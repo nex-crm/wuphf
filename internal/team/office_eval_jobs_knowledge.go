@@ -92,12 +92,8 @@ func evalJobKnowledgeIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error
 	}); err != nil {
 		return err
 	}
-	// Activate via the FE's Approve & Start (decision path, drafting→running).
-	if status, body, err := client.postJSON("/tasks/"+taskID+"/decision", map[string]any{
-		"action": "approve", "created_by": "human",
-	}); err != nil || status != http.StatusOK {
-		return fmt.Errorf("activate: status=%d body=%s err=%w", status, body, err)
-	}
+	// No activation step: creation is the authorization — the owner-set
+	// create above already landed the task running.
 	const renewalsArtifact = "team/accounts/q3-renewals-brief.md"
 	if err := fx.seedWikiFile(renewalsArtifact, "# Q3 renewals brief\n"); err != nil {
 		return err
@@ -299,9 +295,6 @@ func evalJobKnowledgeIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error
 			SuccessCriteria: []string{"One-pager published to the wiki"},
 		},
 	}); err != nil {
-		return err
-	}
-	if err := fx.activateTask(fID); err != nil {
 		return err
 	}
 	// Drive the task at done with a PHANTOM artifact path. complete may

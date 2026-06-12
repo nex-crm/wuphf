@@ -9,10 +9,11 @@ import (
 
 // resolveActionIssue figures out which Issue an external-action call belongs
 // to. Order of preference: (1) caller-supplied IssueID that actually exists,
-// (2) most-recently-updated open Issue in the channel, (3) auto-create a
-// drafting Issue so the human gate still applies. Returns (issueID,
-// lifecycleState, error). The lifecycle state lets the caller enforce gates
-// without a follow-up GET.
+// (2) most-recently-updated open Issue in the channel, (3) auto-create an
+// Issue scoped to the action — creation is the authorization, so the
+// auto-created Issue lands running with the agent as owner. Returns
+// (issueID, lifecycleState, error). The lifecycle state lets the caller
+// enforce the parked-Issue gate without a follow-up GET.
 func resolveActionIssue(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) (string, string, error) {
 	if id := strings.TrimSpace(args.IssueID); id != "" {
 		var resp struct {
@@ -52,8 +53,8 @@ func resolveActionIssue(ctx context.Context, slug, channel string, args TeamActi
 			for _, t := range list.Tasks {
 				// Only auto-attach to top-level Issue records — a recently
 				// updated child task (feature/research/sub-issue) must not
-				// short-circuit the intended top-level `drafting` gate that
-				// applies to the parent Issue.
+				// short-circuit the parked-Issue gate that applies to the
+				// parent Issue.
 				if tt := strings.ToLower(strings.TrimSpace(t.TaskTypeID)); tt != "" && tt != "issue" {
 					continue
 				}
@@ -116,7 +117,10 @@ func resolveActionIssue(ctx context.Context, slug, channel string, args TeamActi
 	if len(created.Tasks) == 0 || strings.TrimSpace(created.Tasks[0].ID) == "" {
 		return "", "", fmt.Errorf("auto-create issue returned no id")
 	}
-	return strings.TrimSpace(created.Tasks[0].ID), "drafting", nil
+	// /task-plan lands an assigned, non-parked task as in_progress/running
+	// (creation is the authorization); report that state so the caller's
+	// parked-Issue gate does not block the action it was created to scope.
+	return strings.TrimSpace(created.Tasks[0].ID), "running", nil
 }
 
 // looksLikeOpaqueID returns true for argument values that look like an

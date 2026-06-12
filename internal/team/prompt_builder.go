@@ -665,13 +665,12 @@ func ruleZeroBlock() string {
 		"The Issue title restates what the human asked for. Pass task_type=\"issue\" (this is the value the Issues board reads — values like follow_up/research/feature/bugfix are for sub-tasks INSIDE an Issue, not for the Issue itself). Capture the human's exact request in details so the Issue is the source of truth.\n" +
 		"ALWAYS set `owner` to a slug from the AVAILABLE AGENTS block above. Prefer an existing specialist whose expertise matches the work. Only call team_member action=create FIRST (then team_task with the new slug) when NO existing agent fits the Issue's domain. Assigning yourself is fine for work that genuinely sits in your domain; assigning the wrong specialist is worse than assigning yourself.\n" +
 		"\n" +
-		"== WAIT FOR APPROVAL ==\n" +
-		"Every new Issue lands in `drafting` state. The human MUST review and click Approve & Start on the Issue before any external/mutating action runs. After creating the Issue:\n" +
-		"  1. Reply briefly in chat (\"I've drafted an Issue for that — review and approve when ready\"). Reference the Issue id.\n" +
-		"  2. Optionally use team_task action=comment to add detail/spec on the Issue itself — humans read the Issue surface, not the chat scrollback.\n" +
-		"  3. Do NOT call team_action_execute, team_action_workflow_execute, or any external mutator. The broker will reject those calls with `lifecycle_state=drafting` until the human approves. Retrying without human action is a waste of tokens and clutters the approvals queue.\n" +
-		"  4. When the human approves, the Issue transitions to `running` and you can proceed. You'll see the state change in the next ACTIVE ISSUES catalog refresh.\n" +
-		"If the human asks to make changes before approving, update the Issue via team_task action=comment or rewrite the spec — do not start work in the background.\n" +
+		"== CREATION IS THE AUTHORIZATION ==\n" +
+		"Creating the Issue IS the go-ahead: a new Issue with an owner lands in `running` and the owner starts immediately — there is no separate start-approval step. After creating the Issue:\n" +
+		"  1. Reply briefly in chat (\"Scoped that as <Issue id> — @owner is on it\"). Reference the Issue id.\n" +
+		"  2. If you are the owner, start the work in the same turn. Do not wait for a human click that will never come.\n" +
+		"  3. External/mutating actions (team_action_execute, team_action_workflow_execute) still raise their OWN approval cards where required — those gates are unchanged. A task the human explicitly PARKED (lifecycle_state=drafting) is the one state you must not work; only the human can start a parked task.\n" +
+		"The human steers mid-flight: stop notes, interviews, request-changes objections, and the review/decision on completion. Honor those instantly — they are the real controls.\n" +
 		"\n" +
 		"If an open Issue in this channel already covers the request, do NOT create a duplicate — post team_task action=comment on it instead. The Issue is the audit-trail anchor for every approval, action, and message that follows. Without it the work is invisible to the operator and approvals become orphan gates.\n" +
 		"Pure chat (yes/no replies, opinion questions, single-fact lookups that need no external action) does NOT need an Issue. The test: would the work require any tool call beyond team_broadcast/human_message? If yes → Issue first. If no → just answer.\n\n"

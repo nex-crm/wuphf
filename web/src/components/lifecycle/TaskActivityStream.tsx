@@ -186,7 +186,7 @@ function describeActivity(
     case "changes_requested":
       return "Owner is revising after a review comment.";
     case "drafting":
-      return "Drafting — not started yet.";
+      return "Parked — start it from the task page.";
     case "ready":
       return "Ready to start.";
     case "approved":

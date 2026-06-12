@@ -2,6 +2,7 @@ package team
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -152,13 +153,13 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if created.Task.ID == "" {
 		t.Fatal("expected task id")
 	}
-	// Issues default to drafting (status=open) until human approves.
-	// See docs/specs/issue-execution-loop.md.
-	if created.Task.Status() != "open" {
-		t.Fatalf("created status: want open (drafting), got %q", created.Task.Status())
+	// Creation is the authorization: an owner-set issue lands running
+	// (status=in_progress) immediately — no Approve & Start ceremony.
+	if created.Task.Status() != "in_progress" {
+		t.Fatalf("created status: want in_progress (running), got %q", created.Task.Status())
 	}
-	if created.Task.LifecycleState != LifecycleStateDrafting {
-		t.Fatalf("created lifecycle: want drafting, got %q", created.Task.LifecycleState)
+	if created.Task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("created lifecycle: want running, got %q", created.Task.LifecycleState)
 	}
 	var foundCreated *teamTask
 	for i := range b.tasks {
@@ -171,32 +172,41 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)
 	}
 
-	// Completion from drafting is impossible by contract (ICP-eval v3 fix
-	// family #1, J3): an agent "complete" on a pre-start task must be
-	// refused with a structured conflict.
-	_, preStartErr := b.MutateTask(TaskPostRequest{
+	// Parked tasks are the ONE drafting state left. Park the lane the
+	// deliberate way (lifecycle chokepoint, same as /task-plan park=true),
+	// then pin the parked-task gate: an agent "complete" on a parked task
+	// must be refused with a structured conflict, and the human's start
+	// (approve) un-parks it into running.
+	if err := b.TransitionLifecycle(created.Task.ID, LifecycleStateDrafting, "parked by composer"); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	_, parkedErr := b.MutateTask(TaskPostRequest{
 		Action:    "complete",
 		ID:        created.Task.ID,
 		Channel:   "general",
 		CreatedBy: "ceo",
 	})
-	var preStartMutationErr *TaskMutationError
-	if !errors.As(preStartErr, &preStartMutationErr) || preStartMutationErr.Kind != TaskMutationConflict {
-		t.Fatalf("complete from drafting: want conflict, got %v", preStartErr)
+	var parkedMutationErr *TaskMutationError
+	if !errors.As(parkedErr, &parkedMutationErr) || parkedMutationErr.Kind != TaskMutationConflict {
+		t.Fatalf("complete on parked task: want conflict, got %v", parkedErr)
+	}
+	if !strings.Contains(parkedMutationErr.Message, "parked") {
+		t.Fatalf("parked refusal must say parked, got %q", parkedMutationErr.Message)
 	}
 
-	// The human's approve ACTIVATES the drafting task (drafting→running).
-	activated, err := b.MutateTask(TaskPostRequest{
+	// The human's approve STARTS the parked task (drafting→running) — the
+	// one remaining start affordance.
+	started, err := b.MutateTask(TaskPostRequest{
 		Action:    "approve",
 		ID:        created.Task.ID,
 		Channel:   "general",
 		CreatedBy: "human",
 	})
 	if err != nil {
-		t.Fatalf("MutateTask approve & start: %v", err)
+		t.Fatalf("MutateTask start parked: %v", err)
 	}
-	if activated.Task.LifecycleState != LifecycleStateRunning {
-		t.Fatalf("approve on drafting: want running, got %q", activated.Task.LifecycleState)
+	if started.Task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("approve on parked: want running, got %q", started.Task.LifecycleState)
 	}
 
 	updated, err := b.MutateTask(TaskPostRequest{
@@ -223,6 +233,41 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	}
 	if foundUpdated == nil || foundUpdated.Status() != "done" {
 		t.Fatalf("expected broker state to be updated, got %+v", b.tasks)
+	}
+}
+
+// Ownerless creates land READY (not parked, not running) and promote to
+// running on assignment — "tasks created without an owner go Ready and
+// dispatch on assignment".
+func TestMutateTaskOwnerlessCreateLandsReadyAndRunsOnAssign(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"ceo"}},
+	}
+	created, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Staff me later",
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create: %v", err)
+	}
+	if created.Task.LifecycleState != LifecycleStateReady {
+		t.Fatalf("ownerless create: want ready, got %q", created.Task.LifecycleState)
+	}
+	assigned, err := b.MutateTask(TaskPostRequest{
+		Action:    "assign",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		Owner:     "alice",
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask assign: %v", err)
+	}
+	if assigned.Task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("assign on ready: want running, got %q", assigned.Task.LifecycleState)
 	}
 }
 

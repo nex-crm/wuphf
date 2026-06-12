@@ -70,7 +70,7 @@ export function isIssueTask(task: Task): boolean {
  *  that. */
 const STAGE_HINT: Record<LifecycleStage, string> = {
   scheduled: "Recurring scheduled tasks",
-  backlog: "Filed, awaiting pickup",
+  backlog: "Parked or awaiting staffing",
   in_progress: "Owner agent working — includes revising",
   blocked: "Blocked on an upstream merge",
   needs_human: "Awaiting your decision",

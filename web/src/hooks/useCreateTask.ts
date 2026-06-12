@@ -20,11 +20,10 @@ export interface CreateTaskResult {
  * (dialog, command palette, CEO inline card).
  *
  * Routes through POST /tasks (action=create, task_type=issue) — the SAME
- * path createSubTask uses — so the broker applies LifecycleStateDrafting
- * by construction. The previous /task-plan route skipped drafting and
- * landed the task straight at status=in_progress, which silently
- * bypassed the CEO scoping interview (issueScopingFrameworkBlock would
- * see a fully-formed task and never ask the office-hours questions).
+ * path createSubTask uses. Creation is the authorization: the broker
+ * lands an owner-set Issue RUNNING (owner dispatched) and an ownerless
+ * Issue READY (dispatches on assignment). Parking is a separate,
+ * deliberate composer action (/task-plan park=true).
  */
 export function useCreateTask() {
   const queryClient = useQueryClient();

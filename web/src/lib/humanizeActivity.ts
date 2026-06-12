@@ -15,7 +15,7 @@
 
 /** Plain-language labels for lifecycle states (raw enums never render). */
 const LIFECYCLE_STATE_LABELS: Record<string, string> = {
-  drafting: "Drafting",
+  drafting: "Parked",
   intake: "Intake",
   ready: "Ready",
   running: "Running",

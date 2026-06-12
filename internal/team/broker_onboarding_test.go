@@ -141,7 +141,9 @@ func TestOnboardingDraftPhaseCreatesFirstIssueFromTaskPrompt(t *testing.T) {
 		t.Fatalf("expected one first issue task, got %+v", tasks)
 	}
 	task := tasks[0]
-	if task.ID != state.FirstIssueID || task.LifecycleState != LifecycleStateDrafting {
+	// The onboarding ask IS the authorization: the first issue lands
+	// running with the CEO as owner — no start-approval ceremony.
+	if task.ID != state.FirstIssueID || task.LifecycleState != LifecycleStateRunning {
 		t.Fatalf("unexpected first issue task: %+v", task)
 	}
 	if task.TaskType != "issue" || task.PipelineID != "issue" {

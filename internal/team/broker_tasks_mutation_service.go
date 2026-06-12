@@ -142,9 +142,10 @@ func taskInTerminalDoneState(task *teamTask) bool {
 // state where a human post in its channel must WAKE the owner (the
 // task_followup path) because no naturally scheduled agent turn will ever
 // carry the note: review, decision, changes_requested, blocked, and the
-// terminal done/approved states. Pre-start states (drafting/intake/ready/
-// queued) are excluded — they have the Approve & Start waiting-hint flow —
-// and archived tasks never wake on channel traffic (legacy fold-ins).
+// terminal done/approved states. Pre-execution states (drafting/intake/
+// ready/queued) are excluded — parked tasks stay parked until the human
+// starts them, and ownerless tasks dispatch on assignment — and archived
+// tasks never wake on channel traffic (legacy fold-ins).
 func taskAwaitsHumanFollowUpWake(task *teamTask) bool {
 	if task == nil {
 		return false
@@ -190,7 +191,7 @@ func taskAwaitsHumanFollowUpWake(task *teamTask) bool {
 // non-#general channels: #general is the office lobby holding every legacy
 // done task, and waking all their owners on any lobby post would be a
 // broadcast storm; per-task channels are where the live dead zone occurred.
-// Drafting/pre-start tasks keep the waiting-hint flow (Approve & Start) and
+// Parked (drafting) tasks stay parked until the human starts them, and
 // archived tasks never wake on lobby traffic.
 //
 // Pure in-memory writes under the already-held lock — the caller's
@@ -793,37 +794,36 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		b.reindexTaskLifecycleFromLegacyLocked(&task)
 		b.tasks = append(b.tasks, task)
-		// Issues start in `drafting` regardless of whether an owner is
-		// set, so the human sees the new Issue in the Drafting column
-		// with an Approve & Start button before the agent begins work.
-		// Without this, owner-set Issues go straight to `in_progress`
-		// / running and the agent ploughs ahead — defeating the
-		// human-approval gate the user demanded for "any work getting
-		// done has an Issue in place". applyLifecycleStateLocked sets
-		// pipeline_stage=draft, review_state=pending_review, status=open,
-		// blocked=false, and updates LifecycleState in-place. Errors
-		// are ignored: the only failure mode is an unrecognized state,
-		// and LifecycleStateDrafting is canonical.
+		// Creating an Issue IS the authorization to work it — there is no
+		// start-approval ceremony (founder directive, 2026-06: "the approval
+		// layer is still there inside a task which should have been
+		// removed"). An Issue with a real owner lands RUNNING and the
+		// task_created action below dispatches that owner; an ownerless (or
+		// auto-triage) Issue lands READY and dispatches on assignment.
+		// Unresolved dependencies park the Issue in QueuedBehindOwner until
+		// the unblock cascade releases it (completion of the upstream, never
+		// an approval click). The human's controls are the ones that matter
+		// mid-flight: interviews, review/decision on completion,
+		// request-changes objections, reopen, and stop notes.
+		// LifecycleStateDrafting remains ONLY for explicitly parked tasks
+		// (the composer's Backlog/park path) — nothing defaults into it.
 		if strings.EqualFold(task.TaskType, "issue") {
-			// Preserve the dependency-block flag across the drafting
-			// transition. LifecycleStateDrafting's derived row has
-			// blocked=false (drafting issues aren't in any dispatch
-			// queue), but a freshly created issue with unresolved
-			// deps was just marked blocked above (line ~281). Without
-			// this restore, the block silently disappears when the
-			// human clicks Approve & Start.
-			depBlocked := b.tasks[len(b.tasks)-1].blocked
-			// Blank the legacy-derived LifecycleState before applying
-			// Drafting so the prev=="" guard in applyLifecycleStateLocked
+			created := &b.tasks[len(b.tasks)-1]
+			target := LifecycleStateReady
+			switch {
+			case created.blocked:
+				target = LifecycleStateQueuedBehindOwner
+			case strings.TrimSpace(created.Owner) != "" && !isAutoOwner(created.Owner):
+				target = LifecycleStateRunning
+			}
+			// Blank the legacy-derived LifecycleState before applying the
+			// landing state so the prev=="" guard in applyLifecycleStateLocked
 			// suppresses the (otherwise) redundant issue_lifecycle chat
 			// card on Issue creation — postIssueCreatedCardLocked below
 			// is the one card we want for the create event.
-			b.tasks[len(b.tasks)-1].LifecycleState = ""
-			_ = b.applyLifecycleStateLocked(&b.tasks[len(b.tasks)-1], LifecycleStateDrafting)
-			if depBlocked {
-				b.tasks[len(b.tasks)-1].blocked = true
-			}
-			task = b.tasks[len(b.tasks)-1]
+			created.LifecycleState = ""
+			_ = b.applyLifecycleStateLocked(created, target)
+			task = *created
 		}
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if dodDerived {
@@ -919,34 +919,33 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// pointers if a later gate in this mutation fails.
 			task.ChangesRequested = nil
 		}
-		// Pre-start gate (ICP-eval v3 fix family #1, J3 [19:52–19:57]): a
-		// Drafting task has not been started — the human's Approve & Start
-		// is the only way into execution. Completion or review-submission
-		// from Drafting is impossible for every non-internal actor: the v3
-		// run had the CEO work and "complete" OFFICE-337 while the pill
-		// still read drafting, with no human gate ever passed. Internal
-		// recovery actors (system/broker/nex, empty) are exempt — they own
-		// migration/fold-in paths that park legacy state.
+		// Parked-task gate: Drafting now means "explicitly parked" — the
+		// human filed the task in the backlog on purpose (composer Backlog
+		// path, or a legacy persisted draft). Work cannot be completed or
+		// submitted from a parked state by any non-internal actor; tasks
+		// that should run land RUNNING at creation and never hit this.
+		// Internal recovery actors (system/broker/nex, empty) are exempt —
+		// they own migration/fold-in paths that park legacy state.
 		if action == "complete" || action == "submit_for_review" {
 			if task.LifecycleState == LifecycleStateDrafting && !isInternalTaskActor(actor) {
 				return TaskResponse{}, taskMutationError(
 					TaskMutationConflict,
-					fmt.Sprintf("task %s has not been started — it is in drafting, waiting on the human to press Approve & Start. Work cannot be %sd from a pre-start state.", task.ID, strings.ReplaceAll(action, "_", " ")),
+					fmt.Sprintf("task %s is parked — it has not been started. Work cannot be %sd from a parked state; the human can start it from the task page.", task.ID, strings.ReplaceAll(action, "_", " ")),
 					nil,
 				)
 			}
 		}
-		// Approve on a pre-start task means "start the work", never "accept
-		// delivered work" — there is no work. A HUMAN approve activates the
-		// task through the same Drafting→Running transition the Approve &
-		// Start button uses; an agent approve is refused because the start
-		// authorization belongs to the human (v3 J2 [19:04]: zero-work tasks
-		// closed terminally at the click).
+		// Approve on a parked task means "start the work", never "accept
+		// delivered work" — there is no work. A HUMAN approve starts the
+		// task (Drafting→Running, the one remaining start affordance for
+		// parked tasks); an agent approve is refused because un-parking a
+		// deliberately parked task belongs to the human (v3 J2 [19:04]:
+		// zero-work tasks closed terminally at the click).
 		if action == "approve" && task.LifecycleState == LifecycleStateDrafting {
 			if !isHumanMessageSender(actor) && !isInternalTaskActor(actor) {
 				return TaskResponse{}, taskMutationError(
 					TaskMutationForbidden,
-					fmt.Sprintf("task %s is in drafting — only the human can approve & start it. Wait for the human's Approve & Start.", task.ID),
+					fmt.Sprintf("task %s is parked — only the human can start it.", task.ID),
 					nil,
 				)
 			}
@@ -1076,9 +1075,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// reopened tasks as conversational dead zones (core-loop B1 /
 			// ICP-eval finding) — the human's reopen click IS the restart
 			// authorization, and reopen is already CEO/human-scoped.
-			// Ownerless (or auto-parked) tasks keep the Drafting landing so
-			// the human can staff + approve as before.
-			reopenTarget := LifecycleStateDrafting
+			// Ownerless (or auto-triage) tasks land Ready and dispatch on
+			// assignment — the same landing a fresh ownerless create uses.
+			reopenTarget := LifecycleStateReady
 			if owner := strings.TrimSpace(task.Owner); owner != "" && !isAutoOwner(owner) {
 				reopenTarget = LifecycleStateRunning
 			}
@@ -1356,13 +1355,6 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		if reassignTriggered {
 			b.postTaskReassignNotificationsLocked(actor, task, reassignPrevOwner)
-			// A draft that just gained its owner is now actionable — the
-			// only way forward is the human's Approve & Start, so raise
-			// the (deduped) "waiting on you" notice that creation skipped
-			// while the task was ownerless (ICP eval N5).
-			if task.LifecycleState == LifecycleStateDrafting {
-				b.postTaskAwaitingStartNoticeLocked(task)
-			}
 		}
 		if cancelTriggered {
 			b.postTaskCancelNotificationsLocked(actor, task, cancelPrevOwner)

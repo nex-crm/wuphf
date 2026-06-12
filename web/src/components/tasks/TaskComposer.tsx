@@ -392,7 +392,7 @@ export function TaskComposer() {
               className="task-composer-btn"
               onClick={() => void handleCreate("backlog")}
               disabled={submitting}
-              title="Park in the backlog (assigned) — nobody starts until you activate it"
+              title="Park in the backlog (assigned) — nobody starts until you start it from the task page"
               data-testid="task-composer-backlog"
             >
               Backlog

@@ -44,22 +44,7 @@ func completionHookCreateDefinedTask(t *testing.T, b *Broker) string {
 	}); err != nil {
 		t.Fatalf("define: %v", err)
 	}
-	approveAndStartAsHuman(t, b, created.Task.ID)
 	return created.Task.ID
-}
-
-// approveAndStartAsHuman activates a Drafting task the way the live FE
-// does (human Approve & Start → drafting→running). Tasks created via
-// MutateTask action=create land in Drafting, and completion from a
-// pre-start state is impossible by contract (ICP-eval v3 fix family #1),
-// so test flows must pass the human gate before driving work.
-func approveAndStartAsHuman(t *testing.T, b *Broker, taskID string) {
-	t.Helper()
-	if _, err := b.MutateTask(TaskPostRequest{
-		Action: "approve", ID: taskID, Channel: "general", CreatedBy: "human",
-	}); err != nil {
-		t.Fatalf("approve & start %s: %v", taskID, err)
-	}
 }
 
 // finishTask drives a task to done through whichever path its review
@@ -134,11 +119,6 @@ func TestArtifactGate_DonePostAndNoticeWithArtifact(t *testing.T) {
 		if req.Kind != "notice" || strings.TrimSpace(req.IssueID) != taskID {
 			continue
 		}
-		// The drafting-entry "waiting on you" notice (N5) shares the
-		// kind=notice primitive — this test pins the DELIVERY notice only.
-		if req.Title == awaitingStartNoticeTitle(taskID) {
-			continue
-		}
 		noticeCount++
 		if req.Blocking || req.Required {
 			t.Fatalf("delivery notice must be non-blocking/non-required: %+v", req)
@@ -166,7 +146,6 @@ func TestArtifactGate_LegacyTaskWithoutDefinitionUnaffected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	approveAndStartAsHuman(t, b, created.Task.ID)
 	if err := finishTask(t, b, created.Task.ID, ""); err != nil {
 		t.Fatalf("legacy task must complete without artifact: %v", err)
 	}
@@ -193,8 +172,8 @@ func TestArtifactGate_RejectsInvalidArtifactPath(t *testing.T) {
 }
 
 // Reopen on an owned task lands in Running (executable — the dispatch gate
-// sendTaskUpdate checks) so the owner is re-engaged; an ownerless task keeps
-// the Drafting landing for the human to staff + approve.
+// sendTaskUpdate checks) so the owner is re-engaged; an ownerless task lands
+// Ready and dispatches on assignment (same landing as an ownerless create).
 func TestReopen_OwnedTaskReturnsToRunning(t *testing.T) {
 	b := newCompletionHookBroker(t)
 	created, err := b.MutateTask(TaskPostRequest{
@@ -204,7 +183,6 @@ func TestReopen_OwnedTaskReturnsToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	approveAndStartAsHuman(t, b, created.Task.ID)
 	if err := finishTask(t, b, created.Task.ID, ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
@@ -223,7 +201,7 @@ func TestReopen_OwnedTaskReturnsToRunning(t *testing.T) {
 	}
 }
 
-func TestReopen_OwnerlessTaskReturnsToDrafting(t *testing.T) {
+func TestReopen_OwnerlessTaskReturnsToReady(t *testing.T) {
 	b := newCompletionHookBroker(t)
 	created, err := b.MutateTask(TaskPostRequest{
 		Action: "create", Channel: "general", Title: "Backlog item to triage",
@@ -239,8 +217,8 @@ func TestReopen_OwnerlessTaskReturnsToDrafting(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	task := b.TaskByID(created.Task.ID)
-	if task.LifecycleState != LifecycleStateDrafting {
-		t.Fatalf("ownerless reopen must land Drafting, got %s", task.LifecycleState)
+	if task.LifecycleState != LifecycleStateReady {
+		t.Fatalf("ownerless reopen must land Ready (staff to dispatch), got %s", task.LifecycleState)
 	}
 }
 

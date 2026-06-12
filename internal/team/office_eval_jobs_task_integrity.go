@@ -9,9 +9,10 @@ package team
 //	    completion attaches the artifact to the PARENT through the
 //	    legitimate path (V3-N8: deliverables shipped from OFFICE-295 while
 //	    the primaries sat empty).
-//	(b) a pack-style auto-seeded task lands in Drafting and does NOT
-//	    dispatch until the human activates it (V3-N9: pack lanes
-//	    self-started despite "queued… whenever you want").
+//	(b) pack-style auto-seeded lanes follow the creation-is-authorization
+//	    contract: an owner-set lane lands RUNNING and dispatches, an
+//	    ownerless lane lands READY and dispatch is gated only by
+//	    ownership (no start-approval ceremony).
 //	(c) a long-title task feeds NO clipped title into the agent-facing
 //	    details/packet of its repair sub-task (v3 [17:41:35]: one agent
 //	    pass consumed a truncated source and shipped a conflicting brief).
@@ -37,7 +38,7 @@ import (
 func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	const job = "task-integrity"
 
-	// ── (b) pack-style auto lanes obey the drafting→activation gate ────────
+	// ── (b) pack lanes: dispatch gated only by ownership ───────────────────
 	// Runs FIRST because the blueprint seed replaces the fixture's roster +
 	// task list wholesale; the remaining checks build on the seeded office.
 	bp := operations.Blueprint{
@@ -55,6 +56,10 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 				Channel: "general", Owner: "eng",
 				Title:   "Run the first CRM hygiene sweep",
 				Details: "Probe pack lane seeded by the blueprint.",
+			}, {
+				Channel: "general",
+				Title:   "Audit the intake form copy",
+				Details: "Ownerless probe lane seeded by the blueprint.",
 			}},
 		},
 	}
@@ -64,30 +69,28 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	if seedErr != nil {
 		return fmt.Errorf("seed blueprint: %w", seedErr)
 	}
-	var packID string
+	var packID, idleID string
 	for _, t := range fx.broker.AllTasks() {
 		if t.Title == "Run the first CRM hygiene sweep" {
 			packID = t.ID
 		}
+		if t.Title == "Audit the intake form copy" {
+			idleID = t.ID
+		}
 	}
 	pack := fx.broker.TaskByID(packID)
-	r.add(job, "pack-seeded lane lands in drafting, not running",
-		pack != nil && pack.LifecycleState == LifecycleStateDrafting &&
+	r.add(job, "pack-seeded owner lane lands running (creation is the authorization)",
+		pack != nil && pack.LifecycleState == LifecycleStateRunning &&
 			strings.EqualFold(strings.TrimSpace(pack.TaskType), "issue"),
 		fmt.Sprintf("id=%s state=%s type=%s", packID, lifecycleStateOf(pack), taskTypeOf(pack)), "")
+	idle := fx.broker.TaskByID(idleID)
+	r.add(job, "ownerless pack lane lands ready until staffed",
+		idle != nil && idle.LifecycleState == LifecycleStateReady,
+		fmt.Sprintf("id=%s state=%s", idleID, lifecycleStateOf(idle)), "")
 
-	// Agent completion from the seeded pre-start state is refused.
-	_, packCompleteErr := fx.broker.MutateTask(TaskPostRequest{
-		Action: "complete", ID: packID, Channel: "general", CreatedBy: "ceo",
-	})
-	packAfterRefusal := fx.broker.TaskByID(packID)
-	r.add(job, "agent complete on a pack lane is refused pre-activation",
-		packCompleteErr != nil && packAfterRefusal != nil &&
-			packAfterRefusal.LifecycleState == LifecycleStateDrafting,
-		fmt.Sprintf("err=%v state=%s", packCompleteErr, lifecycleStateOf(packAfterRefusal)), "")
-
-	// No execution turn dispatches for the seeded lane (the same gate
-	// sendTaskUpdate enforces on the live notify path).
+	// Dispatch is gated only by ownership: the owner-set RUNNING lane
+	// dispatches an execution turn; the ownerless READY lane does not
+	// (the same isExecutableTeamTaskStatus gate on the live notify path).
 	woke := make(chan string, 1)
 	stub := func(_ *Launcher, _ context.Context, slug, _ string, _ ...string) error {
 		select {
@@ -101,31 +104,37 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	if snapshot := fx.broker.TaskByID(packID); snapshot != nil {
 		fx.launcher.sendTaskUpdate(
 			notificationTarget{Slug: "eng"},
-			officeActionLog{Kind: "task_updated", Actor: "ceo", Channel: snapshot.Channel, RelatedID: packID},
+			officeActionLog{Kind: "task_created", Actor: "wuphf", Channel: snapshot.Channel, RelatedID: packID},
 			*snapshot,
-			"Pack lane probe — must not dispatch pre-activation.",
+			"Pack lane probe — owner-set lane must dispatch.",
 		)
 	}
 	dispatched := ""
 	select {
 	case dispatched = <-woke:
+	case <-time.After(8 * time.Second):
+	}
+	fx.launcher.stopHeadlessWorkers()
+	r.add(job, "owner-set pack lane dispatches off the seed", dispatched == "eng",
+		fmt.Sprintf("dispatched=%q", dispatched), "")
+
+	if snapshot := fx.broker.TaskByID(idleID); snapshot != nil {
+		fx.launcher.sendTaskUpdate(
+			notificationTarget{Slug: "eng"},
+			officeActionLog{Kind: "task_created", Actor: "wuphf", Channel: snapshot.Channel, RelatedID: idleID},
+			*snapshot,
+			"Ownerless pack lane probe — must not dispatch until staffed.",
+		)
+	}
+	idleDispatched := ""
+	select {
+	case idleDispatched = <-woke:
 	case <-time.After(750 * time.Millisecond):
 	}
 	fx.launcher.stopHeadlessWorkers()
 	headlessCodexRunTurnOverride.Store(prior)
-	r.add(job, "pack lane does not dispatch before human activation", dispatched == "",
-		fmt.Sprintf("dispatched=%q", dispatched), "")
-
-	// Human activation starts it through the normal gate.
-	if _, err := fx.broker.MutateTask(TaskPostRequest{
-		Action: "approve", ID: packID, Channel: "general", CreatedBy: "human",
-	}); err != nil {
-		return fmt.Errorf("activate pack lane: %w", err)
-	}
-	packActivated := fx.broker.TaskByID(packID)
-	r.add(job, "human activation starts the pack lane",
-		packActivated != nil && packActivated.LifecycleState == LifecycleStateRunning,
-		fmt.Sprintf("state=%s", lifecycleStateOf(packActivated)), "")
+	r.add(job, "ownerless pack lane does not dispatch before staffing", idleDispatched == "",
+		fmt.Sprintf("dispatched=%q", idleDispatched), "")
 
 	// ── (a) self-heal: child not sibling, deduped, completion → parent ─────
 	parentA, err := fx.broker.MutateTask(TaskPostRequest{
@@ -136,9 +145,6 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	parentAID := parentA.Task.ID
-	if err := fx.activateTask(parentAID); err != nil {
-		return err
-	}
 	child, reused, err := fx.broker.RequestSelfHealing("eng", parentAID, agent.EscalationStuck, "Agent stuck: provider session went stale.")
 	if err != nil {
 		return err
@@ -200,9 +206,6 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	if err != nil {
 		return err
 	}
-	if err := fx.activateTask(parentC.Task.ID); err != nil {
-		return err
-	}
 	healC, _, err := fx.broker.RequestSelfHealing("eng", parentC.Task.ID, agent.EscalationStuck, "Stuck on the brief.")
 	if err != nil {
 		return err
@@ -226,9 +229,6 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	dID := parentD.Task.ID
-	if err := fx.activateTask(dID); err != nil {
-		return err
-	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: dID, Channel: "general", CreatedBy: "eng"}); err != nil {
 		return err
 	}
@@ -298,15 +298,21 @@ func evalJobTaskIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	eID := parentE.Task.ID
+	// Park the lane (the deliberate composer path), then start it through
+	// the decision endpoint — the one remaining start affordance — so a
+	// Started lifecycle card is emitted for the owner-attribution probe.
+	if err := fx.broker.TransitionLifecycle(eID, LifecycleStateDrafting, "parked for the card probe"); err != nil {
+		return err
+	}
 	// Contaminate the packet: the LAST packet actor is the CEO, not the
 	// owner. The cards must keep naming the owner from the task record.
 	fx.broker.mu.Lock()
 	fx.broker.AppendPacketFeedbackLocked(eID, "ceo", "Packet-side note from the CEO — must not become the card actor.")
 	fx.broker.mu.Unlock()
 	if err := fx.broker.RecordTaskDecisionWithComment(eID, "approve", "", "human"); err != nil {
-		return fmt.Errorf("activate via decision path: %w", err)
+		return fmt.Errorf("start via decision path: %w", err)
 	}
-	// Read the activation card BEFORE the next transition: the 10s lifecycle
+	// Read the start card BEFORE the next transition: the 10s lifecycle
 	// card coalescer replaces it once the in_review card lands.
 	startedOwner, startedFound := latestLifecycleCardOwner(fx.broker, eID, string(IssueLifecycleTransitionStarted))
 	if _, err := fx.broker.MutateTask(TaskPostRequest{

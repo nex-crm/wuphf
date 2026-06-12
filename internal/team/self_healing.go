@@ -329,10 +329,10 @@ func selfHealingParentContract(parent *teamTask) string {
 // outcome back onto the stalled parent (ten-out-of-ten A1, V3-N8): the
 // delivered artifact is recorded on the PARENT, the delivery is noted in the
 // parent's details, and the parent advances through the legitimate path —
-// into Review for the human's decision, never straight to done. Pre-start
-// parents (drafting/intake) only receive the artifact + note: the human's
-// Approve & Start gate stays sovereign. Caller holds b.mu; the caller's
-// saveLocked persists the parent mutation alongside the child's.
+// into Review for the human's decision, never straight to done. Pre-execution
+// parents (parked/intake/ready) only receive the artifact + note: a parked
+// parent stays parked until the human starts it. Caller holds b.mu; the
+// caller's saveLocked persists the parent mutation alongside the child's.
 func (b *Broker) attachSelfHealCompletionToParentLocked(child *teamTask) {
 	if b == nil || child == nil || !isSelfHealingTask(child) {
 		return
@@ -364,7 +364,8 @@ func (b *Broker) attachSelfHealCompletionToParentLocked(child *teamTask) {
 	case LifecycleStateReview, LifecycleStateDecision:
 		// already awaiting the human — the artifact + note are enough
 	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady:
-		// never started by the human — do not skip the activation gate
+		// never entered execution (parked or awaiting staffing) — record
+		// the artifact + note only; do not force a Review transition
 	default:
 		if err := b.applyLifecycleStateLocked(parent, LifecycleStateReview); err != nil {
 			log.Printf("self-healing: advance parent %s to review: %v", parent.ID, err)

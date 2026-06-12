@@ -105,10 +105,13 @@ const (
 	// because the work did not land.
 	LifecycleStateRejected LifecycleState = "rejected"
 
-	// LifecycleStateDrafting is the pre-Intake mode for a task awaiting
-	// activation. Agents can post comments on a Drafting task; they CANNOT
-	// dispatch tool calls or execution work — isExecutableTeamTaskStatus is
-	// the dispatch gate that refuses execution turns in this state (tested in
+	// LifecycleStateDrafting marks a task the human EXPLICITLY parked
+	// (the composer's Backlog/park path, or a legacy persisted draft).
+	// Nothing lands here by default — creation IS the authorization, so
+	// new tasks land Running (owner set) or Ready (ownerless). Agents can
+	// post comments on a parked task; they CANNOT dispatch tool calls or
+	// execution work — isExecutableTeamTaskStatus is the dispatch gate
+	// that refuses execution turns in this state (tested in
 	// broker_lifecycle_dispatch_test.go). The state value also round-trips
 	// cleanly through JSON and the lifecycle index.
 	//
@@ -204,7 +207,7 @@ type lifecycleDerivedFieldsRow struct {
 // once the rest of the harness is in place. The lifecycle index and the
 // LifecycleState field still source-of-truth correctly.
 var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
-	// Drafting: pre-Intake mode where agents comment but cannot dispatch.
+	// Drafting: explicitly parked — agents comment but cannot dispatch.
 	// PipelineStage="draft" matches the spec's draft phase name. Status="open"
 	// keeps the task visible in the open-tasks view; Blocked=false so it is
 	// not confused with a waiting-on-upstream state. isExecutableTeamTaskStatus
@@ -571,17 +574,6 @@ func (b *Broker) applyLifecycleStateLocked(task *teamTask, newState LifecycleSta
 	// duplicate.
 	if prev != "" && prev != LifecycleStateUnknown {
 		b.postIssueLifecycleCardLocked(task, prev, newState, "system")
-	}
-	// A task entering drafting can only move forward via the human's
-	// Approve & Start — raise the non-blocking "waiting on you" Inbox
-	// notice so the human is told instead of staring at a silent task
-	// (ICP eval N5). Deduped per task inside the helper. Leaving drafting
-	// self-resolves a still-pending notice: the human just acted, so the
-	// hint must not linger asking for an acknowledgement.
-	if newState == LifecycleStateDrafting && prev != LifecycleStateDrafting {
-		b.postTaskAwaitingStartNoticeLocked(task)
-	} else if prev == LifecycleStateDrafting && newState != LifecycleStateDrafting {
-		b.resolveAwaitingStartNoticeLocked(task.ID)
 	}
 	// Keep the persisted Decision Packet's lifecycleState in lockstep with
 	// the task on EVERY typed-state write — direct applyLifecycleStateLocked

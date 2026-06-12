@@ -1069,22 +1069,22 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 
 // lifecycleStateForDecisionAction maps a human resolution to the target
 // lifecycle state plus a transition reason string. The currentState
-// argument disambiguates "approve the draft so the owner starts work"
-// (Drafting -> Running, NOT a decision) from "approve completed work"
-// (Review/Decision -> Approved, the terminal decision). Without this
-// disambiguation, clicking "Approve & Start" on a Drafting issue would
-// land in the terminal Approved state and write a misleading wiki
-// "decision" with no execution.
+// argument disambiguates "start a parked/pre-execution task" (Drafting ->
+// Running, NOT a decision — the FE's "Parked — start" affordance rides
+// this) from "approve completed work" (Review/Decision -> Approved, the
+// terminal decision). Without this disambiguation, starting a parked
+// issue would land in the terminal Approved state and write a misleading
+// wiki "decision" with no execution.
 func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState) (LifecycleState, string) {
 	switch action {
 	case RecordDecisionApprove:
 		if isPreExecutionLifecycleState(currentState) {
-			// Activating a parked/backlog/pre-start task goes straight to
+			// Starting a parked/backlog/pre-execution task goes straight to
 			// execution. The set is wider than Drafting alone: a task whose
 			// typed state drifted to Intake/Ready/QueuedBehindOwner is
 			// still zero-work, and approving it must START it, never
 			// terminalize it (ICP-eval v3 J2 [19:04]).
-			return LifecycleStateRunning, "human approved pre-execution issue and started work"
+			return LifecycleStateRunning, "human started pre-execution issue"
 		}
 		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:

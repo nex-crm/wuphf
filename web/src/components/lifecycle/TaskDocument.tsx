@@ -6,7 +6,7 @@
  * sub-tasks) lives in the right rail (TaskContextRail).
  *
  * The header carries title + lifecycle pill + verification badge and the
- * lifecycle action toolbar (Approve & Start while Drafting, the
+ * lifecycle action toolbar (a Start affordance while parked/drafting, the
  * PR-style loop otherwise). The task's understanding lives in its title +
  * description (Details) — there is no spec document (core-loop R2).
  */
@@ -380,51 +380,31 @@ function TaskDocumentError({
 // ── Lifecycle action buttons ───────────────────────────────────────────
 
 /**
- * Inline system hint shown at the top of the task chat while the task is
- * in `drafting`. In drafting the ONLY way forward is the human pressing
- * Approve & Start, but nothing used to say so — humans stared at a silent
- * task for 10+ minutes (ICP eval N5). Renders null for every other state.
- */
-export function DraftingWaitingHint({
-  lifecycleState,
-}: {
-  lifecycleState: LifecycleState;
-}) {
-  if (lifecycleState !== "drafting") return null;
-  return (
-    <div
-      className="issue-doc-waiting-hint"
-      role="status"
-      data-testid="drafting-waiting-hint"
-    >
-      Waiting on you — this task starts when you press{" "}
-      <strong>Approve &amp; Start</strong>.
-    </div>
-  );
-}
-
-/**
- * Approve & Start button. Visible only during `drafting` state.
+ * Start button for a PARKED task — the ONE place a start affordance
+ * remains. Visible only during `drafting` (now: explicitly parked) state;
+ * every other creation path lands tasks running, so there is nothing to
+ * start anywhere else (the Approve & Start ceremony is retired).
  *
- * On click: POSTs to existing approve endpoint (postDecision "approve"),
+ * On click: POSTs to the existing approve endpoint (postDecision
+ * "approve" — the broker maps pre-execution approve to Drafting→Running),
  * transitions optimistically to "Starting…", then refetches the task.
  * On error: inline error banner appears, button re-enables.
  *
  * A11y: aria-label, focus-visible outline, Enter/Space activatable via
  * the native <button> element.
  */
-interface ApproveAndStartButtonProps {
+interface StartParkedTaskButtonProps {
   taskId: string;
   onApproved: () => void;
-  /** Button label. Defaults to "Approve & Start". */
+  /** Button label. Defaults to "Start". */
   label?: string;
 }
 
-export function ApproveAndStartButton({
+export function StartParkedTaskButton({
   taskId,
   onApproved,
-  label = "Approve & Start",
-}: ApproveAndStartButtonProps) {
+  label = "Start",
+}: StartParkedTaskButtonProps) {
   const [approveError, setApproveError] = useState<string | null>(null);
 
   const approveMutation = useMutation({
@@ -443,15 +423,12 @@ export function ApproveAndStartButton({
   const { isPending } = approveMutation;
 
   return (
-    <div
-      className="issue-approve-and-start"
-      data-testid="approve-and-start-wrapper"
-    >
+    <div className="issue-approve-and-start" data-testid="start-parked-wrapper">
       {approveError ? (
         <div
           className="issue-approve-error"
           role="alert"
-          data-testid="approve-and-start-error"
+          data-testid="start-parked-error"
         >
           {approveError}
         </div>
@@ -461,8 +438,8 @@ export function ApproveAndStartButton({
         className="btn btn-primary issue-approve-btn"
         disabled={isPending}
         onClick={() => approveMutation.mutate()}
-        aria-label="Approve and start execution"
-        data-testid="approve-and-start"
+        aria-label="Start this parked task"
+        data-testid="start-parked"
       >
         {isPending ? "Starting…" : label}
       </button>
@@ -675,7 +652,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
               });
             }}
           />
-          {/* Lifecycle actions (Approve & Start when Drafting, the
+          {/* Lifecycle actions (Start when parked/drafting, the
            *  PR-style loop otherwise). Right-aligned on the same row as the
            *  owner so the header stays two tight rows instead of four. */}
           <TaskActionToolbar
@@ -705,7 +682,6 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
       <div className="issue-doc-body issue-doc-body--split">
         <main className="issue-doc-chat" aria-label="Chat">
           <div className="issue-doc-chat-header">Chat</div>
-          <DraftingWaitingHint lifecycleState={doc.lifecycleState} />
           <TaskChannelChat channel={doc.channel} />
         </main>
 

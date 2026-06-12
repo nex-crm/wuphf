@@ -77,26 +77,11 @@ func evalJobUtteranceRouting(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		}
 		return task, nil
 	}
-	activate := func(taskID string) error {
-		status, raw, err := client.postJSON("/tasks/"+taskID+"/decision", map[string]any{
-			"action": "approve", "created_by": "human",
-		})
-		if err != nil {
-			return err
-		}
-		if status != http.StatusOK {
-			return fmt.Errorf("activate %s: status=%d body=%s", taskID, status, raw)
-		}
-		return nil
-	}
 
 	// ── (a) FE-payload request-changes → text reaches stamp + wake + packet ──
 	const rcText = "Show the full email bodies inline; use Dana Whitfield as the Acme contact; Corti ARR is $61k — do not mark done until I read them."
 	taskA, err := createTask("Draft tailored renewal emails (utterance a)", "eng")
 	if err != nil {
-		return err
-	}
-	if err := activate(taskA.ID); err != nil {
 		return err
 	}
 	if _, _, err := client.postJSON("/tasks", map[string]any{
@@ -213,9 +198,6 @@ func evalJobUtteranceRouting(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	if err != nil {
 		return err
 	}
-	if err := activate(taskC.ID); err != nil {
-		return err
-	}
 	if _, _, err := client.postJSON("/tasks", map[string]any{
 		"action": "submit_for_review", "id": taskC.ID, "channel": taskC.Channel,
 		"created_by": "eng", "details": "One-pager draft submitted.",
@@ -307,9 +289,6 @@ func evalJobUtteranceRouting(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	// flow while eng's interview is pending — the v3 office froze here.
 	taskB, err := createTask("Ship the pipeline baseline (utterance d)", "ceo")
 	if err != nil {
-		return err
-	}
-	if err := activate(taskB.ID); err != nil {
 		return err
 	}
 	bSnapshot := fx.broker.TaskByID(taskB.ID)

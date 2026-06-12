@@ -204,21 +204,21 @@ func (b *Broker) gateTaskCompletionVerification(body TaskPostRequest) error {
 		b.mu.Unlock()
 		return nil
 	}
-	// Approve on a pre-execution task is an ACTIVATION (start work), not a
+	// Approve on a pre-execution task is a START (un-park / staff), not a
 	// done-claim — running the definition-of-done check before any work has
-	// happened would block the human's Approve & Start forever. The check
+	// happened would block the human's start affordance forever. The check
 	// binds on the completing transition instead.
 	if strings.TrimSpace(body.Action) == "approve" && isPreExecutionLifecycleState(task.LifecycleState) {
 		b.mu.Unlock()
 		return nil
 	}
-	// Complete on a pre-execution task is refused by the pre-start gate in
-	// the locked mutation phase for every non-internal actor ("Approve &
-	// Start first"). Let that gate own the error: failing the DoD check
-	// here instead told the agent the work just needs fixing when the real
-	// blocker is the missing human activation — and executed a command
-	// before any work could exist. Internal recovery actors still run the
-	// check, since the pre-start gate exempts them.
+	// Complete on a parked (pre-execution) task is refused by the parked-
+	// task gate in the locked mutation phase for every non-internal actor.
+	// Let that gate own the error: failing the DoD check here instead told
+	// the agent the work just needs fixing when the real blocker is that
+	// the task was never started — and executed a command before any work
+	// could exist. Internal recovery actors still run the check, since the
+	// parked-task gate exempts them.
 	if strings.TrimSpace(body.Action) == "complete" && isPreExecutionLifecycleState(task.LifecycleState) &&
 		!isInternalTaskActor(strings.TrimSpace(body.CreatedBy)) {
 		b.mu.Unlock()

@@ -463,9 +463,10 @@ export function createSubTask(opts: {
   });
 }
 
-/** Reopen a closed Task (rejected/cancelled/approved) back to drafting
- *  so the human can re-approve to restart work. The broker preserves
- *  the title/details/owner and just resets the lifecycle. */
+/** Reopen a closed Task (rejected/cancelled/approved). The broker
+ *  preserves title/details/owner and resets the lifecycle: an owned task
+ *  reopens straight into running (owner re-dispatched); an ownerless one
+ *  lands ready and dispatches on assignment. */
 export function reopenTask(taskId: string, channel: string) {
   return post<TaskResponse>("/tasks", {
     action: "reopen",

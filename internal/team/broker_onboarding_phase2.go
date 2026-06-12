@@ -250,7 +250,11 @@ func (b *Broker) ensureOnboardingFirstIssue(s *onboarding.State) error {
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-		if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
+		// The onboarding ask IS the authorization: the first issue lands
+		// RUNNING with the CEO as owner; the task_created action appended
+		// below wakes the CEO through the normal notify path. No
+		// start-approval ceremony.
+		if err := b.applyLifecycleStateLocked(&task, LifecycleStateRunning); err != nil {
 			b.mu.Unlock()
 			return err
 		}

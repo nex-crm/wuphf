@@ -1063,16 +1063,16 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 		t.Fatalf("handleTeamTask: %v", err)
 	}
 	text := textFromResult(t, result)
-	// Issues (the default task_type via RULE ZERO override) land in
-	// drafting / status=open until the human approves them. See
-	// docs/specs/issue-execution-loop.md.
+	// Creation is the authorization: an owner-set Issue (the default
+	// task_type via RULE ZERO override) lands running / in_progress
+	// immediately — no Approve & Start ceremony.
 	// Slice 7: MySlug must be ceo (only lead can create); owner
 	// defaults to the caller, so the assertion reads "@ceo".
 	// Task IDs follow the workspace prefix (Linear-style, default OFFICE).
 	// We assert the message shape without pinning the exact prefix so the
 	// test survives prefix-from-company-name resolution.
-	if !strings.Contains(text, "Task ") || !strings.Contains(text, "is now open @ceo") {
-		t.Fatalf("expected self-owned drafting (open) task result, got %q", text)
+	if !strings.Contains(text, "Task ") || !strings.Contains(text, "is now in_progress @ceo") {
+		t.Fatalf("expected self-owned running (in_progress) task result, got %q", text)
 	}
 
 	var tasks brokerTasksResponse
@@ -1093,8 +1093,8 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 	if task.Title != "Investigate webhook retries" {
 		t.Fatalf("expected created task present across channels, got %+v", tasks.Tasks)
 	}
-	if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "open" {
-		t.Fatalf("expected caller-owned drafting (status=open) task, got %+v", task)
+	if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "in_progress" {
+		t.Fatalf("expected caller-owned running (status=in_progress) task, got %+v", task)
 	}
 
 	result, _, err = handleTeamTask(ctx, nil, TeamTaskArgs{
@@ -1108,8 +1108,8 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 		t.Fatalf("handleTeamTask whitespace owner: %v", err)
 	}
 	text = textFromResult(t, result)
-	if !strings.Contains(text, "is now open @ceo") {
-		t.Fatalf("expected whitespace-owner task to be caller-owned (drafting), got %q", text)
+	if !strings.Contains(text, "is now in_progress @ceo") {
+		t.Fatalf("expected whitespace-owner task to be caller-owned (running), got %q", text)
 	}
 
 	if err := brokerGetJSON(ctx, "/tasks?all_channels=true&include_done=true", &tasks); err != nil {
@@ -1121,8 +1121,8 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 			continue
 		}
 		foundWhitespace = true
-		if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "open" {
-			t.Fatalf("expected trimmed-empty owner to default to caller (drafting), got %+v", task)
+		if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "in_progress" {
+			t.Fatalf("expected trimmed-empty owner to default to caller (running), got %+v", task)
 		}
 	}
 	if !foundWhitespace {
@@ -1209,10 +1209,10 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	text := textFromResult(t, result)
 	for _, want := range []string{
 		fmt.Sprintf("Runtime state for #%s", taskChannel),
-		// 2 = the fixture's blocking approval + the drafting "Waiting on
-		// you" notice the broker now raises on owner-assigned drafting
-		// tasks (v2-eval N5 fix).
-		"Pending human requests: 2",
+		// 1 = the fixture's blocking approval. The drafting "Waiting on
+		// you" notice is gone with the start-approval ceremony: created
+		// tasks land running, so no awaiting-start request is raised.
+		"Pending human requests: 1",
 		"Current focus: Approve release from @ceo.",
 		"working_directory ",
 		"Runtime capabilities:",

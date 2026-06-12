@@ -173,11 +173,12 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:     now,
 		}
 		b.refreshPlannedTaskBlockStateLocked(&task)
-		// Lifecycle routing (Phase 3 Backlog): Backlog (Park) creates the task
-		// assigned but parked in Drafting — non-executable, shows in Backlog,
-		// dispatches nobody. Activated via "Approve & Start" (Drafting→Running)
-		// in the decision handler. Start-now tasks keep the in_progress
-		// promotion and run immediately.
+		// Lifecycle routing: Backlog (Park) is the ONE deliberate way to
+		// land a task in Drafting — assigned but parked, non-executable,
+		// shows in Backlog, dispatches nobody. The human starts it later
+		// from the task page ("Parked — start", the one remaining start
+		// affordance). Start-now tasks keep the in_progress promotion and
+		// run immediately — creation is the authorization.
 		if item.Park {
 			if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
 				rollbackPlan()
