@@ -219,7 +219,27 @@ func (r *Repo) isGitRepoLocked(ctx context.Context) (bool, error) {
 		}
 		return false, fmt.Errorf("wiki: check git work tree: %w: %s", err, strings.TrimSpace(out))
 	}
-	return strings.TrimSpace(out) == "true", nil
+	if strings.TrimSpace(out) != "true" {
+		return false, nil
+	}
+	// Inside-a-work-tree is not enough: when the wiki root lives under a
+	// LARGER repo (a runtime home inside a checkout — dev installs, eval
+	// scratch homes), rev-parse answers true for the PARENT repo, Init
+	// would skip git init, and fsck then fails on the missing .git
+	// forever. The wiki is a repo only if ITS OWN root is the toplevel.
+	top, err := r.runGitLocked(ctx, "system", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, fmt.Errorf("wiki: resolve work tree toplevel: %w: %s", err, strings.TrimSpace(top))
+	}
+	rootEval, rootErr := filepath.EvalSymlinks(r.root)
+	if rootErr != nil {
+		rootEval = r.root
+	}
+	topEval, topErr := filepath.EvalSymlinks(strings.TrimSpace(top))
+	if topErr != nil {
+		topEval = strings.TrimSpace(top)
+	}
+	return rootEval == topEval, nil
 }
 
 func isGitNotRepositoryOutput(out string) bool {
