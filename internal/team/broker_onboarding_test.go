@@ -577,3 +577,42 @@ func TestOnboardingCompleteEmitsOfficeReseededEvent(t *testing.T) {
 		}
 	}
 }
+
+// TestOnboardingBlueprintSeedsLandExecutable pins the creation-is-the-
+// authorization contract on blueprint seeds: owned lanes land Running,
+// ownerless lanes land Ready — never Drafting (the parked state is for
+// explicit parks only). A silent regression to the retired start-approval
+// ceremony fails here.
+func TestOnboardingBlueprintSeedsLandExecutable(t *testing.T) {
+	ensureOperationsFallbackFS(t)
+	b := newTestBroker(t)
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
+		t.Fatalf("onboardingCompleteFn: %v", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	checked := 0
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if strings.EqualFold(task.TaskType, "system") || task.LifecycleState == LifecycleStateArchived {
+			continue
+		}
+		checked++
+		switch {
+		case strings.TrimSpace(task.Owner) != "" && !strings.EqualFold(task.Owner, "auto"):
+			if task.LifecycleState != LifecycleStateRunning && task.LifecycleState != LifecycleStateQueuedBehindOwner {
+				t.Errorf("owned seed %s (owner=%s) must land executable; got %s", task.ID, task.Owner, task.LifecycleState)
+			}
+		default:
+			if task.LifecycleState != LifecycleStateReady {
+				t.Errorf("ownerless seed %s must land Ready; got %s", task.ID, task.LifecycleState)
+			}
+		}
+		if task.LifecycleState == LifecycleStateDrafting {
+			t.Errorf("seed %s landed in the parked state — the start-approval ceremony is retired", task.ID)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("blueprint seeded no checkable tasks")
+	}
+}

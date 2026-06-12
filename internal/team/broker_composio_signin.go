@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -235,13 +236,24 @@ func (b *Broker) composioSigninAdvanceIfLoggedIn() bool {
 func (b *Broker) composioSigninProvision() {
 	flow := &b.composioSignin
 	key, err := composioProvisionProjectKey()
+	var storeFailed bool
 	if err == nil {
-		err = b.storeComposioAPIKey(key)
+		if err = b.storeComposioAPIKey(key); err != nil {
+			storeFailed = true
+		}
 	}
 	flow.mu.Lock()
 	actor := flow.actor
 	if err != nil {
-		flow.state = composioSigninState{Status: composioSigninStatusError, Reason: err.Error()}
+		reason := err.Error()
+		if storeFailed {
+			// config.Save errors wrap OS errors carrying the user's home
+			// path — keep filesystem details out of the browser-facing
+			// Reason (review finding); the full error goes to the log.
+			log.Printf("composio signin: %v", err)
+			reason = "could not save the Composio API key to config — check the broker logs"
+		}
+		flow.state = composioSigninState{Status: composioSigninStatusError, Reason: reason}
 		flow.mu.Unlock()
 		return
 	}

@@ -8,6 +8,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -108,6 +109,26 @@ afterEach(() => {
 });
 
 describe("RootRoute bootstrap fallback", () => {
+  it("auto-retries the bootstrap after BOOT_RETRY_MS without a click", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // First attempt fails; the timer-driven second attempt succeeds.
+      getMock.mockRejectedValueOnce(apiError(503, '{"error":"broker wedged"}'));
+      getMock.mockResolvedValue({ complete: false });
+      renderRoot();
+      const fallback = await screen.findByTestId("broker-unreachable");
+      expect(fallback).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      await waitFor(() =>
+        expect(screen.queryByTestId("broker-unreachable")).toBeNull(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders the broker-unreachable state on a 503, not a blank body", async () => {
     getMock.mockRejectedValue(apiError(503, '{"error":"broker wedged"}'));
 

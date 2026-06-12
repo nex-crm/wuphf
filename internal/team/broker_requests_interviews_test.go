@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -1206,5 +1207,40 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected task_unblocked action after answering request")
+	}
+}
+
+// TestAlsoAskingSurvivesRestart pins the dedupe fan-out across a broker
+// restart: a subscriber attached to a pending interview must still be
+// treated as awaiting the answer after the state round-trips disk.
+func TestAlsoAskingSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "broker-state.json")
+	b := NewBrokerAt(statePath)
+	b.mu.Lock()
+	b.requests = append(b.requests, humanInterview{
+		ID: "req-restart", Kind: "interview", Status: "pending",
+		From: "ae", Channel: "general",
+		Question:   "Which CRM should I connect to?",
+		AlsoAsking: []string{"revops"},
+	})
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("save: %v", err)
+	}
+	b.mu.Unlock()
+
+	b2 := NewBrokerAt(statePath)
+	if err := b2.loadState(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !b2.AgentAwaitingInterviewAnswer("revops") {
+		t.Fatal("also_asking subscriber must still be awaiting after restart")
+	}
+	if !b2.AgentAwaitingInterviewAnswer("ae") {
+		t.Fatal("original asker must still be awaiting after restart")
+	}
+	if b2.AgentAwaitingInterviewAnswer("eng") {
+		t.Fatal("non-subscriber must not be parked")
 	}
 }
