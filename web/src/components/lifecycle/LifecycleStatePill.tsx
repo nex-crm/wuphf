@@ -47,6 +47,53 @@ const DOT_COLOR: Record<StatusDotKind, string> = {
   idle: "var(--text-tertiary, var(--text-secondary))",
 };
 
+/**
+ * True when a task sits assigned to the "auto" sentinel in a pre-run
+ * state — i.e. the CEO triage loop is picking the owner (see
+ * requestAutoAssignmentLocked on the Go side). The task header renders
+ * the staffing pill + copy instead of "parked", which implied the human
+ * had to act (the removed approval wall) when nothing was waiting on
+ * them. Lives next to the pill (not in TaskDocument) so the staffing
+ * regression test can import it without pulling in the chat surface.
+ */
+export function isAwaitingStaffing(
+  doc: { ownerSlug?: string; lifecycleState: LifecycleState } | undefined,
+): boolean {
+  if (!doc) return false;
+  if (doc.ownerSlug?.trim().toLowerCase() !== "auto") return false;
+  return (
+    doc.lifecycleState === "drafting" ||
+    doc.lifecycleState === "intake" ||
+    doc.lifecycleState === "ready"
+  );
+}
+
+/**
+ * Pill for an ownerless ("auto") task awaiting CEO staffing. Rendered in
+ * place of the lifecycle pill so the page says what is actually happening
+ * — the CEO is picking an owner — instead of "parked", which read like the
+ * removed approval wall to new users (live smoke run gap #1).
+ */
+export function StaffingStatePill() {
+  return (
+    <span
+      className="lifecycle-state-pill lifecycle-state-pill--running"
+      style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
+      data-state="staffing"
+      data-activity="running"
+      data-testid="staffing-state-pill"
+      title="The CEO is picking the owner"
+    >
+      <span
+        className="dot dot--blink"
+        style={{ background: DOT_COLOR.running }}
+        aria-hidden="true"
+      />
+      staffing
+    </span>
+  );
+}
+
 export function LifecycleStatePill({ state }: LifecycleStatePillProps) {
   const token = STATE_PILL_TOKENS[state] ?? {
     ...UNKNOWN_PILL,

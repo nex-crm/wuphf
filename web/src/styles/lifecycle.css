@@ -3629,6 +3629,12 @@ button.verification-badge {
   gap: 12px;
   margin-top: 8px;
 }
+/* Ownerless ("auto") task awaiting CEO staffing — honest in-progress copy
+ * next to the owner pill so the page never reads as "parked on you". */
+.issue-doc-staffing-note {
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
 .issue-doc-owner-pill {
   appearance: none;
   display: inline-flex;

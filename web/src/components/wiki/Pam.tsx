@@ -295,7 +295,10 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
         title="Pam — click for options"
         onClick={() => setMenuOpen((v) => !v)}
       >
-        <PixelAvatar slug="pam" size={56} className="pam-avatar" />
+        {/* 40px avatar + 16px desk (−14px overlap) = 42px — exactly the
+            tab bar's height, so the sprite fits the row it lives in
+            instead of floating over the tabs (founder smoke run gap #5). */}
+        <PixelAvatar slug="pam" size={40} className="pam-avatar" />
       </button>
       <div className="pam-desk" aria-hidden="true" />
 
@@ -440,7 +443,7 @@ function JimPamVisit({ visit }: { visit: JimPamVisitState }) {
           {bubble.text}
         </div>
       ) : null}
-      <JimFullBodySprite size={46} className="jim-pixel" />
+      <JimFullBodySprite size={34} className="jim-pixel" />
     </div>
   );
 }

@@ -148,6 +148,46 @@ function describeGetError(err: unknown): Error | null {
   return null;
 }
 
+/**
+ * Turn a broker error body into a human-readable message. The broker
+ * answers many failures with a JSON envelope (`{"error":"wiki backend
+ * is not active"}`); rendering that envelope verbatim leaked raw JSON
+ * into every surface that shows `err.message` (the wiki did exactly
+ * that during a broker wedge). When the body is JSON carrying a
+ * sentence-shaped `error`/`message` string, surface that string as
+ * plain text — sentence-cased with a trailing period. Code-shaped
+ * values (`store_busy`, no whitespace) are NOT prose; keep the raw
+ * body so programmatic consumers and error reports stay precise.
+ */
+export function humanizeApiErrorBody(bodyText: string): string | null {
+  if (!bodyText) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const rec = parsed as Readonly<Record<string, unknown>>;
+  // Envelopes that carry payload beyond the message (e.g. the wiki 409
+  // conflict shape with current_sha/current_content) are data, not prose —
+  // callers parse them out of the message text, so leave those intact.
+  if (Object.keys(rec).some((k) => k !== "error" && k !== "message")) {
+    return null;
+  }
+  const candidate = [rec.error, rec.message].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  if (!candidate) return null;
+  const text = candidate.trim();
+  // A code-like token (no whitespace) is not a sentence — leave it alone.
+  if (!/\s/.test(text)) return null;
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -162,7 +202,10 @@ export class ApiError extends Error {
     readonly errorCode?: string | null;
     readonly retryAfter?: string | null;
   }) {
-    super(args.bodyText || `${args.status} ${args.statusText}`);
+    super(
+      humanizeApiErrorBody(args.bodyText) ??
+        (args.bodyText || `${args.status} ${args.statusText}`),
+    );
     this.name = "ApiError";
     this.status = args.status;
     this.statusText = args.statusText;

@@ -53,7 +53,7 @@ describe("<Pam>", () => {
     expect(visitor).toHaveClass("is-away");
     const jim = screen.getByTestId("jim-full-body-sprite");
     expect(jim).toHaveClass("pixel-avatar", "jim-pixel");
-    expect(drawKnownPixelAvatar).toHaveBeenCalledWith(jim, "hybridJim", 46);
+    expect(drawKnownPixelAvatar).toHaveBeenCalledWith(jim, "hybridJim", 34);
 
     act(() => {
       vi.advanceTimersByTime(5000);

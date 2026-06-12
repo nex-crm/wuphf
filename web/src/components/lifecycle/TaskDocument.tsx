@@ -27,7 +27,11 @@ import {
 } from "../../api/tasks";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
-import { LifecycleStatePill } from "./LifecycleStatePill";
+import {
+  isAwaitingStaffing,
+  LifecycleStatePill,
+  StaffingStatePill,
+} from "./LifecycleStatePill";
 import { OwnerPicker } from "./OwnerPicker";
 import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
 import { TaskActionToolbar } from "./TaskActionToolbar";
@@ -591,6 +595,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
 
   const doc = query.data;
   const isDrafting = doc?.lifecycleState === "drafting";
+  const awaitingStaffing = isAwaitingStaffing(doc);
 
   if (query.isPending && !initialDocument) {
     return <TaskDocumentSkeleton />;
@@ -628,7 +633,11 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
           <ParentTaskBreadcrumb parentTaskId={doc.parentTaskId} />
         ) : null}
         <div className="issue-doc-header-row">
-          <LifecycleStatePill state={doc.lifecycleState} />
+          {awaitingStaffing ? (
+            <StaffingStatePill />
+          ) : (
+            <LifecycleStatePill state={doc.lifecycleState} />
+          )}
           <VerificationBadge
             verification={doc.verification}
             result={doc.verificationResult}
@@ -638,6 +647,14 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
           </h2>
         </div>
         <div className="issue-doc-meta-row" data-testid="issue-doc-button-row">
+          {awaitingStaffing ? (
+            <span
+              className="issue-doc-staffing-note"
+              data-testid="issue-staffing-note"
+            >
+              Staffing — CEO is picking the owner
+            </span>
+          ) : null}
           <OwnerPicker
             taskId={taskId}
             channel={doc.channel}
