@@ -547,6 +547,17 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		channel = "general"
 	}
 
+	// Permission preflight must run before any gate with external side
+	// effects. The locked auth check below still runs again after these
+	// pre-phases, so a task whose owner/reviewer changes while a verification
+	// command runs is rechecked before mutation.
+	b.mu.Lock()
+	if err := b.checkTaskActionAuthLocked(action, actor, body.ID); err != nil {
+		b.mu.Unlock()
+		return TaskResponse{}, err
+	}
+	b.mu.Unlock()
+
 	// Resubmission artifact-delta gate (done-integrity): an agent re-landing
 	// changes-requested work must have actually changed the delivered
 	// artifact. Runs BEFORE the lock below because it reads artifact files

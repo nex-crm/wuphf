@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -82,8 +83,8 @@ func newVerificationTestBroker(t *testing.T) *Broker {
 	t.Helper()
 	b := newTestBroker(t)
 	b.mu.Lock()
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}, {Slug: "eng", Name: "Engineer"}}
-	b.channels = []teamChannel{{Slug: "general", Name: "general", Members: []string{"human", "ceo", "eng"}}}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}, {Slug: "eng", Name: "Engineer"}, {Slug: "qa", Name: "QA"}}
+	b.channels = []teamChannel{{Slug: "general", Name: "general", Members: []string{"human", "ceo", "eng", "qa"}}}
 	b.mu.Unlock()
 	return b
 }
@@ -240,5 +241,43 @@ func TestVerificationGateDefersToPreStartGateOnDrafting(t *testing.T) {
 	}
 	if got := b.TaskByID(resp.Task.ID); got.VerificationResult != nil {
 		t.Fatalf("no check may run for a pre-start agent complete; stamped %+v", got.VerificationResult)
+	}
+}
+
+func TestVerificationGateAuthPreflightBlocksForbiddenActorSideEffects(t *testing.T) {
+	b := newVerificationTestBroker(t)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	resp, err := b.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "URL-gated work",
+		Details: "work with a URL definition of done", Owner: "eng", CreatedBy: "ceo",
+		VerificationKind: "url", VerificationSpec: srv.URL + "/ok", VerificationRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := b.MutateTask(TaskPostRequest{
+		Action: "approve", ID: resp.Task.ID, Channel: "general", CreatedBy: "human",
+	}); err != nil {
+		t.Fatalf("approve & start: %v", err)
+	}
+
+	_, err = b.MutateTask(TaskPostRequest{
+		Action: "complete", ID: resp.Task.ID, Channel: "general", CreatedBy: "qa",
+	})
+	var mErr *TaskMutationError
+	if !errors.As(err, &mErr) || mErr.Kind != TaskMutationForbidden {
+		t.Fatalf("forbidden non-owner complete: want TaskMutationForbidden, got %v", err)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("forbidden actor must not trigger URL verification; got %d requests", got)
+	}
+	if got := b.TaskByID(resp.Task.ID); got.VerificationResult != nil {
+		t.Fatalf("forbidden actor must not stamp verification result; got %+v", got.VerificationResult)
 	}
 }
