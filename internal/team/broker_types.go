@@ -139,6 +139,15 @@ type humanInterview struct {
 	RedactionCount   int      `json:"redaction_count,omitempty"`
 	RedactionReasons []string `json:"redaction_reasons,omitempty"`
 	DedupeKey        string   `json:"dedupe_key,omitempty"`
+	// AlsoAsking lists additional agent slugs subscribed to this interview's
+	// answer. When an agent raises a HUMAN-directed interview whose question
+	// is semantically similar to this still-pending one, the broker attaches
+	// that agent here instead of stacking a duplicate card (live smoke run:
+	// FIVE agents asked "which CRM?" in five separate blocking interviews).
+	// Subscribers poll the same request id, so the one human answer fans out
+	// to every asker through the existing answer-delivery path. Additive
+	// wire field (omitempty); only ever set on kind=interview requests.
+	AlsoAsking []string `json:"also_asking,omitempty"`
 	// IssueID links this request back to the parent Issue (team_task)
 	// that scopes the work. Populated by team_action_execute via the
 	// auto-resolve gate (resolveActionIssue) so every approval card has

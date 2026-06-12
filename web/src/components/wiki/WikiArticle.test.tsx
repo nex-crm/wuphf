@@ -1098,3 +1098,44 @@ describe("<WikiArticle delete affordance>", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 });
+
+describe("<WikiArticle header row>", () => {
+  // Regression (live smoke run): the floated action toolbars overlapped a
+  // vertically-wrapping breadcrumb. The header must be ONE row container
+  // holding breadcrumb + actions, with the title below it — not floats.
+  it("renders breadcrumb and page actions inside a single header row, title below", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Customer X" });
+    const header = screen.getByTestId("wk-article-header");
+
+    // Breadcrumb lives inside the header row…
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(header.contains(breadcrumb)).toBe(true);
+
+    // …and so do BOTH page actions, grouped in one actions container.
+    const aiChange = screen.getByTestId("wk-article-ai-change");
+    const deleteBtn = screen.getByTestId("wk-article-delete");
+    expect(header.contains(aiChange)).toBe(true);
+    expect(header.contains(deleteBtn)).toBe(true);
+    const actions = header.querySelector(".wk-article-actions");
+    expect(actions).not.toBeNull();
+    expect(actions?.contains(aiChange)).toBe(true);
+    expect(actions?.contains(deleteBtn)).toBe(true);
+
+    // The title renders on its own line BELOW the header row, not inside it.
+    const title = screen.getByRole("heading", { name: "Customer X" });
+    expect(header.contains(title)).toBe(false);
+    expect(
+      header.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});

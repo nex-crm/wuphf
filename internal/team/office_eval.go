@@ -213,6 +213,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"live-paths", evalJobLivePaths},
 		{"workspace-isolation", evalJobWorkspaceIsolation},
 		{"utterance-routing", evalJobUtteranceRouting},
+		{"interview-dedupe", evalJobInterviewDedupe},
 		{"task-integrity", evalJobTaskIntegrity},
 		{"knowledge-integrity", evalJobKnowledgeIntegrity},
 		{"review-change-tasks", evalJobReviewChangeTasks},

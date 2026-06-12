@@ -390,6 +390,45 @@
   padding: 8px 0 10px;
 }
 
+/* Article header row — breadcrumb left, page actions right, title below.
+   Replaces the old floated toolbars that overlapped the wrapping
+   breadcrumb in narrow viewports. */
+.wk-article-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 0 12px;
+}
+.wk-article-header .wk-breadcrumb {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* When narrow, middle segments give way first; the leaf keeps the most
+   room but still ellipsizes rather than pushing the actions off-row. */
+.wk-article-header .wk-breadcrumb a,
+.wk-article-header .wk-breadcrumb [aria-current="page"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.wk-article-header .wk-breadcrumb .sep {
+  flex-shrink: 0;
+}
+.wk-article-header .wk-breadcrumb [aria-current="page"] {
+  flex-shrink: 0.5;
+}
+.wk-article-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
 /* Breadcrumbs — docmost pattern: small sans crumbs ("space / parent / page"),
    "/" separators, no underline, the current page in plain text. */
 .wk-breadcrumb {
@@ -420,7 +459,10 @@
 /* ─── Page title — docmost's .page-title h1: 2.5rem/700, tight leading ─── */
 .wk-article-title {
   font-family: var(--wk-heading-font);
-  font-size: var(--wk-h1-size);
+  /* Cap the title scale: --wk-h1-size (2.5rem) is the ceiling on wide
+     viewports; short/narrow viewports ramp down toward 1.5rem so the
+     title never renders enormous relative to the reading column. */
+  font-size: clamp(1.5rem, 1.05rem + 2.2vw, var(--wk-h1-size));
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: var(--wk-heading-track);
@@ -1835,14 +1877,13 @@
 }
 
 /* Article-view toolbar: the read-mode page actions (Request changes via AI,
-   Delete page). Each control wraps itself in .wk-article-toolbar; floating
-   them right lets consecutive toolbars share one quiet docmost-style action
-   row above the breadcrumb instead of stacking. */
+   Delete page). Each control wraps itself in .wk-article-toolbar; the
+   .wk-article-actions row in the article header lays consecutive toolbars
+   out side by side — no floats, so they can never overlap the breadcrumb. */
 .wk-article-toolbar {
-  float: right;
   display: inline-flex;
+  align-items: center;
   gap: 8px;
-  margin: 8px 0 0 8px;
 }
 .wk-article-delete-btn {
   font-family: var(--wk-chrome);

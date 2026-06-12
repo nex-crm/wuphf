@@ -325,6 +325,13 @@ func (b *Broker) AgentAwaitingInterviewAnswer(slug string) bool {
 		if strings.ToLower(strings.TrimSpace(req.From)) == slug {
 			return true
 		}
+		// Subscribers merged onto this interview (also_asking) are parked
+		// in the same /interview/answer poll loop as the original asker.
+		for _, also := range req.AlsoAsking {
+			if strings.ToLower(strings.TrimSpace(also)) == slug {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -665,6 +672,52 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// Cross-agent semantic dedupe for HUMAN-directed interviews ONLY
+		// (see interview_dedup.go). Approval-style gates are excluded by
+		// the kind check — their distinct payloads must never collapse;
+		// the exact DedupeKey above already absorbs their retries.
+		if normalizeRequestKind(body.Kind) == "interview" && !body.Secret {
+			question := strings.TrimSpace(body.Question)
+			asker := strings.ToLower(strings.TrimSpace(body.From))
+			// (a) ACTIVE similar interview → no second card. Attach the
+			// asker as a subscriber; it polls the existing request id, so
+			// the human's one answer reaches it exactly like the original.
+			if existing := b.findActiveSimilarInterviewLocked(question); existing != nil {
+				if !interviewAskerKnown(*existing, asker) {
+					existing.AlsoAsking = append(existing.AlsoAsking, asker)
+					existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+					b.appendActionLocked("request_subscribed", "office", existing.Channel, asker,
+						truncateSummary("Joined "+existing.ID+" — same question already pending: "+existing.Question, 140), existing.ID)
+					if err := b.saveLocked(); err != nil {
+						http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+						return
+					}
+				}
+				clone := cloneHumanInterview(*existing)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"request":     clone,
+					"id":          clone.ID,
+					"deduped":     true,
+					"merged_into": clone.ID,
+				})
+				return
+			}
+			// (b) recently ANSWERED similar interview → hand the existing
+			// answer straight back; do not re-prompt the human.
+			if answered, answer := b.recentlyAnsweredSimilarInterviewLocked(question); answered != nil {
+				clone := cloneHumanInterview(*answered)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"request":          clone,
+					"id":               clone.ID,
+					"deduped":          true,
+					"already_answered": true,
+					"answer":           answer,
+				})
+				return
+			}
+		}
 		b.counter++
 		req := humanInterview{
 			ID:                   fmt.Sprintf("request-%d", b.counter),
@@ -840,11 +893,14 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		pendingCascade := b.applyRequestAnswerLocked(&b.requests[i], answer, answerActor)
 
 		b.counter++
+		// Tag the original asker AND every also_asking subscriber: the
+		// answer fans out to all agents merged onto this interview.
+		tagged := append([]string{b.requests[i].From}, b.requests[i].AlsoAsking...)
 		msg := channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
 			From:      answerActor,
 			Channel:   normalizeChannelSlug(b.requests[i].Channel),
-			Tagged:    []string{b.requests[i].From},
+			Tagged:    tagged,
 			ReplyTo:   strings.TrimSpace(b.requests[i].ReplyTo),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}

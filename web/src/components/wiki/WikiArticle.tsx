@@ -563,17 +563,28 @@ export default function WikiArticle({
             onChange={setTab}
             rightRail={context ? [context] : undefined}
           />
-          <RequestAIChangeControl title={article.title} path={article.path} />
-          <ArticleDeleteControl
-            title={article.title}
-            path={article.path}
-            onDeleted={() => onNavigate("")}
-          />
-          <ArticleBreadcrumb
-            article={article}
-            segments={breadcrumbSegments}
-            onNavigate={onNavigate}
-          />
+          {/* One clean header row: breadcrumb left (single line, middle
+              segments truncate), page actions right. The title sits BELOW
+              on its own line — previously the two floated toolbars
+              overlapped the wrapping breadcrumb. */}
+          <div className="wk-article-header" data-testid="wk-article-header">
+            <ArticleBreadcrumb
+              article={article}
+              segments={breadcrumbSegments}
+              onNavigate={onNavigate}
+            />
+            <div className="wk-article-actions">
+              <RequestAIChangeControl
+                title={article.title}
+                path={article.path}
+              />
+              <ArticleDeleteControl
+                title={article.title}
+                path={article.path}
+                onDeleted={() => onNavigate("")}
+              />
+            </div>
+          </div>
           <ArticleTitle title={article.title} />
           {byline}
           <ArticleBadges article={article} />
