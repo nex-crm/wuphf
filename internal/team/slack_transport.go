@@ -47,6 +47,9 @@ type slackAPI interface {
 	// GetUsersInConversationContext lists the member ids of a channel, used to
 	// pre-warm the user → member-slug map.
 	GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
+	// PublishViewContext publishes a user's App Home tab view (views.publish),
+	// used to render the office overview when the Home tab is opened.
+	PublishViewContext(ctx context.Context, userID string, view slack.HomeTabViewRequest) error
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -74,6 +77,11 @@ func (c *slackClient) AuthTestContext(ctx context.Context) (*slack.AuthTestRespo
 
 func (c *slackClient) GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error) {
 	return c.api.GetUsersInConversationContext(ctx, params)
+}
+
+func (c *slackClient) PublishViewContext(ctx context.Context, userID string, view slack.HomeTabViewRequest) error {
+	_, err := c.api.PublishViewContext(ctx, slack.PublishViewContextRequest{UserID: userID, View: view})
+	return err
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and
@@ -359,6 +367,11 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 		if !ok {
 			return true
 		}
+		if home, isHome := apiEvent.InnerEvent.Data.(*slackevents.AppHomeOpenedEvent); isHome {
+			// Best-effort render of the office overview; always Ack'd.
+			t.publishHomeTab(ctx, home.User)
+			return true
+		}
 		msg, ok := apiEvent.InnerEvent.Data.(*slackevents.MessageEvent)
 		if !ok {
 			return true
@@ -495,32 +508,74 @@ func (t *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 		log.Printf("[slack] outbound skip: no channel for %q", ch)
 		return transport.Outbound{}, false
 	}
+	// Resolve the office-internal sender to a Slack-facing display name BEFORE
+	// rendering: "@ceo" means nothing to real Slack users, so attribution is a
+	// plain bold name, never a fake tag.
+	msg.From = t.displayNameForOffice(msg.From)
 	return transport.Outbound{
 		Binding: transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: ch},
-		Text:    t.linkSlackAgentMentions(formatSlackOutbound(msg), msg.Tagged),
+		Text:    t.renderOfficeTags(formatSlackOutbound(msg)),
 	}, true
 }
 
-// linkSlackAgentMentions upgrades "@slug" tokens for TAGGED, REGISTERED foreign
-// agents into real <@U…> Slack mentions so the foreign bot is actually pinged —
-// without this, office agents addressing a Slack agent produce inert plain text
-// and the bot never wakes. Two properties keep this injection-safe: the user id
-// comes exclusively from the registry (SlackAgentUserIDBySlug — never from
-// message text), and the rewrite runs AFTER formatSlackOutbound has escaped
-// every dynamic field, so surrounding text cannot smuggle its own control
-// sequences. Tags that aren't registered foreign agents are left as escaped
-// plain text.
-func (t *SlackTransport) linkSlackAgentMentions(text string, tagged []string) string {
-	if t.Broker == nil || len(tagged) == 0 {
+// displayNameForOffice maps an office sender identity to the name real Slack
+// users should see. Office-internal identities (member slugs, "you"/"human",
+// gate actor ids) are NOT taggable in Slack, so they render as plain display
+// names. "system" passes through untouched (formatSlackOutbound styles it).
+func (t *SlackTransport) displayNameForOffice(from string) string {
+	from = strings.TrimSpace(from)
+	if from == "" || from == "system" {
+		return from
+	}
+	if id, ok := strings.CutPrefix(from, "human:"); ok {
+		// Gate clicks attribute to human:<slack user id>. Show the cached
+		// Slack display name — attribution, not a mention, so no ping.
+		uid := strings.ToUpper(strings.TrimSpace(id))
+		t.mapsMu.RLock()
+		info, cached := t.UserMap[uid]
+		t.mapsMu.RUnlock()
+		if cached {
+			return info.name
+		}
+		return uid
+	}
+	if isHumanMessageSender(from) {
+		return "Human"
+	}
+	if t.Broker != nil {
+		if name := t.Broker.MemberDisplayNames()[normalizeActorSlug(from)]; name != "" {
+			return name
+		}
+	}
+	return from
+}
+
+// renderOfficeTags rewrites office-internal "@slug" tokens for SLACK READERS:
+// a REGISTERED foreign agent becomes a real <@U…> mention so the bot is
+// actually pinged; every other office member token becomes its plain display
+// name, because a tag that cannot be tagged in Slack is just noise. Two
+// properties keep this injection-safe: replacement values come exclusively
+// from the roster/registry (never from message text), and the rewrite runs
+// AFTER formatSlackOutbound has escaped every dynamic field, so surrounding
+// text cannot smuggle its own control sequences. Unknown "@whatever" tokens
+// are left as escaped plain text.
+func (t *SlackTransport) renderOfficeTags(text string) string {
+	if t.Broker == nil {
 		return text
 	}
-	for _, slug := range tagged {
-		userID := t.Broker.SlackAgentUserIDBySlug(slug)
-		if userID == "" {
+	for slug, name := range t.Broker.MemberDisplayNames() {
+		if slug == "" {
 			continue
 		}
-		text = replaceMentionToken(text, "@"+slug, "<@"+slackEscape(userID)+">")
+		if userID := t.Broker.SlackAgentUserIDBySlug(slug); userID != "" {
+			text = replaceMentionToken(text, "@"+slug, "<@"+slackEscape(userID)+">")
+			continue
+		}
+		text = replaceMentionToken(text, "@"+slug, slackEscape(name))
 	}
+	// Universal human identities never map to one Slack user; render plainly.
+	text = replaceMentionToken(text, "@human", "Human")
+	text = replaceMentionToken(text, "@you", "Human")
 	return text
 }
 
@@ -689,7 +744,7 @@ func formatSlackOutbound(msg channelMessage) string {
 	title := slackEscape(msg.Title)
 	switch {
 	case msg.Kind == "skill_invocation":
-		return fmt.Sprintf("⚡ *@%s* invoked a skill", from)
+		return fmt.Sprintf("⚡ *%s* invoked a skill", from)
 	case msg.Kind == "skill_proposal":
 		return fmt.Sprintf("💡 *Skill proposed*: %s", content)
 	case msg.Kind == "automation":
@@ -708,7 +763,9 @@ func formatSlackOutbound(msg channelMessage) string {
 	default:
 		var sb strings.Builder
 		if from != "" {
-			sb.WriteString("*@")
+			// Attribution is a plain bold name — office identities are not
+			// taggable in Slack, so no "@" theater.
+			sb.WriteString("*")
 			sb.WriteString(from)
 			sb.WriteString("*: ")
 		}
@@ -728,7 +785,7 @@ func formatSlackDecision(msg channelMessage) string {
 	var sb strings.Builder
 	sb.WriteString("📋 *Decision needed*")
 	if msg.From != "" {
-		sb.WriteString(" from @")
+		sb.WriteString(" from ")
 		sb.WriteString(slackEscape(msg.From))
 	}
 	sb.WriteString("\n\n")

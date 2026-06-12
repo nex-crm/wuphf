@@ -167,6 +167,11 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// even after the probe succeeds.
 	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
 	webURL := fmt.Sprintf("http://%s", webAddr)
+	if l.broker != nil {
+		// Surfaces that link back to the web app (e.g. the Slack App Home
+		// tab) read this; before LaunchWeb runs they render without links.
+		l.broker.SetWebURL(webURL)
+	}
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
 	fmt.Printf("  Broker:  %s\n", l.BrokerBaseURL())
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")

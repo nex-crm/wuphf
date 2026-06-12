@@ -66,6 +66,7 @@ type Broker struct {
 	memberIndex       map[string]int                  // slug → index into members; guarded by mu
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
+	webURL            string                          // base URL of the web UI, set by LaunchWeb; guarded by mu
 	channels          []teamChannel
 	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
@@ -935,6 +936,21 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 		out = append(out, cloneChannelMessageForRead(msg))
 	}
 	return out
+}
+
+// SetWebURL records the web UI's base URL so surfaces that link back to the
+// app (e.g. the Slack App Home tab) can build real links.
+func (b *Broker) SetWebURL(url string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.webURL = strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+// WebURL returns the web UI's base URL, or "" before LaunchWeb has run.
+func (b *Broker) WebURL() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.webURL
 }
 
 // EnsureBridgedMember registers a bridged external agent as an office member

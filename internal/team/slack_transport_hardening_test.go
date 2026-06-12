@@ -34,8 +34,8 @@ func TestFormatSlackOutboundEscapesControlSequences(t *testing.T) {
 	if !strings.Contains(out, "&lt;!channel&gt;") {
 		t.Fatalf("expected escaped From, got %q", out)
 	}
-	if !strings.Contains(out, "*@") {
-		t.Fatalf("structural markup should remain literal, got %q", out)
+	if !strings.HasPrefix(out, "*&lt;!channel&gt;*: ") {
+		t.Fatalf("structural bold-name attribution should remain literal, got %q", out)
 	}
 }
 
@@ -216,6 +216,52 @@ func TestSlackFormatOutboundLinksRegisteredAgentMentions(t *testing.T) {
 	}
 	if strings.Contains(out.Text, "<!channel>") {
 		t.Fatalf("escaping must still neutralize control sequences, got %q", out.Text)
+	}
+}
+
+// Office-internal identities are NOT taggable in Slack: "@ceo"/"@human"/"@you"
+// must render as plain display names, while registered foreign agents keep
+// their real <@U…> pings. Sender attribution resolves to the display name with
+// no "@" theater, and gate actors (human:<slack id>) resolve via the user cache.
+func TestSlackRenderOfficeTagsForRealSlackReaders(t *testing.T) {
+	api := newFakeSlackAPI()
+	tr, b := newTestSlackTransport(t, "C0123", api)
+	if _, err := b.RegisterSlackAgent("claude-bot", "Claude Bot", "U777"); err != nil {
+		t.Fatalf("RegisterSlackAgent: %v", err)
+	}
+
+	out, ok := tr.FormatOutbound(channelMessage{
+		From:    "ceo",
+		Channel: "slack-general",
+		Content: "Approved @ceo's request. @claude-bot take it from here, cc @human and @you.",
+		Tagged:  []string{"ceo", "claude-bot"},
+	})
+	if !ok {
+		t.Fatal("FormatOutbound should map slack-general")
+	}
+	if !strings.HasPrefix(out.Text, "*CEO*: ") {
+		t.Fatalf("sender must render as plain display name, got %q", out.Text)
+	}
+	if strings.Contains(out.Text, "@ceo") || strings.Contains(out.Text, "@human") || strings.Contains(out.Text, "@you") {
+		t.Fatalf("office-internal tags must not survive as fake @tags, got %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "Approved CEO's request") {
+		t.Fatalf("member tag should become its display name, got %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "<@U777>") {
+		t.Fatalf("registered foreign agent must keep its real mention, got %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "cc Human and Human") {
+		t.Fatalf("@human/@you should render as Human, got %q", out.Text)
+	}
+
+	// Gate actor attribution: human:<slack id> resolves through the user cache.
+	tr.UserMap["U08TVALKJ86"] = slackUserInfo{name: "Naj", human: true}
+	if got := tr.displayNameForOffice("human:u08tvalkj86"); got != "Naj" {
+		t.Fatalf("gate actor should resolve to slack display name, got %q", got)
+	}
+	if got := tr.displayNameForOffice("human:UNKNOWNID1"); got != "UNKNOWNID1" {
+		t.Fatalf("uncached gate actor falls back to the id, got %q", got)
 	}
 }
 

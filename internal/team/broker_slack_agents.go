@@ -197,6 +197,24 @@ func (b *Broker) slackAgents() []slackAgentView {
 	return out
 }
 
+// MemberDisplayNames returns slug → display name for every office member.
+// The Slack renderer uses it to turn office-internal "@slug" tokens — which
+// mean nothing to real Slack users — into plain display names.
+func (b *Broker) MemberDisplayNames() map[string]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[string]string, len(b.members))
+	for i := range b.members {
+		m := &b.members[i]
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = m.Slug
+		}
+		out[m.Slug] = name
+	}
+	return out
+}
+
 // SlackAgentSlugByUserID resolves a Slack user id to the office slug of a
 // registered foreign agent, or "" when the id is not registered. This is the
 // transport's inbound allowlist lookup — an empty return means "drop".

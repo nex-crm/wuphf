@@ -28,6 +28,9 @@ type fakeSlackAPI struct {
 	postErrAt int // return postErr only on the Nth (1-based) post; 0 = every call
 	postCalls int
 
+	publishedViews []fakePublishedView
+	publishErr     error
+
 	users   map[string]*slack.User
 	userErr error
 
@@ -42,6 +45,21 @@ type fakePost struct {
 	ChannelID string
 	Text      string
 	ThreadTS  string
+}
+
+type fakePublishedView struct {
+	UserID string
+	View   slack.HomeTabViewRequest
+}
+
+func (f *fakeSlackAPI) PublishViewContext(_ context.Context, userID string, view slack.HomeTabViewRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.publishErr != nil {
+		return f.publishErr
+	}
+	f.publishedViews = append(f.publishedViews, fakePublishedView{UserID: userID, View: view})
+	return nil
 }
 
 func newFakeSlackAPI() *fakeSlackAPI {
@@ -345,7 +363,9 @@ func TestSlackFormatOutbound(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true for mapped channel")
 	}
-	if out.Text != "*@ceo*: [Update] All good" {
+	// The office slug resolves to the member display name with NO "@" — office
+	// identities are not taggable in Slack, so attribution is a plain bold name.
+	if out.Text != "*CEO*: [Update] All good" {
 		t.Fatalf("text = %q", out.Text)
 	}
 	if out.Binding.Scope != teamTransport.ScopeChannel || out.Binding.ChannelSlug != "slack-general" {
@@ -429,12 +449,12 @@ func TestSlackFormatOutboundKinds(t *testing.T) {
 		msg  channelMessage
 		want string
 	}{
-		{"agent", channelMessage{From: "pm", Content: "hi"}, "*@pm*: hi"},
+		{"agent", channelMessage{From: "pm", Content: "hi"}, "*pm*: hi"},
 		{"system", channelMessage{From: "system", Content: "routing"}, "→ _routing_"},
 		{"automation", channelMessage{Kind: "automation", Source: "github", Content: "merged"}, "🤖 *[github]*: merged"},
-		{"skill", channelMessage{Kind: "skill_invocation", From: "ceo", Content: "x"}, "⚡ *@ceo* invoked a skill"},
+		{"skill", channelMessage{Kind: "skill_invocation", From: "ceo", Content: "x"}, "⚡ *ceo* invoked a skill"},
 		{"proposal", channelMessage{Kind: "skill_proposal", Content: "auto-deploy"}, "💡 *Skill proposed*: auto-deploy"},
-		{"decision", channelMessage{Kind: "interview", From: "ceo", Content: "ship?", Title: "Release"}, "📋 *Decision needed* from @ceo\n\nship?\n\n_Release_"},
+		{"decision", channelMessage{Kind: "interview", From: "ceo", Content: "ship?", Title: "Release"}, "📋 *Decision needed* from ceo\n\nship?\n\n_Release_"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
