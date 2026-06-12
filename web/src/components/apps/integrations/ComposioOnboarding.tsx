@@ -13,7 +13,9 @@ import { GitHubLogo, GmailLogo, SlackLogo } from "./IntegrationLogos";
 // and the catalog fills in. The broker resolves the Composio user identity from
 // the workspace email, so the API key is the only thing we need here.
 
-const COMPOSIO_KEYS_URL = "https://app.composio.dev/developers";
+// API keys live in the project settings of the new Composio dashboard; the
+// root URL routes signed-in users to their active project.
+const COMPOSIO_KEYS_URL = "https://dashboard.composio.dev";
 
 interface ComposioOnboardingProps {
   /** Called after the key is saved so the page can re-fetch config + catalog. */
@@ -49,7 +51,9 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
     <section className="composio-onb" aria-label="Connect Composio">
       <div className="composio-onb-card">
         <span className="composio-onb-eyebrow">Integrations</span>
-        <h2 className="composio-onb-title">Connect Composio to add integrations</h2>
+        <h2 className="composio-onb-title">
+          Connect Composio to add integrations
+        </h2>
         <p className="composio-onb-lead">
           Composio is the gateway your team uses to act in Gmail, Slack, GitHub,
           and 250+ other tools — securely, with OAuth and a full audit trail.

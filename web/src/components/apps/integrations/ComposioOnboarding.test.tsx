@@ -23,7 +23,9 @@ describe("<ComposioOnboarding>", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/composio api key/i)).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /get an api key/i });
-    expect(link).toHaveAttribute("href", "https://app.composio.dev/developers");
+    // Regression: the old developer portal (app.composio.dev) is gone; the
+    // current dashboard lives at dashboard.composio.dev.
+    expect(link).toHaveAttribute("href", "https://dashboard.composio.dev");
   });
 
   it("disables connect until a key is entered", () => {
@@ -48,7 +50,9 @@ describe("<ComposioOnboarding>", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /connect composio/i }));
     await waitFor(() =>
-      expect(updateConfig).toHaveBeenCalledWith({ composio_api_key: "comp_abc123" }),
+      expect(updateConfig).toHaveBeenCalledWith({
+        composio_api_key: "comp_abc123",
+      }),
     );
     await waitFor(() => expect(onConnected).toHaveBeenCalled());
   });
