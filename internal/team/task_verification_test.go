@@ -258,12 +258,9 @@ func TestVerificationGateAuthPreflightBlocksForbiddenActorSideEffects(t *testing
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := b.MutateTask(TaskPostRequest{
-		Action: "approve", ID: resp.Task.ID, Channel: "general", CreatedBy: "human",
-	}); err != nil {
-		t.Fatalf("approve & start: %v", err)
-	}
-
+	// Creation is the authorization: the task is already running. The
+	// forbidden actor's complete is the only call that could touch the
+	// URL gate.
 	_, err = b.MutateTask(TaskPostRequest{
 		Action: "complete", ID: resp.Task.ID, Channel: "general", CreatedBy: "qa",
 	})
