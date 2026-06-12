@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "./client";
 import {
   disconnectIntegration,
+  getComposioSigninStatus,
   getIntegrationAudit,
   getIntegrationConnectStatus,
   listIntegrations,
+  startComposioSignin,
   startIntegrationConnection,
 } from "./integrations";
 
@@ -118,5 +120,29 @@ describe("integrations api client", () => {
       platform: "gmail",
       connection_key: "ca_123",
     });
+  });
+
+  it("starts and polls the Sign in with Composio flow on stable routes", async () => {
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue({
+      status: "awaiting_login",
+      auth_url: "https://platform.composio.dev/?cliKey=sess_1",
+    });
+    const getSpy = vi.spyOn(client, "get").mockResolvedValue({
+      status: "done",
+    });
+
+    await expect(startComposioSignin()).resolves.toEqual({
+      status: "awaiting_login",
+      auth_url: "https://platform.composio.dev/?cliKey=sess_1",
+    });
+    await expect(getComposioSigninStatus()).resolves.toEqual({
+      status: "done",
+    });
+
+    expect(postSpy).toHaveBeenCalledWith(
+      "/integrations/composio/signin/start",
+      {},
+    );
+    expect(getSpy).toHaveBeenCalledWith("/integrations/composio/signin/status");
   });
 });

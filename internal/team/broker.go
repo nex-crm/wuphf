@@ -108,7 +108,10 @@ type Broker struct {
 	// actionGrants are persisted, human-issued standing approvals for a specific
 	// (agent, platform, action_id). The resolver reads them to skip the approval
 	// modal for pre-authorized actions. Human-minted only. Guarded by b.mu.
-	actionGrants        []actionGrant
+	actionGrants []actionGrant
+	// composioSignin is the in-memory "Sign in with Composio" CLI flow state
+	// (broker_composio_signin.go). Carries its own mutex; zero value ready.
+	composioSignin      composioSigninFlow
 	humanInvites        []humanInvite
 	humanSessions       []humanSession
 	humanSessionRevoke  map[string]chan struct{} // session ID → closed on revoke
@@ -664,6 +667,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/integrations/audit", b.requireAuth(b.handleIntegrationAudit))
 	mux.HandleFunc("/integrations/resolve", b.requireAuth(b.handleIntegrationResolve))
 	mux.HandleFunc("/integrations/grants", b.requireAuth(b.handleIntegrationGrants))
+	// "Sign in with Composio" — the broker drives the composio CLI so the
+	// user never copy/pastes an API key. See broker_composio_signin.go.
+	mux.HandleFunc("/integrations/composio/signin/start", b.requireAuth(b.handleComposioSigninStart))
+	mux.HandleFunc("/integrations/composio/signin/status", b.requireAuth(b.handleComposioSigninStatus))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))

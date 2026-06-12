@@ -1106,6 +1106,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/integrations/audit",
 		"/integrations/resolve",
 		"/integrations/grants",
+		"/integrations/composio/signin/start",
+		"/integrations/composio/signin/status",
 		// reset/usage/policies/signals/decisions/watchdogs/actions/scheduler
 		"/reset",
 		"/reset-dm",

@@ -13,6 +13,7 @@ const mockState = vi.hoisted(() => ({
 
 vi.mock("../../api/client", () => ({
   getConfig: vi.fn(async () => mockState.config),
+  updateConfig: vi.fn(async () => ({ status: "ok" })),
   getLocalProvidersStatus: vi.fn(async () => []),
   getActionGrants: vi.fn(async () => ({ grants: [] })),
   revokeActionGrant: vi.fn(async () => ({})),
@@ -51,6 +52,8 @@ vi.mock("../../api/integrations", () => ({
   })),
   startIntegrationConnection: vi.fn(),
   disconnectIntegration: vi.fn(),
+  startComposioSignin: vi.fn(async () => ({ status: "idle" })),
+  getComposioSigninStatus: vi.fn(async () => ({ status: "idle" })),
 }));
 
 function wrap(ui: ReactNode) {
