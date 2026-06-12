@@ -44,20 +44,23 @@ vi.mock("./WebsiteViewer", () => ({
 
 import * as api from "../../api/wiki";
 import { APP_NAV_PREFIX } from "./tree/WikiTree";
-import Wiki from "./Wiki";
+import Wiki, { WIKI_LAST_VIEWED_KEY } from "./Wiki";
 
 describe("<Wiki>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    globalThis.localStorage?.clear();
     vi.spyOn(api, "subscribeEditLog").mockImplementation(() => () => {});
     vi.spyOn(api, "subscribeSectionsUpdated").mockImplementation(
       () => () => {},
     );
     vi.spyOn(api, "fetchSections").mockResolvedValue([]);
     vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
+    // The persistent page-tree sidebar mounts on every view.
+    vi.spyOn(api, "fetchWikiTree").mockResolvedValue([]);
   });
 
-  it("shows the search-first home when no article is selected", async () => {
+  it("shows the overview with the page tree when no article is selected", async () => {
     vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([
       {
         path: "people/nazz",
@@ -75,9 +78,47 @@ describe("<Wiki>", () => {
       screen.getByRole("heading", { name: "Team Wiki" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("wk-home-search")).toBeInTheDocument();
+    // The page tree sidebar is THE navigation — visible next to the overview.
+    expect(screen.getByTestId("wk-nav-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("wk-tree")).toBeInTheDocument();
   });
 
-  it("keeps the legacy tree + catalog behind the All files escape hatch", async () => {
+  it("resumes on the last-viewed article when the wiki opens bare", async () => {
+    vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([]);
+    globalThis.localStorage.setItem(
+      WIKI_LAST_VIEWED_KEY,
+      "team/people/nazz.md",
+    );
+    const onNavigate = vi.fn();
+    render(<Wiki articlePath={null} onNavigate={onNavigate} />);
+    await waitFor(() =>
+      expect(onNavigate).toHaveBeenCalledWith("team/people/nazz.md"),
+    );
+  });
+
+  it("records the open article as last-viewed for the next session", async () => {
+    vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([]);
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/people/nazz.md",
+      title: "Nazz",
+      content: "Body.",
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    render(<Wiki articlePath="people/nazz" onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(globalThis.localStorage.getItem(WIKI_LAST_VIEWED_KEY)).toBe(
+        "people/nazz",
+      ),
+    );
+  });
+
+  it("lands legacy _files deep links on the overview (tree is always visible)", async () => {
     vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([
       {
         path: "people/nazz",
@@ -89,8 +130,9 @@ describe("<Wiki>", () => {
     ]);
     render(<Wiki articlePath="_files" onNavigate={() => {}} />);
     await waitFor(() =>
-      expect(screen.getByTestId("wk-catalog")).toBeInTheDocument(),
+      expect(screen.getByTestId("wk-home")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("wk-tree")).toBeInTheDocument();
   });
 
   it("renders a category index page for a _category path", async () => {

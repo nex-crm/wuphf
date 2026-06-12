@@ -1,306 +1,111 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DiscoveredSection, WikiCatalogEntry } from "../../api/wiki";
+import type { WikiFSTreeNode } from "../../api/wiki";
+import * as wiki from "../../api/wiki";
 import WikiSidebar from "./WikiSidebar";
 
-const CATALOG: WikiCatalogEntry[] = [
+const TREE: WikiFSTreeNode[] = [
   {
-    path: "team/people/nazz.md",
-    title: "Nazz",
-    author_slug: "pm",
-    last_edited_ts: new Date().toISOString(),
-    group: "people",
+    name: "companies",
+    path: "team/companies",
+    type: "dir",
+    title: "Companies",
+    children: [
+      {
+        name: "acme.md",
+        path: "team/companies/acme.md",
+        type: "page",
+        title: "Acme Corp",
+      },
+    ],
   },
   {
-    path: "team/people/sarah.md",
-    title: "Sarah",
-    author_slug: "ceo",
-    last_edited_ts: new Date().toISOString(),
-    group: "people",
-  },
-  {
-    path: "team/playbooks/churn.md",
-    title: "Churn prevention",
-    author_slug: "cmo",
-    last_edited_ts: new Date().toISOString(),
-    group: "playbooks",
-  },
-];
-
-describe("<WikiSidebar> — legacy catalog-grouping path", () => {
-  it("renders grouped articles", () => {
-    render(<WikiSidebar catalog={CATALOG} onNavigate={() => {}} />);
-    expect(screen.getByText("people")).toBeInTheDocument();
-    expect(screen.getByText("playbooks")).toBeInTheDocument();
-    expect(screen.getByText("Nazz")).toBeInTheDocument();
-  });
-
-  it("marks the current article", () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        currentPath="people/nazz"
-        onNavigate={() => {}}
-      />,
-    );
-    const li = screen.getByText("Nazz").closest("li");
-    expect(li).toHaveClass("current");
-  });
-
-  it("calls onNavigate when an article link is clicked", () => {
-    const onNavigate = vi.fn();
-    render(<WikiSidebar catalog={CATALOG} onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByText("Churn prevention"));
-    expect(onNavigate).toHaveBeenCalledWith("team/playbooks/churn.md");
-  });
-
-  it("filters articles by the search query", () => {
-    render(<WikiSidebar catalog={CATALOG} onNavigate={() => {}} />);
-    const search = screen.getByPlaceholderText("Search wiki…");
-    fireEvent.change(search, { target: { value: "churn" } });
-    expect(screen.getByText("Churn prevention")).toBeInTheDocument();
-    expect(screen.queryByText("Nazz")).not.toBeInTheDocument();
-  });
-});
-
-// ── Dynamic sections — v1.3 ──────────────────────────────────────────
-
-const nowIso = () => new Date().toISOString();
-const daysAgoIso = (days: number) =>
-  new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-
-const SECTIONS: DiscoveredSection[] = [
-  {
-    slug: "people",
+    name: "people",
+    path: "team/people",
+    type: "dir",
     title: "People",
-    article_paths: ["team/people/nazz.md", "team/people/sarah.md"],
-    article_count: 2,
-    first_seen_ts: daysAgoIso(30),
-    last_update_ts: nowIso(),
-    from_schema: true,
-  },
-  {
-    slug: "playbooks",
-    title: "Playbooks",
-    article_paths: ["team/playbooks/churn.md"],
-    article_count: 1,
-    first_seen_ts: daysAgoIso(14),
-    last_update_ts: nowIso(),
-    from_schema: true,
-  },
-  {
-    slug: "retrospectives",
-    title: "Retrospectives",
-    article_paths: [],
-    article_count: 0,
-    first_seen_ts: daysAgoIso(2),
-    last_update_ts: nowIso(),
-    from_schema: false,
+    children: [
+      {
+        name: "nazz.md",
+        path: "team/people/nazz.md",
+        type: "page",
+        title: "Nazz",
+      },
+    ],
   },
 ];
 
-describe("<WikiSidebar> — dynamic sections", () => {
-  it("renders sections in the order provided", () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
-        onNavigate={() => {}}
-      />,
-    );
-    const headers = screen.getAllByRole("heading", { level: 3 });
-    expect(
-      headers.map(
-        (h) =>
-          h.dataset.sectionSlug ??
-          h.closest("[data-section-slug]")?.getAttribute("data-section-slug"),
-      ),
-    ).toEqual(["people", "playbooks", "retrospectives"]);
+describe("<WikiSidebar>", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(wiki, "fetchWikiTree").mockResolvedValue(TREE);
   });
 
-  it("renders nested folders from canonical article paths", () => {
-    const nested: WikiCatalogEntry[] = [
-      ...CATALOG,
-      {
-        path: "team/people/customers/acme.md",
-        title: "Acme",
-        author_slug: "pm",
-        last_edited_ts: new Date().toISOString(),
-        group: "people",
-      },
-    ];
-    const sections: DiscoveredSection[] = [
-      {
-        ...SECTIONS[0],
-        article_paths: [
-          "team/people/nazz.md",
-          "team/people/sarah.md",
-          "team/people/customers/acme.md",
-        ],
-        article_count: 3,
-      },
-    ];
-    render(
-      <WikiSidebar
-        catalog={nested}
-        sections={sections}
-        currentPath="team/people/customers/acme.md"
-        onNavigate={() => {}}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: /customers 1/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Acme").closest("li")).toHaveClass("current");
-  });
-
-  it("reopens a collapsed folder when navigation selects an article inside it", async () => {
-    const nested: WikiCatalogEntry[] = [
-      ...CATALOG,
-      {
-        path: "team/people/customers/acme.md",
-        title: "Acme",
-        author_slug: "pm",
-        last_edited_ts: new Date().toISOString(),
-        group: "people",
-      },
-    ];
-    const sections: DiscoveredSection[] = [
-      {
-        ...SECTIONS[0],
-        article_paths: [
-          "team/people/nazz.md",
-          "team/people/sarah.md",
-          "team/people/customers/acme.md",
-        ],
-        article_count: 3,
-      },
-    ];
-    const { rerender } = render(
-      <WikiSidebar
-        catalog={nested}
-        sections={sections}
-        currentPath={null}
-        onNavigate={() => {}}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /customers 1/i }));
-    expect(screen.queryByText("Acme")).toBeNull();
-
-    rerender(
-      <WikiSidebar
-        catalog={nested}
-        sections={sections}
-        currentPath="team/people/customers/acme.md"
-        onNavigate={() => {}}
-      />,
-    );
-
+  it("renders the menu links and the page tree as the navigation", async () => {
+    render(<WikiSidebar currentPath={null} onNavigate={() => {}} />);
+    expect(screen.getByTestId("wk-sidebar-home")).toBeInTheDocument();
+    expect(screen.getByTestId("wk-sidebar-audit")).toBeInTheDocument();
+    expect(screen.getByTestId("wk-sidebar-lint")).toBeInTheDocument();
+    // Root groups = the wiki's kinds (Companies, People, …).
     await waitFor(() =>
-      expect(screen.getByText("Acme").closest("li")).toHaveClass("current"),
+      expect(screen.getByText("Companies")).toBeInTheDocument(),
     );
+    expect(screen.getByText("People")).toBeInTheDocument();
   });
 
-  it("distinguishes schema-declared from discovered sections via class", () => {
+  it("navigates to a nested page through the tree (deep link path)", async () => {
+    const onNavigate = vi.fn();
+    render(<WikiSidebar currentPath={null} onNavigate={onNavigate} />);
+    await waitFor(() => expect(screen.getByText("People")).toBeInTheDocument());
+    // Expand the People space, then open the nested article.
+    fireEvent.click(screen.getByText("People"));
+    fireEvent.click(await screen.findByText("Nazz"));
+    expect(onNavigate).toHaveBeenCalledWith("team/people/nazz.md");
+  });
+
+  it("opens the first matching page on Enter in the sidebar search", async () => {
+    const onNavigate = vi.fn();
+    render(<WikiSidebar currentPath={null} onNavigate={onNavigate} />);
+    await waitFor(() =>
+      expect(screen.getByText("Companies")).toBeInTheDocument(),
+    );
+    const search = screen.getByLabelText("Search pages");
+    fireEvent.change(search, { target: { value: "acme" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onNavigate).toHaveBeenCalledWith("team/companies/acme.md");
+  });
+
+  it("marks the Overview link active on the home view and routes the menu links", () => {
+    const onNavigate = vi.fn();
+    render(<WikiSidebar currentPath="" onNavigate={onNavigate} />);
+    expect(screen.getByTestId("wk-sidebar-home")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    fireEvent.click(screen.getByTestId("wk-sidebar-audit"));
+    expect(onNavigate).toHaveBeenCalledWith("_audit");
+    fireEvent.click(screen.getByTestId("wk-sidebar-lint"));
+    expect(onNavigate).toHaveBeenCalledWith("_lint");
+    fireEvent.click(screen.getByTestId("wk-sidebar-home"));
+    expect(onNavigate).toHaveBeenCalledWith("");
+  });
+
+  it("highlights the currently open article in the tree", async () => {
     render(
       <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
+        currentPath="team/companies/acme.md"
         onNavigate={() => {}}
       />,
     );
-    const peopleHeader = screen.getByText(/people/i).closest("h3");
-    const retroHeader = screen.getByText(/retrospectives/i).closest("h3");
-    expect(peopleHeader).toHaveClass("wk-section-schema");
-    expect(retroHeader).toHaveClass("wk-section-discovered");
-  });
-
-  it('marks recently-discovered sections with a "new" indicator', () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
-        onNavigate={() => {}}
-      />,
+    // The branch containing the current page is visible after expanding.
+    await waitFor(() =>
+      expect(screen.getByText("Companies")).toBeInTheDocument(),
     );
-    // retrospectives was first seen 2 days ago — under the 7-day window.
-    expect(screen.getByLabelText("New section")).toBeInTheDocument();
-  });
-
-  it("does not mark blueprint-declared sections as new even if recent", () => {
-    const recent: DiscoveredSection[] = [
-      {
-        ...SECTIONS[0],
-        first_seen_ts: daysAgoIso(1),
-        from_schema: true,
-      },
-    ];
-    render(
-      <WikiSidebar catalog={CATALOG} sections={recent} onNavigate={() => {}} />,
+    fireEvent.click(screen.getByText("Companies"));
+    const row = (await screen.findByText("Acme Corp")).closest(
+      "[role='treeitem']",
     );
-    expect(screen.queryByLabelText("New section")).toBeNull();
-  });
-
-  it('shows an "add to blueprint" banner when a discovered section header is clicked', () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
-        onNavigate={() => {}}
-      />,
-    );
-    expect(screen.queryByTestId("section-banner")).toBeNull();
-    const retroHeader = screen.getByText(/retrospectives/i).closest("h3");
-    if (!retroHeader) throw new Error("Expected retrospectives header");
-    fireEvent.click(retroHeader);
-    expect(screen.getByTestId("section-banner")).toBeInTheDocument();
-    expect(screen.getByTestId("section-banner")).toHaveTextContent(
-      "retrospectives",
-    );
-  });
-
-  it("does not show the banner for blueprint-declared sections", () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
-        onNavigate={() => {}}
-      />,
-    );
-    const peopleHeader = screen.getByText(/people/i).closest("h3");
-    if (!peopleHeader) throw new Error("Expected people header");
-    fireEvent.click(peopleHeader);
-    expect(screen.queryByTestId("section-banner")).toBeNull();
-  });
-
-  it("renders empty sections with a placeholder row", () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
-        onNavigate={() => {}}
-      />,
-    );
-    // retrospectives has no articles — placeholder should be visible.
-    expect(screen.getByText("No articles yet")).toBeInTheDocument();
-  });
-
-  it("filters by search within the section structure", () => {
-    render(
-      <WikiSidebar
-        catalog={CATALOG}
-        sections={SECTIONS}
-        onNavigate={() => {}}
-      />,
-    );
-    const search = screen.getByPlaceholderText("Search wiki…");
-    fireEvent.change(search, { target: { value: "churn" } });
-    expect(screen.getByText("Churn prevention")).toBeInTheDocument();
-    expect(screen.queryByText("Nazz")).toBeNull();
-    // An empty section ("retrospectives") is hidden during search.
-    expect(screen.queryByText(/retrospectives/i)).toBeNull();
+    expect(row).toHaveAttribute("aria-selected", "true");
   });
 });

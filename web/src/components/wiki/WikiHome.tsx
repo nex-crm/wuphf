@@ -9,20 +9,15 @@ import {
 } from "../../api/wiki";
 import { formatAgentName } from "../../lib/agentName";
 import { formatRelativeTime, pluralize } from "../../lib/format";
-import { resolveGroupOrder } from "../../lib/groupOrder";
 import NewArticleModal from "./NewArticleModal";
 import { categoryLabel } from "./WikiCategoryPage";
-import { categoryPath, FILES_PATH } from "./wikiPaths";
 
 /**
- * The wiki's Wikipedia-style main page: a search-first landing.
- *
- * A prominent search box with instant title suggestions (client-side over
- * the catalog — the broker's catalog is the full title list) and full-text
- * results on submit (GET /wiki/search). Below it: article count, category
- * entry points (Companies, People, Playbooks, … as CATEGORY pages, not
- * folders), and recent changes from the audit log. The old Files/Sections
- * tree lives behind "All files".
+ * The wiki's overview page, docmost-style: a quiet landing next to the
+ * always-visible page tree (the tree is the navigation — no category-card
+ * detour). A prominent search box with instant title suggestions
+ * (client-side over the catalog) and full-text results on submit
+ * (GET /wiki/search), then a single recently-updated list.
  */
 
 interface WikiHomeProps {
@@ -99,17 +94,6 @@ export default function WikiHome({
     () => suggestTitles(catalog, query),
     [catalog, query],
   );
-
-  const groups = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const entry of catalog) {
-      counts.set(entry.group, (counts.get(entry.group) ?? 0) + 1);
-    }
-    return resolveGroupOrder(catalog.map((c) => c.group)).map((group) => ({
-      group,
-      count: counts.get(group) ?? 0,
-    }));
-  }, [catalog]);
 
   // Recently updated articles from the catalog — the fallback "recent
   // changes" source when the audit log has nothing (fresh installs, mocks).
@@ -238,47 +222,18 @@ export default function WikiHome({
       </header>
 
       <div className="wk-home-grid">
-        <section className="wk-home-card" aria-label="Browse by category">
-          <h2>Browse</h2>
-          <ul className="wk-home-categories">
-            {groups.map(({ group, count }) => (
-              <li key={group}>
-                <a
-                  href={`#/wiki/${categoryPath(group)}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onNavigate(categoryPath(group));
-                  }}
-                >
-                  {categoryLabel(group)}
-                </a>
-                <span className="wk-count">{count}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="wk-home-actions">
+        <section className="wk-home-card" aria-label="Recently updated">
+          <div className="wk-home-card-head">
+            <h2>Recently updated</h2>
             <button
               type="button"
-              className="wk-catalog-new-link"
+              className="wk-home-new-btn"
               data-testid="wk-home-new"
               onClick={() => setShowNew(true)}
             >
-              + New article
+              + New page
             </button>
-            <a
-              href={`#/wiki/${FILES_PATH}`}
-              onClick={(e) => {
-                e.preventDefault();
-                onNavigate(FILES_PATH);
-              }}
-            >
-              All files →
-            </a>
           </div>
-        </section>
-
-        <section className="wk-home-card" aria-label="Recent changes">
-          <h2>Recent changes</h2>
           {auditEntries.length > 0 ? (
             <ul className="wk-home-recent">
               {auditEntries.slice(0, RECENT_LIMIT).map((entry) => (

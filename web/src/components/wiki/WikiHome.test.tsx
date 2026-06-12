@@ -89,13 +89,12 @@ describe("<WikiHome>", () => {
     expect(onNavigate).toHaveBeenCalledWith("team/people/eng.md");
   });
 
-  it("links category entry points to category index pages", () => {
-    const onNavigate = vi.fn();
+  it("renders no category-card detour — the page tree owns browsing", () => {
     render(
-      <WikiHome catalog={CATALOG} onNavigate={onNavigate} recentChanges={[]} />,
+      <WikiHome catalog={CATALOG} onNavigate={() => {}} recentChanges={[]} />,
     );
-    fireEvent.click(screen.getByRole("link", { name: "Companies" }));
-    expect(onNavigate).toHaveBeenCalledWith("_category/companies");
+    expect(screen.queryByLabelText("Browse by category")).toBeNull();
+    expect(screen.queryByRole("link", { name: "All files →" })).toBeNull();
   });
 
   it("falls back to recently-edited articles when the audit log is empty", () => {
@@ -103,7 +102,7 @@ describe("<WikiHome>", () => {
       <WikiHome catalog={CATALOG} onNavigate={() => {}} recentChanges={[]} />,
     );
     // Most recently edited first.
-    const recent = screen.getByLabelText("Recent changes");
+    const recent = screen.getByLabelText("Recently updated");
     expect(recent).toHaveTextContent("Acme Corp");
     expect(recent).toHaveTextContent("Renewal Playbook");
   });
@@ -127,12 +126,10 @@ describe("<WikiHome>", () => {
     expect(screen.getByText("wiki: update acme article")).toBeInTheDocument();
   });
 
-  it("keeps the All files escape hatch one click away", () => {
-    const onNavigate = vi.fn();
+  it("offers a New page action from the overview", () => {
     render(
-      <WikiHome catalog={CATALOG} onNavigate={onNavigate} recentChanges={[]} />,
+      <WikiHome catalog={CATALOG} onNavigate={() => {}} recentChanges={[]} />,
     );
-    fireEvent.click(screen.getByRole("link", { name: "All files →" }));
-    expect(onNavigate).toHaveBeenCalledWith("_files");
+    expect(screen.getByTestId("wk-home-new")).toBeInTheDocument();
   });
 });

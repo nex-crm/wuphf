@@ -147,7 +147,7 @@ describe("<WikiTree>", () => {
     render(<WikiTree onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("People")).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText("Search files…"), {
+    fireEvent.change(screen.getByPlaceholderText("Search pages…"), {
       target: { value: "churn" },
     });
     expect(screen.getByText("Churn")).toBeInTheDocument();

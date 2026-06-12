@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getSkillsList } from "../../api/client";
 import {
   type DiscoveredSection,
   fetchCatalogStrict,
@@ -8,19 +7,16 @@ import {
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
 } from "../../api/wiki";
-import { useOfficeStats } from "../../hooks/useOfficeStats";
 import EditLogFooter from "./EditLogFooter";
 import { APP_NAV_PREFIX } from "./tree/WikiTree";
 import FileViewer, { isMarkdownPath } from "./viewers/FileViewer";
 import WebsiteViewer from "./WebsiteViewer";
 import WikiArticle from "./WikiArticle";
 import WikiAudit from "./WikiAudit";
-import WikiCatalog from "./WikiCatalog";
 import WikiCategoryPage from "./WikiCategoryPage";
 import WikiHome from "./WikiHome";
 import WikiLint from "./WikiLint";
-import WikiNavRail from "./WikiNavRail";
-import WikiSidebar, { type SidebarSkill } from "./WikiSidebar";
+import WikiSidebar from "./WikiSidebar";
 import {
   AUDIT_PATH,
   FILES_PATH,
@@ -37,8 +33,31 @@ type WikiView =
   | "file"
   | "app"
   | "home"
-  | "files"
   | "category";
+
+/**
+ * localStorage slot for the last article the user had open. Opening the wiki
+ * with no explicit path resumes here (docmost-style "land where you left
+ * off") instead of forcing a detour through a landing page.
+ */
+export const WIKI_LAST_VIEWED_KEY = "wuphf:wiki:last-viewed";
+
+function readLastViewed(): string | null {
+  try {
+    const value = globalThis.localStorage?.getItem(WIKI_LAST_VIEWED_KEY);
+    return value && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastViewed(path: string): void {
+  try {
+    globalThis.localStorage?.setItem(WIKI_LAST_VIEWED_KEY, path);
+  } catch {
+    // Private mode / quota — resume-where-you-left-off is best-effort.
+  }
+}
 
 /**
  * True when `path` targets an embedded app/website folder. The tree prepends
@@ -85,14 +104,15 @@ interface WikiProps {
 }
 
 /**
- * Wikipedia-style wiki shell.
+ * Wiki shell, docmost/Notion-style (visual + IA reference only — original
+ * implementation in our stack):
  *
- * The home page is search-first (big search box + category entry points +
- * recent changes); articles read with a left Contents rail and a right
- * meta rail; categories replace folders as the organizing surface. The
- * legacy Files/Sections tree survives behind "All files" — it is the
- * upload surface and the full-filesystem escape hatch, no longer the
- * default navigation.
+ * A persistent left page tree is THE navigation — spaces (the wiki's kinds:
+ * Companies, People, Playbooks, …) as root groups with articles nested
+ * beneath, search at the top. Opening the wiki resumes on the last-viewed
+ * article (or a quiet overview page when there is none). Recent changes and
+ * wiki health stay one click away in the sidebar menu. Deep-link article
+ * routes are untouched.
  */
 export default function Wiki({
   articlePath,
@@ -100,38 +120,49 @@ export default function Wiki({
   onNavigate,
 }: WikiProps) {
   const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([]);
-  const [sections, setSections] = useState<DiscoveredSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadNonce, setLoadNonce] = useState(0);
-  const [sidebarSkills, setSidebarSkills] = useState<SidebarSkill[]>([]);
 
-  // Shared derived-stats source: the home header's "N articles" reads
-  // the broker's count (same filter as /wiki/catalog) instead of the
-  // length of whatever slice of the catalog has loaded — the v3 "main
-  // page says 0 articles, All-files says 19" contradiction came from
-  // counting different local lists.
+  // Resume where you left off: when the wiki opens with no explicit path,
+  // navigate once to the last-viewed article. Guarded by a ref so it fires
+  // only for the initial mount — clicking "Overview" later stays on the
+  // overview instead of bouncing back to the article.
+  const resumeConsideredRef = useRef(false);
+  const [resuming, setResuming] = useState(
+    () => !articlePath && readLastViewed() !== null,
+  );
+  useEffect(() => {
+    if (resumeConsideredRef.current) return;
+    resumeConsideredRef.current = true;
+    if (articlePath) {
+      setResuming(false);
+      return;
+    }
+    const last = readLastViewed();
+    if (last) onNavigate(last);
+    setResuming(false);
+  }, [articlePath, onNavigate]);
 
   useEffect(() => {
     let cancelled = false;
     void loadNonce;
     setLoading(true);
     setLoadError(null);
-    // Parallel fetch: catalog and sections are independent. The STRICT
-    // catalog fetch is deliberate: the lenient fetchCatalog() swallows
-    // errors into an empty list, which is precisely how the home page
-    // rendered "0 articles" as fact over a failed load (C4). Here the
-    // error must reach the catch so the catalog view can show the
-    // broker-not-responding state instead.
+    // The STRICT catalog fetch is deliberate: the lenient fetchCatalog()
+    // swallows errors into an empty list, which is precisely how the home
+    // page rendered "0 articles" as fact over a failed load (C4). Here the
+    // error must reach the catch so the shell can show the
+    // broker-not-responding state instead. fetchSections keeps the broker's
+    // section discovery warm for live updates below.
     Promise.all([fetchCatalogStrict(), fetchSections()])
-      .then(([c, s]) => {
+      .then(([c, _s]: [WikiCatalogEntry[], DiscoveredSection[]]) => {
         if (cancelled) return;
         setCatalog(c);
-        setSections(s);
       })
       .catch((err: unknown) => {
         // Honest failure: never render "0 articles" as fact over a
-        // failed load. The catalog view below switches to an explicit
+        // failed load. The view below switches to an explicit
         // broker-not-responding state with a retry.
         if (!cancelled) {
           setLoadError(
@@ -147,27 +178,6 @@ export default function Wiki({
     };
   }, [loadNonce]);
 
-  useEffect(() => {
-    let cancelled = false;
-    getSkillsList("all")
-      .then((res) => {
-        if (cancelled) return;
-        setSidebarSkills(
-          (res.skills ?? []).map((s) => ({
-            name: s.name,
-            title: s.title,
-            status: s.status,
-          })),
-        );
-      })
-      .catch(() => {
-        // Skills section is additive — a failure here should not break the wiki.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const refreshCatalog = useCallback(() => {
     fetchCatalogStrict()
       .then((c) => setCatalog(c))
@@ -177,13 +187,12 @@ export default function Wiki({
       });
   }, []);
 
-  // Live-update sections when the broker emits wiki:sections_updated.
-  // The event payload carries the full section list; the article list still
-  // comes from /wiki/catalog, so refresh it after a write-created section.
+  // Live-update the catalog when the broker emits wiki:sections_updated.
+  // The article list comes from /wiki/catalog, so refresh it after a
+  // write-created section.
   useEffect(() => {
     const unsubscribe = subscribeSectionsUpdated((event) => {
       if (Array.isArray(event.sections)) {
-        setSections(event.sections);
         refreshCatalog();
       }
     });
@@ -200,38 +209,18 @@ export default function Wiki({
   const categorySlug =
     view === "category" && articlePath ? parseCategoryPath(articlePath) : null;
 
-  // The legacy tree sidebar serves the file-ish views (All files, file
-  // viewer, embedded apps); every other view gets the Wikipedia-style nav
-  // rail. The article view renders its own rail (with the Contents panel)
-  // inside WikiArticle.
-  const showTreeSidebar = view === "files" || view === "file" || view === "app";
-  const showNavRail =
-    view === "home" ||
-    view === "category" ||
-    view === "audit" ||
-    view === "lint";
+  // Persist the last-viewed article so the next wiki open resumes there.
+  useEffect(() => {
+    if (view === "article" && articlePath) writeLastViewed(articlePath);
+  }, [view, articlePath]);
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
       <div className="wiki-layout" data-view={view}>
-        {showTreeSidebar ? (
-          <WikiSidebar
-            catalog={catalog}
-            sections={sections}
-            currentPath={view === "files" ? null : (appPath ?? articlePath)}
-            onNavigate={(path) => onNavigate(path)}
-            onNavigateAudit={() => onNavigate(AUDIT_PATH)}
-            onNavigateLint={() => onNavigate(LINT_PATH)}
-            skills={sidebarSkills}
-            defaultMode="tree"
-          />
-        ) : null}
-        {showNavRail ? (
-          <WikiNavRail
-            activePath={articlePath ?? ""}
-            onNavigate={(path) => onNavigate(path)}
-          />
-        ) : null}
+        <WikiSidebar
+          currentPath={appPath ?? articlePath}
+          onNavigate={(path) => onNavigate(path)}
+        />
         {view === "audit" ? (
           <WikiAudit onNavigate={(path) => onNavigate(path)} />
         ) : view === "lint" ? (
@@ -250,12 +239,6 @@ export default function Wiki({
             catalog={catalog}
             onNavigate={(path) => onNavigate(path)}
           />
-        ) : view === "files" ? (
-          <WikiCatalog
-            catalog={catalog}
-            onNavigate={(path) => onNavigate(path)}
-            onOpenAudit={() => onNavigate(AUDIT_PATH)}
-          />
         ) : view === "article" && articlePath ? (
           <WikiArticle
             path={articlePath}
@@ -263,25 +246,33 @@ export default function Wiki({
             onNavigate={(path) => onNavigate(path)}
             externalRefreshNonce={externalRefreshNonce}
           />
+        ) : resuming ? (
+          <main
+            className="wiki-main wk-shell-state wk-shell-state--loading"
+            data-testid="wk-resuming"
+            aria-busy="true"
+          >
+            <p className="wk-shell-state-msg">Opening your last page…</p>
+          </main>
         ) : loading ? (
           <main
-            className="wiki-main wk-catalog wk-catalog--loading"
+            className="wiki-main wk-shell-state wk-shell-state--loading"
             data-testid="wk-catalog-loading"
             aria-busy="true"
           >
-            <p className="wk-catalog-stats">Loading wiki…</p>
+            <p className="wk-shell-state-msg">Loading wiki…</p>
           </main>
         ) : loadError ? (
           <main
-            className="wiki-main wk-catalog wk-catalog--error"
+            className="wiki-main wk-shell-state wk-shell-state--error"
             data-testid="wk-catalog-error"
           >
-            <p className="wk-catalog-stats" role="alert">
+            <p className="wk-shell-state-msg" role="alert">
               Broker not responding — {loadError}
             </p>
             <button
               type="button"
-              className="wk-catalog-retry"
+              className="wk-shell-retry"
               onClick={() => setLoadNonce((n) => n + 1)}
             >
               Retry
@@ -305,7 +296,9 @@ function wikiViewFor(articlePath: string | null | undefined): WikiView {
   if (!articlePath) return "home";
   if (articlePath === AUDIT_PATH) return "audit";
   if (articlePath === LINT_PATH) return "lint";
-  if (articlePath === FILES_PATH) return "files";
+  // The legacy "All files" surface is retired — the page tree is always
+  // visible now. Old `_files` deep links land on the overview.
+  if (articlePath === FILES_PATH) return "home";
   if (parseCategoryPath(articlePath) !== null) return "category";
   if (isAppPath(articlePath)) return "app";
   return isFilePath(articlePath) ? "file" : "article";
