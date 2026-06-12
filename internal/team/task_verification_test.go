@@ -99,15 +99,8 @@ func createVerifiedTask(t *testing.T, b *Broker, spec string) string {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Pass the human gate: created issues land in Drafting and completion
-	// from a pre-start state is impossible by contract (v3 fix family #1).
-	// A human approve on a Drafting task ACTIVATES it (drafting→running)
-	// without running the DoD check — the check binds on completion.
-	if _, err := b.MutateTask(TaskPostRequest{
-		Action: "approve", ID: resp.Task.ID, Channel: "general", CreatedBy: "human",
-	}); err != nil {
-		t.Fatalf("approve & start: %v", err)
-	}
+	// Creation is the authorization: the owner-set issue lands running
+	// immediately, with the DoD check binding on completion.
 	return resp.Task.ID
 }
 
@@ -212,21 +205,25 @@ func TestVerificationGateRunsInOwnerScratchDirWhenNoWorktree(t *testing.T) {
 	}
 }
 
-// TestVerificationGateDefersToPreStartGateOnDrafting pins the J3-chain
-// ordering fix: an agent complete on a DRAFTING task must be refused by the
-// pre-start gate ("Approve & Start"), not by a premature DoD check run —
-// the verification_failed error told the agent the work just needed fixing
-// when the real blocker was the missing human activation.
-func TestVerificationGateDefersToPreStartGateOnDrafting(t *testing.T) {
+// TestVerificationGateDefersToParkedGateOnDrafting pins the J3-chain
+// ordering fix on the surviving parked state: an agent complete on a PARKED
+// task must be refused by the parked-task gate, not by a premature DoD
+// check run — the verification_failed error told the agent the work just
+// needed fixing when the real blocker was that the task was never started.
+func TestVerificationGateDefersToParkedGateOnDrafting(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
 	b := newVerificationTestBroker(t)
 	resp, err := b.MutateTask(TaskPostRequest{
-		Action: "create", Channel: "general", Title: "Gated drafting work",
+		Action: "create", Channel: "general", Title: "Gated parked work",
 		Details: "work with a definition of done", Owner: "eng", CreatedBy: "ceo",
 		VerificationKind: "command", VerificationSpec: "exit 1", VerificationRequired: true,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
+	}
+	// Park the lane the deliberate way (the only path into drafting).
+	if err := b.TransitionLifecycle(resp.Task.ID, LifecycleStateDrafting, "parked by composer"); err != nil {
+		t.Fatalf("park: %v", err)
 	}
 	_, completeErr := b.MutateTask(TaskPostRequest{Action: "complete", ID: resp.Task.ID, Channel: "general", CreatedBy: "eng"})
 	var mErr *TaskMutationError
@@ -234,13 +231,13 @@ func TestVerificationGateDefersToPreStartGateOnDrafting(t *testing.T) {
 		t.Fatalf("want TaskMutationError; got %v", completeErr)
 	}
 	if mErr.Kind == TaskMutationVerificationFailed {
-		t.Fatalf("drafting complete must hit the pre-start gate, not the DoD check; got %v", completeErr)
+		t.Fatalf("parked complete must hit the parked gate, not the DoD check; got %v", completeErr)
 	}
-	if !strings.Contains(mErr.Message, "Approve & Start") {
-		t.Fatalf("refusal must name the Approve & Start path; got %q", mErr.Message)
+	if !strings.Contains(mErr.Message, "parked") {
+		t.Fatalf("refusal must name the parked state; got %q", mErr.Message)
 	}
 	if got := b.TaskByID(resp.Task.ID); got.VerificationResult != nil {
-		t.Fatalf("no check may run for a pre-start agent complete; stamped %+v", got.VerificationResult)
+		t.Fatalf("no check may run for a parked agent complete; stamped %+v", got.VerificationResult)
 	}
 }
 

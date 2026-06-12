@@ -172,12 +172,6 @@ func (b *Broker) postTaskDeliveredLocked(task *teamTask) {
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", taskChannel, noticeFrom, truncateSummary(notice.Title+" "+notice.Question, 140), notice.ID)
 	task.DonePostedFor = doneKey
-	// Single-source state hint (ten-out-of-ten A2): a delivered task can no
-	// longer be "waiting on you to start". Retire any still-pending
-	// awaiting-start notice so the two hints are mutually exclusive — the v3
-	// inbox showed "OFFICE-172 delivered" and "OFFICE-172 is waiting on you —
-	// press Approve & Start" side by side ([19:23:59]).
-	b.resolveAwaitingStartNoticeLocked(task.ID)
 }
 
 // ── Deterministic entity extraction (B1 step 3) ──────────────────────────────

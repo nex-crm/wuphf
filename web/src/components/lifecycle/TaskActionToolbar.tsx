@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { type TaskStatusAction, updateTaskStatus } from "../../api/tasks";
 import type { LifecycleState } from "../../lib/types/lifecycle";
 import { ReopenTaskButton } from "./ReopenTaskButton";
-import { ApproveAndStartButton } from "./TaskDocument";
+import { StartParkedTaskButton } from "./TaskDocument";
 
 // ── State-aware Issue action toolbar ─────────────────────────────────
 
@@ -36,8 +36,9 @@ interface ActionDef {
 function actionsForState(state: LifecycleState): ActionDef[] {
   switch (state) {
     case "drafting":
-      // Approve & Start has its own button (special verb postDecision).
-      // From drafting we offer Cancel as the close path.
+      // Drafting now means explicitly PARKED. The Start affordance has its
+      // own button (special verb postDecision — the one remaining start
+      // button). From parked we offer Cancel as the close path.
       return [
         {
           action: "cancel",
@@ -218,13 +219,14 @@ export function TaskActionToolbar({
 
   return (
     <div className="issue-action-toolbar">
-      {/* Approve & Start — uses postDecision via the existing button so the
-       * special drafting→running transition keeps its server-side behavior. */}
+      {/* Parked — start. Uses postDecision via the existing button so the
+       * drafting→running un-park keeps its server-side behavior. This is
+       * the ONE start button left; every other path starts at creation. */}
       {isDrafting ? (
-        <ApproveAndStartButton
+        <StartParkedTaskButton
           taskId={taskId}
           onApproved={onAfterAction}
-          label="Approve & Start"
+          label="Parked — start"
         />
       ) : null}
 

@@ -17,10 +17,10 @@ package team
 //  (b) a chat-turn (no task) gets the per-agent scratch dir;
 //  (c) the J3 done-means-done chain end-to-end over HTTP: create with
 //      Sam's verbatim DoD phrasing → verification derived at create →
-//      human Approve & Start activates → agent complete WITHOUT the file
-//      → 409 verification_failed → deliverable created in the agent's
-//      working dir → complete succeeds → Verified visible on the task
-//      detail endpoint;
+//      the task lands running (creation is the authorization) → agent
+//      complete WITHOUT the file → 409 verification_failed → deliverable
+//      created in the agent's working dir → complete succeeds → Verified
+//      visible on the task detail endpoint;
 //  (d) a Halt note's packet carries the do-not-revert instruction.
 
 import (
@@ -89,18 +89,6 @@ func evalJobWorkspaceIsolation(fx *officeEvalFixture, r *OfficeEvalReport) error
 		}
 		return parsed.Task.ID, parsed.Task.Channel, nil
 	}
-	activate := func(id string) error {
-		status, raw, err := client.postJSON("/tasks/"+id+"/decision", map[string]any{
-			"action": "approve", "created_by": "human",
-		})
-		if err != nil {
-			return err
-		}
-		if status != http.StatusOK {
-			return fmt.Errorf("approve & start %s: status=%d body=%s", id, status, raw)
-		}
-		return nil
-	}
 
 	// Park-stub the runner: the queue still computes the launch params
 	// (working directory record) on the real dispatch path; the stub only
@@ -142,12 +130,9 @@ func evalJobWorkspaceIsolation(fx *officeEvalFixture, r *OfficeEvalReport) error
 	if err != nil {
 		return err
 	}
-	if err := activate(aID); err != nil {
-		return err
-	}
 	aTask := fx.broker.TaskByID(aID)
 	if aTask == nil {
-		return fmt.Errorf("task %s vanished after activation", aID)
+		return fmt.Errorf("task %s vanished after create", aID)
 	}
 	fx.launcher.sendTaskUpdate(
 		notificationTarget{Slug: "eng"},
@@ -192,21 +177,8 @@ func evalJobWorkspaceIsolation(fx *officeEvalFixture, r *OfficeEvalReport) error
 	r.add(job, "J3: verbatim DoD phrasing derives a required machine check at create",
 		derived, fmt.Sprintf("verification=%+v", created.Verification), "")
 
-	// Agent complete from drafting is refused (fix-1 gate forces the human
-	// Approve & Start path — verify, don't rework).
-	preStatus, preBody, err := client.postJSON("/tasks", map[string]any{
-		"action": "complete", "id": jID, "channel": jChannel, "created_by": "ceo",
-	})
-	if err != nil {
-		return err
-	}
-	r.add(job, "J3: agent complete from drafting is refused until the human approves & starts",
-		preStatus == http.StatusConflict && strings.Contains(preBody, "Approve & Start"),
-		fmt.Sprintf("status=%d body=%s", preStatus, truncate(preBody, 160)), "")
-
-	if err := activate(jID); err != nil {
-		return err
-	}
+	// No activation step: the create above landed the task running —
+	// the DoD gate is what stands between the agent and "done" now.
 
 	// Complete WITHOUT the deliverable: the DoD gate must refuse with a
 	// structured verification failure — not pass because a stale
@@ -265,9 +237,6 @@ func evalJobWorkspaceIsolation(fx *officeEvalFixture, r *OfficeEvalReport) error
 	// ── (d) Halt note packet carries the do-not-revert instruction ────────
 	dID, dChannel, err := createTask("Refresh the pricing page copy (workspace d)", "Probe for the Stop contract.", "ceo")
 	if err != nil {
-		return err
-	}
-	if err := activate(dID); err != nil {
 		return err
 	}
 	if _, err := fx.broker.PostMessage("you", dChannel, "Stop — leave it exactly as it is.", nil, ""); err != nil {

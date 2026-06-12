@@ -52,9 +52,6 @@ func evalJobCompletionHook(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	}); err != nil {
 		return err
 	}
-	if err := fx.activateTask(taskID); err != nil {
-		return err
-	}
 
 	// (a) Whichever action would land the task in done must be blocked while
 	// no artifact is on record. complete may route through review first
@@ -211,9 +208,6 @@ func evalJobHumanSovereignty(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	taskID := created.Task.ID
-	if err := fx.activateTask(taskID); err != nil {
-		return err
-	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{
 		Action: "submit_for_review", ID: taskID, Channel: "general", CreatedBy: "eng",
 		Details: "First draft attached.",
@@ -349,9 +343,6 @@ func evalJobEntityArticles(fx *officeEvalFixture, r *OfficeEvalReport) error {
 				SuccessCriteria: []string{deliverable + " published to the wiki"},
 			},
 		}); err != nil {
-			return "", err
-		}
-		if err := fx.activateTask(id); err != nil {
 			return "", err
 		}
 		if err := fx.seedWikiFile(artifact, "# "+deliverable+"\n"); err != nil {
@@ -523,9 +514,6 @@ func evalJobPlaybookCompilation(fx *officeEvalFixture, r *OfficeEvalReport) erro
 				SuccessCriteria: criteria,
 			},
 		}); err != nil {
-			return "", err
-		}
-		if err := fx.activateTask(id); err != nil {
 			return "", err
 		}
 		if err := fx.seedWikiFile(artifact, "# Investor update\n"); err != nil {
@@ -774,9 +762,6 @@ func evalJobNotebookBookends(fx *officeEvalFixture, r *OfficeEvalReport) error {
 			SuccessCriteria: []string{"Brief published to the wiki"},
 		},
 	}); err != nil {
-		return err
-	}
-	if err := fx.activateTask(id); err != nil {
 		return err
 	}
 
@@ -1152,9 +1137,6 @@ func evalJobDoneIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	if err != nil {
 		return err
 	}
-	if err := fx.activateTask(created.Task.ID); err != nil {
-		return err
-	}
 	dodTask := fx.broker.TaskByID(created.Task.ID)
 	derived := dodTask != nil && dodTask.Verification != nil &&
 		dodTask.Verification.Kind == taskVerificationKindCommand &&
@@ -1217,9 +1199,6 @@ func evalJobDoneIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		Details: "Draft the exec one-pager from the account brief.", Owner: "eng", CreatedBy: "ceo",
 	})
 	if err != nil {
-		return err
-	}
-	if err := fx.activateTask(deltaCreated.Task.ID); err != nil {
 		return err
 	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{

@@ -65,9 +65,6 @@ func evalJobPlatformHonesty(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return fmt.Errorf("create task: %w", err)
 	}
 	taskID := created.Task.ID
-	if err := fx.activateTask(taskID); err != nil {
-		return fmt.Errorf("activate task: %w", err)
-	}
 	running, ok := fx.taskByID(taskID)
 	if !ok {
 		return fmt.Errorf("task %s vanished after activation", taskID)

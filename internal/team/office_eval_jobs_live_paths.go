@@ -67,14 +67,17 @@ package team
 //     live task state on the detail read.
 //
 // ── PHASE C checks (this job) ──────────────────────────────────────────────
-//  (a) approve-on-drafting starts (running, not approved)
-//  (b) approve with zero work on a defined/drifted task → structured error
+//  (a) create with an owner lands RUNNING and the owner dispatches —
+//      creation is the authorization; there is no start-approval ceremony
+//  (b) approve with zero work on a defined running task → structured error
+//      (the review-path truthful-approve gate)
 //  (c) reopen via the exact FE payload works (and leaves no stale index)
 //  (d) wiki review request-changes + approve via the FE payloads succeed;
 //      the empty-rationale contract errors loudly
-//  (e) agent complete on a drafting task is refused; no turn dispatches
-//  (f) dependent stays blocked past upstream approval; unblocks on
-//      completion-with-artifact
+//  (e) a PARKED task (composer Backlog/park — the one deliberate way into
+//      drafting): agent complete is refused, no turn dispatches, and the
+//      human's start affordance un-parks it into running
+//  (f) dependent stays blocked until upstream completion-with-artifact
 //  (g) board list and task detail report the same state for the same task
 
 import (
@@ -178,6 +181,7 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tasks", fx.broker.requireAuth(fx.broker.handleTasks))
 	mux.HandleFunc("/tasks/", fx.broker.requireAuth(fx.broker.handleTaskByID))
+	mux.HandleFunc("/task-plan", fx.broker.requireAuth(fx.broker.handleTaskPlan))
 	mux.HandleFunc("/notebook/write", fx.broker.requireAuth(fx.broker.handleNotebookWrite))
 	mux.HandleFunc("/notebook/promote", fx.broker.requireAuth(fx.broker.handleNotebookPromote))
 	mux.HandleFunc("/review/", fx.broker.requireAuth(fx.broker.handleReviewSubpath))
@@ -211,15 +215,10 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return parsed.Task.ID, nil
 	}
 
-	// ── (a) Approve & Start on a drafting task STARTS it ──────────────────
+	// ── (a) create with an owner lands RUNNING; the owner dispatches ──────
+	// Creation IS the authorization (founder directive): no Approve & Start
+	// ceremony stands between the create and the owner's first turn.
 	aID, err := createTask("Draft the renewal emails (live-path a)")
-	if err != nil {
-		return err
-	}
-	// Exact FE payload: web/src/api/lifecycle.ts postDecision.
-	decisionStatus, decisionBody, err := client.postJSON("/tasks/"+aID+"/decision", map[string]any{
-		"action": "approve", "created_by": "human",
-	})
 	if err != nil {
 		return err
 	}
@@ -228,16 +227,45 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	packetState, taskState, taskStatus := taskDetailStates(detailBody)
-	r.add(job, "approve-on-drafting starts the task (running, not approved)",
-		decisionStatus == http.StatusOK && taskState == string(LifecycleStateRunning) &&
+	r.add(job, "create with an owner lands running (no start-approval ceremony)",
+		taskState == string(LifecycleStateRunning) &&
 			packetState == string(LifecycleStateRunning) && !strings.EqualFold(taskStatus, "done"),
-		fmt.Sprintf("decision=%d body=%s packet=%s task=%s status=%s", decisionStatus, truncate(decisionBody, 120), packetState, taskState, taskStatus), "")
+		fmt.Sprintf("packet=%s task=%s status=%s", packetState, taskState, taskStatus), "")
 
-	// ── (b) approve with zero work on a defined, state-drifted task ───────
-	// Replicates J2's contamination: create (drafting) → CEO assigns →
-	// legacy reindex drifts the typed state to Running with ZERO work done.
-	// The FE click on the (previously stale) page must now hit a structured
-	// error, never a terminal approve.
+	// The owner DISPATCHES off the create: the task_created action routed
+	// through the live sendTaskUpdate path must enqueue an execution turn.
+	aWoke := make(chan string, 1)
+	aStub := func(_ *Launcher, _ context.Context, slug, _ string, _ ...string) error {
+		select {
+		case aWoke <- slug:
+		default:
+		}
+		return nil
+	}
+	aPrior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&aStub)
+	aSnapshot := fx.broker.TaskByID(aID)
+	fx.launcher.sendTaskUpdate(
+		notificationTarget{Slug: "eng"},
+		officeActionLog{Kind: "task_created", Actor: "ceo", Channel: aSnapshot.Channel, RelatedID: aID},
+		*aSnapshot,
+		"Work packet for a freshly created task — must dispatch.",
+	)
+	aDispatched := ""
+	select {
+	case aDispatched = <-aWoke:
+	case <-time.After(8 * time.Second):
+	}
+	fx.launcher.stopHeadlessWorkers()
+	headlessCodexRunTurnOverride.Store(aPrior)
+	r.add(job, "owner dispatches off the create (task_created turn enqueued)",
+		aDispatched == "eng", fmt.Sprintf("dispatched=%q", aDispatched), "")
+
+	// ── (b) approve with zero work on a defined running task ──────────────
+	// The review-path truthful-approve gate: a created task lands running
+	// with ZERO work done. An approve click on it must hit a structured
+	// error ("mid-execution; nothing submitted"), never a terminal approve
+	// (v3 J2 [19:04]: zero-work tasks closed terminally at the click).
 	bID, err := createTask("Build the QBR one-pager (live-path b)")
 	if err != nil {
 		return err
@@ -265,7 +293,7 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	bAfter := fx.broker.TaskByID(bID)
-	r.add(job, "approve with zero work on a defined task returns a structured error, never terminal",
+	r.add(job, "approve with zero work on a running defined task returns a structured error, never terminal",
 		drifted != nil && drifted.LifecycleState == LifecycleStateRunning &&
 			bDecisionStatus == http.StatusConflict && strings.Contains(bDecisionBody, "error") &&
 			bAfter != nil && bAfter.LifecycleState != LifecycleStateApproved &&
@@ -295,9 +323,6 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	// ── (c) Reopen via the exact FE payload shape ──────────────────────────
 	cID, err := createTask("Ship the launch checklist (live-path c)")
 	if err != nil {
-		return err
-	}
-	if err := fx.activateTask(cID); err != nil {
 		return err
 	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: cID, Channel: "general", CreatedBy: "eng"}); err != nil {
@@ -383,11 +408,36 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		approveStatus == http.StatusOK && strings.Contains(approveBody, "approved"),
 		fmt.Sprintf("status=%d body=%s", approveStatus, truncate(approveBody, 160)), "")
 
-	// ── (e) agent turn / completion for a drafting task is refused ────────
-	eID, err := createTask("Ship the MeetingMind landing page (live-path e)")
+	// ── (e) agent turn / completion for a PARKED task is refused ──────────
+	// Drafting is now reachable only through the deliberate park path (the
+	// composer's Backlog action → POST /task-plan park=true). Everything
+	// the old pre-start ceremony enforced binds ONLY here.
+	ePlanStatus, ePlanBody, err := client.postJSON("/task-plan", map[string]any{
+		"channel": "general", "created_by": "human",
+		"tasks": []map[string]any{{
+			"title": "Ship the MeetingMind landing page (live-path e)", "assignee": "eng",
+			"details": "Parked on purpose — backlog lane.", "task_type": "issue", "park": true,
+		}},
+	})
 	if err != nil {
 		return err
 	}
+	var ePlan struct {
+		Tasks []struct {
+			ID string `json:"id"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(ePlanBody), &ePlan); err != nil {
+		return fmt.Errorf("park via task-plan: status=%d body=%s: %w", ePlanStatus, ePlanBody, err)
+	}
+	if ePlanStatus != http.StatusOK || len(ePlan.Tasks) == 0 {
+		return fmt.Errorf("park via task-plan: status=%d body=%s", ePlanStatus, ePlanBody)
+	}
+	eID := ePlan.Tasks[0].ID
+	eParked := fx.broker.TaskByID(eID)
+	r.add(job, "composer park lands the task in drafting (the one deliberate parked state)",
+		eParked != nil && eParked.LifecycleState == LifecycleStateDrafting,
+		fmt.Sprintf("state=%s", eParked.LifecycleState), "")
 	eStatus, eBody, err := client.postJSON("/tasks", map[string]any{
 		"action": "complete", "id": eID, "channel": "general", "created_by": "ceo",
 	})
@@ -395,12 +445,12 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		return err
 	}
 	eTask := fx.broker.TaskByID(eID)
-	r.add(job, "agent complete on a drafting task is refused with a structured error",
-		eStatus == http.StatusConflict && strings.Contains(eBody, "Approve & Start") &&
+	r.add(job, "agent complete on a parked task is refused with a structured error",
+		eStatus == http.StatusConflict && strings.Contains(eBody, "parked") &&
 			eTask != nil && eTask.LifecycleState == LifecycleStateDrafting,
 		fmt.Sprintf("status=%d body=%s state=%s", eStatus, truncate(eBody, 160), eTask.LifecycleState), "")
 
-	// No execution turn dispatches for a drafting task: the same gate
+	// No execution turn dispatches for a parked task: the same gate
 	// sendTaskUpdate enforces (isExecutableTeamTaskStatus).
 	woke := make(chan string, 1)
 	stub := func(_ *Launcher, _ context.Context, slug, _ string, _ ...string) error {
@@ -417,7 +467,7 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		notificationTarget{Slug: "eng"},
 		officeActionLog{Kind: "task_updated", Actor: "ceo", Channel: eTaskSnapshot.Channel, RelatedID: eID},
 		*eTaskSnapshot,
-		"Work packet for a drafting task — must not dispatch.",
+		"Work packet for a parked task — must not dispatch.",
 	)
 	dispatched := ""
 	select {
@@ -426,8 +476,21 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	}
 	fx.launcher.stopHeadlessWorkers()
 	headlessCodexRunTurnOverride.Store(prior)
-	r.add(job, "no execution turn dispatches for a drafting task", dispatched == "",
+	r.add(job, "no execution turn dispatches for a parked task", dispatched == "",
 		fmt.Sprintf("dispatched=%q", dispatched), "")
+
+	// The human's start affordance ("Parked — start", FE postDecision
+	// approve) is the ONE remaining start button — it un-parks into running.
+	eStartStatus, eStartBody, err := client.postJSON("/tasks/"+eID+"/decision", map[string]any{
+		"action": "approve", "created_by": "human",
+	})
+	if err != nil {
+		return err
+	}
+	eStarted := fx.broker.TaskByID(eID)
+	r.add(job, "the human's start affordance un-parks the task into running",
+		eStartStatus == http.StatusOK && eStarted != nil && eStarted.LifecycleState == LifecycleStateRunning,
+		fmt.Sprintf("status=%d body=%s state=%s", eStartStatus, truncate(eStartBody, 120), eStarted.LifecycleState), "")
 
 	// ── (f) dependency releases on completion-with-artifact, not approval ──
 	upID, err := createTask("Research competitor pricing (live-path f)")
@@ -448,19 +511,17 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	if err != nil {
 		return err
 	}
-	// Approve & Start the upstream (activation). The dependent must STAY
-	// blocked — v3 released it at this exact click ([18:45:40]).
-	if _, _, err := client.postJSON("/tasks/"+upID+"/decision", map[string]any{
-		"action": "approve", "created_by": "human",
-	}); err != nil {
-		return err
-	}
+	// The upstream landed RUNNING at create (no activation step exists).
+	// The dependent must be born blocked and STAY blocked until the
+	// upstream actually completes with its artifact — release requires
+	// COMPLETION, never a click (v3 released it at an approval click,
+	// [18:45:40]).
 	_, listBody, err := client.getJSON("/tasks?viewer_slug=human&all_channels=true&include_done=true")
 	if err != nil {
 		return err
 	}
 	_, _, downBlocked, downFound := listTaskState(listBody, downID)
-	r.add(job, "dependent stays blocked past the upstream approval click",
+	r.add(job, "dependent is born blocked while the running upstream is incomplete",
 		downFound && downBlocked, fmt.Sprintf("found=%v blocked=%v", downFound, downBlocked), "")
 
 	// Completion WITH artifact releases it. The artifact must exist on disk

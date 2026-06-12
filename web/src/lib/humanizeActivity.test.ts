@@ -26,7 +26,7 @@ describe("humanizeLifecycleState", () => {
     expect(humanizeLifecycleState("running")).toBe("Running");
     expect(humanizeLifecycleState("review")).toBe("In review");
     expect(humanizeLifecycleState("decision")).toBe("Needs decision");
-    expect(humanizeLifecycleState("drafting")).toBe("Drafting");
+    expect(humanizeLifecycleState("drafting")).toBe("Parked");
   });
 
   it("degrades unknown snake_case states to capitalized words", () => {

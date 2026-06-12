@@ -12,13 +12,13 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskDocument as TaskDocumentType } from "./TaskDocument";
 import {
-  DraftingWaitingHint,
   normalizeTaskDocument,
+  StartParkedTaskButton,
   TaskDocument,
 } from "./TaskDocument";
 
@@ -143,7 +143,8 @@ describe.skip("<TaskDocument>", () => {
     renderDoc(BASE_DOC);
     const pill = document.querySelector("[data-state='drafting']");
     expect(pill).not.toBeNull();
-    expect(pill?.textContent).toMatch(/drafting/i);
+    // drafting renders as "parked" — the explicit park state's label.
+    expect(pill?.textContent).toMatch(/parked/i);
   });
 
   it("renders approved pill for approved state", () => {
@@ -158,20 +159,19 @@ describe.skip("<TaskDocument>", () => {
     renderDoc(BASE_DOC);
     const row = screen.getByTestId("issue-doc-button-row");
     expect(row).toBeInTheDocument();
-    // In Drafting state, the Approve & Start button is inside the row.
-    expect(
-      row.querySelector("[data-testid='approve-and-start']"),
-    ).not.toBeNull();
+    // In the parked (drafting) state, the Start button is inside the row —
+    // the ONE place a start affordance remains.
+    expect(row.querySelector("[data-testid='start-parked']")).not.toBeNull();
   });
 
-  it("button row hides Approve & Start for non-drafting states", () => {
+  it("button row hides the parked Start button for non-drafting states", () => {
     renderDoc(APPROVED_DOC);
     const row = screen.getByTestId("issue-doc-button-row");
     // TaskActionToolbar now renders state-appropriate actions for every
     // lifecycle (e.g. Cancel on approved), so the row is no longer empty.
-    // What we still want to guarantee is that the Approve & Start button
+    // What we still want to guarantee is that the parked Start button
     // is suppressed off the drafting state.
-    expect(row.querySelector("[data-testid='approve-and-start']")).toBeNull();
+    expect(row.querySelector("[data-testid='start-parked']")).toBeNull();
   });
 });
 
@@ -270,10 +270,10 @@ describe("normalizeTaskDocument", () => {
   });
 });
 
-// ── Approve & Start button ────────────────────────────────────────────
+// ── Parked Start button ───────────────────────────────────────────────
 
 // FIXME(v3-mvp): same hang as <TaskDocument> above. Re-enable when fixed.
-describe.skip("<TaskDocument> — Approve & Start", () => {
+describe.skip("<TaskDocument> — parked Start", () => {
   beforeEach(() => {
     try {
       sessionStorage.clear();
@@ -286,77 +286,85 @@ describe.skip("<TaskDocument> — Approve & Start", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders Approve & Start button when lifecycleState is drafting", () => {
+  it("renders the Start button when lifecycleState is drafting (parked)", () => {
     renderDoc(BASE_DOC);
-    expect(screen.getByTestId("approve-and-start")).toBeInTheDocument();
+    expect(screen.getByTestId("start-parked")).toBeInTheDocument();
   });
 
-  it("does NOT render Approve & Start button when state is approved", () => {
+  it("does NOT render the Start button when state is approved", () => {
     renderDoc(APPROVED_DOC);
-    expect(screen.queryByTestId("approve-and-start")).toBeNull();
+    expect(screen.queryByTestId("start-parked")).toBeNull();
   });
 
-  it("does NOT render Approve & Start button when state is running", () => {
+  it("does NOT render the Start button when state is running", () => {
     renderDoc(RUNNING_DOC);
-    expect(screen.queryByTestId("approve-and-start")).toBeNull();
+    expect(screen.queryByTestId("start-parked")).toBeNull();
   });
 
-  it("Approve & Start button has the correct aria-label", () => {
+  it("Start button has the correct aria-label", () => {
     renderDoc(BASE_DOC);
-    const btn = screen.getByTestId("approve-and-start");
-    expect(btn).toHaveAttribute("aria-label", "Approve and start execution");
+    const btn = screen.getByTestId("start-parked");
+    expect(btn).toHaveAttribute("aria-label", "Start this parked task");
   });
 
-  it("clicking Approve & Start button fires a click event", () => {
+  it("clicking the Start button fires a click event", () => {
     // This test verifies the button is clickable and triggers the mutation
     // flow. The actual approve action requires the broker; we verify the
     // button is present, enabled, and fires onClick correctly.
     renderDoc(BASE_DOC);
-    const btn = screen.getByTestId("approve-and-start");
+    const btn = screen.getByTestId("start-parked");
     expect(btn).not.toBeDisabled();
     // Clicking should not throw.
     expect(() => fireEvent.click(btn)).not.toThrow();
   });
 
-  it("clicking Approve & Start shows error banner on failure", async () => {
-    // We test that the component shows an error when the mutation fails.
-    // Because we can't easily mock the module in vitest without resetModules,
-    // we verify the error path by checking the error banner element exists
-    // AFTER the button click leads to a mutation error.
-    // The error banner test is validated in integration via the error element.
+  it("error banner is absent before any failed start", () => {
     renderDoc(BASE_DOC);
     // Error banner should NOT be present initially.
-    expect(screen.queryByTestId("approve-and-start-error")).toBeNull();
+    expect(screen.queryByTestId("start-parked-error")).toBeNull();
   });
 });
 
-// ── DraftingWaitingHint (ICP eval N5) ───────────────────────────────────
+// ── StartParkedTaskButton (ceremony retirement regression) ──────────────
 //
 // Pure component — tested directly (not via the full <TaskDocument>
 // mount, which is describe.skip'd above pending the vitest hang FIXME).
-// The wiring is a single unconditional render in the chat column.
-describe("<DraftingWaitingHint>", () => {
-  it("tells the human the task is waiting on Approve & Start while drafting", () => {
-    render(<DraftingWaitingHint lifecycleState="drafting" />);
-    const hint = screen.getByTestId("drafting-waiting-hint");
-    expect(hint).toHaveTextContent(
-      "Waiting on you — this task starts when you press Approve & Start.",
-    );
-    expect(hint).toHaveAttribute("role", "status");
+// Pins the retirement of the Approve & Start ceremony: the start button
+// reads "Start"-family copy and posts the decision approve on click; the
+// old "Waiting on you — press Approve & Start" chat hint is gone.
+describe("<StartParkedTaskButton>", () => {
+  afterEach(() => {
+    lifecycleApi.postDecision.mockClear();
   });
 
-  it("renders nothing outside drafting", () => {
-    for (const state of [
-      "running",
-      "review",
-      "approved",
-      "rejected",
-    ] as const) {
-      const { unmount } = render(
-        <DraftingWaitingHint lifecycleState={state} />,
-      );
-      expect(screen.queryByTestId("drafting-waiting-hint")).toBeNull();
-      unmount();
-    }
+  it("renders the parked Start affordance with start copy, not Approve & Start", () => {
+    render(
+      <QueryClientProvider client={makeClient()}>
+        <StartParkedTaskButton
+          taskId="task-1"
+          onApproved={() => {}}
+          label="Parked — start"
+        />
+      </QueryClientProvider>,
+    );
+    const btn = screen.getByTestId("start-parked");
+    expect(btn).toHaveTextContent("Parked — start");
+    expect(btn).not.toHaveTextContent("Approve & Start");
+    expect(btn).toHaveAttribute("aria-label", "Start this parked task");
+  });
+
+  it("posts the decision approve (the drafting→running un-park) on click", async () => {
+    render(
+      <QueryClientProvider client={makeClient()}>
+        <StartParkedTaskButton taskId="task-9" onApproved={() => {}} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByTestId("start-parked"));
+    await waitFor(() =>
+      expect(lifecycleApi.postDecision).toHaveBeenCalledWith(
+        "task-9",
+        "approve",
+      ),
+    );
   });
 });

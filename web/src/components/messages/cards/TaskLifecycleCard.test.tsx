@@ -30,7 +30,7 @@ describe("TaskLifecycleCard", () => {
     expect(card.tagName).toBe("BUTTON");
     expect(card).not.toHaveAttribute("data-static");
     expect(card.textContent).toMatch(/Open →/);
-    expect(card.textContent).toMatch(/Drafting → In progress/);
+    expect(card.textContent).toMatch(/Parked → In progress/);
 
     fireEvent.click(card);
     expect(navigate).toHaveBeenCalledWith({
@@ -48,7 +48,7 @@ describe("TaskLifecycleCard", () => {
     expect(card.className).toMatch(/issue-lifecycle-card--static/);
     expect(card.textContent).not.toMatch(/Open →/);
     // The transition itself is still surfaced as inline history.
-    expect(card.textContent).toMatch(/Drafting → In progress/);
+    expect(card.textContent).toMatch(/Parked → In progress/);
 
     fireEvent.click(card);
     expect(navigate).not.toHaveBeenCalled();

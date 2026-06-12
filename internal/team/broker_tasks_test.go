@@ -243,14 +243,13 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 		"thread_id":  "msg-1",
 	})
 	// Issues (task_type defaults to "issue" since the rule-zero override
-	// landed) start in drafting state, awaiting human approval — they
-	// transition to running only via the Approve & Start path. See
-	// docs/specs/issue-execution-loop.md.
-	if created.Status() != "open" || created.Owner != "fe" {
+	// landed) with an owner land RUNNING — creation is the authorization;
+	// there is no Approve & Start ceremony.
+	if created.Status() != "in_progress" || created.Owner != "fe" {
 		t.Fatalf("unexpected created task: %+v", created)
 	}
-	if created.LifecycleState != LifecycleStateDrafting {
-		t.Fatalf("expected drafting lifecycle for new issue, got %q", created.LifecycleState)
+	if created.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("expected running lifecycle for new owner-set issue, got %q", created.LifecycleState)
 	}
 	if created.FollowUpAt == "" || created.ReminderAt == "" || created.RecheckAt == "" {
 		t.Fatalf("expected follow-up timestamps on task create, got %+v", created)
@@ -2932,17 +2931,10 @@ func TestBrokerUpdatesTaskByIDAcrossChannels(t *testing.T) {
 		t.Fatalf("expected planning task, got %+v", created)
 	}
 
-	// Created issues land in drafting; the human's approve activates them
-	// (drafting→running) before any completion is possible (v3 fix
-	// family #1: completion from a pre-start state is impossible).
-	activated := post(map[string]any{
-		"action":     "approve",
-		"channel":    "general",
-		"id":         created.ID,
-		"created_by": "human",
-	})
-	if activated.LifecycleState != LifecycleStateRunning {
-		t.Fatalf("expected approve to activate the drafting task, got %+v", activated)
+	// Created issues with an owner land running immediately — creation is
+	// the authorization; no approve step stands before completion.
+	if created.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("expected created owner-set issue to land running, got %+v", created)
 	}
 
 	completed := post(map[string]any{

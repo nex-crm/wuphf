@@ -107,18 +107,17 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		fmt.Fprintf(os.Stderr, "teammcp: action issue auto-resolve failed for %s/%s: %v\n", args.Platform, args.ActionID, err)
 	} else {
 		args.IssueID = resolvedIssueID
-		// Hard gate: an Issue in `drafting` is awaiting human review +
-		// approve. The agent must NOT proceed with external actions
-		// until the human approves it via the Issue detail surface.
-		// Surface a clear error back to the agent so its next-step
+		// Hard gate: an Issue in `drafting` was explicitly PARKED by the
+		// human (backlog/park path) — nothing lands there by default.
+		// The agent must NOT proceed with external actions on parked
+		// work. Surface a clear error back to the agent so its next-step
 		// reasoning routes to "wait + ping the human" instead of
 		// retrying the action. The agent will see this error in its
 		// tool_result and is prompted (RULE ZERO) to back off.
 		if strings.EqualFold(strings.TrimSpace(resolvedState), "drafting") {
 			return approvalContext{}, fmt.Errorf(
-				"issue %s is awaiting human approval (lifecycle_state=drafting); "+
-					"do NOT retry this action — surface the Issue to the human (it's already in chat as an Issue card and on the Issues board) and wait; "+
-					"resume work only after the human clicks Approve & Start on the Issue",
+				"issue %s is parked (lifecycle_state=drafting); "+
+					"do NOT retry this action — only the human can start a parked Issue from the task page; wait until it is running",
 				resolvedIssueID,
 			)
 		}

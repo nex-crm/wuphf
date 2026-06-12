@@ -475,8 +475,8 @@ func (b *Broker) postIssueLifecycleCardLocked(task *teamTask, from, to Lifecycle
 	// Coalesce: if a recent (<10s) issue_lifecycle card for the SAME
 	// task is still in the message log, drop it before appending the
 	// new card. This collapses multi-step flows that a user perceives
-	// as ONE action (e.g. Approve & Start fires Drafting→Approved
-	// AND Approved→Running back-to-back). Without this, the channel
+	// as ONE action (e.g. a create that fires legacy-derive AND the
+	// Running landing back-to-back). Without this, the channel
 	// shows two lifecycle cards for one click. The 10s window is
 	// conservative — typical multi-step flows complete in under 1s.
 	b.coalesceRecentLifecycleCardLocked(task.ID, 10*time.Second)
@@ -500,10 +500,9 @@ func (b *Broker) postIssueLifecycleCardLocked(task *teamTask, from, to Lifecycle
 
 // coalesceRecentLifecycleCardLocked removes any issue_lifecycle card
 // for taskID emitted within the last `window`. Used to collapse a
-// burst of lifecycle transitions (e.g. Drafting→Approved→Running on
-// a single Approve & Start click) into the most recent card, so the
-// channel does not stack redundant cards for what a user reads as one
-// action.
+// burst of lifecycle transitions on a single user action into the most
+// recent card, so the channel does not stack redundant cards for what
+// a user reads as one action.
 //
 // Walks newest-first and stops at the first message older than the
 // window. Returns the number of cards removed.
@@ -561,85 +560,6 @@ func issueLifecycleHumanLine(transition IssueLifecycleTransition, taskID, title,
 		return fmt.Sprintf("Revising — %s reworking %s: %s", ownerTag, taskID, title)
 	}
 	return fmt.Sprintf("Issue %s updated: %s", taskID, title)
-}
-
-// awaitingStartNoticeTitle is the stable per-task dedupe key for the
-// "waiting on you" Inbox notice. Keyed on the task ID so a task raises at
-// most one such notice over its lifetime (re-entering drafting after a
-// reopen does not nag again).
-func awaitingStartNoticeTitle(taskID string) string {
-	return taskID + " is waiting on you"
-}
-
-// postTaskAwaitingStartNoticeLocked raises the non-blocking Inbox notice
-// (the B1 humanInterview kind="notice" primitive — see
-// task_completion_hook.go) when an Issue ENTERS drafting with an owner.
-// In drafting the ONLY way forward is the human pressing Approve & Start,
-// but nothing used to say so — the human stared at a silent task for
-// 10–12 minutes (ICP eval N5, three incidents). Copy stays short and
-// honest; the notice never blocks and never nags (no reminders).
-//
-// Caller holds b.mu for write. Deduped per task via the stable title.
-func (b *Broker) postTaskAwaitingStartNoticeLocked(task *teamTask) {
-	if b == nil || task == nil || task.System {
-		return
-	}
-	if !strings.EqualFold(task.TaskType, "issue") {
-		return
-	}
-	if strings.TrimSpace(task.Owner) == "" {
-		// Ownerless drafts get triaged first; the Approve & Start hint
-		// would point at a button that can't dispatch anyone yet.
-		return
-	}
-	title := awaitingStartNoticeTitle(task.ID)
-	for i := range b.requests {
-		if b.requests[i].IssueID == task.ID && b.requests[i].Kind == "notice" && b.requests[i].Title == title {
-			return // already told the human once — never nag
-		}
-	}
-	taskChannel := normalizeChannelSlug(task.Channel)
-	if taskChannel == "" {
-		taskChannel = "general"
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	b.counter++
-	notice := humanInterview{
-		ID:        fmt.Sprintf("request-%d", b.counter),
-		Kind:      "notice",
-		Status:    "pending",
-		From:      "system",
-		Channel:   taskChannel,
-		Title:     title,
-		Question:  fmt.Sprintf("Waiting on you — %s starts when you press Approve & Start.", task.ID),
-		Blocking:  false,
-		Required:  false,
-		IssueID:   task.ID,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	notice.Options, notice.RecommendedID = normalizeRequestOptions(notice.Kind, "", nil)
-	b.requests = append(b.requests, notice)
-	b.pendingInterview = firstBlockingRequest(b.requests)
-	b.appendActionLocked("request_created", "office", taskChannel, "system",
-		truncateSummary(notice.Title+" — "+notice.Question, 140), notice.ID)
-}
-
-// resolveAwaitingStartNoticeLocked clears a still-pending "waiting on you"
-// notice once the task leaves drafting — the human (or a reopen path) just
-// acted, so asking them to acknowledge a hint about a button they already
-// pressed would be noise. Caller holds b.mu for write.
-func (b *Broker) resolveAwaitingStartNoticeLocked(taskID string) {
-	title := awaitingStartNoticeTitle(taskID)
-	now := time.Now().UTC().Format(time.RFC3339)
-	for i := range b.requests {
-		if b.requests[i].IssueID == taskID && b.requests[i].Kind == "notice" &&
-			b.requests[i].Title == title && requestIsActive(b.requests[i]) {
-			b.requests[i].Status = "answered"
-			b.requests[i].UpdatedAt = now
-		}
-	}
-	b.pendingInterview = firstBlockingRequest(b.requests)
 }
 
 func dedupeReassignTags(tags []string) []string {
