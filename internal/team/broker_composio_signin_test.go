@@ -151,14 +151,23 @@ func TestComposioSigninStart_InstallDeadlineExcludesLoginWindow(t *testing.T) {
 	b := newComposioSigninBroker(t, dir)
 
 	// Block the installer so the flow stays in "installing" while we inspect
-	// the deadline the start handler set.
+	// the deadline the start handler set. `entered` lets cleanup confirm the
+	// background goroutine actually read the stub before restoring the global —
+	// otherwise an unlucky schedule could let the goroutine run the REAL
+	// installer after restore.
+	entered := make(chan struct{})
 	block := make(chan struct{})
 	orig := composioInstaller
 	composioInstaller = func(_ context.Context) error {
+		close(entered)
 		<-block
 		return errors.New("unblocked in cleanup")
 	}
 	t.Cleanup(func() {
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+		}
 		close(block)
 		composioInstaller = orig
 	})

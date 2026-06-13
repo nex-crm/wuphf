@@ -7,6 +7,11 @@ import (
 	"os/exec"
 )
 
+// composioInstallCommand is the official Composio installer on Unix — a
+// `curl | bash` pipeline. Surfaced to the user as a copy-able fallback and run
+// by the auto-install path.
+const composioInstallCommand = "curl -fsSL https://composio.dev/install | bash"
+
 // defaultComposioInstaller runs the official Composio installer, which is a
 // `curl | bash` pipeline. This lives in a Unix-only file because it shells out
 // to bash, which does not exist on Windows — the Windows build supplies a stub

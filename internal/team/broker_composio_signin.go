@@ -51,9 +51,12 @@ const (
 	composioSigninStatusError         = "error"
 )
 
-// composioInstallCommand is the official installer, surfaced verbatim by the UI
-// as a copy-able fallback and run by the auto-install path.
-const composioInstallCommand = "curl -fsSL https://composio.dev/install | bash"
+// composioInstallCommand is the install command surfaced verbatim by the UI as
+// a copy-able fallback, and (on Unix) run by the auto-install path. It is
+// OS-specific — defined in broker_composio_signin_unix.go (the official
+// `curl | bash` installer) and broker_composio_signin_windows.go (npm, since
+// the `curl | bash` script has no Windows equivalent) — so Windows users are
+// never shown a Unix-only command they can't run.
 
 // composioInstaller runs the official installer. It's a package var so tests
 // substitute a fake install instead of shelling out, and so the real
