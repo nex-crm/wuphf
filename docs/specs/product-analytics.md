@@ -160,12 +160,17 @@ human-behavior product analytics, and would multiply volume.
       wiki_viewed, agent_created, app_error, action_failed via MutationCache,
       route pageviews); two onboarding toggles (StepFirstIssue) + two Settings
       toggles (Privacy & Analytics section). tsc clean, full web suite green.
-- [ ] **P4 Dashboards** — build the dashboards via PostHog MCP (project Prod
-      185073). Insights reference approved event names; populate once a keyed
-      instance runs.
-- [ ] **P5 Verify + ship** — README + policy updated (done); screenshots of the
-      consent surfaces; draft PR. Live event/replay verification needs a keyed
-      running instance.
+- [x] **P4 Dashboards** — seeded 439 tagged example events (`seed=true`, RevOps
+      ICP, spread over 14 days) into project Prod (185073) via PostHog `/batch/`,
+      then built the **WUPHF — Product Health** dashboard (id 1708570, pinned):
+      activation funnel, tasks-over-time, daily active operators, decisions by
+      outcome, core-loop engagement by event, friction (failed actions + app
+      errors). Verified the data aggregates. Seed events are filterable/deletable
+      by the `seed` property; the seed script lives at `/tmp/seed-posthog.mjs`
+      (not committed). Real instance data will land alongside.
+- [x] **P5 Ship** — README "Privacy & Telemetry" section + this spec; draft PR
+      #1077 opened (commit + push done). Remaining: screenshots of the two
+      consent surfaces; live event/replay verification from a keyed instance.
 
 ## Verification commands
 
