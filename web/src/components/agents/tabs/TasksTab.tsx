@@ -56,7 +56,7 @@ interface StageColumn {
 }
 
 export function TasksTab({ agentSlug }: TasksTabProps) {
-  const { data: allTasks = [], isLoading } = useOfficeTasks();
+  const { data: allTasks = [], isLoading, isError } = useOfficeTasks();
 
   const agentTasks = allTasks.filter((t) => t.owner === agentSlug);
 
@@ -75,6 +75,16 @@ export function TasksTab({ agentSlug }: TasksTabProps) {
     return (
       <div className="agent-tasks-tab agent-tasks-tab--loading">
         <p className="agent-tasks-empty">Loading tasks…</p>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="agent-tasks-tab">
+        <p className="agent-tasks-empty" role="alert">
+          Couldn't load tasks. Check your connection and try again.
+        </p>
       </div>
     );
   }

@@ -9,7 +9,7 @@
  * AgentInstructionsSection; this is the default.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { AgentFileResponse } from "../../api/agentFiles";
 import { writeAgentFile } from "../../api/agentFiles";
@@ -58,6 +58,10 @@ export function AgentFileBlockEditor({
   const [blocks, setBlocks] = useState<BlockState[]>(initialBlocks);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Snapshot the SHA at edit-open. Using the live `data.sha` at save time
+  // would let a background refetch advance it mid-edit, so a save could
+  // silently overwrite newer disk content instead of getting a conflict.
+  const expectedShaRef = useRef(data.sha);
 
   const dirty =
     preamble !== parsed.preamble ||
@@ -70,9 +74,13 @@ export function AgentFileBlockEditor({
   async function save() {
     setSaving(true);
     setError(null);
+    // Keep schema-section headings even when emptied so the file's structure
+    // is preserved (the section reappears as an empty-to-fill block on reopen).
+    // Only drop emptied *custom* sections — clearing one is an intentional
+    // delete, not a structural section.
     const sections = blocks
-      .map((b) => ({ heading: b.heading, body: b.body.trim() }))
-      .filter((b) => b.body !== "");
+      .filter((b) => b.fromSchema || b.body.trim() !== "")
+      .map((b) => ({ heading: b.heading, body: b.body.trim() }));
     const content = serializeAgentFile({
       title: parsed.title,
       preamble: preamble.trim(),
@@ -83,7 +91,7 @@ export function AgentFileBlockEditor({
         path,
         content,
         commitMessage: `Update ${label}`,
-        expectedSha: data.sha,
+        expectedSha: expectedShaRef.current,
       });
       if ("commit_sha" in result) {
         onSaved(result.commit_sha);

@@ -129,7 +129,11 @@ export function SkillsTab({ agentSlug }: SkillsTabProps) {
   const [filter, setFilter] = useState("");
   const queryClient = useQueryClient();
 
-  const { data: allSkills = [], isLoading } = useQuery({
+  const {
+    data: allSkills = [],
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["skills-list"],
     queryFn: () => getSkillsList("all").then((r) => r.skills ?? []),
     refetchInterval: 30_000,
@@ -240,6 +244,10 @@ export function SkillsTab({ agentSlug }: SkillsTabProps) {
 
       {isLoading ? (
         <p className="agent-skills-empty">Loading skills…</p>
+      ) : isError ? (
+        <p className="agent-skills-empty" role="alert">
+          Couldn't load skills. Check your connection and try again.
+        </p>
       ) : mode === "enabled" ? (
         <EnabledSkillsGrid
           skills={visibleEnabled}

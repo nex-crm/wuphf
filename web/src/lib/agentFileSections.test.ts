@@ -103,4 +103,50 @@ describe("buildEditorBlocks", () => {
     const parsed = parseAgentFile("# IDENTITY — @x\n\n- Name: X\n");
     expect(buildEditorBlocks(parsed, schemaForFile("IDENTITY"))).toEqual([]);
   });
+
+  it("preserves duplicate `##` headings instead of collapsing them", () => {
+    // Two "Values" sections (a schema heading) plus a duplicate custom one.
+    const parsed = parseAgentFile(
+      [
+        "# SOUL — @x",
+        "",
+        "## Values",
+        "first values",
+        "",
+        "## Values",
+        "second values",
+        "",
+        "## Extra",
+        "one",
+        "",
+        "## Extra",
+        "two",
+        "",
+      ].join("\n"),
+    );
+    const blocks = buildEditorBlocks(parsed, schemaForFile("SOUL"));
+    // The schema "Values" block binds to the FIRST occurrence; the second
+    // survives as a custom block so no content is lost on save.
+    const valuesBlocks = blocks.filter((b) => b.heading === "Values");
+    expect(valuesBlocks.map((b) => b.body)).toEqual([
+      "first values",
+      "second values",
+    ]);
+    expect(valuesBlocks[0].fromSchema).toBe(true);
+    expect(valuesBlocks[1].fromSchema).toBe(false);
+    // Both duplicate custom "Extra" sections are preserved too.
+    const extraBlocks = blocks.filter((b) => b.heading === "Extra");
+    expect(extraBlocks.map((b) => b.body)).toEqual(["one", "two"]);
+
+    // Round-trips: every block's content makes it back into the markdown.
+    const out = serializeAgentFile({
+      title: parsed.title,
+      preamble: "",
+      sections: blocks.map((b) => ({ heading: b.heading, body: b.body })),
+    });
+    expect(out).toContain("first values");
+    expect(out).toContain("second values");
+    expect(out).toContain("one");
+    expect(out).toContain("two");
+  });
 });

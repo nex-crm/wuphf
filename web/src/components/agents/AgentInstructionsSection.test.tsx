@@ -163,6 +163,29 @@ describe("<AgentInstructionsSection>", () => {
     expect((raw as HTMLTextAreaElement).value).toMatch(/be relentless/i);
   });
 
+  it("does not wipe unsaved raw edits when the active Raw tab is re-clicked", async () => {
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await screen.findByText("Edit");
+    await user.click(screen.getByText("Edit"));
+    await screen.findByRole("textbox", { name: "Overview" });
+
+    await user.click(screen.getByRole("button", { name: "Raw" }));
+    const raw = await screen.findByLabelText(/raw markdown editor for SOUL/i);
+    fireEvent.change(raw, {
+      target: { value: "# SOUL — @growth\nedited raw" },
+    });
+
+    // Re-clicking the already-active Raw tab must preserve the edit, not
+    // re-seed the textarea from disk content.
+    await user.click(screen.getByRole("button", { name: "Raw" }));
+    expect((raw as HTMLTextAreaElement).value).toBe(
+      "# SOUL — @growth\nedited raw",
+    );
+  });
+
   it("surfaces the seeded badge when a file has not been written yet", async () => {
     readAgentFileMock.mockResolvedValue({
       path: "agents/growth/SOUL.md",

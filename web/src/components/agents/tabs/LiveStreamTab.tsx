@@ -21,7 +21,7 @@ function RecentRunsSection({ agentSlug }: { agentSlug: string }) {
   // the same shape here, or whichever tab loads first poisons the shared cache
   // for the other (object-vs-array → `.map is not a function`). Return the
   // tasks array so both consumers see an array.
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["agent-log-tasks", agentSlug],
     queryFn: () =>
       listAgentLogTasks({ limit: 8, agentSlug }).then((r) =>
@@ -37,6 +37,17 @@ function RecentRunsSection({ agentSlug }: { agentSlug: string }) {
       <div className="agent-stream-section">
         <div className="agent-stream-section-title">Recent runs</div>
         <div className="agent-stream-runs-empty">Loading…</div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="agent-stream-section">
+        <div className="agent-stream-section-title">Recent runs</div>
+        <div className="agent-stream-runs-empty" role="alert">
+          Couldn't load recent runs.
+        </div>
       </div>
     );
   }

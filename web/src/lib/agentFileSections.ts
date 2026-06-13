@@ -169,17 +169,24 @@ export function buildEditorBlocks(
   parsed: ParsedAgentFile,
   schema: SectionSchema[],
 ): EditorBlock[] {
-  const byHeading = new Map<string, AgentFileSection>();
-  for (const s of parsed.sections) {
-    byHeading.set(s.heading.toLowerCase(), s);
-  }
-  const used = new Set<string>();
+  // A schema heading binds to the FIRST parsed section with that heading.
+  // Track consumption by index (not by heading) so that if a file carries
+  // duplicate `## ` headings, every occurrence is preserved — the extras
+  // beyond the first surface as their own "custom" blocks rather than being
+  // silently collapsed into one (which would drop content on save).
+  const firstIndexByHeading = new Map<string, number>();
+  parsed.sections.forEach((s, i) => {
+    const key = s.heading.toLowerCase();
+    if (!firstIndexByHeading.has(key)) firstIndexByHeading.set(key, i);
+  });
+
+  const consumed = new Set<number>();
   const blocks: EditorBlock[] = [];
 
   for (const entry of schema) {
-    const key = entry.heading.toLowerCase();
-    const found = byHeading.get(key);
-    used.add(key);
+    const idx = firstIndexByHeading.get(entry.heading.toLowerCase());
+    const found = idx === undefined ? undefined : parsed.sections[idx];
+    if (idx !== undefined) consumed.add(idx);
     blocks.push({
       heading: entry.heading,
       body: found?.body ?? "",
@@ -187,10 +194,10 @@ export function buildEditorBlocks(
       fromSchema: true,
     });
   }
-  for (const s of parsed.sections) {
-    if (used.has(s.heading.toLowerCase())) continue;
+  parsed.sections.forEach((s, i) => {
+    if (consumed.has(i)) return;
     blocks.push({ heading: s.heading, body: s.body, fromSchema: false });
-  }
+  });
   return blocks;
 }
 

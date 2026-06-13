@@ -206,7 +206,12 @@ function AgentFileCard({
                   type="button"
                   className={`agent-file-mode-btn${mode === "raw" ? " is-active" : ""}`}
                   onClick={() => {
-                    setRawDraft(generatedDraft ?? data.content);
+                    // Seed the raw textarea only if it has no draft yet —
+                    // re-clicking the active Raw tab must not wipe unsaved
+                    // edits the user already typed in raw mode.
+                    setRawDraft(
+                      (prev) => prev ?? generatedDraft ?? data.content,
+                    );
                     setMode("raw");
                   }}
                   aria-pressed={mode === "raw"}

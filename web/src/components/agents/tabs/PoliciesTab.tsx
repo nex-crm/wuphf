@@ -117,7 +117,11 @@ export function PoliciesTab({ agentSlug }: PoliciesTabProps) {
   const [addError, setAddError] = useState<string | null>(null);
   const [mutateError, setMutateError] = useState<string | null>(null);
 
-  const { data: allPolicies = [], isLoading } = useQuery({
+  const {
+    data: allPolicies = [],
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["policies"],
     queryFn: () => import("../../../api/policies").then((m) => m.getPolicies()),
     refetchInterval: 30_000,
@@ -248,6 +252,10 @@ export function PoliciesTab({ agentSlug }: PoliciesTabProps) {
       {/* Policy list */}
       {isLoading ? (
         <p className="agent-policies-empty">Loading policies…</p>
+      ) : isError ? (
+        <p className="agent-policies-empty" role="alert">
+          Couldn't load policies. Check your connection and try again.
+        </p>
       ) : applicablePolicies.length === 0 ? (
         <p className="agent-policies-empty">
           No active policies apply to @{agentSlug}.
