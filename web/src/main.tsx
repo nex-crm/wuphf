@@ -1,8 +1,14 @@
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationCache,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 
+import { ApiError } from "./api/client";
 import { JoinPage } from "./components/join/JoinPage";
+import { track } from "./lib/analytics";
 import { rootRoute, router } from "./lib/router";
 import RootRoute from "./routes/RootRoute";
 import "./styles/fonts.css";
@@ -36,6 +42,21 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 2000 },
   },
+  // One central friction signal: any failed mutation becomes `action_failed`
+  // with the HTTP status and (when set) the mutation key as the action. No
+  // payload or response body is ever attached. Best-effort + dormant-safe.
+  mutationCache: new MutationCache({
+    onError: (error, _vars, _ctx, mutation) => {
+      const key = mutation.options.mutationKey;
+      const action = (
+        Array.isArray(key) && typeof key[0] === "string" ? key[0] : "mutation"
+      ) as string;
+      track("action_failed", {
+        action,
+        status: error instanceof ApiError ? error.status : 0,
+      });
+    },
+  }),
 });
 
 declare global {

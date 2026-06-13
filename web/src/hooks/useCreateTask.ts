@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { post } from "../api/client";
 import type { Task, TaskResponse } from "../api/tasks";
+import { track } from "../lib/analytics";
 
 export interface CreateTaskFormInput {
   title: string;
@@ -40,7 +41,13 @@ export function useCreateTask() {
       });
       return { task: response.task };
     },
-    onSuccess: () => {
+    onSuccess: (_result, input) => {
+      track("task_created", {
+        source: "inline",
+        owner_agent: input.assignee?.trim() || "",
+        has_details: !!input.details?.trim(),
+        start_mode: "start",
+      });
       void queryClient.invalidateQueries({ queryKey: ["issues"] });
       void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
       void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });

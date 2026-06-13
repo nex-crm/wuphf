@@ -11,6 +11,7 @@ import {
   postMessage,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { track } from "../../lib/analytics";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import {
   requestOptionNeedsText,
@@ -117,6 +118,12 @@ export function InterviewBar() {
   useEffect(() => {
     setTextMode(null);
     setCustomText("");
+  }, [currentId]);
+
+  // An agent asked the human for input. Record that it was surfaced so we can
+  // measure shown→answered latency and abandonment. No request content.
+  useEffect(() => {
+    if (currentId) track("interview_shown", { surface: "interview_bar" });
   }, [currentId]);
 
   useEffect(() => {
