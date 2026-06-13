@@ -54,6 +54,7 @@ export function TelegramConnectModal({
   initialStep,
   onClose,
 }: TelegramConnectModalProps) {
+  const openSlackConnect = useAppStore((s) => s.openSlackConnect);
   const [step, setStep] = useState<Step>(initialStep);
   const [token, setToken] = useState("");
   const [botName, setBotName] = useState<string | null>(null);
@@ -239,6 +240,23 @@ export function TelegramConnectModal({
                 >
                   Telegram{" "}
                   <span style={{ opacity: 0.6 }}>— bridge a group or DM</span>
+                </button>
+              </li>
+              <li style={{ marginBottom: 4 }}>
+                <button
+                  type="button"
+                  data-testid="tg-provider-slack"
+                  className="wk-editor-cancel"
+                  style={{ width: "100%", textAlign: "left" }}
+                  onClick={() => {
+                    onClose();
+                    openSlackConnect();
+                  }}
+                >
+                  Slack{" "}
+                  <span style={{ opacity: 0.6 }}>
+                    — bring your whole office into a channel
+                  </span>
                 </button>
               </li>
               <li style={{ marginBottom: 4 }}>

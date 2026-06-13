@@ -26,8 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/slack-go/slack"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // officeSlackManifest is the full Slack app manifest for the OFFICE bridge —
