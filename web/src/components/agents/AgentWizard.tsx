@@ -12,6 +12,7 @@ import {
   post,
 } from "../../api/client";
 import { useWindowEscape } from "../../hooks/useWindowEscape";
+import { track } from "../../lib/analytics";
 import {
   CUSTOM_MODEL_VALUE,
   INHERIT_MODEL_VALUE,
@@ -296,6 +297,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
       };
 
       await post("/office-members", body);
+      track("agent_created", { source: "wizard", from_blueprint: false });
       await queryClient.invalidateQueries({ queryKey: ["office-members"] });
 
       setForm(INITIAL_FORM);

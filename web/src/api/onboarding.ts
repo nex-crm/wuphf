@@ -187,6 +187,9 @@ export interface CompleteOnboardingBody {
   agents: string[];
   owner_name?: string;
   owner_role?: string;
+  /** Product-analytics consent captured by the wizard's two toggles. */
+  analytics_telemetry_enabled?: boolean;
+  analytics_session_recording_enabled?: boolean;
 }
 
 /**
