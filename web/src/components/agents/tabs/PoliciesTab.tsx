@@ -253,7 +253,7 @@ export function PoliciesTab({ agentSlug }: PoliciesTabProps) {
       {isLoading ? (
         <p className="agent-policies-empty">Loading policies…</p>
       ) : isError ? (
-        <p className="agent-policies-empty" role="alert">
+        <p className="agent-policies-error" role="alert">
           Couldn't load policies. Check your connection and try again.
         </p>
       ) : applicablePolicies.length === 0 ? (
