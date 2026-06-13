@@ -190,6 +190,16 @@ describe("onboarding email (the single PII egress)", () => {
     expect(mockPosthog.setPersonProperties).not.toHaveBeenCalled();
     expect(mockPosthog.capture).not.toHaveBeenCalled();
   });
+
+  it.each(["seed-user-15", "not-an-email", "no@domain", "@nope.com"])(
+    "ignores a non-email value (%s) — never attaches it or emits the event",
+    async (junk) => {
+      recordOnboardingEmailCaptured(junk);
+      await flush();
+      expect(mockPosthog.setPersonProperties).not.toHaveBeenCalled();
+      expect(mockPosthog.capture).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("live consent changes", () => {

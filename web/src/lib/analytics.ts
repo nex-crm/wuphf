@@ -350,11 +350,15 @@ export function recordOnboardingEmailStarted(): void {
 /**
  * Record onboarding completion and attach the email to the PostHog person.
  * This is the one call that carries PII, so callers MUST gate it behind the
- * keep-in-touch consent and isValidEmail. Best-effort and fire-and-forget.
+ * keep-in-touch consent. We ALSO validate here as defense in depth: only a
+ * well-formed address is ever attached to the person or emits the event, so a
+ * blank, partial, or junk value can never land in the email-capture funnel
+ * (where it would otherwise surface as the bare distinct_id). Best-effort and
+ * fire-and-forget.
  */
 export function recordOnboardingEmailCaptured(email: string): void {
   const trimmed = email.trim();
-  if (!trimmed) return;
+  if (!isValidEmail(trimmed)) return;
   void ensurePostHog().then((ph) => {
     if (!ph) return;
     ph.setPersonProperties({ email: trimmed });
