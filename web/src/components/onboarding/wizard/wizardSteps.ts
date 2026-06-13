@@ -174,7 +174,7 @@ export const ONBOARDING_EMAIL_COPY = {
     "That does not look like an email. Leave it blank, or fix it to stay in touch.",
   /** Consent checkbox label on the final step. Checked by default. */
   consent:
-    "Keep me posted on WUPHF. It is open source and built in the open, and we would love to learn what to build next. No spam, we promise.",
+    "Keep me posted on WUPHF. It is source-available and built in the open, and we would love to learn what to build next. No spam, we promise.",
 } as const;
 
 /** UI chrome labels for the wizard host. WUPHF voice, no contractions. */

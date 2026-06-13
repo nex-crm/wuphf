@@ -5,7 +5,7 @@
 </p>
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
-[![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
+[![License: Sustainable Use License](https://img.shields.io/badge/license-Sustainable%20Use%20License-A87B4F)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
 
 <p align="left">
@@ -273,7 +273,7 @@ Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flow
 | Mid-task steering | DM any agent, no restart |
 | Runtimes | Mix Claude Code, Codex, Hermes Agent, and OpenClaw in one channel |
 | Memory | Per-agent notebook + shared workspace wiki, git-native markdown by default (no API key needed) |
-| Price | Free and open source (MIT, self-hosted, your API keys) |
+| Price | Free to self-host (Sustainable Use License, your API keys) |
 
 ## Benchmark
 
