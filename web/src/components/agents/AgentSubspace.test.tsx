@@ -81,10 +81,17 @@ vi.mock("../ui/HarnessBadge", () => ({
   HarnessBadge: () => null,
 }));
 
-// Mock heavy children so tests stay fast
-vi.mock("../messages/DMView", () => ({
-  DMView: ({ agentSlug }: { agentSlug: string }) => (
-    <div data-testid="dm-view" data-agent={agentSlug} />
+// Mock heavy children so tests stay fast. The Chat tab is now a pure chat
+// surface: the shared MessageFeed + Composer pointed at the agent's DM channel.
+vi.mock("../messages/MessageFeed", () => ({
+  MessageFeed: ({ channel }: { channel?: string }) => (
+    <div data-testid="message-feed" data-channel={channel} />
+  ),
+}));
+
+vi.mock("../messages/Composer", () => ({
+  Composer: ({ channel }: { channel?: string }) => (
+    <div data-testid="composer" data-channel={channel} />
   ),
 }));
 
@@ -172,22 +179,27 @@ describe("<AgentSubspace>", () => {
     expect(chatTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("renders DMView when Chat tab is active", () => {
+  it("renders a pure chat surface (feed + composer on the DM channel) when Chat is active", () => {
     render(wrap(<AgentSubspace agent={baseAgent} tab="chat" />));
 
-    expect(screen.getByTestId("dm-view")).toBeInTheDocument();
-    expect(screen.getByTestId("dm-view")).toHaveAttribute(
-      "data-agent",
-      "planner",
+    // Pure chat only — no workbench (Tasks/Live Stream have their own tabs).
+    expect(screen.getByTestId("message-feed")).toHaveAttribute(
+      "data-channel",
+      "human__planner",
+    );
+    expect(screen.getByTestId("composer")).toHaveAttribute(
+      "data-channel",
+      "human__planner",
     );
   });
 
   it("resolves the /live alias to the Live Stream tab (no silent Chat fallback)", () => {
     render(wrap(<AgentSubspace agent={baseAgent} tab="live" />));
 
-    expect(
-      screen.getByRole("tab", { name: "Live Stream" }),
-    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Live Stream" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute(
       "aria-selected",
       "false",
@@ -263,7 +275,7 @@ describe("<AgentSubspace>", () => {
 
     const chatTab = screen.getByRole("tab", { name: "Chat" });
     expect(chatTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("dm-view")).toBeInTheDocument();
+    expect(screen.getByTestId("message-feed")).toBeInTheDocument();
   });
 
   it("renders the agent name in the shell header", () => {

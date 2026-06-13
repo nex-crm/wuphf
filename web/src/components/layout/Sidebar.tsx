@@ -7,7 +7,9 @@ import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
+import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
+import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -39,6 +41,8 @@ function useMobileRail(): boolean {
 export function Sidebar() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
+  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
   const currentApp = useCurrentApp();
   const mobileRail = useMobileRail();
   const [mobileExpanded, setMobileExpanded] = useState(false);
@@ -121,6 +125,21 @@ export function Sidebar() {
           </div>
 
           <div className="sidebar-scroll">
+            {/* The agent roster rail — CEO + specialists with avatars, live
+                activity pills, and the peek affordance. Clicking a row opens
+                that agent's subspace (/agents/$slug), so any agent is reachable
+                at any time. Collapsible + persisted via the app store, exactly
+                as before the Slack-style sidebar unify (#919). */}
+            <SidebarSection
+              label="Agents"
+              variant="team"
+              open={sidebarAgentsOpen}
+              onToggle={toggleSidebarAgents}
+              data-testid="sidebar-section-agents"
+            >
+              <AgentList />
+            </SidebarSection>
+
             {/* The sidebar nav is three labeled groups — Work / Knowledge /
                 Config — rendered by AppList. Inbox lives in Work; there is no
                 separate flat task list, and "Tasks" in Work opens the task
