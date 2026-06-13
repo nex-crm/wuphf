@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -59,10 +61,10 @@ func (b *Broker) ServeWebUI(port int) error {
 	distIndex := filepath.Join(distDir, "index.html")
 	if _, err := os.Stat(distIndex); err == nil {
 		// Real Vite build output on disk — use it.
-		fileServer = http.FileServer(http.Dir(distDir))
+		fileServer = spaFileServer(os.DirFS(distDir))
 	} else if embeddedFS, ok := wuphf.WebFS(); ok {
 		// No on-disk build; use embedded assets.
-		fileServer = http.FileServer(http.FS(embeddedFS))
+		fileServer = spaFileServer(embeddedFS)
 	} else {
 		// Source checkout without web/dist. Do not serve raw Vite source files:
 		// browsers load /src/main.tsx as text/plain and the page stalls on
@@ -134,6 +136,29 @@ func (b *Broker) ServeWebUI(port int) error {
 		}
 	}()
 	return nil
+}
+
+// spaFileServer serves the Vite build with an SPA fallback: requests whose
+// path maps to a real file in the bundle are served as-is; everything else is
+// a client-routed app path (e.g. /tasks/OFFICE-41 or /wiki/team/people/x.md
+// deep-linked from the Slack Home tab) and gets index.html so the router can
+// take over. A plain http.FileServer 404s those, which breaks every external
+// deep link into the app.
+func spaFileServer(assets fs.FS) http.Handler {
+	files := http.FileServer(http.FS(assets))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if rel != "" && rel != "." {
+			if info, err := fs.Stat(assets, rel); err == nil && !info.IsDir() {
+				files.ServeHTTP(w, r)
+				return
+			}
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		r2.URL.RawPath = ""
+		files.ServeHTTP(w, r2)
+	})
 }
 
 func missingWebAssetsHandler() http.Handler {

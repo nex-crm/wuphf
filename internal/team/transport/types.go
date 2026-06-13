@@ -125,6 +125,12 @@ type Outbound struct {
 	// support threading use this to send a threaded reply; adapters that do not
 	// support threading ignore it.
 	ThreadKey string
+	// SourceTaskID is the lifecycle task this outbound belongs to (empty for
+	// free conversation). Channel-bound adapters use it to anchor every task
+	// message under one per-task thread: the adapter ensures a thread root for
+	// the task exists and threads the message under it, so one task = one
+	// thread instead of flat, interleaved channel chatter.
+	SourceTaskID string
 }
 
 // HealthState is the connection state of an adapter.

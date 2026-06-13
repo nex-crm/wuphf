@@ -41,6 +41,16 @@ func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 		// back to channel-only when ReplyTo is unset.
 		if taskID := b.activeOwnerTaskIDLocked(msg.From, msg.Channel, msg.ReplyTo); taskID != "" {
 			msg.SourceTaskID = taskID
+			// Chain the agent's task message into the task's thread so the
+			// thread-scoped context (ThreadMessageIDs walks ReplyTo) actually
+			// contains the agent's own work — otherwise a task turn would see
+			// only the bare root card and miss its collaborators' replies.
+			// Only fills an empty ReplyTo; an explicit in-thread reply wins.
+			if strings.TrimSpace(msg.ReplyTo) == "" {
+				if t := b.findTaskByIDLocked(taskID); t != nil && strings.TrimSpace(t.ThreadID) != "" {
+					msg.ReplyTo = strings.TrimSpace(t.ThreadID)
+				}
+			}
 		}
 	}
 	b.messages = append(b.messages, msg)

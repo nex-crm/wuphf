@@ -295,6 +295,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 			humanPrefix, packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	}
+	notification += l.slackChannelConventionNote(channel)
 
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
 		prompt := headlessSandboxNote() + notification
@@ -357,4 +358,21 @@ func isDeterministicPhase2CEODM(channel string) bool {
 		return true
 	}
 	return false
+}
+
+// slackChannelConventionNote returns the authoring conventions appended to
+// every notification for a Slack-bridged channel, or "" elsewhere. The rules
+// exist because the channel contains REAL people and external agents:
+// @-tagging is a wire-level ping there, and WUPHF presents as one
+// coordinating bot, not a cast of internal roles.
+func (l *Launcher) slackChannelConventionNote(channel string) string {
+	if l == nil || l.broker == nil || !l.broker.ChannelHasSurface(channel, "slack") {
+		return ""
+	}
+	return "\n---\nSLACK CHANNEL CONVENTIONS (this channel is bridged to a real Slack workspace with real people and external agents): " +
+		"(1) NEVER @-tag an agent or person unless you need them to act or respond — a tag pings them and they WILL respond; for FYI/status references use the plain name with no @. " +
+		"(2) To delegate to an external agent and get a response, START your message with @agent-slug. " +
+		"(3) You are part of ONE coordinating presence (the office bot). Never introduce yourself by an internal role name like CEO or planner; speak as the office. " +
+		"(4) If a message needs no action from you, post NOTHING. Never post acknowledgement-only replies (\"noted\", \"acknowledged\", \"no action needed\") — real people read this channel, and repeating the same status is spam. Summarize once when the situation changes, not once per incoming message. " +
+		"(5) Every task lives in its OWN Slack thread (the office opens one automatically, rooted on the task card). Do all of a task's work inside that thread — never start parallel top-level messages for the same task. To quote or reference another message, paste its Slack message link; Slack renders the link as a quoted reply."
 }

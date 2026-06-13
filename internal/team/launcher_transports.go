@@ -74,6 +74,60 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}
 
+	// Slack: start if both a bot token (xoxb-, Web API) and an app token
+	// (xapp-, Socket Mode) are configured and the broker has at least one slack
+	// surface channel. Missing either token, or no connected channel yet, skips
+	// silently — the transport starts on the next launch once setup is complete.
+	slackBotToken := config.ResolveSlackBotToken()
+	slackAppToken := config.ResolveSlackAppToken()
+	if slackBotToken != "" && slackAppToken != "" {
+		st := NewSlackTransport(b, slackBotToken, slackAppToken)
+		if len(st.ChannelMap) == 0 {
+			log.Printf("[transport] slack: tokens present but no channels connected yet — skipping")
+		} else {
+			host := &brokerTransportHost{broker: b}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			dispatchDone := make(chan struct{})
+			cardsDone := make(chan struct{})
+			stops = append(stops, func() {
+				cancel()
+				<-done         // wait for Run to return before broker.Stop()
+				<-dispatchDone // and the outbound dispatcher's goroutine
+				<-cardsDone    // and the task-card sync loop
+			})
+			go func() {
+				defer close(done)
+				if err := st.Run(ctx, host); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] slack: exited with error: %v", err)
+				}
+			}()
+			go func() {
+				defer close(dispatchDone)
+				if err := runOutboundDispatcher(ctx, b, st.Name(), st.FormatOutbound, st.Send); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] slack: outbound dispatcher exited: %v", err)
+				}
+			}()
+			go func() {
+				defer close(cardsDone)
+				if err := st.runTaskCardSync(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] slack: task card sync exited: %v", err)
+				}
+			}()
+			entitiesDone := make(chan struct{})
+			stops = append(stops, func() { <-entitiesDone })
+			go func() {
+				defer close(entitiesDone)
+				if err := st.runEntityFactSync(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] slack: entity fact sync exited: %v", err)
+				}
+			}()
+			log.Printf("[transport] slack: started (%d channel(s))", len(st.ChannelMap))
+		}
+	} else if slackBotToken != "" || slackAppToken != "" {
+		log.Printf("[transport] slack: only one of SLACK_BOT_TOKEN / SLACK_APP_TOKEN set — both are required, skipping")
+	}
+
 	// OpenClaw: opt-in when members exist or a gateway URL is configured.
 	bridge, ocErr := BuildOpenclawBridgeFromConfig(b)
 	if ocErr != nil {

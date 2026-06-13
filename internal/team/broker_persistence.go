@@ -119,6 +119,17 @@ func (b *Broker) loadState() error {
 		}
 	}
 	b.messages = state.Messages
+	// Messages loaded from disk predate this boot — a previous run already
+	// relayed them (or they are plain history). Seed the delivered set so the
+	// outbound dispatcher never replays channel history to an external surface
+	// after a restart; externalDelivered is in-memory only, and a cold map made
+	// ExternalQueue re-queue every surfaced message on boot.
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{}, len(b.messages))
+	}
+	for _, msg := range b.messages {
+		b.externalDelivered[msg.ID] = struct{}{}
+	}
 	b.incidents = state.Incidents
 	b.members = state.Members
 	b.channels = state.Channels
@@ -153,6 +164,8 @@ func (b *Broker) loadState() error {
 	b.schedulerRevisions = cloneSchedulerRevisions(state.SchedulerRevisions)
 	healStuckRoutines(b.scheduler)
 	b.skills = state.Skills
+	b.slackTaskCards = state.SlackTaskCards
+	b.slackSpawns = state.SlackSpawns
 	// Backfill OwnerAgents for skills persisted before per-agent scoping
 	// landed. Agent-created skills get auto-enabled for their creator so
 	// they keep working after upgrade; human-created skills stay
@@ -304,6 +317,8 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		SchedulerActivity:  cloneSchedulerActivity(b.schedulerActivity),
 		SchedulerRevisions: cloneSchedulerRevisions(b.schedulerRevisions),
 		Skills:             b.skills,
+		SlackTaskCards:     b.cloneSlackTaskCardsLocked(),
+		SlackSpawns:        b.cloneSlackSpawnsLocked(),
 		HumanInvites:       b.humanInvites,
 		HumanSessions:      b.humanSessions,
 		SharedMemory:       b.sharedMemory,
@@ -395,6 +410,7 @@ func (b *Broker) isDefaultBrokerStateLocked() bool {
 		len(b.policies) == 0 &&
 		len(b.scheduler) == 0 &&
 		len(b.skills) == 0 &&
+		len(b.slackSpawns) == 0 &&
 		len(b.sharedMemory) == 0 &&
 		isDefaultChannelState(b.channels) &&
 		isDefaultOfficeMemberState(b.members) &&

@@ -112,7 +112,13 @@ type LearningSearchFilters struct {
 	Trusted      *bool
 	PlaybookSlug string
 	File         string
-	Limit        int
+	// TaskID, when set, restricts results to learnings recorded against that
+	// exact task. Unlike Scope/File/Query (which are fuzzy), this is an exact
+	// match on LearningRecord.TaskID. The egress path (the Slack context-packer)
+	// requires it: "task-scoped learnings" handed to a foreign bot must AND-scope
+	// to the task, never leak unrelated durable brain content via a fuzzy match.
+	TaskID string
+	Limit  int
 }
 
 type LearningSearchResult struct {
@@ -273,6 +279,7 @@ func (l *LearningLog) Search(filters LearningSearchFilters) ([]LearningSearchRes
 	scope := strings.TrimSpace(filters.Scope)
 	playbookSlug := strings.TrimSpace(filters.PlaybookSlug)
 	file := strings.TrimSpace(filters.File)
+	taskID := strings.TrimSpace(filters.TaskID)
 	results := make([]LearningSearchResult, 0, len(deduped))
 	for _, rec := range deduped {
 		if filters.Type != "" && rec.Type != filters.Type {
@@ -291,6 +298,9 @@ func (l *LearningLog) Search(filters LearningSearchFilters) ([]LearningSearchRes
 			continue
 		}
 		if file != "" && !stringSliceContains(rec.Files, file) {
+			continue
+		}
+		if taskID != "" && rec.TaskID != taskID {
 			continue
 		}
 		if query != "" && !learningMatchesQuery(rec, query) {

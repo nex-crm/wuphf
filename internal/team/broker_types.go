@@ -286,6 +286,13 @@ type teamTask struct {
 	// for v1 the task carries its own copy so the routing logic does not
 	// need a Lane-B dependency.
 	Tags []string `json:"tags,omitempty"`
+	// WikiRefs are wiki-relative article paths explicitly linked to this task.
+	// The Slack context-packer treats them as the ONLY wiki content a first-party
+	// foreign bot may receive ("explicitly task-linked wiki refs"), never free
+	// WikiIndex.Search, which would be a retrieval-injection / over-share path.
+	// Empty for every task until something links an article, so the safe default
+	// is "no wiki egress". Wire key "wiki_refs" is additive + stable.
+	WikiRefs []string `json:"wiki_refs,omitempty"`
 	// ReviewStartedAt is the RFC3339 timestamp at which the task entered
 	// the review state. The convergence sweeper compares this against
 	// ReviewTimeoutSeconds (or the package-level default) to decide
@@ -494,6 +501,7 @@ type teamTaskWire struct {
 	LifecycleState       LifecycleState          `json:"lifecycle_state,omitempty"`
 	Reviewers            []string                `json:"reviewers,omitempty"`
 	Tags                 []string                `json:"tags,omitempty"`
+	WikiRefs             []string                `json:"wiki_refs,omitempty"`
 	ReviewStartedAt      string                  `json:"review_started_at,omitempty"`
 	ReviewTimeoutSeconds int                     `json:"review_timeout_seconds,omitempty"`
 	AckedAt              string                  `json:"acked_at,omitempty"`
@@ -550,6 +558,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		LifecycleState:       t.LifecycleState,
 		Reviewers:            t.Reviewers,
 		Tags:                 t.Tags,
+		WikiRefs:             t.WikiRefs,
 		ReviewStartedAt:      t.ReviewStartedAt,
 		ReviewTimeoutSeconds: t.ReviewTimeoutSeconds,
 		AckedAt:              t.AckedAt,
@@ -608,6 +617,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.blocked = w.Blocked
 	t.LifecycleState = normalizeLegacyLifecycleStateName(w.LifecycleState)
 	t.Tags = w.Tags
+	t.WikiRefs = w.WikiRefs
 	t.ReviewStartedAt = w.ReviewStartedAt
 	t.ReviewTimeoutSeconds = w.ReviewTimeoutSeconds
 	t.AckedAt = w.AckedAt
@@ -857,6 +867,8 @@ type brokerState struct {
 	SchedulerActivity  map[string][]schedulerActivity     `json:"scheduler_activity,omitempty"`
 	SchedulerRevisions map[string][]schedulerRevision     `json:"scheduler_revisions,omitempty"`
 	Skills             []teamSkill                        `json:"skills,omitempty"`
+	SlackTaskCards     map[string]slackTaskCardRecord     `json:"slack_task_cards,omitempty"`
+	SlackSpawns        map[string]slackSpawnRecord        `json:"slack_spawns,omitempty"`
 	HumanInvites       []humanInvite                      `json:"human_invites,omitempty"`
 	HumanSessions      []humanSession                     `json:"human_sessions,omitempty"`
 	SharedMemory       map[string]map[string]string       `json:"shared_memory,omitempty"`

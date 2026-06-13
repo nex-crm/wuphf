@@ -34,7 +34,11 @@ type TaskPostRequest struct {
 	WorktreePath     string   `json:"worktree_path"`
 	WorktreeBranch   string   `json:"worktree_branch"`
 	DependsOn        []string `json:"depends_on"`
-	ParentIssueID    string   `json:"parent_issue_id"`
+	// WikiRefs links wiki articles to the task (additive wire key
+	// "wiki_refs"); the Slack context-packer's FirstParty tier exports
+	// task-LINKED wiki only, so this is the packer's wiki allowlist.
+	WikiRefs      []string `json:"wiki_refs"`
+	ParentIssueID string   `json:"parent_issue_id"`
 	// VerificationKind/Spec/Required set the machine-checkable definition
 	// of done on create (U1.1, task_verification.go). Kind is one of
 	// command|artifact|url|none.

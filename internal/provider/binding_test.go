@@ -20,6 +20,7 @@ func TestValidateKind(t *testing.T) {
 		{"openclaw", "openclaw", false},
 		{"openclaw_http", "openclaw-http", false},
 		{"hermes_agent", "hermes-agent", false},
+		{"slack", "slack", false},
 		{"unknown", "gemini", true},
 		{"typo", "claud-code", true},
 		{"uppercase_rejected", "Codex", true},
@@ -98,6 +99,36 @@ func TestBindingJSONRoundTrip_Openclaw(t *testing.T) {
 	}
 }
 
+func TestBindingJSONRoundTrip_Slack(t *testing.T) {
+	t.Parallel()
+	in := ProviderBinding{
+		Kind:  KindSlack,
+		Slack: &SlackProviderBinding{UserID: "U0123ABCD"},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got ProviderBinding
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Kind != in.Kind {
+		t.Fatalf("round-trip lost kind: got=%+v want=%+v", got, in)
+	}
+	if got.Slack == nil || *got.Slack != *in.Slack {
+		t.Fatalf("round-trip lost slack block: got=%+v want=%+v", got.Slack, in.Slack)
+	}
+	// A non-slack binding must not emit an empty slack object.
+	plain, err := json.Marshal(ProviderBinding{Kind: KindCodex})
+	if err != nil {
+		t.Fatalf("marshal plain: %v", err)
+	}
+	if strings.Contains(string(plain), "slack") {
+		t.Fatalf("non-slack binding leaked slack key: %s", plain)
+	}
+}
+
 func TestResolveKindFallsBackToGlobal(t *testing.T) {
 	t.Parallel()
 	// Caller-provided global resolver — tests the shape without depending on config.
@@ -112,7 +143,7 @@ func TestResolveKindFallsBackToGlobal(t *testing.T) {
 
 func TestIsGatewayKind(t *testing.T) {
 	t.Parallel()
-	gateways := []string{KindOpenclaw, KindOpenclawHTTP, KindHermesAgent}
+	gateways := []string{KindOpenclaw, KindOpenclawHTTP, KindHermesAgent, KindSlack}
 	for _, k := range gateways {
 		if !IsGatewayKind(k) {
 			t.Errorf("IsGatewayKind(%q) = false, want true", k)

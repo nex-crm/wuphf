@@ -840,9 +840,28 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	status, msg := b.answerRequestFromActor(answerActor, body.ID, body.ChoiceID, body.ChoiceText, body.CustomText)
+	if status != http.StatusOK {
+		http.Error(w, msg, status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// answerRequestFromActor resolves an active human interview through the broker's
+// canonical answer path and returns an HTTP-style (status, message) pair. It is
+// the single home of the answer side effects — scheduler completion, dependent
+// unblocking, skill activation/archival, self-heal task creation, the answer
+// chat message, and the audit log entry — so every caller (the HTTP handler and
+// the Slack Block Kit gate) fires the exact same effects in the exact same
+// order. answerActor is the resolved sender string (e.g. "human:mira" or "you"),
+// already namespaced by the caller; only a human actor reaches this path because
+// the approval gate is human-only. On success it returns (http.StatusOK, "").
+func (b *Broker) answerRequestFromActor(answerActor, id, choiceIDRaw, choiceTextRaw, customTextRaw string) (int, string) {
 	b.mu.Lock()
 	for i := range b.requests {
-		if b.requests[i].ID != body.ID {
+		if b.requests[i].ID != id {
 			continue
 		}
 		// Reject answers for requests that are no longer active. Without
@@ -853,17 +872,15 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		// immutable after it lands.
 		if !requestIsActive(b.requests[i]) {
 			b.mu.Unlock()
-			http.Error(w, "request is not active", http.StatusConflict)
-			return
+			return http.StatusConflict, "request is not active"
 		}
-		choiceID := strings.TrimSpace(body.ChoiceID)
-		choiceText := strings.TrimSpace(body.ChoiceText)
-		customText := strings.TrimSpace(body.CustomText)
+		choiceID := strings.TrimSpace(choiceIDRaw)
+		choiceText := strings.TrimSpace(choiceTextRaw)
+		customText := strings.TrimSpace(customTextRaw)
 		option := findRequestOption(b.requests[i], choiceID)
 		if choiceID != "" && option == nil {
 			b.mu.Unlock()
-			http.Error(w, "unknown request option", http.StatusBadRequest)
-			return
+			return http.StatusBadRequest, "unknown request option"
 		}
 		if option != nil {
 			if choiceText == "" {
@@ -875,14 +892,12 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 					hint = "custom_text required for this response"
 				}
 				b.mu.Unlock()
-				http.Error(w, hint, http.StatusBadRequest)
-				return
+				return http.StatusBadRequest, hint
 			}
 		}
 		if choiceID == "" && choiceText == "" && customText == "" {
 			b.mu.Unlock()
-			http.Error(w, "choice_text or custom_text required", http.StatusBadRequest)
-			return
+			return http.StatusBadRequest, "choice_text or custom_text required"
 		}
 		answer := &interviewAnswer{
 			ChoiceID:   choiceID,
@@ -908,18 +923,14 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		msg = b.appendMessageLocked(msg)
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()
-			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-			return
+			return http.StatusInternalServerError, "failed to persist broker state"
 		}
 		b.flushPendingAutoNotebookTransitionsLocked(pendingCascade, "system")
 		b.mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-		return
+		return http.StatusOK, ""
 	}
 	b.mu.Unlock()
-	http.Error(w, "request not found", http.StatusNotFound)
+	return http.StatusNotFound, "request not found"
 }
 
 // applyRequestAnswerLocked is the single mutation core for answering a

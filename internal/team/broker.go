@@ -66,6 +66,7 @@ type Broker struct {
 	memberIndex       map[string]int                  // slug → index into members; guarded by mu
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
+	webURL            string                          // base URL of the web UI, set by LaunchWeb; guarded by mu
 	channels          []teamChannel
 	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
@@ -137,12 +138,17 @@ type Broker struct {
 	// updates the company name during onboarding. Existing task-N IDs
 	// are left untouched — only new allocations carry the new prefix.
 	// Guarded by b.mu.
-	idPrefix                string
-	notificationSince       string
-	insightsSince           string
-	pendingInterview        *humanInterview
-	usage                   teamUsageState
-	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
+	idPrefix          string
+	notificationSince string
+	insightsSince     string
+	pendingInterview  *humanInterview
+	usage             teamUsageState
+	externalDelivered map[string]struct{}            // message IDs already queued for external delivery
+	slackTaskCards    map[string]slackTaskCardRecord // task ID → posted Slack lifecycle card (persisted)
+	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
+	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
+	// nil means the real Slack Web API. Tests inject a fake.
+	slackSpawnAuthTest      slackSpawnAuthTestFunc
 	messageSubscribers      map[int]chan channelMessage
 	actionSubscribers       map[int]chan officeActionLog
 	activity                map[string]agentActivitySnapshot
@@ -688,6 +694,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
+	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
+	mux.HandleFunc("/slack/agents", b.requireAuth(b.handleSlackAgents))
+	mux.HandleFunc("/slack/agents/spawn", b.requireAuth(b.handleSlackAgentsSpawn))
+	mux.HandleFunc("/slack/agents/spawn/complete", b.requireAuth(b.handleSlackAgentsSpawnComplete))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
@@ -956,6 +966,21 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 	return out
 }
 
+// SetWebURL records the web UI's base URL so surfaces that link back to the
+// app (e.g. the Slack App Home tab) can build real links.
+func (b *Broker) SetWebURL(url string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.webURL = strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+// WebURL returns the web UI's base URL, or "" before LaunchWeb has run.
+func (b *Broker) WebURL() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.webURL
+}
+
 // EnsureBridgedMember registers a bridged external agent as an office member
 // so it appears in the sidebar and can be @mentioned. Idempotent — calling with
 // an existing slug is a no-op. CreatedBy tags the source (e.g. "openclaw") so
@@ -1045,6 +1070,20 @@ func (b *Broker) EnsureDirectChannel(agentSlug string) (string, error) {
 
 // PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
 func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
+	return b.postInboundSurfaceMessage(from, channel, content, provider, "")
+}
+
+// PostInboundSurfaceMessageInThread is the thread-aware inbound path: when a
+// surface reply arrives inside a thread (threadRootKey is the surface's thread
+// root id — Slack's thread_ts), the broker maps it to the task whose thread
+// root that is and folds the reply into the task's thread (ReplyTo +
+// SourceTaskID). This is what keeps a foreign agent's in-thread reply scoped
+// to the task instead of leaking into the channel's shared context.
+func (b *Broker) PostInboundSurfaceMessageInThread(from, channel, content, provider, threadRootKey string) (channelMessage, error) {
+	return b.postInboundSurfaceMessage(from, channel, content, provider, threadRootKey)
+}
+
+func (b *Broker) postInboundSurfaceMessage(from, channel, content, provider, threadRootKey string) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
@@ -1070,6 +1109,38 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		SourceLabel: provider,
 		Content:     strings.TrimSpace(content),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	// Thread mapping: a reply inside a task's Slack thread is folded into that
+	// task's internal thread so the task context (and only that task) sees it.
+	// Set before appendMessageLocked, whose owner-based auto-stamp does NOT
+	// fire for non-owner foreign agents or humans — the thread is the only
+	// signal that ties their reply to the task.
+	if root := b.slackTaskByRootTSLocked(threadRootKey); root != nil {
+		msg.SourceTaskID = root.ID
+		if strings.TrimSpace(msg.ReplyTo) == "" && strings.TrimSpace(root.ThreadID) != "" {
+			msg.ReplyTo = strings.TrimSpace(root.ThreadID)
+		}
+	}
+	// Promote @slug mentions into tags, mirroring handlePostMessage's
+	// auto-promote: surface humans (Slack/Telegram) expect "@agent" to
+	// notify exactly like web humans do. Same lead-routing guard as the web
+	// path: when the lead is mentioned, do NOT fan out to other mentioned
+	// agents — the human's intent is for the lead to route.
+	if b.senderMayAutoPromoteLocked(from) {
+		mentioned := extractMentionedSlugs(msg.Content)
+		leadSlug := officeLeadSlugFrom(b.members)
+		leadMentioned := leadSlug != "" && containsString(mentioned, leadSlug)
+		for _, slug := range mentioned {
+			if b.findMemberLocked(slug) == nil {
+				continue
+			}
+			if leadMentioned && slug != leadSlug {
+				continue
+			}
+			if !containsString(msg.Tagged, slug) {
+				msg.Tagged = append(msg.Tagged, slug)
+			}
+		}
 	}
 	msg = b.appendMessageLocked(msg)
 	// Mark as already delivered so it doesn't bounce back to the same surface
