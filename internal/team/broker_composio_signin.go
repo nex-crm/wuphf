@@ -52,16 +52,18 @@ const (
 )
 
 // composioInstallCommand is the official installer, surfaced verbatim by the UI
-// as a copy-able fallback and run by the auto-install path below.
+// as a copy-able fallback and run by the auto-install path.
 const composioInstallCommand = "curl -fsSL https://composio.dev/install | bash"
 
 // composioInstaller runs the official installer. It's a package var so tests
-// substitute a fake install instead of shelling out to curl|bash. The default
-// uses a shell because the official installer is a curl|bash pipeline; it runs
-// ONLY after the human explicitly chose "Sign in with Composio".
-var composioInstaller = func(ctx context.Context) error {
-	return exec.CommandContext(ctx, "bash", "-c", composioInstallCommand).Run()
-}
+// substitute a fake install instead of shelling out, and so the real
+// implementation can be platform-specific: the installer is a `curl | bash`
+// pipeline that only exists on Unix, so the default lives in
+// broker_composio_signin_unix.go; Windows gets a stub that reports
+// not-supported (broker_composio_signin_windows.go), which cleanly falls back
+// to the manual install command. It runs ONLY after the human explicitly chose
+// "Sign in with Composio".
+var composioInstaller = defaultComposioInstaller
 
 var (
 	// composioProjectKeyPattern accepts only project-scoped SDK keys.
@@ -84,6 +86,10 @@ var (
 	composioLoginWindow = 15 * time.Minute
 	// composioInstallTimeout bounds the auto-install of the CLI.
 	composioInstallTimeout = 4 * time.Minute
+	// composioInstallDeadlineGrace is how long past the install context the
+	// status endpoint waits before declaring the install wedged — enough for
+	// the auto-install goroutine to flip state after its context ends.
+	composioInstallDeadlineGrace = 30 * time.Second
 )
 
 // composioSigninState is the wire shape both endpoints return.
@@ -131,7 +137,13 @@ func (b *Broker) handleComposioSigninStart(w http.ResponseWriter, r *http.Reques
 			Status:         composioSigninStatusInstalling,
 			InstallCommand: composioInstallCommand,
 		}
-		flow.deadline = time.Now().Add(composioInstallTimeout + composioLoginWindow)
+		// Backstop only the INSTALL phase (a small grace past the install
+		// context so the auto-install goroutine can transition state first).
+		// The login window is a separate, later deadline set by
+		// composioSigninBeginLogin once the flow reaches awaiting_login; folding
+		// it in here would leave a wedged install showing "installing" for the
+		// whole install+login span instead of timing out at the install budget.
+		flow.deadline = time.Now().Add(composioInstallTimeout + composioInstallDeadlineGrace)
 		state := flow.state
 		flow.mu.Unlock()
 		b.recordComposioSigninEvent("integration_signin_started", actor, "Installing the Composio CLI, then signing in")

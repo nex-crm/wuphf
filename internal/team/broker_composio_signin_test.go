@@ -142,6 +142,49 @@ func TestComposioSigninStart_AutoInstallFailsFallsBackToCLIMissing(t *testing.T)
 	}
 }
 
+// TestComposioSigninStart_InstallDeadlineExcludesLoginWindow: the "installing"
+// backstop must be bounded by the install budget (+ a small grace), NOT
+// stretched by the login window — otherwise a wedged install lingers in
+// "installing" for the whole install+login span before timing out.
+func TestComposioSigninStart_InstallDeadlineExcludesLoginWindow(t *testing.T) {
+	dir := t.TempDir() // empty PATH dir — no composio
+	b := newComposioSigninBroker(t, dir)
+
+	// Block the installer so the flow stays in "installing" while we inspect
+	// the deadline the start handler set.
+	block := make(chan struct{})
+	orig := composioInstaller
+	composioInstaller = func(_ context.Context) error {
+		<-block
+		return errors.New("unblocked in cleanup")
+	}
+	t.Cleanup(func() {
+		close(block)
+		composioInstaller = orig
+	})
+
+	start := time.Now()
+	code, state, raw := composioSigninRequest(t, b, http.MethodPost, "/integrations/composio/signin/start")
+	if code != http.StatusOK {
+		t.Fatalf("start status=%d body=%s", code, raw)
+	}
+	if state.Status != composioSigninStatusInstalling {
+		t.Fatalf("expected installing on start, got %+v", state)
+	}
+
+	b.composioSignin.mu.Lock()
+	deadline := b.composioSignin.deadline
+	b.composioSignin.mu.Unlock()
+
+	maxAllowed := start.Add(composioInstallTimeout + composioInstallDeadlineGrace + time.Second)
+	if deadline.After(maxAllowed) {
+		t.Fatalf("install deadline %v exceeds install budget+grace (max %v) — login window leaked into the install backstop", deadline, maxAllowed)
+	}
+	if !deadline.After(start.Add(composioInstallTimeout)) {
+		t.Fatalf("install deadline %v should sit past the install timeout from start", deadline)
+	}
+}
+
 // TestComposioSigninStart_AutoInstallSucceedsThenSignsIn: the CLI is absent, so
 // start auto-installs (the stub drops a fake composio + a logged-in session),
 // then the flow continues straight through provisioning to done — one user

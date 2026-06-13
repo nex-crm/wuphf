@@ -124,6 +124,9 @@ export function ConnectIntegrationCard({
     staleTime: 10_000,
   });
   const composioSignedIn = configQuery.data?.composio_key_set === true;
+  // Whether /config has actually resolved. Until it has, we know nothing about
+  // sign-in state — and must NOT treat "not loaded yet" as "not signed in".
+  const configReady = configQuery.isSuccess;
 
   const [signin, setSignin] = useState<ComposioSigninState | null>(null);
 
@@ -144,7 +147,14 @@ export function ConnectIntegrationCard({
         : 2_500;
     },
   });
-  const signinInfo = signinStatusQuery.data ?? signin;
+  // Only trust the poll's data while THIS card has a sign-in in flight. The
+  // query key is shared across cards, and TanStack hands cached data to
+  // disabled observers too — so a freshly-mounted card could otherwise read a
+  // previous flow's stale status (and stale auth_url) before the user has done
+  // anything. `signin` is only set after the user clicks, so this gate keeps a
+  // fresh card clean.
+  const pollData = signin ? signinStatusQuery.data : undefined;
+  const signinInfo = pollData ?? signin;
   const signinStatus = signinInfo?.status;
 
   // The auth_url may arrive on the START response (CLI already present) OR later
@@ -153,7 +163,7 @@ export function ConnectIntegrationCard({
   // Prefer whichever source carries a URL: the start response (CLI present) or
   // the poll (auto-install path). A poll frame without auth_url must not mask
   // one the start already provided.
-  const authUrl = signin?.auth_url ?? signinStatusQuery.data?.auth_url;
+  const authUrl = signin?.auth_url ?? pollData?.auth_url;
   const openedAuthUrlRef = useRef<string | null>(null);
   useEffect(() => {
     if (!authUrl || openedAuthUrlRef.current === authUrl) return;
@@ -195,6 +205,10 @@ export function ConnectIntegrationCard({
 
   // Connect entry point: gate on Composio sign-in, then initiate the connection.
   const handleConnect = () => {
+    // Wait for /config to resolve before routing — otherwise an already
+    // signed-in office would be sent through a redundant sign-in just because
+    // the config fetch hadn't landed on the first click.
+    if (!configReady) return;
     if (!composioSignedIn) {
       signinMutation.mutate();
       return;
@@ -288,17 +302,20 @@ export function ConnectIntegrationCard({
           disabled={
             submitting ||
             !platform ||
+            !configReady ||
             connectMutation.isPending ||
             signinMutation.isPending
           }
         >
-          {signingIn
-            ? "Signing in to Composio…"
-            : !composioSignedIn
-              ? `Sign in & connect ${name}`
-              : pending && !failed
-                ? "Reopen connect window"
-                : `Connect ${name}`}
+          {!configReady
+            ? "Checking…"
+            : signingIn
+              ? "Signing in to Composio…"
+              : !composioSignedIn
+                ? `Sign in & connect ${name}`
+                : pending && !failed
+                  ? "Reopen connect window"
+                  : `Connect ${name}`}
         </button>
         <button
           type="button"

@@ -74,7 +74,7 @@ describe("<ConnectIntegrationCard>", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the integration identity and the connect/skip actions", () => {
+  it("renders the integration identity and the connect/skip actions", async () => {
     render(
       wrap(
         <ConnectIntegrationCard
@@ -91,8 +91,9 @@ describe("<ConnectIntegrationCard>", () => {
     expect(
       screen.getByText(/needs this to run an external action/i),
     ).toBeInTheDocument();
+    // Button settles from the "Checking…" placeholder once /config resolves.
     expect(
-      screen.getByRole("button", { name: /connect gmail/i }),
+      await screen.findByRole("button", { name: /connect gmail/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
   });
@@ -229,6 +230,90 @@ describe("<ConnectIntegrationCard>", () => {
     expect(startConnect).not.toHaveBeenCalled();
   });
 
+  it("waits for /config before routing — a fast click never sign-ins an already-signed-in office", async () => {
+    // /config hasn't resolved yet on the first click. Treating "not loaded" as
+    // "not signed in" would wrongly start a sign-in; instead the button is a
+    // disabled "Checking…" until config lands.
+    let resolveConfig: (v: { composio_key_set: boolean }) => void = () => {};
+    getConfig.mockReturnValue(
+      new Promise<{ composio_key_set: boolean }>((res) => {
+        resolveConfig = res;
+      }),
+    );
+    startConnect.mockResolvedValue({
+      provider: "composio",
+      platform: "gmail",
+      status: "pending",
+    });
+    getStatus.mockResolvedValue({
+      provider: "composio",
+      platform: "gmail",
+      status: "pending",
+    });
+
+    render(
+      wrap(
+        <ConnectIntegrationCard
+          request={makeConnectRequest()}
+          submitting={false}
+          onSkip={() => {}}
+          onDismiss={() => {}}
+        />,
+      ),
+    );
+
+    const checking = screen.getByRole("button", { name: /checking/i });
+    expect(checking).toBeDisabled();
+    fireEvent.click(checking); // disabled → no-op
+    expect(startSignin).not.toHaveBeenCalled();
+    expect(startConnect).not.toHaveBeenCalled();
+
+    // Config resolves to already-signed-in → Connect goes to integration OAuth,
+    // never the sign-in flow.
+    resolveConfig({ composio_key_set: true });
+    const connectBtn = await screen.findByRole("button", {
+      name: /^connect gmail$/i,
+    });
+    fireEvent.click(connectBtn);
+    await waitFor(() =>
+      expect(startConnect).toHaveBeenCalledWith("composio", "gmail"),
+    );
+    expect(startSignin).not.toHaveBeenCalled();
+  });
+
+  it("ignores a previous flow's cached sign-in status on a fresh card", async () => {
+    // The ["composio-signin-status"] cache is shared across cards, and TanStack
+    // hands cached data to disabled observers. A freshly-mounted card must not
+    // act on a stale status (e.g. auto-open a stale auth_url) before the user
+    // has clicked anything.
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(["composio-signin-status"], {
+      status: "awaiting_login",
+      auth_url: "https://app.composio.dev/login?stale=1",
+    });
+
+    render(
+      <QueryClientProvider client={qc}>
+        <ConnectIntegrationCard
+          request={makeConnectRequest()}
+          submitting={false}
+          onSkip={() => {}}
+          onDismiss={() => {}}
+        />
+      </QueryClientProvider>,
+    );
+
+    // Already-signed-in config settles → the card shows a plain Connect, not a
+    // "signing in" state, and never opens the stale cached auth_url.
+    await screen.findByRole("button", { name: /^connect gmail$/i });
+    expect(window.open).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText(/finish signing in to composio/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("answers skip without touching the OAuth flow", () => {
     const onSkip = vi.fn();
     render(
@@ -247,7 +332,7 @@ describe("<ConnectIntegrationCard>", () => {
     expect(startSignin).not.toHaveBeenCalled();
   });
 
-  it("disables connect when no platform is known", () => {
+  it("disables connect when no platform is known", async () => {
     render(
       wrap(
         <ConnectIntegrationCard
@@ -258,8 +343,10 @@ describe("<ConnectIntegrationCard>", () => {
         />,
       ),
     );
+    // After /config settles the placeholder "Checking…" label resolves; the
+    // missing platform still keeps the button disabled.
     expect(
-      screen.getByRole("button", { name: /connect the integration/i }),
+      await screen.findByRole("button", { name: /connect the integration/i }),
     ).toBeDisabled();
   });
 });
