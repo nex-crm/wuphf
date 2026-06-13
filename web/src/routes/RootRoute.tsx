@@ -697,7 +697,7 @@ function MainContent() {
     case "agents":
       return <AgentsTool />;
     case "agent-detail":
-      return <AgentDetail agentSlug={route.agentSlug} />;
+      return <AgentDetail agentSlug={route.agentSlug} tab={route.tab} />;
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
     case "routine-detail":

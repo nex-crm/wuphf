@@ -231,6 +231,13 @@ export const agentDetailRoute = createRoute({
   path: "$agentSlug",
 });
 
+// /agents/$agentSlug/$tab — tabbed subspace view. Child of agentDetailRoute.
+// Tab values: chat | tasks | skills | policies | live-stream | config.
+export const agentDetailTabRoute = createRoute({
+  getParentRoute: () => agentDetailRoute,
+  path: "$tab",
+});
+
 // Route tree
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -253,8 +260,11 @@ export const routeTree = rootRoute.addChildren([
   routinesRoute,
   routineNewRoute,
   routineDetailRoute,
-  // Agents tool: roster (/agents) with the detail/config page as a child.
-  agentsRoute.addChildren([agentDetailRoute]),
+  // Agents tool: roster (/agents) with the detail/config page as a child,
+  // and the tabbed subspace (/agents/$agentSlug/$tab) as a grandchild.
+  agentsRoute.addChildren([
+    agentDetailRoute.addChildren([agentDetailTabRoute]),
+  ]),
   // Skill detail (full-screen edit + render with raw/preview toggle).
   skillDetailRoute,
 ]);

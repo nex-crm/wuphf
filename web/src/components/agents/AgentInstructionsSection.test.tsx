@@ -118,7 +118,7 @@ describe("<AgentInstructionsSection>", () => {
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("opens the editor on Edit and returns to view on save", async () => {
+  it("opens the raw markdown editor on Edit (faithful default)", async () => {
     const user = userEvent.setup();
     render(wrap(<AgentInstructionsSection agent={specialist} />));
 
@@ -126,6 +126,24 @@ describe("<AgentInstructionsSection>", () => {
     await screen.findByText("Edit");
     await user.click(screen.getByText("Edit"));
 
+    // Definition files default to a faithful raw-markdown textarea, not the
+    // rich Tiptap editor (which normalizes markdown / drops HTML comments).
+    const raw = await screen.findByLabelText(/raw markdown editor for SOUL/i);
+    expect(raw).toBeInTheDocument();
+    expect((raw as HTMLTextAreaElement).value).toMatch(/be relentless/i);
+  });
+
+  it("can switch to the rich editor and save", async () => {
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await screen.findByText("Edit");
+    await user.click(screen.getByText("Edit"));
+    await screen.findByLabelText(/raw markdown editor for SOUL/i);
+
+    // Toggle to Rich → the reused wiki editor mounts seeded with the file.
+    await user.click(screen.getByRole("button", { name: "Rich" }));
     const editor = await screen.findByTestId("wiki-editor-stub");
     expect(editor).toBeInTheDocument();
     expect(screen.getByTestId("editor-path")).toHaveTextContent(
@@ -194,11 +212,12 @@ describe("<AgentInstructionsSection>", () => {
         "agents/growth/SOUL.md",
       );
     });
-    // Editor opens seeded with the generated draft (not the on-disk content).
-    const editor = await screen.findByTestId("wiki-editor-stub");
-    expect(editor).toBeInTheDocument();
-    expect(screen.getByTestId("editor-initial")).toHaveTextContent(
-      "AI-authored, vivid and specific",
+    // Editor opens (raw mode, the faithful default) seeded with the generated
+    // draft — not the on-disk content. Regression: generate must seed rawDraft,
+    // or the draft would be invisible in the default raw textarea.
+    const raw = await screen.findByLabelText(/raw markdown editor for SOUL/i);
+    expect((raw as HTMLTextAreaElement).value).toMatch(
+      /AI-authored, vivid and specific/,
     );
   });
 

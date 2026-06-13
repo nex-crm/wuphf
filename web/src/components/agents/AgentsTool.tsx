@@ -21,7 +21,7 @@ import { type HarnessKind, resolveHarness } from "../../lib/harness";
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
-import { AgentProfilePanel } from "./AgentProfilePanel";
+import { AgentSubspace } from "./AgentSubspace";
 import { AgentWizard, useAgentWizard } from "./AgentWizard";
 
 /** Short descriptors for the always-present default agents. */
@@ -131,9 +131,10 @@ export function AgentsTool() {
 
 interface AgentDetailProps {
   agentSlug: string;
+  tab?: string;
 }
 
-export function AgentDetail({ agentSlug }: AgentDetailProps) {
+export function AgentDetail({ agentSlug, tab }: AgentDetailProps) {
   const { data: members = [] } = useOfficeMembers();
   const agent = useMemo(
     () => members.find((m) => m.slug === agentSlug),
@@ -148,7 +149,7 @@ export function AgentDetail({ agentSlug }: AgentDetailProps) {
     return (
       <div className="app-panel active agents-tool" data-testid="agent-detail">
         <div className="agents-tool-empty">
-          <p>No agent “{agentSlug}”.</p>
+          <p>No agent "{agentSlug}".</p>
           <button
             type="button"
             className="issues-new-btn"
@@ -168,7 +169,7 @@ export function AgentDetail({ agentSlug }: AgentDetailProps) {
       data-testid="agent-detail"
       data-agent-slug={agentSlug}
     >
-      <AgentProfilePanel agent={agent} onClose={back} />
+      <AgentSubspace agent={agent} tab={tab ?? "chat"} />
     </div>
   );
 }

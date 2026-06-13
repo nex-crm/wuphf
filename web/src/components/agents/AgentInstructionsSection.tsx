@@ -27,16 +27,47 @@ const FILE_DESCRIPTIONS: Record<AgentInstructionFile, string> = {
   TOOLS: "Tool inventory and usage notes",
 };
 
+/**
+ * Per-file purpose hints (DEFINITION-FILE MATURITY — parity with NousResearch
+ * Hermes SOUL.md model). Shown above the editor so the human knows exactly
+ * what belongs in each file.
+ */
+const FILE_PURPOSE_HINTS: Record<AgentInstructionFile | "USER", string> = {
+  SOUL: "Persona, voice, values, and hard boundaries — who this agent is. Follows the agent everywhere.",
+  IDENTITY:
+    "Name, role, expertise, and runtime — the factual record. Mostly derived; edit rarely.",
+  OPERATIONS:
+    "How this agent works day to day, and when it escalates. The project/operating playbook.",
+  TOOLS: "Tool inventory and usage notes — what this agent can do.",
+  USER: "The human this office serves — preferences and how to optimize for their time.",
+};
+
 interface FileCardConfig {
   path: string;
   label: string;
   description: string;
+  /** One-line "what belongs here" blurb shown above the editor. */
+  purposeHint?: string;
 }
 
-function AgentFileCard({ path, label, description }: FileCardConfig) {
+function AgentFileCard({
+  path,
+  label,
+  description,
+  purposeHint,
+}: FileCardConfig) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
+  /**
+   * Raw-markdown mode: these are plain .md files and the rich Tiptap
+   * WikiEditor normalises markdown / drops HTML comments. Default = true
+   * (Raw) so edits are maximally faithful.
+   */
+  const [rawMode, setRawMode] = useState(true);
+  const [rawDraft, setRawDraft] = useState<string | null>(null);
+  const [rawSaving, setRawSaving] = useState(false);
+  const [rawSaveError, setRawSaveError] = useState<string | null>(null);
   // An LLM-authored draft, held only for the editor session (never written to
   // the query cache, so disk stays the source of truth). When set, the editor
   // opens seeded with it; Save commits it, Cancel discards it.
@@ -59,6 +90,8 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
         setEditing(false);
         setGeneratedDraft(null);
         setGenError(null);
+        setRawDraft(null);
+        setRawSaveError(null);
       }
       return next;
     });
@@ -67,7 +100,41 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
   const closeEditor = () => {
     setEditing(false);
     setGeneratedDraft(null);
+    setRawDraft(null);
+    setRawSaveError(null);
   };
+
+  async function handleRawSave(currentData: AgentFileResponse) {
+    if (rawDraft === null) return;
+    setRawSaving(true);
+    setRawSaveError(null);
+    try {
+      const result = await writeAgentFile({
+        path,
+        content: rawDraft,
+        commitMessage: `Update ${label}`,
+        expectedSha: currentData.sha,
+      });
+      if ("commit_sha" in result) {
+        queryClient.setQueryData(
+          ["agent-file", path],
+          (old: AgentFileResponse | undefined) =>
+            old ? { ...old, sha: result.commit_sha, exists: true } : old,
+        );
+        void queryClient.invalidateQueries({ queryKey: ["agent-file", path] });
+        closeEditor();
+      } else {
+        // Conflict shape
+        setRawSaveError(
+          "Conflict: file changed on disk. Close and re-open to reload.",
+        );
+      }
+    } catch (err: unknown) {
+      setRawSaveError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setRawSaving(false);
+    }
+  }
 
   async function handleGenerate() {
     setGenerating(true);
@@ -75,7 +142,11 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
     try {
       const { content } = await generateAgentFile(path);
       // Open the editor seeded with the draft so the human reviews + saves it.
+      // Seed BOTH editor surfaces: rawDraft (the default raw textarea) and
+      // generatedDraft (the rich editor, if the human toggles to it). Without
+      // seeding rawDraft the draft would be invisible in the default raw mode.
       setGeneratedDraft(content);
+      setRawDraft(content);
       setEditing(true);
     } catch (err: unknown) {
       setGenError(err instanceof Error ? err.message : "Generation failed");
@@ -109,13 +180,53 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
 
       {expanded ? (
         <div className="agent-file-card-body">
+          {/* Per-file purpose hint (DEFINITION-FILE MATURITY) */}
+          {purposeHint ? (
+            <p className="agent-file-purpose-hint">{purposeHint}</p>
+          ) : null}
+
+          {/* Raw / Rich mode toggle (shown when viewing or editing) */}
+          {data && !isLoading && !isError ? (
+            <div className="agent-file-mode-row">
+              <fieldset className="agent-file-mode-switch">
+                <legend className="sr-only">Editor mode</legend>
+                <button
+                  type="button"
+                  className={`agent-file-mode-btn${rawMode ? " is-active" : ""}`}
+                  onClick={() => {
+                    setRawMode(true);
+                    setEditing(false);
+                    setRawDraft(null);
+                    setRawSaveError(null);
+                  }}
+                  aria-pressed={rawMode}
+                >
+                  Raw
+                </button>
+                <button
+                  type="button"
+                  className={`agent-file-mode-btn${!rawMode ? " is-active" : ""}`}
+                  onClick={() => {
+                    setRawMode(false);
+                    setRawDraft(null);
+                    setRawSaveError(null);
+                  }}
+                  aria-pressed={!rawMode}
+                >
+                  Rich
+                </button>
+              </fieldset>
+            </div>
+          ) : null}
+
           {isLoading ? (
             <div className="agent-file-card-loading">Loading…</div>
           ) : isError ? (
             <div className="agent-file-card-error" role="alert">
               {error instanceof Error ? error.message : "Failed to load file"}
             </div>
-          ) : editing && data ? (
+          ) : !rawMode && editing && data ? (
+            /* Rich / WikiEditor mode */
             <WikiEditor
               path={path}
               initialContent={generatedDraft ?? data.content}
@@ -138,6 +249,43 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
               }}
               onCancel={closeEditor}
             />
+          ) : rawMode && editing && data ? (
+            /* Raw markdown textarea mode */
+            <>
+              <textarea
+                className="agent-file-raw-editor"
+                value={rawDraft ?? data.content}
+                onChange={(e) => setRawDraft(e.target.value)}
+                disabled={rawSaving}
+                aria-label={`Raw markdown editor for ${label}`}
+                rows={14}
+              />
+              {rawSaveError ? (
+                <div className="agent-file-card-error" role="alert">
+                  {rawSaveError}
+                </div>
+              ) : null}
+              <div className="agent-file-card-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={closeEditor}
+                  disabled={rawSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void handleRawSave(data)}
+                  disabled={
+                    rawSaving || rawDraft === null || rawDraft === data.content
+                  }
+                >
+                  {rawSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </>
           ) : data ? (
             <>
               <div className="agent-file-view">
@@ -171,7 +319,10 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm agent-file-edit"
-                  onClick={() => setEditing(true)}
+                  onClick={() => {
+                    setRawDraft(data.content);
+                    setEditing(true);
+                  }}
                   disabled={generating}
                 >
                   <EditPencil width={13} height={13} />
@@ -203,6 +354,7 @@ export function AgentInstructionsSection({
     path: agentFilePath(agent.slug, name),
     label: name,
     description: FILE_DESCRIPTIONS[name],
+    purposeHint: FILE_PURPOSE_HINTS[name],
   }));
 
   return (
@@ -228,6 +380,7 @@ export function AgentInstructionsSection({
               path={OFFICE_USER_FILE_PATH}
               label="USER"
               description="The human this office serves"
+              purposeHint={FILE_PURPOSE_HINTS.USER}
             />
           </div>
         </div>
