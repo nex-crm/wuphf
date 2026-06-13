@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { type AgentRequest, getConfig } from "../../api/client";
@@ -129,9 +129,12 @@ export function ConnectIntegrationCard({
 
   const signinStatusQuery = useQuery({
     queryKey: ["composio-signin-status"],
+    // Poll while the broker is working: installing the CLI, awaiting the
+    // browser login, or provisioning the key.
     enabled:
       Boolean(signin) &&
-      (signin?.status === "awaiting_login" ||
+      (signin?.status === "installing" ||
+        signin?.status === "awaiting_login" ||
         signin?.status === "provisioning"),
     queryFn: getComposioSigninStatus,
     refetchInterval: (query) => {
@@ -144,14 +147,25 @@ export function ConnectIntegrationCard({
   const signinInfo = signinStatusQuery.data ?? signin;
   const signinStatus = signinInfo?.status;
 
+  // The auth_url may arrive on the START response (CLI already present) OR later
+  // via the status poll (after an auto-install completes). Open it once, the
+  // moment it first appears, from whichever source.
+  // Prefer whichever source carries a URL: the start response (CLI present) or
+  // the poll (auto-install path). A poll frame without auth_url must not mask
+  // one the start already provided.
+  const authUrl = signin?.auth_url ?? signinStatusQuery.data?.auth_url;
+  const openedAuthUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authUrl || openedAuthUrlRef.current === authUrl) return;
+    openedAuthUrlRef.current = authUrl;
+    window.open(authUrl, "_blank", "noopener,noreferrer");
+  }, [authUrl]);
+
   const signinMutation = useMutation({
     mutationFn: startComposioSignin,
-    onSuccess: (state) => {
-      setSignin(state);
-      if (state.auth_url) {
-        window.open(state.auth_url, "_blank", "noopener,noreferrer");
-      }
-    },
+    // Don't open the popup here — the effect above is the single opener so the
+    // auto-install path (auth_url arrives later, via the poll) works the same.
+    onSuccess: (state) => setSignin(state),
     onError: (err: unknown) => {
       showNotice(
         err instanceof Error ? err.message : "Could not start Composio sign-in",
@@ -173,6 +187,7 @@ export function ConnectIntegrationCard({
 
   const signingIn =
     signinMutation.isPending ||
+    signinStatus === "installing" ||
     signinStatus === "awaiting_login" ||
     signinStatus === "provisioning";
   const cliMissing = signinStatus === "cli_missing";
@@ -218,10 +233,12 @@ export function ConnectIntegrationCard({
         <div className="eac-connect-status" role="status">
           <span className="eac-spinner" aria-hidden="true" />
           <span>
-            {signinStatus === "provisioning"
-              ? "Setting up your Composio account…"
-              : "Finish signing in to Composio in the popup. We'll connect " +
-                `${name} automatically once you're in.`}
+            {signinStatus === "installing"
+              ? "Setting up Composio (one-time)…"
+              : signinStatus === "provisioning"
+                ? "Setting up your Composio account…"
+                : "Finish signing in to Composio in the popup. We'll connect " +
+                  `${name} automatically once you're in.`}
           </span>
         </div>
       ) : null}

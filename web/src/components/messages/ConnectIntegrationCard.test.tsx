@@ -191,6 +191,44 @@ describe("<ConnectIntegrationCard>", () => {
     );
   });
 
+  it("auto-installs the CLI then opens the login URL from the status poll", async () => {
+    // Not signed in + CLI missing → start returns `installing` (no auth_url);
+    // the auth_url arrives later via the poll once the install completes.
+    getConfig.mockResolvedValue({ composio_key_set: false });
+    startSignin.mockResolvedValue({ status: "installing" });
+    getSigninStatus.mockResolvedValue({
+      status: "awaiting_login",
+      auth_url: "https://app.composio.dev/login?cliKey=xyz",
+    });
+
+    render(
+      wrap(
+        <ConnectIntegrationCard
+          request={makeConnectRequest()}
+          submitting={false}
+          onSkip={() => {}}
+          onDismiss={() => {}}
+        />,
+      ),
+    );
+    const signinBtn = await screen.findByRole("button", {
+      name: /sign in & connect gmail/i,
+    });
+    fireEvent.click(signinBtn);
+
+    await waitFor(() => expect(startSignin).toHaveBeenCalledTimes(1));
+    // The login URL surfaced by the poll is opened exactly once.
+    await waitFor(() =>
+      expect(window.open).toHaveBeenCalledWith(
+        "https://app.composio.dev/login?cliKey=xyz",
+        "_blank",
+        "noopener,noreferrer",
+      ),
+    );
+    // Integration connect must not start until Composio sign-in is done.
+    expect(startConnect).not.toHaveBeenCalled();
+  });
+
   it("answers skip without touching the OAuth flow", () => {
     const onSkip = vi.fn();
     render(
