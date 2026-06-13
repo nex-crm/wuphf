@@ -295,6 +295,19 @@ async function setTheme(id) {
 await installCommonMocks(context, { extra: mockFeature });
 await bootShell(page, { afterFlipSelector: ".status-bar" });
 
+// The restored collapsible "Agents" roster rail in the sidebar — CEO +
+// specialists with avatars, activity pills, and the peek affordance. Any
+// row opens that agent's subspace.
+const agentsSection = page.locator('[data-testid="sidebar-section-agents"]');
+if (await agentsSection.count()) {
+  await shotElement(
+    page,
+    '[data-testid="sidebar-section-agents"]',
+    OUT,
+    "00-sidebar-agents",
+  );
+}
+
 await openTab("growth", "chat");
 await shotElement(page, ".agent-subspace", OUT, "01-chat");
 
