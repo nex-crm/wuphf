@@ -148,7 +148,10 @@ type Broker struct {
 	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
 	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
 	// nil means the real Slack Web API. Tests inject a fake.
-	slackSpawnAuthTest      slackSpawnAuthTestFunc
+	slackSpawnAuthTest slackSpawnAuthTestFunc
+	// slackOnboardingAuthTest is the auth.test seam for the web onboarding
+	// wizard's token-validation step; nil means the real Slack Web API.
+	slackOnboardingAuthTest slackOnboardingAuthTestFunc
 	messageSubscribers      map[int]chan channelMessage
 	actionSubscribers       map[int]chan officeActionLog
 	activity                map[string]agentActivitySnapshot
@@ -707,6 +710,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
 	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
+	mux.HandleFunc("/slack/app-manifest", b.requireAuth(b.handleSlackAppManifest))
+	mux.HandleFunc("/slack/tokens", b.requireAuth(b.handleSlackTokens))
+	mux.HandleFunc("/slack/status", b.requireAuth(b.handleSlackStatus))
 	mux.HandleFunc("/slack/agents", b.requireAuth(b.handleSlackAgents))
 	mux.HandleFunc("/slack/agents/spawn", b.requireAuth(b.handleSlackAgentsSpawn))
 	mux.HandleFunc("/slack/agents/spawn/complete", b.requireAuth(b.handleSlackAgentsSpawnComplete))
