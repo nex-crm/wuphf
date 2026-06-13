@@ -22,6 +22,7 @@ import { useOnboardingDMContext } from "../onboarding/OnboardingDMRoute";
 import type { CardStage, CeoSuggestion } from "../onboarding/types";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
+import { ConnectIntegrationCard } from "./ConnectIntegrationCard";
 import { StructuredMessageCard } from "./cards/StructuredMessageCard";
 
 /**
@@ -197,6 +198,10 @@ export function InterviewBar() {
   // "@x asks" made the bar cry wolf (ICP eval N8: 10+ notices drowned 3
   // real interviews). Notices get a neutral NOTICE badge and drop "asks".
   const isNotice = current.kind === "notice";
+  // `connect` requests render the OAuth-driving ConnectIntegrationCard instead
+  // of generic option buttons — otherwise "Connect" just answers the request
+  // and nothing opens.
+  const isConnect = current.kind === "connect";
 
   return (
     <>
@@ -256,89 +261,104 @@ export function InterviewBar() {
           </button>
         </div>
 
-        <div className="interview-bar-body">
-          {current.title && current.title !== "Request" ? (
-            <div className="interview-bar-title">{current.title}</div>
-          ) : null}
-          <div className="interview-bar-question">
-            {(current.question || "")
-              .replace(/\*\*/g, "")
-              .replace(/^\s*\d+\.\s*/, "")}
-          </div>
-          {(() => {
-            if (current.kind === "approval") {
-              const parsed = parseApprovalContext(current.context);
-              if (parsed) return <ApprovalContextView parsed={parsed} />;
-            }
-            return current.context ? (
-              <div className="interview-bar-context">{current.context}</div>
-            ) : null;
-          })()}
-        </div>
-
-        {textMode ? (
-          <div className="interview-bar-text">
-            <textarea
-              ref={textareaRef}
-              className="interview-bar-textarea"
-              placeholder={requestOptionTextHint(current, textMode.option)}
-              value={customText}
-              onChange={(e) => setCustomText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setTextMode(null);
-                }
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  if (customText.trim())
-                    submit(textMode.option, customText.trim());
-                }
-              }}
-              rows={3}
+        {isConnect ? (
+          <div className="interview-bar-body interview-bar-connect">
+            <ConnectIntegrationCard
+              request={current}
+              submitting={submitting}
+              onSkip={() => submit({ id: "skip", label: "Skip" })}
+              onDismiss={handleDismiss}
             />
-            <div className="interview-bar-text-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setTextMode(null)}
-                disabled={submitting}
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => submit(textMode.option, customText.trim())}
-                disabled={submitting || !customText.trim()}
-              >
-                {submitting ? "Sending..." : `Send as ${textMode.option.label}`}
-              </button>
-            </div>
-          </div>
-        ) : options.length > 0 ? (
-          <div
-            className={`interview-bar-actions${options.length <= 2 ? " interview-bar-actions-inline" : ""}`}
-          >
-            {options.map((opt, i) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`btn btn-sm ${opt.id === current.recommended_id ? "btn-primary" : "btn-ghost"}`}
-                onClick={() => handleOption(opt)}
-                disabled={submitting}
-                title={opt.description}
-              >
-                <span className="interview-bar-opt-num">{i + 1}</span>
-                <span className="interview-bar-opt-label">{opt.label}</span>
-                {requestOptionNeedsText(current, opt) ? (
-                  <span className="interview-bar-text-hint"> · type</span>
-                ) : null}
-              </button>
-            ))}
           </div>
         ) : (
-          <div className="interview-bar-empty">No options provided.</div>
+          <>
+            <div className="interview-bar-body">
+              {current.title && current.title !== "Request" ? (
+                <div className="interview-bar-title">{current.title}</div>
+              ) : null}
+              <div className="interview-bar-question">
+                {(current.question || "")
+                  .replace(/\*\*/g, "")
+                  .replace(/^\s*\d+\.\s*/, "")}
+              </div>
+              {(() => {
+                if (current.kind === "approval") {
+                  const parsed = parseApprovalContext(current.context);
+                  if (parsed) return <ApprovalContextView parsed={parsed} />;
+                }
+                return current.context ? (
+                  <div className="interview-bar-context">{current.context}</div>
+                ) : null;
+              })()}
+            </div>
+
+            {textMode ? (
+              <div className="interview-bar-text">
+                <textarea
+                  ref={textareaRef}
+                  className="interview-bar-textarea"
+                  placeholder={requestOptionTextHint(current, textMode.option)}
+                  value={customText}
+                  onChange={(e) => setCustomText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setTextMode(null);
+                    }
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      if (customText.trim())
+                        submit(textMode.option, customText.trim());
+                    }
+                  }}
+                  rows={3}
+                />
+                <div className="interview-bar-text-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setTextMode(null)}
+                    disabled={submitting}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => submit(textMode.option, customText.trim())}
+                    disabled={submitting || !customText.trim()}
+                  >
+                    {submitting
+                      ? "Sending..."
+                      : `Send as ${textMode.option.label}`}
+                  </button>
+                </div>
+              </div>
+            ) : options.length > 0 ? (
+              <div
+                className={`interview-bar-actions${options.length <= 2 ? " interview-bar-actions-inline" : ""}`}
+              >
+                {options.map((opt, i) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`btn btn-sm ${opt.id === current.recommended_id ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => handleOption(opt)}
+                    disabled={submitting}
+                    title={opt.description}
+                  >
+                    <span className="interview-bar-opt-num">{i + 1}</span>
+                    <span className="interview-bar-opt-label">{opt.label}</span>
+                    {requestOptionNeedsText(current, opt) ? (
+                      <span className="interview-bar-text-hint"> · type</span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="interview-bar-empty">No options provided.</div>
+            )}
+          </>
         )}
       </section>
     </>
