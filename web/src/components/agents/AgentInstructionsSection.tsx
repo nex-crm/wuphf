@@ -16,7 +16,7 @@ import {
   writeAgentFile,
 } from "../../api/agentFiles";
 import type { OfficeMember } from "../../api/client";
-import WikiEditor from "../wiki/WikiEditor";
+import { AgentFileBlockEditor } from "./AgentFileBlockEditor";
 
 // One-line descriptions for each instruction file, shown under the file name so
 // the human knows what each one governs without opening it.
@@ -60,11 +60,13 @@ function AgentFileCard({
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   /**
-   * Raw-markdown mode: these are plain .md files and the rich Tiptap
-   * WikiEditor normalises markdown / drops HTML comments. Default = true
-   * (Raw) so edits are maximally faithful.
+   * Editor mode: structured per-section "blocks" (default — keeps the file's
+   * shape intact) or "raw" markdown (the Advanced escape hatch for arbitrary
+   * structure). The rich Tiptap editor was dropped here because it normalises
+   * markdown / drops HTML comments — exactly what these plain .md files must
+   * round-trip faithfully.
    */
-  const [rawMode, setRawMode] = useState(true);
+  const [mode, setMode] = useState<"blocks" | "raw">("blocks");
   const [rawDraft, setRawDraft] = useState<string | null>(null);
   const [rawSaving, setRawSaving] = useState(false);
   const [rawSaveError, setRawSaveError] = useState<string | null>(null);
@@ -147,6 +149,7 @@ function AgentFileCard({
       // seeding rawDraft the draft would be invisible in the default raw mode.
       setGeneratedDraft(content);
       setRawDraft(content);
+      setMode("blocks");
       setEditing(true);
     } catch (err: unknown) {
       setGenError(err instanceof Error ? err.message : "Generation failed");
@@ -185,37 +188,37 @@ function AgentFileCard({
             <p className="agent-file-purpose-hint">{purposeHint}</p>
           ) : null}
 
-          {/* Raw / Rich mode toggle (shown when viewing or editing) */}
-          {data && !isLoading && !isError ? (
+          {/* Blocks / Raw mode toggle — shown while editing. Blocks is the
+              structured default; Raw is the Advanced whole-file escape hatch. */}
+          {data && !isLoading && !isError && editing ? (
             <div className="agent-file-mode-row">
               <fieldset className="agent-file-mode-switch">
                 <legend className="sr-only">Editor mode</legend>
                 <button
                   type="button"
-                  className={`agent-file-mode-btn${rawMode ? " is-active" : ""}`}
-                  onClick={() => {
-                    setRawMode(true);
-                    setEditing(false);
-                    setRawDraft(null);
-                    setRawSaveError(null);
-                  }}
-                  aria-pressed={rawMode}
+                  className={`agent-file-mode-btn${mode === "blocks" ? " is-active" : ""}`}
+                  onClick={() => setMode("blocks")}
+                  aria-pressed={mode === "blocks"}
                 >
-                  Raw
+                  Blocks
                 </button>
                 <button
                   type="button"
-                  className={`agent-file-mode-btn${!rawMode ? " is-active" : ""}`}
+                  className={`agent-file-mode-btn${mode === "raw" ? " is-active" : ""}`}
                   onClick={() => {
-                    setRawMode(false);
-                    setRawDraft(null);
-                    setRawSaveError(null);
+                    setRawDraft(generatedDraft ?? data.content);
+                    setMode("raw");
                   }}
-                  aria-pressed={!rawMode}
+                  aria-pressed={mode === "raw"}
                 >
-                  Rich
+                  Raw
                 </button>
               </fieldset>
+              <span className="agent-file-mode-note">
+                {mode === "raw"
+                  ? "Advanced: edit the whole file as markdown."
+                  : "Edit each section in place."}
+              </span>
             </div>
           ) : null}
 
@@ -225,18 +228,20 @@ function AgentFileCard({
             <div className="agent-file-card-error" role="alert">
               {error instanceof Error ? error.message : "Failed to load file"}
             </div>
-          ) : !rawMode && editing && data ? (
-            /* Rich / WikiEditor mode */
-            <WikiEditor
+          ) : editing && data && mode === "blocks" ? (
+            /* Structured block editor (default) */
+            <AgentFileBlockEditor
+              // Remount when a generated draft arrives so it re-parses into
+              // blocks rather than keeping the on-disk parse.
+              key={generatedDraft ? "draft" : "disk"}
               path={path}
-              initialContent={generatedDraft ?? data.content}
-              expectedSha={data.sha}
-              writeArticle={writeAgentFile}
-              hideWikiHelp={true}
+              label={label}
+              data={
+                generatedDraft !== null
+                  ? { ...data, content: generatedDraft }
+                  : data
+              }
               onSaved={(newSha) => {
-                // Promote the new SHA into the cache immediately so re-opening
-                // the card before the refetch lands does not seed the editor
-                // with a stale expected_sha; then refetch for fresh content.
                 queryClient.setQueryData(
                   ["agent-file", path],
                   (old: AgentFileResponse | undefined) =>
@@ -249,8 +254,8 @@ function AgentFileCard({
               }}
               onCancel={closeEditor}
             />
-          ) : rawMode && editing && data ? (
-            /* Raw markdown textarea mode */
+          ) : editing && data ? (
+            /* Raw markdown — the Advanced escape hatch */
             <>
               <textarea
                 className="agent-file-raw-editor"
@@ -321,6 +326,7 @@ function AgentFileCard({
                   className="btn btn-ghost btn-sm agent-file-edit"
                   onClick={() => {
                     setRawDraft(data.content);
+                    setMode("blocks");
                     setEditing(true);
                   }}
                   disabled={generating}

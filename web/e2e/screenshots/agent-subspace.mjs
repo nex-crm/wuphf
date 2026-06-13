@@ -197,20 +197,20 @@ const AGENT_LOGS = {
 };
 
 const FILES = {
-  "agents/growth/SOUL.md": `# Identity
+  "agents/growth/SOUL.md": `# SOUL — @growth
 
-You are the office's growth engine. Pipeline is the only scoreboard you trust.
+## Who you are
+The office's growth engine. Pipeline is the only scoreboard you trust.
 
-## Style
+## Values
 - Numbers first, then the plan
-- Direct without being cold
+- Bias to action over vanity metrics
 
-## Avoid
-- Vanity metrics dressed up as wins
-- Hedging when the funnel is flat
+## Voice
+Direct without being cold. Lead with the number.
 
-## Defaults
-- When ambiguous, run the smallest real experiment and measure it.
+## Boundaries
+Stay in your lane on execution; escalate scope changes to the lead.
 `,
   "office/USER.md": `# USER — the human this office serves
 
@@ -313,7 +313,7 @@ await shotElement(page, ".agent-subspace", OUT, "05-live-stream");
 await openTab("growth", "config");
 await shotElement(page, ".agent-subspace", OUT, "06-config");
 
-// Config with a definition file expanded (purpose hint + raw-markdown mode).
+// Config with the SOUL file expanded (purpose hint + rendered view).
 const soulHeader = page
   .locator(".agent-file-card-header")
   .filter({ hasText: "SOUL" })
@@ -322,19 +322,27 @@ if (await soulHeader.count()) {
   await soulHeader.scrollIntoViewIfNeeded();
   await soulHeader.click();
   await page.waitForTimeout(400);
-  await shotElement(page, ".agent-subspace", OUT, "07-config-soul-raw");
+  await shotElement(page, ".agent-subspace", OUT, "07-config-soul-view");
+
+  // Click Edit → the structured block editor (default), one block per section.
+  const editBtn = page.locator(".agent-file-edit").first();
+  if (await editBtn.count()) {
+    await editBtn.click();
+    await page.waitForTimeout(400);
+    await shotElement(page, ".agent-subspace", OUT, "08-soul-block-editor");
+  }
 }
 
 // ── Theme coverage: dark + noir on two representative tabs ────────────
 await setTheme("nex-dark");
 await openTab("growth", "policies");
-await shotElement(page, ".agent-subspace", OUT, "08-policies-dark");
+await shotElement(page, ".agent-subspace", OUT, "09-policies-dark");
 await openTab("growth", "config");
-await shotElement(page, ".agent-subspace", OUT, "09-config-dark");
+await shotElement(page, ".agent-subspace", OUT, "10-config-dark");
 
 await setTheme("noir-gold");
 await openTab("growth", "skills");
-await shotElement(page, ".agent-subspace", OUT, "10-skills-noir");
+await shotElement(page, ".agent-subspace", OUT, "11-skills-noir");
 
 console.log(`captured screenshots to ${OUT}`);
 await browser.close();

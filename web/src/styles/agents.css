@@ -1398,8 +1398,82 @@
 .agent-file-mode-row {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.agent-file-mode-note {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+/* Structured block editor — one labelled block per file section. */
+.agent-file-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-file-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-file-block-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.agent-file-block-tag {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.agent-file-block-hint {
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+.agent-file-block-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--motion-fast, 120ms) ease;
+}
+
+.agent-file-block-input:focus {
+  border-color: var(--accent);
+}
+
+.agent-file-block-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .agent-file-mode-switch {
