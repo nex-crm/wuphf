@@ -53,8 +53,21 @@ function isAgentTab(value: string): value is AgentTab {
   return AGENT_TABS.some((t) => t.id === value);
 }
 
+// Friendly aliases for tab slugs people are likely to type/guess in the URL
+// so they land on the right tab instead of silently falling back to Chat.
+const TAB_ALIASES: Record<string, AgentTab> = {
+  live: "live-stream",
+  stream: "live-stream",
+  livestream: "live-stream",
+  settings: "config",
+  task: "tasks",
+  skill: "skills",
+  policy: "policies",
+};
+
 function resolveTab(raw: string): AgentTab {
-  return isAgentTab(raw) ? raw : "chat";
+  if (isAgentTab(raw)) return raw;
+  return TAB_ALIASES[raw.toLowerCase()] ?? "chat";
 }
 
 // ── Shell header ─────────────────────────────────────────────────

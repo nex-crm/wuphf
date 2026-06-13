@@ -182,6 +182,33 @@ describe("<AgentSubspace>", () => {
     );
   });
 
+  it("resolves the /live alias to the Live Stream tab (no silent Chat fallback)", () => {
+    render(wrap(<AgentSubspace agent={baseAgent} tab="live" />));
+
+    expect(
+      screen.getByRole("tab", { name: "Live Stream" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("renames the agent from the persistent shell header (parity with old panel)", async () => {
+    const user = userEvent.setup();
+    render(wrap(<AgentSubspace agent={baseAgent} tab="chat" />));
+
+    // The header shows the name as a click-to-edit control (EditableName).
+    // Clicking it must open an inline text input — the rename affordance the
+    // old AgentProfilePanel header had, relocated to the shell header.
+    const nameButton = screen.getByRole("button", { name: /planner/i });
+    await user.click(nameButton);
+
+    const input = await screen.findByRole("textbox", { name: /agent name/i });
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue("Planner");
+  });
+
   it("marks the active tab as aria-selected", () => {
     render(wrap(<AgentSubspace agent={baseAgent} tab="tasks" />));
 
