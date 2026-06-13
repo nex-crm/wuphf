@@ -2,6 +2,7 @@
 // that file under the file-size cap. Wire shapes mirror the Go broker
 // in internal/team/scheduler_*.go.
 
+import { trackOn } from "../lib/analytics";
 import { get, patch, post } from "./client";
 
 export interface SchedulerJob {
@@ -219,5 +220,11 @@ export interface CreateSchedulerJobBody {
 export async function createSchedulerJob(
   body: CreateSchedulerJobBody,
 ): Promise<{ job: SchedulerJob }> {
-  return post<{ job: SchedulerJob }>("/scheduler", body);
+  return trackOn(
+    post<{ job: SchedulerJob }>("/scheduler", body),
+    "routine_created",
+    {
+      schedule_type: body.schedule_expr ? "cron" : "interval",
+    },
+  );
 }

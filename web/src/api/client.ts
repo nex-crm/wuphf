@@ -3,11 +3,33 @@
  * Mirrors every method from the legacy IIFE in index.legacy.html.
  */
 
+import type { InjectedAnalyticsConfig } from "../lib/analytics";
+import { trackOn } from "../lib/analytics";
+
 const apiBase = "/api";
 let brokerDirect = "http://localhost:7890";
 let useProxy = true;
 let token: string | null = null;
 const brokerHandshakeTimeoutMs = 8000;
+
+// The analytics config the broker injects via /api-token. Captured at boot so
+// RootRoute can configure PostHog without a second round trip. Null until
+// initApi runs (or when the broker omits the block, e.g. older servers).
+let injectedAnalytics: InjectedAnalyticsConfig | null = null;
+
+/** The PostHog runtime config the broker injected at boot, if any. */
+export function getInjectedAnalyticsConfig(): InjectedAnalyticsConfig | null {
+  return injectedAnalytics;
+}
+
+/** Coarse length bucket for a message body — never the content itself. */
+function lengthBucket(text: string): "empty" | "short" | "medium" | "long" {
+  const n = text.trim().length;
+  if (n === 0) return "empty";
+  if (n < 80) return "short";
+  if (n < 400) return "medium";
+  return "long";
+}
 
 // ── Init ──
 
@@ -19,6 +41,9 @@ export async function initApi(): Promise<void> {
     token = nextToken;
     if (brokerUrl) {
       brokerDirect = String(brokerUrl).replace(/\/+$/, "");
+    }
+    if (data && typeof data.analytics === "object" && data.analytics !== null) {
+      injectedAnalytics = data.analytics as InjectedAnalyticsConfig;
     }
     useProxy = true;
   } catch {
@@ -487,7 +512,11 @@ export function postMessage(
   };
   if (replyTo) body.reply_to = replyTo;
   if (tagged && tagged.length > 0) body.tagged = tagged;
-  return post<Message>("/messages", body);
+  return trackOn(post<Message>("/messages", body), "message_sent", {
+    is_reply: !!replyTo,
+    mention_count: tagged?.length ?? 0,
+    length_bucket: lengthBucket(content),
+  });
 }
 
 export function getThreadMessages(channel: string, threadId: string) {
@@ -660,24 +689,36 @@ export function getChannels() {
 }
 
 export function createChannel(slug: string, name: string, description: string) {
-  return post("/channels", {
-    action: "create",
-    slug,
-    name: name || slug,
-    description,
-    created_by: "you",
-  });
+  return trackOn(
+    post("/channels", {
+      action: "create",
+      slug,
+      name: name || slug,
+      description,
+      created_by: "you",
+    }),
+    "channel_created",
+    { kind: "channel" },
+  );
 }
 
 export function generateChannel(prompt: string) {
-  return postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000);
+  return trackOn(
+    postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000),
+    "channel_created",
+    { kind: "generated" },
+  );
 }
 
 export function createDM(agentSlug: string) {
-  return post<DMChannelResponse>("/channels/dm", {
-    members: ["human", agentSlug],
-    type: "direct",
-  });
+  return trackOn(
+    post<DMChannelResponse>("/channels/dm", {
+      members: ["human", agentSlug],
+      type: "direct",
+    }),
+    "channel_created",
+    { kind: "dm" },
+  );
 }
 
 // ── Requests ──
@@ -789,7 +830,9 @@ export function answerRequest(
 ) {
   const body: Record<string, string> = { id, choice_id: choiceId };
   if (customText) body.custom_text = customText;
-  return post("/requests/answer", body);
+  return trackOn(post("/requests/answer", body), "interview_answered", {
+    has_custom_text: !!customText,
+  });
 }
 
 export function cancelRequest(id: string) {
@@ -822,14 +865,18 @@ export interface CreateActionGrantInput {
 // (agent, platform, action_id) without re-prompting. Backs the approval
 // modal's "Approve & always allow" button (deterministic-integrations slice 5b).
 export function createActionGrant(input: CreateActionGrantInput) {
-  return post<{ grant: ActionGrant }>("/integrations/grants", {
-    action: "grant",
-    agent_slug: input.agentSlug,
-    platform: input.platform,
-    action_scope: input.actionScope,
-    channel: input.channel,
-    issue_id: input.issueId,
-  });
+  return trackOn(
+    post<{ grant: ActionGrant }>("/integrations/grants", {
+      action: "grant",
+      agent_slug: input.agentSlug,
+      platform: input.platform,
+      action_scope: input.actionScope,
+      channel: input.channel,
+      issue_id: input.issueId,
+    }),
+    "integration_action",
+    { action: "grant", platform: input.platform },
+  );
 }
 
 export function getActionGrants() {
@@ -837,10 +884,14 @@ export function getActionGrants() {
 }
 
 export function revokeActionGrant(id: string) {
-  return post<{ grant: ActionGrant }>("/integrations/grants", {
-    action: "revoke",
-    id,
-  });
+  return trackOn(
+    post<{ grant: ActionGrant }>("/integrations/grants", {
+      action: "revoke",
+      id,
+    }),
+    "integration_action",
+    { action: "revoke" },
+  );
 }
 
 // ── Signals / Decisions / Watchdogs / Actions ──
@@ -965,9 +1016,13 @@ export interface DisableSkillResponse {
 }
 
 export function disableSkill(name: string): Promise<DisableSkillResponse> {
-  return post<DisableSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/disable`,
-    {},
+  return trackOn(
+    post<DisableSkillResponse>(
+      `/skills/${encodeURIComponent(name)}/disable`,
+      {},
+    ),
+    "skill_state_changed",
+    { action: "disable", scope: "global" },
   );
 }
 
@@ -976,9 +1031,10 @@ export interface EnableSkillResponse {
 }
 
 export function enableSkill(name: string): Promise<EnableSkillResponse> {
-  return post<EnableSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/enable`,
-    {},
+  return trackOn(
+    post<EnableSkillResponse>(`/skills/${encodeURIComponent(name)}/enable`, {}),
+    "skill_state_changed",
+    { action: "enable", scope: "global" },
   );
 }
 
@@ -996,9 +1052,13 @@ export function enableSkillForAgent(
   name: string,
   agent: string,
 ): Promise<SkillOwnerToggleResponse> {
-  return post<SkillOwnerToggleResponse>(
-    `/skills/${encodeURIComponent(name)}/enable-for`,
-    { agent },
+  return trackOn(
+    post<SkillOwnerToggleResponse>(
+      `/skills/${encodeURIComponent(name)}/enable-for`,
+      { agent },
+    ),
+    "skill_state_changed",
+    { action: "enable_for_agent", scope: "agent" },
   );
 }
 
@@ -1007,9 +1067,13 @@ export function disableSkillForAgent(
   name: string,
   agent: string,
 ): Promise<SkillOwnerToggleResponse> {
-  return post<SkillOwnerToggleResponse>(
-    `/skills/${encodeURIComponent(name)}/disable-for`,
-    { agent },
+  return trackOn(
+    post<SkillOwnerToggleResponse>(
+      `/skills/${encodeURIComponent(name)}/disable-for`,
+      { agent },
+    ),
+    "skill_state_changed",
+    { action: "disable_for_agent", scope: "agent" },
   );
 }
 
@@ -1020,9 +1084,13 @@ export interface RestoreArchivedSkillResponse {
 export function restoreArchivedSkill(
   name: string,
 ): Promise<RestoreArchivedSkillResponse> {
-  return post<RestoreArchivedSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/restore`,
-    {},
+  return trackOn(
+    post<RestoreArchivedSkillResponse>(
+      `/skills/${encodeURIComponent(name)}/restore`,
+      {},
+    ),
+    "skill_state_changed",
+    { action: "restore", scope: "global" },
   );
 }
 
@@ -1032,9 +1100,13 @@ export interface ArchiveSkillResponse {
 }
 
 export function archiveSkill(name: string): Promise<ArchiveSkillResponse> {
-  return post<ArchiveSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/archive`,
-    {},
+  return trackOn(
+    post<ArchiveSkillResponse>(
+      `/skills/${encodeURIComponent(name)}/archive`,
+      {},
+    ),
+    "skill_state_changed",
+    { action: "archive", scope: "global" },
   );
 }
 
@@ -1107,9 +1179,13 @@ export interface ApproveSkillResponse {
 }
 
 export function approveSkill(name: string): Promise<ApproveSkillResponse> {
-  return post<ApproveSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/approve`,
-    {},
+  return trackOn(
+    post<ApproveSkillResponse>(
+      `/skills/${encodeURIComponent(name)}/approve`,
+      {},
+    ),
+    "skill_state_changed",
+    { action: "approve", scope: "global" },
   );
 }
 
@@ -1124,9 +1200,13 @@ export function rejectSkill(
   name: string,
   reason?: string,
 ): Promise<RejectSkillResponse> {
-  return post<RejectSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/reject`,
-    reason ? { reason } : {},
+  return trackOn(
+    post<RejectSkillResponse>(
+      `/skills/${encodeURIComponent(name)}/reject`,
+      reason ? { reason } : {},
+    ),
+    "skill_state_changed",
+    { action: "reject", scope: "global" },
   );
 }
 
@@ -1181,9 +1261,13 @@ export function editSkillContent(
   name: string,
   content: string,
 ): Promise<EditSkillContentResponse> {
-  return put<EditSkillContentResponse>(`/skills/${encodeURIComponent(name)}`, {
-    content,
-  });
+  return trackOn(
+    put<EditSkillContentResponse>(`/skills/${encodeURIComponent(name)}`, {
+      content,
+    }),
+    "skill_state_changed",
+    { action: "edit", scope: "global" },
+  );
 }
 
 // ── Memory ──
@@ -1301,6 +1385,12 @@ export interface ConfigSnapshot {
   telegram_token_set?: boolean;
   openclaw_token_set?: boolean;
   openclaw_gateway_url?: string;
+  // Product-analytics consent (PostHog). Both default true. `analytics_configured`
+  // reports whether the broker injects a key; the frontend ORs it with its own
+  // build-time key to decide whether the toggles are meaningful to show.
+  analytics_telemetry_enabled?: boolean;
+  analytics_session_recording_enabled?: boolean;
+  analytics_configured?: boolean;
   config_path?: string;
 }
 
@@ -1337,6 +1427,9 @@ export type ConfigUpdate = Partial<{
   telegram_bot_token: string;
   openclaw_token: string;
   openclaw_gateway_url: string;
+  // Product-analytics consent toggles.
+  analytics_telemetry_enabled: boolean;
+  analytics_session_recording_enabled: boolean;
 }>;
 
 export function getConfig() {

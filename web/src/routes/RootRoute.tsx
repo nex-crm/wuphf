@@ -16,7 +16,12 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 
-import { ApiError, get, initApi } from "../api/client";
+import {
+  ApiError,
+  get,
+  getInjectedAnalyticsConfig,
+  initApi,
+} from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
@@ -35,6 +40,12 @@ import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useOfficeTasks } from "../hooks/useOfficeTasks";
+import {
+  configureAnalytics,
+  identifyWorkspace,
+  track,
+  trackPageview,
+} from "../lib/analytics";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { directChannelSlug, useAppStore } from "../stores/app";
@@ -227,6 +238,13 @@ class ErrorBoundary extends Component<
       /Failed to fetch dynamically imported module/i.test(message) ||
       /Importing a module script failed/i.test(message) ||
       error?.name === "ChunkLoadError";
+    // Record the failure shape (class name + chunk flag) — never the raw
+    // message, which can contain content.
+    track("app_error", {
+      boundary: "root",
+      error_name: error?.name || "Error",
+      is_chunk_error: isChunkError,
+    });
     if (isChunkError && typeof window !== "undefined") {
       const key = "wuphf:chunk-reload-attempted";
       if (!window.sessionStorage.getItem(key)) {
@@ -884,6 +902,50 @@ export default function RootRoute() {
   const [bootError, setBootError] = useState(false);
   const [bootAttempt, setBootAttempt] = useState(0);
 
+  // Manual SPA pageviews (autocapture is off). We subscribe to the router
+  // singleton rather than useRouterState so this works even where RootRoute is
+  // rendered without a RouterProvider (the bootstrap-fallback tests). Fires the
+  // matched route pattern plus pathname on every navigation; a no-op until
+  // analytics is configured.
+  useEffect(() => {
+    const emit = () => {
+      const loc = router.state.location;
+      const { matches } = router.state;
+      const routeId = matches[matches.length - 1]?.routeId ?? "";
+      if (loc?.pathname) trackPageview(routeId || loc.pathname, loc.pathname);
+    };
+    emit();
+    return router.subscribe("onResolved", emit);
+  }, []);
+
+  // Group events by workspace, keyed by a hashed id (never the raw id or name)
+  // so cohort analysis is possible without identifying the workspace. Gated on
+  // apiReady so it only runs after a successful boot — that keeps it out of the
+  // bootstrap-fallback path (and its mocked get() sequence) entirely. Reads via
+  // get() (not a hook) so it needs no provider context. No-op until analytics
+  // is configured.
+  useEffect(() => {
+    if (!apiReady) return;
+    let cancelled = false;
+    void get<{
+      workspace_id?: string;
+      blueprint?: string;
+      company_size?: string;
+    }>("/config")
+      .then((cfg) => {
+        if (!cancelled && cfg?.workspace_id) {
+          identifyWorkspace(cfg.workspace_id, {
+            blueprint: cfg.blueprint,
+            company_size: cfg.company_size,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [apiReady]);
+
   // When CEO onboarding is active (phase set, not "complete"), pin a
   // generic landing URL (#general) to the home composer (index `/`) so the
   // URL is sensible the moment the broker flips onboarded=true and the
@@ -968,6 +1030,10 @@ export default function RootRoute() {
       .then(() => {
         if (cancelled) return;
         setBrokerConnected(true);
+        // Configure product analytics from the broker's runtime injection
+        // (dormant unless a PostHog key resolves; respects the consent
+        // toggles). Best-effort and non-blocking — never gates boot.
+        configureAnalytics(getInjectedAnalyticsConfig() ?? undefined);
         return get<{ onboarded?: boolean; phase?: string }>(
           "/onboarding/state",
         );

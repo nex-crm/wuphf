@@ -262,6 +262,39 @@ Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flow
    /config set action_provider composio
    ```
 
+## Privacy & Telemetry
+
+WUPHF can send anonymous product analytics and fully-masked session recordings
+to help us improve it. This is **optional**, controlled by you, and **off
+unless a PostHog key is configured** — a stock source build and every fork ship
+with no key, so they never phone home.
+
+Two independent toggles (onboarding and **Settings → Privacy & Analytics**),
+both on by default, both reversible at any time:
+
+- **Product analytics** — anonymous usage events: which flows are used, where
+  people get stuck, error counts. We send **counts and shapes only, never your
+  content** (no message text, wiki bodies, task titles, customer data, or
+  secrets). Identity is an anonymous device id; workspaces are grouped by a
+  hashed id. The single exception is the onboarding email, attached to your
+  PostHog person once at finish and only if you leave "keep me posted" checked.
+- **Session recording** — every recording is **fully masked**: all text and all
+  inputs are obscured (`maskAllInputs`, `maskTextSelector: "*"`). We see layout,
+  cursor, clicks, scroll, and navigation to fix rough edges — never your text,
+  data, or secrets.
+
+No autocapture, no cookies (localStorage only). Self-hosted operators can point
+at their own PostHog and flip either channel at runtime without rebuilding:
+
+```bash
+# Build-time (baked into the bundle), or:
+export WUPHF_POSTHOG_KEY=phc_xxx        # your PROJECT (write-only) key
+export WUPHF_POSTHOG_HOST=https://us.i.posthog.com
+```
+
+Leave the key unset to keep WUPHF fully dormant. Full taxonomy and policy:
+[docs/specs/product-analytics.md](docs/specs/product-analytics.md).
+
 ## Why WUPHF
 
 | Feature | How it works |
