@@ -97,15 +97,14 @@ func composioSigninRequest(t *testing.T, b *Broker, method, path string) (int, c
 
 func pollComposioSigninUntil(t *testing.T, b *Broker, want string) composioSigninState {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
 	var last composioSigninState
-	for time.Now().Before(deadline) {
+	testTickUntil(t, 10*time.Second, func() bool {
 		_, state, _ := composioSigninRequest(t, b, http.MethodGet, "/integrations/composio/signin/status")
 		last = state
-		if state.Status == want || state.Status == composioSigninStatusError {
-			return state
-		}
-		time.Sleep(25 * time.Millisecond)
+		return state.Status == want || state.Status == composioSigninStatusError
+	})
+	if last.Status == want || last.Status == composioSigninStatusError {
+		return last
 	}
 	t.Fatalf("timed out waiting for status %q, last %+v", want, last)
 	return last
