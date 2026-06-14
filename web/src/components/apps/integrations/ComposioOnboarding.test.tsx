@@ -65,6 +65,28 @@ describe("<ComposioOnboarding>", () => {
     ).toBeInTheDocument();
   });
 
+  it("handles the installing status: shows the setup panel and keeps polling", async () => {
+    // Regression: the broker auto-installs the CLI and returns `installing`
+    // first. The page previously had no case for it — applySigninState fell
+    // through to default and polling stayed disabled, so "Sign in with
+    // Composio" silently did nothing. It must now render a working state and
+    // keep polling so it can advance to awaiting_login / done.
+    vi.stubGlobal("open", vi.fn());
+    startComposioSignin.mockResolvedValue({
+      status: "installing",
+      install_command: "curl -fsSL https://composio.dev/install | bash",
+    });
+    getComposioSigninStatus.mockResolvedValue({ status: "installing" });
+    render(wrap(<ComposioOnboarding onConnected={() => {}} />));
+    fireEvent.click(
+      screen.getByRole("button", { name: /sign in with composio/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/setting up composio/i)).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(getComposioSigninStatus).toHaveBeenCalled());
+  });
+
   it("shows the auth link and auto-opens it once while awaiting login", async () => {
     const open = vi.fn();
     vi.stubGlobal("open", open);

@@ -26,6 +26,7 @@ const COMPOSIO_KEYS_URL = "https://dashboard.composio.dev";
 
 type SigninPhase =
   | "idle"
+  | "installing"
   | "cli_missing"
   | "awaiting_login"
   | "provisioning"
@@ -58,6 +59,13 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
   const applySigninState = useCallback(
     (state: ComposioSigninState) => {
       switch (state.status) {
+        case "installing":
+          // The broker is auto-installing the Composio CLI before it can mint
+          // a login URL. We must enter (and keep polling) this phase — without
+          // it the page would stall on "idle" and never open the sign-in tab.
+          setPhase("installing");
+          setInstallCommand(state.install_command ?? "");
+          break;
         case "cli_missing":
           setPhase("cli_missing");
           setInstallCommand(state.install_command ?? "");
@@ -105,7 +113,10 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
     signinMutation.mutate();
   };
 
-  const polling = phase === "awaiting_login" || phase === "provisioning";
+  const polling =
+    phase === "installing" ||
+    phase === "awaiting_login" ||
+    phase === "provisioning";
   const statusQuery = useQuery({
     queryKey: ["composio-signin-status"],
     queryFn: getComposioSigninStatus,
@@ -209,6 +220,18 @@ function SigninPanel({
   starting,
   onStart,
 }: SigninPanelProps) {
+  if (phase === "installing") {
+    return (
+      <div className="composio-onb-panel" role="status">
+        <p className="composio-onb-panel-title">Setting up Composio…</p>
+        <p className="composio-onb-panel-note">
+          Installing the Composio CLI (one-time). We’ll open the sign-in page
+          automatically as soon as it’s ready.
+        </p>
+        <p className="composio-onb-wait">Working on it…</p>
+      </div>
+    );
+  }
   if (phase === "cli_missing") {
     return (
       <div className="composio-onb-panel" role="status">

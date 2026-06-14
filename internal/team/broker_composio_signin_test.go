@@ -50,6 +50,11 @@ func newComposioSigninBroker(t *testing.T, pathDir string) *Broker {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("COMPOSIO_CACHE_DIR", "")
+	// Sandbox the CLI install dir too: composioBinary falls back to
+	// $COMPOSIO_INSTALL_DIR (else ~/.composio) when composio isn't on PATH, so
+	// a real CLI installed on the dev box (the common case) would otherwise leak
+	// into these tests. Empty → defaults under the isolated temp HOME.
+	t.Setenv("COMPOSIO_INSTALL_DIR", "")
 	t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(home, ".wuphf", "config.json"))
 	if err := os.MkdirAll(filepath.Join(home, ".wuphf"), 0o700); err != nil {
 		t.Fatal(err)
@@ -245,6 +250,104 @@ func TestComposioSigninStart_AutoInstallSucceedsThenSignsIn(t *testing.T) {
 	}
 	if cfg.ComposioAPIKey != testComposioProjectKey {
 		t.Fatalf("expected stored composio key %q, got %q", testComposioProjectKey, cfg.ComposioAPIKey)
+	}
+}
+
+// TestComposioSigninStart_AutoInstallNotOnPATHResolvesFromInstallDir is the
+// regression for the reported bug: the official installer drops `composio` into
+// ~/.composio and only appends that dir to PATH in the user's shell profile,
+// which the already-running broker never re-reads. So a CLI installed *after*
+// the broker started is invisible to exec.LookPath, and the flow wrongly
+// reported cli_missing right after a successful install ("it attempts and then
+// says: The Composio CLI isn't installed").
+//
+// Here the install stub places the binary ONLY in ~/.composio (NOT on PATH).
+// The flow must still resolve it (via composioBinary's install-dir fallback)
+// and run to done — never cli_missing.
+func TestComposioSigninStart_AutoInstallNotOnPATHResolvesFromInstallDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell script requires a POSIX shell")
+	}
+	pathDir := t.TempDir() // PATH stays empty of composio for the whole flow
+	b := newComposioSigninBroker(t, pathDir)
+	home := os.Getenv("HOME")
+	// Default the install dir to ~/.composio (the installer's default), making
+	// the test independent of any COMPOSIO_INSTALL_DIR in the dev environment.
+	t.Setenv("COMPOSIO_INSTALL_DIR", "")
+	installDir := filepath.Join(home, ".composio")
+
+	orig := composioInstaller
+	composioInstaller = func(_ context.Context) error {
+		// Mirror the real installer: binary lands in ~/.composio (NOT on PATH),
+		// plus a logged-in session so the flow skips the browser hop.
+		body := "case \"$1 $2\" in\n  \"dev init\")\n    printf 'COMPOSIO_API_KEY=\"" +
+			testComposioProjectKey + "\"\\n' > .env.local\n    ;;\n  *) exit 1 ;;\nesac"
+		script := "#!/bin/sh\nPATH=\"/bin:/usr/bin:$PATH\"\n" + body + "\n"
+		if err := os.MkdirAll(installDir, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(installDir, "composio"), []byte(script), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(
+			filepath.Join(installDir, "user_data.json"),
+			[]byte(`{"api_key":"uak_cli_only_session_key"}`),
+			0o600,
+		)
+	}
+	t.Cleanup(func() { composioInstaller = orig })
+
+	code, state, raw := composioSigninRequest(t, b, http.MethodPost, "/integrations/composio/signin/start")
+	if code != http.StatusOK {
+		t.Fatalf("start status=%d body=%s", code, raw)
+	}
+	if state.Status != composioSigninStatusInstalling {
+		t.Fatalf("expected installing on start, got %+v", state)
+	}
+
+	done := pollComposioSigninUntil(t, b, composioSigninStatusDone)
+	if done.Status != composioSigninStatusDone {
+		t.Fatalf("expected done (CLI resolved from install dir, not PATH), got %+v", done)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config load: %v", err)
+	}
+	if cfg.ComposioAPIKey != testComposioProjectKey {
+		t.Fatalf("expected stored composio key %q, got %q", testComposioProjectKey, cfg.ComposioAPIKey)
+	}
+}
+
+// TestComposioBinary_ResolvesFromInstallDir exercises the resolver directly:
+// with no composio on PATH, it falls back to $COMPOSIO_INSTALL_DIR/composio
+// (and to ~/.composio/composio when the override is unset).
+func TestComposioBinary_ResolvesFromInstallDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit semantics differ on Windows")
+	}
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath) // nothing named composio on PATH
+	installDir := t.TempDir()
+	t.Setenv("COMPOSIO_INSTALL_DIR", installDir) // empty so far — pinned for hermeticity
+	if _, ok := composioBinary(); ok {
+		t.Fatal("composioBinary resolved a binary with an empty PATH and an empty install dir")
+	}
+
+	bin := filepath.Join(installDir, "composio")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fake composio: %v", err)
+	}
+	got, ok := composioBinary()
+	if !ok || got != bin {
+		t.Fatalf("composioBinary() = (%q, %v), want (%q, true)", got, ok, bin)
+	}
+
+	// A non-executable file at the install path must NOT be treated as the CLI.
+	if err := os.Chmod(bin, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if _, ok := composioBinary(); ok {
+		t.Fatal("composioBinary resolved a non-executable file as the CLI")
 	}
 }
 

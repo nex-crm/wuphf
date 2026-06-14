@@ -17,6 +17,7 @@ import {
 import {
   type AgentRequest,
   answerRequest,
+  cancelRequest,
   getAllRequests,
 } from "../../api/client";
 import {
@@ -31,6 +32,7 @@ import {
 } from "../../api/notebook";
 import type { InboxItem, InboxItemKind } from "../../lib/types/inbox";
 import { SEV_ORDER, SEVERITY_TOKENS } from "../../lib/types/lifecycle";
+import { ConnectIntegrationCard } from "../messages/ConnectIntegrationCard";
 import { RequestItem } from "./RequestItem";
 
 const TaskDocumentRoute = lazy(() =>
@@ -822,6 +824,27 @@ function RequestBody({
     }
   };
 
+  const handleDismiss = async () => {
+    setAnswerError(null);
+    try {
+      await cancelRequest(fullRequest.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["lifecycle"] }),
+      ]);
+    } catch (err) {
+      setAnswerError(
+        err instanceof Error ? err.message : "Could not dismiss request.",
+      );
+    }
+  };
+
+  // `connect` requests need the OAuth-driving ConnectIntegrationCard, not the
+  // generic option buttons — otherwise clicking "Connect" just answers the
+  // request (it vanishes from the Inbox) without ever running the sign-in /
+  // connection flow. Mirrors InterviewBar's connect branch.
+  const isConnect = fullRequest.kind === "connect";
+
   return (
     <div className="inbox-mail-detail-body inbox-mail-detail-body--embed">
       {answerError ? (
@@ -830,13 +853,22 @@ function RequestBody({
           <div className="body">{answerError}</div>
         </div>
       ) : null}
-      <RequestItem
-        request={fullRequest}
-        isPending={isPending}
-        onAnswer={(choiceId, customText) =>
-          void handleAnswer(choiceId, customText)
-        }
-      />
+      {isPending && isConnect ? (
+        <ConnectIntegrationCard
+          request={fullRequest}
+          submitting={false}
+          onSkip={() => void handleAnswer("skip")}
+          onDismiss={() => void handleDismiss()}
+        />
+      ) : (
+        <RequestItem
+          request={fullRequest}
+          isPending={isPending}
+          onAnswer={(choiceId, customText) =>
+            void handleAnswer(choiceId, customText)
+          }
+        />
+      )}
       {!isPending && auditEntries.length > 0 ? (
         <ApprovalAuditTrail entries={auditEntries} />
       ) : null}

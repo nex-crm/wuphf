@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +68,85 @@ const (
 // to the manual install command. It runs ONLY after the human explicitly chose
 // "Sign in with Composio".
 var composioInstaller = defaultComposioInstaller
+
+// composioInstallDir is the directory the official installer drops the
+// `composio` binary into: $COMPOSIO_INSTALL_DIR, else ~/.composio — the same
+// default install.sh uses (COMPOSIO_INSTALL_DIR:-$HOME/.composio).
+func composioInstallDir() string {
+	if dir := strings.TrimSpace(os.Getenv("COMPOSIO_INSTALL_DIR")); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".composio")
+}
+
+// composioBinary resolves the `composio` CLI path. It checks PATH first, then
+// falls back to the installer's known location. That fallback is the whole
+// point of the auto-install fix: the official installer appends its dir to PATH
+// only in the user's shell profile (~/.zshrc, ~/.bashrc, …), which the
+// already-running broker process never re-reads — so a CLI installed *after*
+// the broker started is invisible to exec.LookPath, and the flow would wrongly
+// report cli_missing immediately after a successful install. Returns
+// ("", false) when no usable binary is found.
+func composioBinary() (string, bool) {
+	if path, err := exec.LookPath("composio"); err == nil {
+		return path, true
+	}
+	dir := composioInstallDir()
+	if dir == "" {
+		return "", false
+	}
+	name := "composio"
+	if runtime.GOOS == "windows" {
+		name = "composio.exe"
+	}
+	candidate := filepath.Join(dir, name)
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		return candidate, true
+	}
+	return "", false
+}
+
+// composioCommand builds an exec.Cmd for the composio CLI using the resolved
+// binary path, prepending its directory to the subprocess PATH so the CLI can
+// find any sibling helpers it shells out to (the broker's inherited PATH may
+// not include the installer's dir). Returns an error when the CLI cannot be
+// located.
+func composioCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	bin, ok := composioBinary()
+	if !ok {
+		return nil, errors.New("composio CLI not found on PATH or in the install directory")
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = composioCommandEnv(filepath.Dir(bin))
+	return cmd, nil
+}
+
+// composioCommandEnv returns the process environment with binDir prepended to
+// PATH (replacing the existing entry rather than duplicating it), so the
+// resolved CLI's own dir is searchable by any child it spawns.
+func composioCommandEnv(binDir string) []string {
+	env := os.Environ()
+	if binDir == "" {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	pathVal := binDir
+	for _, kv := range env {
+		if name, val, ok := strings.Cut(kv, "="); ok && strings.EqualFold(name, "PATH") {
+			if val != "" {
+				pathVal = binDir + string(os.PathListSeparator) + val
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, "PATH="+pathVal)
+	return out
+}
 
 var (
 	// composioProjectKeyPattern accepts only project-scoped SDK keys.
@@ -130,7 +210,7 @@ func (b *Broker) handleComposioSigninStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	actor := integrationRequestActor(r)
-	if _, err := exec.LookPath("composio"); err != nil {
+	if _, ok := composioBinary(); !ok {
 		// Auto-install on demand: the CLI is needed for one-click sign-in, so
 		// rather than dead-ending on cli_missing we run the official installer
 		// once in the background and continue the flow. The manual install
@@ -244,21 +324,23 @@ func (b *Broker) handleComposioSigninStatus(w http.ResponseWriter, r *http.Reque
 }
 
 // composioSigninAutoInstall runs the official installer once, then continues
-// the sign-in if the CLI landed on PATH. On failure it falls back to
-// cli_missing with the manual install command. PATH (not the exit code) is the
-// source of truth — installers can warn-and-exit nonzero while still placing
-// the binary.
+// the sign-in if the CLI landed. On failure it falls back to cli_missing with
+// the manual install command. The binary's presence (via composioBinary, which
+// also checks the installer's ~/.composio location — not just the broker's
+// inherited PATH), not the exit code, is the source of truth: installers can
+// warn-and-exit nonzero while still placing the binary, and the installer adds
+// its dir to PATH only in shell profiles the running broker never re-reads.
 func (b *Broker) composioSigninAutoInstall() {
 	ctx, cancel := context.WithTimeout(context.Background(), composioInstallTimeout)
 	defer cancel()
 	runErr := composioInstaller(ctx)
-	if _, err := exec.LookPath("composio"); err != nil {
+	if _, ok := composioBinary(); !ok {
 		flow := &b.composioSignin
 		flow.mu.Lock()
 		if flow.state.Status == composioSigninStatusInstalling {
 			reason := "could not install the Composio CLI automatically — run the install command shown, then try again"
 			if runErr == nil {
-				reason = "the Composio installer finished but the CLI is still not on PATH — run the install command shown, then try again"
+				reason = "the Composio installer finished but the CLI could not be located — run the install command shown, then try again"
 			}
 			flow.state = composioSigninState{
 				Status:         composioSigninStatusCLIMissing,
@@ -320,10 +402,15 @@ func (b *Broker) composioSigninBeginLogin() {
 func (b *Broker) composioSigninAwaitLogin() {
 	ctx, cancel := context.WithTimeout(context.Background(), composioLoginPollTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "composio", "login", "--poll")
-	// Output deliberately discarded: never echo CLI output that may carry
-	// credentials into broker logs.
-	_ = cmd.Run()
+	cmd, err := composioCommand(ctx, "login", "--poll")
+	if err == nil {
+		// Output deliberately discarded: never echo CLI output that may carry
+		// credentials into broker logs.
+		_ = cmd.Run()
+	}
+	// Advance regardless: even if the poll could not run, the user may have
+	// finished `composio login` in their own terminal (user_data.json), and
+	// the status endpoint also calls this — the file is the source of truth.
 	b.composioSigninAdvanceIfLoggedIn()
 }
 
@@ -388,7 +475,11 @@ func (b *Broker) composioSigninProvision() {
 func composioMintLoginURL() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), composioLoginStartTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "composio", "login", "--no-wait").CombinedOutput()
+	cmd, err := composioCommand(ctx, "login", "--no-wait")
+	if err != nil {
+		return "", err
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Don't echo raw CLI output into the error: it is user-visible.
 		return "", fmt.Errorf("composio login --no-wait: %w", err)
@@ -422,7 +513,10 @@ func composioProvisionProjectKey() (string, error) {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	cmd := exec.CommandContext(ctx, "composio", "dev", "init", "-y", "--no-browser")
+	cmd, err := composioCommand(ctx, "dev", "init", "-y", "--no-browser")
+	if err != nil {
+		return "", err
+	}
 	cmd.Dir = dir
 	// Output discarded on purpose: dev init may echo project metadata and the
 	// key it writes; nothing from it belongs in broker logs or errors.

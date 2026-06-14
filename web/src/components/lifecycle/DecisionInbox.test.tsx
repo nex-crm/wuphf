@@ -7,7 +7,12 @@ import {
   type AgentRequest,
   answerRequest,
   getAllRequests,
+  getConfig,
 } from "../../api/client";
+import {
+  getIntegrationConnectStatus,
+  startIntegrationConnection,
+} from "../../api/integrations";
 import type { InboxItem } from "../../lib/types/inbox";
 import { DecisionInbox } from "./DecisionInbox";
 
@@ -17,8 +22,16 @@ vi.mock("../../api/client", async (importOriginal) => {
     ...actual,
     answerRequest: vi.fn(),
     getAllRequests: vi.fn(),
+    getConfig: vi.fn(),
   };
 });
+
+vi.mock("../../api/integrations", () => ({
+  startComposioSignin: vi.fn(),
+  getComposioSigninStatus: vi.fn(),
+  startIntegrationConnection: vi.fn(),
+  getIntegrationConnectStatus: vi.fn(),
+}));
 
 vi.mock("../../routes/useCurrentRoute", async (importOriginal) => {
   const actual =
@@ -104,6 +117,7 @@ describe("<DecisionInbox> (mail-style)", () => {
       requests: [ADA_FULL_REQUEST],
     });
     vi.mocked(answerRequest).mockResolvedValue({});
+    vi.mocked(getConfig).mockResolvedValue({ composio_key_set: true });
   });
 
   it("renders one row per item with sender + subject", () => {
@@ -332,5 +346,83 @@ describe("<DecisionInbox> (mail-style)", () => {
     expect(
       screen.queryByText(/answered or is no longer active/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders a connect request as the ConnectIntegrationCard and runs the connect flow (not a generic answer)", async () => {
+    // Regression: a `connect` request rendered as generic option buttons, so
+    // clicking "Connect" called answerRequest — the request vanished from the
+    // Inbox but no OAuth ever ran ("disappears but does nothing"). It must now
+    // render the OAuth-driving ConnectIntegrationCard, like InterviewBar does.
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    // This file's beforeEach doesn't reset call history; clear answerRequest so
+    // the "not answered" assertion reflects only this test.
+    vi.mocked(answerRequest).mockClear();
+    vi.mocked(startIntegrationConnection).mockResolvedValue({
+      provider: "composio",
+      platform: "gmail",
+      status: "connecting",
+      auth_url: "https://oauth.example/gmail",
+    });
+    vi.mocked(getIntegrationConnectStatus).mockResolvedValue({
+      provider: "composio",
+      platform: "gmail",
+      status: "connecting",
+    });
+
+    const connectItem: InboxItem = {
+      kind: "request",
+      requestId: "req-connect",
+      title: "Connect Gmail",
+      agentSlug: "ada",
+      channel: "general",
+      createdAt: "2026-05-11T12:50:00Z",
+      request: {
+        kind: "connect",
+        question: "@ada needs Gmail to send the email.",
+        from: "ada",
+      },
+    };
+    vi.mocked(getAllRequests).mockResolvedValue({
+      requests: [
+        {
+          id: "req-connect",
+          kind: "connect",
+          from: "ada",
+          platform: "gmail",
+          channel: "general",
+          title: "Connect Gmail",
+          question: "@ada needs Gmail to send the email.",
+          status: "pending",
+          blocking: true,
+          options: [{ id: "connect", label: "Connect" }],
+        },
+      ],
+    });
+
+    render(wrap(<DecisionInbox initialItems={[connectItem]} />));
+
+    // The card's eyebrow is unique to ConnectIntegrationCard; the generic
+    // RequestItem never renders it.
+    expect(await screen.findByText(/connect to continue/i)).toBeInTheDocument();
+    const connectButton = await screen.findByRole("button", {
+      name: /^Connect Gmail$/i,
+    });
+
+    fireEvent.click(connectButton);
+
+    // Drives the real connection flow — NOT answerRequest.
+    await waitFor(() =>
+      expect(startIntegrationConnection).toHaveBeenCalledWith(
+        "composio",
+        "gmail",
+      ),
+    );
+    expect(open).toHaveBeenCalledWith(
+      "https://oauth.example/gmail",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(answerRequest).not.toHaveBeenCalled();
   });
 });
