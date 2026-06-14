@@ -19,12 +19,13 @@ ls -lh /out/wuphf-desktop | awk '{print "linux binary:",$5}'
 
 cat > /tmp/inner.sh <<'INNER'
 #!/usr/bin/env bash
-export DISPLAY=:99
+# xvfb-run -a sets DISPLAY for us; don't override it.
 /out/wuphf-desktop >/out/app.log 2>&1 &
 APP=$!
 # wait for the webview to connect to the in-process UI (port 7973)
+connected=0
 for i in $(seq 1 40); do
-  ss -tnH 2>/dev/null | grep -q '127.0.0.1:7973' && break
+  ss -tnH 2>/dev/null | grep -q '127.0.0.1:7973' && { connected=1; break; }
   sleep 1
 done
 sleep 5
@@ -45,12 +46,17 @@ import -window root /out/linux-screenshot.png 2>/out/import.log \
   || { xwd -root -silent | convert xwd:- /out/linux-screenshot.png; } 2>>/out/import.log \
   || echo "screenshot failed" >> /out/import.log
 kill "$APP" 2>/dev/null
+# Fail loudly if the webview never reached the in-process UI, so the probe can't
+# pass green when nothing actually rendered.
+[ "$connected" = 1 ] || { echo "PROBE FAILED: webview never connected to 127.0.0.1:7973" >&2; exit 1; }
 INNER
 chmod +x /tmp/inner.sh
 
 echo "=== run under xvfb + dbus ==="
-xvfb-run -a -s "-screen 0 1440x900x24" dbus-run-session -- /tmp/inner.sh
+probe_rc=0
+xvfb-run -a -s "-screen 0 1440x900x24" dbus-run-session -- /tmp/inner.sh || probe_rc=$?
 
 echo "=== app.log (broker boot) ==="; tail -20 /out/app.log
 echo "=== proof ==="; cat /out/sockets.txt
 echo "=== screenshot ==="; ls -lh /out/linux-screenshot.png 2>/dev/null || echo "NO SCREENSHOT"
+exit "$probe_rc"

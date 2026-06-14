@@ -204,9 +204,10 @@
     // Copy buttons
     document.querySelectorAll("[data-copy]").forEach(function (b) {
       b.addEventListener("click", function () {
-        navigator.clipboard.writeText(b.getAttribute("data-copy")).then(function () {
-          var t = b.textContent; b.textContent = "COPIED"; setTimeout(function () { b.textContent = t; }, 1400);
-        });
+        var done = function () { var t = b.textContent; b.textContent = "COPIED"; setTimeout(function () { b.textContent = t; }, 1400); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(b.getAttribute("data-copy")).then(done).catch(function () {});
+        }
       });
     });
   })();

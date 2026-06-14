@@ -52,8 +52,12 @@ func officeInfoPath() string {
 }
 
 // writeOfficeInfo records the running broker's URLs for the active workspace.
-// It writes atomically (temp + rename) so a concurrent reader never sees a torn
-// file.
+// It writes to a temp file then renames into place so a concurrent reader sees
+// either the old or the new file, never a torn one — os.Rename replaces the
+// destination on POSIX (atomic) and via MoveFileEx on Windows (replaces, and is
+// atomic on NTFS for our single-writer case). On the rare Windows-locked-target
+// failure the write errors and is treated as best-effort; the sidecar then
+// self-heals (RunningOfficeURL re-probes, a future boot rewrites it).
 func writeOfficeInfo(webURL, brokerURL string) error {
 	path := officeInfoPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

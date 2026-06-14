@@ -57,22 +57,27 @@ cd desktop/oswails && wails build -s -skipbindings -tags "desktop webkit2_41"
 ## Single-instance & attach
 
 `SingleInstanceLock` ensures one desktop instance per machine — a second launch
-focuses the running window instead of spawning a competing in-process broker.
+focuses the running window instead of spawning a competing process.
 
-**Not yet handled (follow-up):** a CLI `wuphf web` already running the *same
-workspace*. WUPHF is single-broker-per-workspace (`killStaleBroker` + the
-per-workspace `office.pid`), so the shell should detect a live broker and
-*attach* (point the window at its UI) rather than boot its own. That needs
-`office.pid` to record the bound UI URL and the desktop path to skip
-`killStaleBroker`. Tracked in the feasibility spec.
+**Shared office, one broker per workspace.** The shell opens the user's active
+workspace (the same office an unqualified `wuphf web` uses). Before booting it
+calls `team.RunningOfficeURL()`, which reads the `office.json` sidecar (written
+next to `office.pid` with the running broker's web URL) and, if a loopback,
+WUPHF-identity-verified peer is live, **attaches** the window to it instead of
+booting a second broker. The CLI's `wuphf web` does the same — opens the running
+office and exits rather than `killStaleBroker`-ing a peer. Clean shutdown clears
+the sidecar; a stale one self-heals via the reachability probe. This makes one
+broker per workspace the invariant, so the broker port is no longer a concern.
 
 ## Known follow-ups
 
-- **Broker port** still binds the default `:7890`; only the *UI* port is
-  dynamic. Single-instance makes that safe today, but the broker port should
-  become app-specific too.
-- **Clean shutdown:** the process currently relies on exit to tear the broker
-  down (fine with no running agents). A real `Launcher.Shutdown()` (stop
-  transports, clear `office.pid`) is the productionization step.
+- **Desktop+CLI simultaneous cold-start** has no lock between the attach-check
+  and boot, so two front-ends starting within ~ms could both boot
+  (`SingleInstanceLock` only covers desktop↔desktop). An advisory boot lock is
+  the fix.
+- **Identity probe** confirms a WUPHF office via a marker in the served `/`; a
+  dedicated broker endpoint on the web port would be more robust.
+- **Multi-workspace:** the desktop opens the default `~` office, not
+  `cli_current`.
 - **Cross-platform:** macOS + Linux WebKitGTK validated by hand; Windows
   WebView2 via `.github/workflows/desktop-webview-probe.yml`.

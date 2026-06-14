@@ -694,8 +694,10 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	// another CLI), attach to it instead of booting a second broker — which
 	// killStaleBroker would otherwise kill on the shared port. Open it and exit.
 	if url, ok := team.RunningOfficeURL(); ok {
-		fmt.Printf("\n  Office already running at %s — opening it.\n\n", url)
-		if !noOpen {
+		if noOpen {
+			fmt.Printf("\n  Office already running at %s\n\n", url)
+		} else {
+			fmt.Printf("\n  Office already running at %s — opening it.\n\n", url)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := openBrowser(ctx, url); err != nil {

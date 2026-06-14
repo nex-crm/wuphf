@@ -46,7 +46,7 @@ jobs:
     runs-on: macos-14 # Apple Silicon
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
 
       - name: Resolve version
         id: ver
@@ -62,11 +62,11 @@ jobs:
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2
 
       - name: Build embedded web bundle
         run: cd web && bun install && bun run build
@@ -147,7 +147,7 @@ jobs:
           # releases/latest/download/WUPHF-mac.dmg URL (same signed+stapled bytes).
           cp "dist/WUPHF-$VERSION.dmg" "dist/WUPHF-mac.dmg"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # ratchet:softprops/action-gh-release@v2
         with:
           files: dist/WUPHF-*.dmg
           draft: true # review before publishing
@@ -157,12 +157,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2
 
       - name: Resolve version
         id: ver
@@ -207,7 +207,7 @@ jobs:
       # Azure Trusted Signing — only runs when the AZURE_* secrets are present.
       - name: Sign (Azure Trusted Signing)
         if: steps.azure.outputs.enabled == 'true'
-        uses: azure/trusted-signing-action@v0.5.0
+        uses: azure/trusted-signing-action@07c81171dd46a04e1b9f382b6c693815828bbbf7 # ratchet:azure/trusted-signing-action@v0.5.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -227,12 +227,14 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           mkdir -p dist
-          exe=$(find desktop/oswails/build/bin -maxdepth 1 -name '*.exe' | head -1)
+          # Wails -nsis emits both the app .exe and the NSIS installer; publish the installer.
+          exe=$(find desktop/oswails/build/bin -maxdepth 1 -name '*installer*.exe' | head -1)
+          [ -n "$exe" ] || exe=$(find desktop/oswails/build/bin -maxdepth 1 -name '*.exe' | head -1)
           cp "$exe" "dist/WUPHF-$VERSION-setup.exe"
           # Version-less alias for the stable releases/latest/download URL.
           cp "$exe" "dist/WUPHF-windows-setup.exe"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # ratchet:softprops/action-gh-release@v2
         with:
           files: dist/WUPHF-*-setup.exe
           draft: true

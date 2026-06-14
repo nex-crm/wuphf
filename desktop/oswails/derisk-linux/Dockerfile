@@ -11,7 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-dejavu-core fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 # Go 1.26.2 (Ubuntu's packaged Go is too old for this module's go 1.25.10 directive).
-RUN curl -fsSL https://go.dev/dl/go1.26.2.linux-arm64.tar.gz | tar -C /usr/local -xz
+# Verify the archive checksum before extracting (supply-chain hygiene).
+RUN curl -fsSLO https://go.dev/dl/go1.26.2.linux-arm64.tar.gz \
+ && curl -fsSLO https://go.dev/dl/go1.26.2.linux-arm64.tar.gz.sha256 \
+ && echo "$(cat go1.26.2.linux-arm64.tar.gz.sha256)  go1.26.2.linux-arm64.tar.gz" | sha256sum -c - \
+ && tar -C /usr/local -xzf go1.26.2.linux-arm64.tar.gz \
+ && rm -f go1.26.2.linux-arm64.tar.gz go1.26.2.linux-arm64.tar.gz.sha256
 ENV PATH=/usr/local/go/bin:/root/go/bin:$PATH
 ENV GOTOOLCHAIN=local
 WORKDIR /src
