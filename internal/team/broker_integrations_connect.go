@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -130,6 +131,15 @@ func (b *Broker) ensureIntegrationDecisionLocked(spec integrationDecisionCard) s
 		UpdatedAt:     now,
 	}
 	b.scheduleRequestLifecycleLocked(&req)
+	// Announce a connect decision in its channel so it surfaces on chat-bridged
+	// surfaces (Slack) as a decision message — the Slack connect card upgrades
+	// this announcement to an interactive Block Kit card. Scoped to connect: the
+	// fallback kind is a sibling concern and keeps its current (inbox-only)
+	// surfacing. Mirrors the team_request path's loud-ask announcement; runs
+	// before the append so the stamped ReplyTo persists with the request.
+	if kind == "connect" {
+		b.postRequestRaisedChatMessageLocked(&req)
+	}
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	auditKind := strings.TrimSpace(spec.AuditKind)
@@ -232,6 +242,81 @@ func (b *Broker) resolveConnectRequestsLocked(platform, actor, choiceID, reason 
 	}
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	return pending
+}
+
+// slackConnectStatus is the glanceable connection status the Slack connect card
+// renders in its context block. It is the registry's last-known state mapped to
+// the same three words the web ConnectIntegrationCard surfaces: "Connected",
+// "Connecting…", or "Not connected". An unknown/missing platform reads as not
+// connected (the safe default that keeps the Connect button live).
+func (b *Broker) slackConnectStatus(platform string) string {
+	entry, ok := b.lookupConnectionRegistry(platform)
+	if !ok {
+		return "Not connected"
+	}
+	switch action.ConnectionState(strings.TrimSpace(entry.State)) {
+	case action.StateConnected:
+		return "Connected"
+	case action.StatePending, action.StateChecking:
+		return "Connecting…"
+	default:
+		return "Not connected"
+	}
+}
+
+// composioConfiguredForConnect reports whether the Composio provider has the
+// credentials it needs to start an OAuth connection. The Slack connect card uses
+// this to decide between a live "Connect" button (round-trips through Composio)
+// and an informational card (no button) when Composio is not set up, so a click
+// can never dead-end against an unconfigured provider.
+func composioConfiguredForConnect() bool {
+	return action.NewComposioFromEnv().Configured()
+}
+
+// startSlackIntegrationConnect initiates a Composio OAuth connection for platform
+// from a Slack connect-button click. It mirrors handleIntegrationConnect's
+// server side: start the connection, record the integration_connect_started
+// audit, and return the result whose AuthURL the human opens to finish OAuth.
+// The existing connect-status fan-out (handleIntegrationConnectStatus →
+// fanOutConnected) auto-answers the parked connect card once the connection goes
+// live, so this path never has to poll. Returns an error when Composio is not
+// configured or the start call fails.
+func (b *Broker) startSlackIntegrationConnect(ctx context.Context, platform, actor string) (action.IntegrationConnectResult, error) {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return action.IntegrationConnectResult{}, fmt.Errorf("connect: platform is empty")
+	}
+	composio := action.NewComposioFromEnv()
+	if !composio.Configured() {
+		return action.IntegrationConnectResult{}, fmt.Errorf("composio is not configured")
+	}
+	result, err := composio.StartIntegrationConnection(ctx, action.IntegrationConnectRequest{
+		Provider: "composio",
+		Platform: platform,
+	})
+	if err != nil {
+		return action.IntegrationConnectResult{}, fmt.Errorf("start composio connection: %w", err)
+	}
+	if strings.TrimSpace(actor) == "" {
+		actor = "system"
+	}
+	_ = b.RecordActionWithMetadata(
+		"integration_connect_started",
+		"composio",
+		"general",
+		actor,
+		fmt.Sprintf("Started %s connection via Composio (Slack)", action.DisplayPlatformName(result.Platform)),
+		result.Platform,
+		nil,
+		"",
+		map[string]string{
+			"provider": "composio",
+			"platform": result.Platform,
+			"status":   result.Status,
+			"surface":  "slack",
+		},
+	)
+	return result, nil
 }
 
 func connectChoiceLabel(choiceID string) string {

@@ -110,6 +110,26 @@ func formatSlackInterviewBlocks(req humanInterview) []slack.Block {
 	return blocks
 }
 
+// decisionBlocks renders the Block Kit for an active decision, dispatching by
+// kind: a `connect` decision becomes the polished integration connect card
+// (logo + status + Connect button, slack_integration_cards.go); every other kind
+// renders as the generic option-buttons interview card. The connect branch reads
+// the live connection status + Composio-configured state from the broker, which
+// the pure formatSlackInterviewBlocks cannot do — so this transport method is the
+// single render entry point the Send path calls.
+func (t *SlackTransport) decisionBlocks(decision humanInterview) []slack.Block {
+	if isSlackConnectInterview(decision) {
+		status := "Not connected"
+		canConnect := false
+		if t.Broker != nil {
+			status = t.Broker.slackConnectStatus(decision.Platform)
+			canConnect = composioConfiguredForConnect()
+		}
+		return formatSlackConnectBlocks(decision, status, canConnect)
+	}
+	return formatSlackInterviewBlocks(decision)
+}
+
 // slackInterviewButtons builds one button per option, capped at the Slack action
 // block limit (5 elements per action block). Buttons beyond the cap are dropped
 // rather than split across blocks: the gate's canonical kinds (approval/connect/
@@ -199,7 +219,11 @@ func (t *SlackTransport) activeDecisionForChannel(slug string) (humanInterview, 
 	var best humanInterview
 	var found bool
 	for _, req := range reqs {
-		if !isHumanDecisionKind(req.Kind) || len(req.Options) == 0 {
+		// A connect decision is rendered as the integration connect card; it is a
+		// human decision even though isHumanDecisionKind (the chat-prefix helper)
+		// does not list the "connect" kind. Other kinds fall through to the generic
+		// option-button card and must have at least one option to click.
+		if !isSlackConnectInterview(req) && (!isHumanDecisionKind(req.Kind) || len(req.Options) == 0) {
 			continue
 		}
 		if !found || req.CreatedAt > best.CreatedAt {
@@ -233,7 +257,11 @@ func (t *SlackTransport) handleInteractive(ctx context.Context, callback slack.I
 	}
 
 	for _, action := range actions {
-		if action == nil || action.BlockID != slackGateActionBlock {
+		if action == nil {
+			continue
+		}
+		isConnect := action.BlockID == slackConnectActionBlock
+		if action.BlockID != slackGateActionBlock && !isConnect {
 			continue
 		}
 		interviewID, optionID, ok := parseSlackGateValue(action.Value)
@@ -252,19 +280,54 @@ func (t *SlackTransport) handleInteractive(ctx context.Context, callback slack.I
 			return true
 		}
 
-		// Bind the click to its channel: the interview being answered must be the
-		// ACTIVE decision in the channel the click came from. This stops a crafted
-		// or replayed interaction from resolving another channel's gate by id
-		// (request ids are predictable), independent of option validation.
 		officeSlug := t.channelSlugForID(channelID)
-		decision, found := t.activeDecisionForChannel(officeSlug)
-		if officeSlug == "" || !found || decision.ID != interviewID {
+		if officeSlug == "" {
 			t.postGateEphemeral(ctx, channelID, callback.User.ID, "This decision is no longer available in this channel.")
 			return true
 		}
 
 		actorSlug := slackHumanActorSlug(callback.User.ID, name)
 		answerActor := humanMessageSender(actorSlug)
+
+		// A connect card's buttons are bound to their channel by id: the connect
+		// request keyed on the clicked id must be the active connect decision in the
+		// channel the click came from. "Connect" starts the Composio OAuth flow and
+		// rewrites the card; "Not now" (skip) resolves the gate through the canonical
+		// answer path and rewrites the card to its terminal skipped state.
+		if isConnect {
+			req, found := t.connectInterviewByID(officeSlug, interviewID)
+			if !found {
+				t.postGateEphemeral(ctx, channelID, callback.User.ID, "This decision is no longer available in this channel.")
+				return true
+			}
+			if optionID == slackConnectOptionConnect {
+				t.handleConnectClick(ctx, channelID, messageTS, callback.User.ID, name, req)
+				return true
+			}
+			status, msg := t.Broker.answerRequestFromActor(answerActor, interviewID, optionID, "", "")
+			if status != http.StatusOK {
+				reason := strings.TrimSpace(msg)
+				if reason == "" {
+					reason = "could not record your answer"
+				}
+				log.Printf("[slack] connect: answer %s/%s failed (%d): %s", interviewID, optionID, status, reason)
+				t.postGateEphemeral(ctx, channelID, callback.User.ID,
+					"This request is no longer active: "+reason+".")
+				return true
+			}
+			t.updateConnectResolvedMessage(ctx, channelID, messageTS, req, name)
+			return true
+		}
+
+		// Bind the click to its channel: the interview being answered must be the
+		// ACTIVE decision in the channel the click came from. This stops a crafted
+		// or replayed interaction from resolving another channel's gate by id
+		// (request ids are predictable), independent of option validation.
+		decision, found := t.activeDecisionForChannel(officeSlug)
+		if !found || decision.ID != interviewID {
+			t.postGateEphemeral(ctx, channelID, callback.User.ID, "This decision is no longer available in this channel.")
+			return true
+		}
 
 		status, msg := t.Broker.answerRequestFromActor(answerActor, interviewID, optionID, "", "")
 		if status != http.StatusOK {

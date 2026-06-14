@@ -689,7 +689,7 @@ func (t *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 	if isSlackDecisionText(msg.Text) {
 		if decision, ok := t.activeDecisionForChannel(msg.Binding.ChannelSlug); ok {
 			decision.From = t.displayNameForOffice(decision.From)
-			opts = append(opts, slack.MsgOptionBlocks(formatSlackInterviewBlocks(decision)...))
+			opts = append(opts, slack.MsgOptionBlocks(t.decisionBlocks(decision)...))
 		}
 	}
 	// Thread anchoring: a task message threads under its task's single root
