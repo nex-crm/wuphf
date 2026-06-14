@@ -145,6 +145,7 @@ type Broker struct {
 	usage             teamUsageState
 	externalDelivered map[string]struct{}            // message IDs already queued for external delivery
 	slackTaskCards    map[string]slackTaskCardRecord // task ID → posted Slack lifecycle card (persisted)
+	slackTagOrigins   map[string]slackTagOrigin      // slack channel id → where the office was last @-tagged (in-memory; for task-thread backlinks)
 	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
 	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
 	// nil means the real Slack Web API. Tests inject a fake.

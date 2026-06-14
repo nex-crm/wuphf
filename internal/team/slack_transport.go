@@ -63,6 +63,10 @@ type slackAPI interface {
 	// RemovePinContext unpins a message (pins.remove), used when a task's
 	// lifecycle card reaches a terminal state.
 	RemovePinContext(ctx context.Context, channelID string, item slack.ItemRef) error
+	// GetPermalinkContext returns a shareable permalink to a message (chat.
+	// getPermalink), used to link a task's new thread back into the conversation
+	// where WUPHF was tagged.
+	GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error)
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -116,6 +120,10 @@ func (c *slackClient) AddPinContext(ctx context.Context, channelID string, item 
 
 func (c *slackClient) RemovePinContext(ctx context.Context, channelID string, item slack.ItemRef) error {
 	return c.api.RemovePinContext(ctx, channelID, item)
+}
+
+func (c *slackClient) GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error) {
+	return c.api.GetPermalinkContext(ctx, params)
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and
@@ -532,6 +540,36 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 		}
 	}
 
+	// Passivity gate (HUMAN messages only). Registered foreign agents are WUPHF's
+	// own delegates — allowlisted via /slack/agents, and their posts are part of
+	// active coordination, not ambient chatter — so they always ingress. A human,
+	// though, is a co-worker in a shared channel: WUPHF stays out of the way and
+	// acts only when (a) the message tags our bot, or (b) it continues work WUPHF
+	// already owns (a reply inside an existing task thread). Everything else,
+	// untagged channel chatter, is ignored: not ingested, no office turn.
+	if human {
+		mentioned := t.mentionsBot(msg.Text)
+		inTaskThread := false
+		if ts := strings.TrimSpace(msg.ThreadTimeStamp); ts != "" && t.Broker != nil {
+			inTaskThread = t.Broker.SlackThreadIsTaskRoot(ts)
+		}
+		if !mentioned && !inTaskThread {
+			return nil
+		}
+		// A fresh tag (not already inside a task thread) starts new work. Remember
+		// where it came from so the task the office spins up can link its new
+		// thread back into this conversation (consumed by ensureTaskThreadRoot):
+		// the thread it was tagged in, or the tag message itself when posted at
+		// the channel root.
+		if mentioned && !inTaskThread && t.Broker != nil {
+			origin := strings.TrimSpace(msg.ThreadTimeStamp)
+			if origin == "" {
+				origin = strings.TrimSpace(msg.TimeStamp)
+			}
+			t.Broker.recordSlackTagOrigin(msg.Channel, origin)
+		}
+	}
+
 	p := transport.Participant{
 		AdapterName: "slack",
 		Key:         msg.User,
@@ -562,6 +600,23 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 // slackInboundMentionRE matches Slack's wire mention syntax <@U…> / <@W…>
 // (optionally with a |label suffix).
 var slackInboundMentionRE = regexp.MustCompile(`<@([UW][A-Z0-9]+)(?:\|[^>]*)?>`)
+
+// mentionsBot reports whether text @-mentions this office's own Slack bot (the
+// raw <@U…> wire form). Tagging the bot is how a human wakes the office, so this
+// is the primary signal for the inbound passivity gate. Returns false when the
+// bot's own user id is unknown (auth.test failed): without it a mention can't be
+// proven, and the gate fails closed (stay passive) rather than acting blind.
+func (t *SlackTransport) mentionsBot(text string) bool {
+	if t.botUserID == "" || !strings.Contains(text, "<@") {
+		return false
+	}
+	for _, m := range slackInboundMentionRE.FindAllStringSubmatch(text, -1) {
+		if len(m) >= 2 && m[1] == t.botUserID {
+			return true
+		}
+	}
+	return false
+}
 
 // translateInboundMentions rewrites Slack wire mentions into office tokens so
 // the broker's mention machinery understands who is addressed: a mention of

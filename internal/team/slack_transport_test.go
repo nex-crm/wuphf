@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,6 +98,8 @@ type fakeSlackAPI struct {
 	pinErr   error
 	unpins   []fakePin
 	unpinErr error
+
+	permalinkErr error
 }
 
 type fakePin struct {
@@ -147,6 +150,15 @@ func (f *fakeSlackAPI) RemovePinContext(_ context.Context, channelID string, ite
 	}
 	f.unpins = append(f.unpins, fakePin{ChannelID: channelID, Timestamp: item.Timestamp})
 	return nil
+}
+
+func (f *fakeSlackAPI) GetPermalinkContext(_ context.Context, params *slack.PermalinkParameters) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.permalinkErr != nil {
+		return "", f.permalinkErr
+	}
+	return "https://slack.example/archives/" + params.Channel + "/p" + strings.ReplaceAll(params.Ts, ".", ""), nil
 }
 
 func (f *fakeSlackAPI) PublishViewContext(_ context.Context, userID string, view slack.HomeTabViewRequest) error {
@@ -328,6 +340,10 @@ func newTestSlackTransport(t *testing.T, channelID string, api slackAPI) (*Slack
 	t.Helper()
 	b := newTestBrokerWithSlackChannel(t, channelID)
 	tr := newSlackTransport(b, "xoxb-test", "xapp-test", api)
+	// Match the resolved identity Run() would set from auth.test, so the inbound
+	// passivity gate can recognize a <@UBOT> tag in tests that call routeInbound
+	// directly. Tests that exercise the auth.test-failed path reset this to "".
+	tr.botUserID = "UBOT"
 	return tr, b
 }
 
@@ -392,10 +408,12 @@ func TestSlackRouteInbound(t *testing.T) {
 	tr, b := newTestSlackTransport(t, "C0123", api)
 	host := &brokerTransportHost{broker: b}
 
+	// Human messages only ingress when they tag the bot (the passivity gate);
+	// the <@UBOT> mention translates to the office lead token on the way in.
 	msg := &slackevents.MessageEvent{
 		User:      "U7",
 		Channel:   "C0123",
-		Text:      "hello via socket",
+		Text:      "<@UBOT> hello via socket",
 		TimeStamp: "1700000001.0001",
 	}
 	if err := tr.routeInbound(context.Background(), host, msg); err != nil {
@@ -406,8 +424,8 @@ func TestSlackRouteInbound(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message in channel, got %d", len(msgs))
 	}
-	if msgs[0].Content != "hello via socket" {
-		t.Fatalf("content = %q, want %q", msgs[0].Content, "hello via socket")
+	if !strings.Contains(msgs[0].Content, "hello via socket") {
+		t.Fatalf("content = %q, want to contain %q", msgs[0].Content, "hello via socket")
 	}
 	// Slack humans post as the "human:<id>" actor so the broker classifies
 	// them as human (mention rights, lead wake, FromHuman queue priority).
@@ -430,7 +448,7 @@ func TestSlackRouteInboundUpsertsParticipantBeforeReceive(t *testing.T) {
 	tr, b := newTestSlackTransport(t, "C0123", api)
 	rec := &slackOrderingHost{inner: &brokerTransportHost{broker: b}}
 
-	msg := &slackevents.MessageEvent{User: "U9", Channel: "C0123", Text: "hi", TimeStamp: "1.1"}
+	msg := &slackevents.MessageEvent{User: "U9", Channel: "C0123", Text: "<@UBOT> hi", TimeStamp: "1.1"}
 	if err := tr.routeInbound(context.Background(), rec, msg); err != nil {
 		t.Fatalf("routeInbound: %v", err)
 	}
@@ -484,10 +502,11 @@ func TestSlackRouteInboundChannelMissing(t *testing.T) {
 	// Map a channel id to a slug that does not exist as a broker channel so the
 	// Host returns ErrBindingChannelMissing on ReceiveMessage.
 	tr := newSlackTransport(b, "xoxb", "xapp", api)
+	tr.botUserID = "UBOT"
 	tr.ChannelMap["C0123"] = "ghost-channel"
 	host := &brokerTransportHost{broker: b}
 
-	msg := &slackevents.MessageEvent{User: "U1", Channel: "C0123", Text: "lost", TimeStamp: "1"}
+	msg := &slackevents.MessageEvent{User: "U1", Channel: "C0123", Text: "<@UBOT> lost", TimeStamp: "1"}
 	err := tr.routeInbound(context.Background(), host, msg)
 	if err == nil || !errors.Is(err, teamTransport.ErrBindingChannelMissing) {
 		t.Fatalf("expected ErrBindingChannelMissing, got %v", err)
