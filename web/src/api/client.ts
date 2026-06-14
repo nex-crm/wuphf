@@ -248,7 +248,11 @@ export async function get<T = unknown>(
   let url = baseURL() + path;
   if (params) {
     const qs = Object.entries(params)
-      .filter(([, v]) => v !== null)
+      // Drop absent params. Both null AND undefined must be skipped — without
+      // the undefined check, String(undefined) serializes as the literal
+      // "undefined", which the broker then treats as a real filter value (e.g.
+      // ?provider=undefined silently blanked the integrations catalog).
+      .filter(([, v]) => v !== null && v !== undefined)
       .map(
         ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
       )
@@ -278,7 +282,11 @@ export async function getText(
   let url = baseURL() + path;
   if (params) {
     const qs = Object.entries(params)
-      .filter(([, v]) => v !== null)
+      // Drop absent params. Both null AND undefined must be skipped — without
+      // the undefined check, String(undefined) serializes as the literal
+      // "undefined", which the broker then treats as a real filter value (e.g.
+      // ?provider=undefined silently blanked the integrations catalog).
+      .filter(([, v]) => v !== null && v !== undefined)
       .map(
         ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
       )

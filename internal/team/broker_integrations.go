@@ -50,11 +50,21 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	providerFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
+	// Sanitize query params: a client that serializes an absent value as the
+	// literal string "undefined"/"null" must not blank the catalog (a bad
+	// ?provider=undefined used to skip the whole composio catalog block).
+	qval := func(key string) string {
+		v := strings.TrimSpace(r.URL.Query().Get(key))
+		if strings.EqualFold(v, "undefined") || strings.EqualFold(v, "null") {
+			return ""
+		}
+		return v
+	}
+	providerFilter := strings.ToLower(qval("provider"))
 	opts := action.IntegrationCatalogOptions{
-		Search:    strings.TrimSpace(r.URL.Query().Get("search")),
-		Connected: strings.TrimSpace(r.URL.Query().Get("connected")),
-		Cursor:    strings.TrimSpace(r.URL.Query().Get("cursor")),
+		Search:    qval("search"),
+		Connected: qval("connected"),
+		Cursor:    qval("cursor"),
 		Limit:     parseIntegrationLimit(r.URL.Query().Get("limit"), 50),
 	}
 

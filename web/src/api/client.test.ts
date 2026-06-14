@@ -149,6 +149,32 @@ describe("get timeout", () => {
     const init = fetchMock.mock.calls.at(-1)?.[1];
     expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
+
+  // Regression: undefined params were serialized as the literal "undefined"
+  // (String(undefined)), so ?provider=undefined reached the broker and blanked
+  // the integrations catalog. Both null AND undefined must be dropped.
+  it("drops undefined and null query params instead of sending 'undefined'", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await get("/integrations", {
+      provider: undefined,
+      search: undefined,
+      connected: null,
+      limit: 60,
+    });
+
+    const url = String(fetchMock.mock.calls.at(-1)?.[0]);
+    expect(url).toContain("limit=60");
+    expect(url).not.toContain("undefined");
+    expect(url).not.toContain("null");
+    expect(url).not.toContain("provider=");
+    expect(url).not.toContain("connected=");
+  });
 });
 
 // Regression: a broker-down wiki rendered the raw JSON envelope

@@ -108,6 +108,36 @@ func TestIntegrationsEndpointReportsUnconfiguredProviders(t *testing.T) {
 	}
 }
 
+// TestIntegrationsEndpointIgnoresUndefinedQuerySentinels: a client that
+// serialized absent params as the literal "undefined"/"null" must not blank the
+// catalog. ?provider=undefined used to skip the whole composio catalog block,
+// so the page showed "Configured" with zero available integrations.
+func TestIntegrationsEndpointIgnoresUndefinedQuerySentinels(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "state.json"))
+	srv := newIntegrationsTestServer(t, b)
+	defer srv.Close()
+
+	resp := integrationRequest(t, srv, b, http.MethodGet,
+		"/integrations?provider=undefined&search=undefined&connected=undefined&cursor=null", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(raw))
+	}
+	var body struct {
+		Items []struct {
+			Provider string `json:"provider"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) == 0 {
+		t.Fatal("undefined/null query sentinels must not blank the catalog")
+	}
+}
+
 func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
