@@ -54,6 +54,10 @@ func (t *SlackTransport) publishHomeTab(ctx context.Context, userID string) {
 		Type:   slack.VTHomeTab,
 		Blocks: slack.Blocks{BlockSet: blocks},
 	}
+	// Bound the network call: this runs on the inbound event goroutine, so a
+	// hung Slack call without a local deadline would stall event processing.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	if err := t.api.PublishViewContext(ctx, userID, view); err != nil {
 		log.Printf("[slack] home tab publish failed for %s: %v", userID, err)
 	}
@@ -163,7 +167,11 @@ func buildSlackHomeBlocks(b *Broker) []slack.Block {
 		}
 		section(strings.Join(lines, "\n"))
 		if overflow > 0 {
-			contextLine(fmt.Sprintf("…and %d more on the <%s/tasks|full board>.", overflow, base))
+			if base != "" {
+				contextLine(fmt.Sprintf("…and %d more on the <%s/tasks|full board>.", overflow, base))
+			} else {
+				contextLine(fmt.Sprintf("…and %d more on the full board.", overflow))
+			}
 		}
 	}
 	divider()
@@ -308,6 +316,10 @@ func slackRelativeTime(updated string, now time.Time) string {
 	}
 	d := now.Sub(t)
 	switch {
+	case d < 0:
+		// Future or clock-skewed timestamp — "just now" would mislabel a
+		// genuinely-newer article. Treat it as the freshest state plainly.
+		return "just updated"
 	case d < time.Hour:
 		return "just now"
 	case d < 24*time.Hour:

@@ -65,8 +65,8 @@ func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idemp
 		return "", fmt.Errorf("slack bridge: empty mention text (idempotency key %q)", idempotencyKey)
 	}
 
-	postCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	mentionCtx, cancelMention := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelMention()
 
 	// Post the mention. escapeText=true is deliberate and security-relevant: this
 	// is the foreign-facing egress boundary, and the packer redacts SECRETS, not
@@ -79,7 +79,7 @@ func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idemp
 	if ts := strings.TrimSpace(d.Injection.ThreadTS); ts != "" {
 		mentionOpts = append(mentionOpts, slack.MsgOptionTS(ts))
 	}
-	_, mentionTS, err := b.api.PostMessageContext(postCtx, channelID, mentionOpts...)
+	_, mentionTS, err := b.api.PostMessageContext(mentionCtx, channelID, mentionOpts...)
 	if err != nil {
 		return "", fmt.Errorf("slack bridge: post mention: %w", err)
 	}
@@ -92,7 +92,12 @@ func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idemp
 		if threadTS == "" {
 			threadTS = mentionTS
 		}
-		_, _, ferr := b.api.PostMessageContext(postCtx, channelID,
+		// Fresh timeout: the mention call above may have consumed most of its
+		// budget, and the follow-up is an independent network call that deserves
+		// its own deadline rather than the mention's leftovers.
+		followCtx, cancelFollow := context.WithTimeout(ctx, 30*time.Second)
+		defer cancelFollow()
+		_, _, ferr := b.api.PostMessageContext(followCtx, channelID,
 			slack.MsgOptionText(thread, true),
 			slack.MsgOptionTS(threadTS),
 		)

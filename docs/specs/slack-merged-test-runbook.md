@@ -88,6 +88,7 @@ endpoint that does this in one call is the first thing to build in the session.
    learning + any `link_task_wiki`-linked article: the loop compounds.
 
 ### Assertions
+
 - The injected mention never contains secrets (scanner redaction) or Slack
   control sequences (`escapeText=true`).
 - `PackerInjectionSink.History()` shows a `DeliverySent` record per delegation

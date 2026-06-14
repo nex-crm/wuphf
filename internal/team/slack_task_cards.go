@@ -198,14 +198,18 @@ func (t *SlackTransport) updateTaskCard(ctx context.Context, rec slackTaskCardRe
 		log.Printf("[slack] task card update failed for %s: %v", task.ID, err)
 		return
 	}
-	rec.State = state
 	if slackCardTerminalStates[state] && rec.Pinned {
 		if err := t.api.RemovePinContext(ctx, rec.ChannelID, slack.NewRefToMessage(rec.ChannelID, rec.Timestamp)); err != nil {
-			log.Printf("[slack] task card unpin failed for %s: %v", task.ID, err)
-		} else {
-			rec.Pinned = false
+			// Leave rec.State UNADVANCED so the next sync tick re-enters this
+			// path (state still differs) and retries the unpin. Persisting the
+			// terminal state here would strand the pin forever — the steady
+			// state is silent, so there'd be no later trigger to remove it.
+			log.Printf("[slack] task card unpin failed for %s (will retry): %v", task.ID, err)
+			return
 		}
+		rec.Pinned = false
 	}
+	rec.State = state
 	t.Broker.SetSlackTaskCard(task.ID, rec)
 }
 

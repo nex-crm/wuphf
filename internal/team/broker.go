@@ -1115,10 +1115,17 @@ func (b *Broker) postInboundSurfaceMessage(from, channel, content, provider, thr
 	// Set before appendMessageLocked, whose owner-based auto-stamp does NOT
 	// fire for non-owner foreign agents or humans — the thread is the only
 	// signal that ties their reply to the task.
-	if root := b.slackTaskByRootTSLocked(threadRootKey); root != nil {
-		msg.SourceTaskID = root.ID
-		if strings.TrimSpace(msg.ReplyTo) == "" && strings.TrimSpace(root.ThreadID) != "" {
-			msg.ReplyTo = strings.TrimSpace(root.ThreadID)
+	// Scope the fold to Slack and to the message's own channel: the root key is
+	// a Slack thread_ts, so a non-Slack inbound (Telegram reply_to, etc.) or a
+	// reply that lands in a different channel must never be folded into a Slack
+	// task thread by a key collision or replay.
+	if provider == "slack" {
+		if root := b.slackTaskByRootTSLocked(threadRootKey); root != nil &&
+			normalizeChannelSlug(root.Channel) == channel {
+			msg.SourceTaskID = root.ID
+			if strings.TrimSpace(msg.ReplyTo) == "" && strings.TrimSpace(root.ThreadID) != "" {
+				msg.ReplyTo = strings.TrimSpace(root.ThreadID)
+			}
 		}
 	}
 	// Promote @slug mentions into tags, mirroring handlePostMessage's

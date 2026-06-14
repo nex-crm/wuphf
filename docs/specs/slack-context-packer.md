@@ -1,7 +1,9 @@
 # Inbound Context Packer
 
-> Status: **DRAFT / design v2** (2026-06-09). Not yet implemented. Revised after a
-> `/codex` consult review — see "Review dispositions" at the end.
+> Status: **IMPLEMENTED** — the egress core ships in `internal/packer`; see the
+> "Implementation status" section below for the per-finding disposition. This
+> spec began as design v2 (2026-06-09) and was revised after a `/codex` consult
+> review — see "Review dispositions" at the end.
 > Owner: founder + harness team.
 > Scope: open-source self-hosted WUPHF. Designed as a **shared kernel** the Nex
 > cloud (hosted, multi-tenant) version inherits without forking.
@@ -42,7 +44,7 @@ model was rejected.
 
 ## Where it sits
 
-```
+```text
 Slack workspace channel  (just a workspace; carries no structure)
         │  human posts a goal / bot posts a reply
         ▼

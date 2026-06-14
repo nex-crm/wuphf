@@ -1262,11 +1262,18 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.TaskType = taskType
 		}
 		if len(body.WikiRefs) > 0 {
-			// Wiki links are routing metadata, not the spec body, so they stay
-			// mutable after approval (like TaskType/ExecutionMode) and are not
-			// gated by the spec freeze. Replace semantics: the caller sends the
-			// full linked set; dedupePaths trims/normalizes/dedupes.
-			task.WikiRefs = dedupePaths(body.WikiRefs)
+			// Wiki links shape a task's wiki-egress boundary, so mutating them is
+			// a CURATOR action (CEO / human / Librarian) — the same authority the
+			// link_task_wiki tool requires. This generic update path is reachable
+			// via the universally-open `comment` action, so without a gate here a
+			// specialist could relabel a task's wiki egress by attaching WikiRefs
+			// to a note. Non-curators' WikiRefs are ignored (the other optional
+			// fields here follow the same silently-skip pattern). Replace
+			// semantics: the caller sends the full set; dedupePaths normalizes.
+			actorSlug := strings.ToLower(strings.TrimSpace(actor))
+			if isHumanMessageSender(actorSlug) || actorSlug == "ceo" || isLibrarianSlug(actorSlug) {
+				task.WikiRefs = dedupePaths(body.WikiRefs)
+			}
 		}
 		if pipelineID := strings.TrimSpace(body.PipelineID); pipelineID != "" {
 			task.PipelineID = pipelineID

@@ -1,6 +1,9 @@
 package packer
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Budget tiers (approximate tokens). The security pass runs first; these only
 // govern how much of what SURVIVED classification is ranked in. See the spec's
@@ -39,6 +42,11 @@ func capTokens(s string, maxTokens int) string {
 		return s
 	}
 	cut := s[:maxChars]
+	// Back off the byte cut to a rune boundary so a multibyte rune isn't split
+	// into invalid UTF-8 (replacement chars in non-ASCII asks/wiki snippets).
+	for len(cut) > 0 && !utf8.RuneStart(s[len(cut)]) {
+		cut = cut[:len(cut)-1]
+	}
 	if idx := strings.LastIndexAny(cut, " \n\t"); idx > maxChars/2 {
 		cut = cut[:idx]
 	}

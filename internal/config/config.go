@@ -630,12 +630,20 @@ func ResolveSlackAppToken() string {
 }
 
 // SaveSlackTokens persists the Slack bot and app tokens to config.json. Empty
-// values are stored as-is so a caller can clear a token by passing "".
-func SaveSlackTokens(botToken, appToken string) {
-	cfg, _ := Load()
+// values are stored as-is so a caller can clear a token by passing "". Returns
+// an error rather than silently dropping Load/Save failures: a failed Load
+// would otherwise write an EMPTY config back over every other persisted field.
+func SaveSlackTokens(botToken, appToken string) error {
+	cfg, err := Load()
+	if err != nil {
+		return fmt.Errorf("save slack tokens: load config: %w", err)
+	}
 	cfg.SlackBotToken = strings.TrimSpace(botToken)
 	cfg.SlackAppToken = strings.TrimSpace(appToken)
-	_ = Save(cfg)
+	if err := Save(cfg); err != nil {
+		return fmt.Errorf("save slack tokens: %w", err)
+	}
+	return nil
 }
 
 // CompanyContextBlock returns a prompt fragment with company context for agent

@@ -52,8 +52,8 @@ func TestSendThreadsTaskMessageUnderRootCard(t *testing.T) {
 	if card.Blocks == "" || !strings.Contains(card.Blocks, "OFFICE-7") {
 		t.Fatalf("first post should be the task root card: %+v", card)
 	}
-	if msg.ThreadTS != card.ThreadTS && msg.ThreadTS == "" {
-		t.Fatalf("task message was not threaded: %+v", msg)
+	if msg.ThreadTS == "" {
+		t.Fatalf("task message was not threaded under the root card: %+v", msg)
 	}
 	rec, ok := b.SlackTaskCard("OFFICE-7")
 	if !ok {

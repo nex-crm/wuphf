@@ -73,7 +73,10 @@ func (t *SlackTransport) syncEntityFactsOnce(ctx context.Context) {
 		return
 	}
 	factLog, graph, worker := t.Broker.entityFactSinks()
-	if factLog == nil || worker == nil {
+	// Fail closed on any missing sink: RegenerateEntityArticle dereferences the
+	// graph, so a nil graph (wiki backend half-initialized) would panic the
+	// sync goroutine. All three must be present before we touch the wiki.
+	if factLog == nil || graph == nil || worker == nil {
 		return
 	}
 
@@ -132,7 +135,11 @@ func (t *SlackTransport) recordSlackUserFacts(ctx context.Context, record func(s
 			if userID == "" || userID == t.botUserID {
 				continue
 			}
-			name, _ := t.resolveUser(ctx, userID)
+			// resolveUser is the authority on human-vs-bot (it consults
+			// users.info and caches the result); UserMap is only the profile
+			// detail cache and can be momentarily stale on a cache miss. Trust
+			// the returned `human`, not info.human, for the classification.
+			name, human := t.resolveUser(ctx, userID)
 			t.mapsMu.RLock()
 			info := t.UserMap[userID]
 			t.mapsMu.RUnlock()
@@ -142,7 +149,7 @@ func (t *SlackTransport) recordSlackUserFacts(ctx context.Context, record func(s
 			// (richer identity); here they only gain the presence fact.
 			isForeignAgent := t.foreignAgentSlug(userID) != ""
 			if !isForeignAgent {
-				if info.human {
+				if human {
 					record(slug, fmt.Sprintf("Human teammate on Slack — display name %q (user id %s).", name, userID))
 					if info.realName != "" && info.realName != name {
 						record(slug, fmt.Sprintf("Full name: %s.", info.realName))

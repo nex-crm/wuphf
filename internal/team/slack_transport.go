@@ -500,6 +500,14 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 		return nil
 	} else {
 		fromName, human = t.resolveUser(ctx, msg.User)
+		if !human {
+			// resolveUser classified this user as a bot (users.info IsBot) but
+			// it is not a registered foreign agent — fail closed, exactly like
+			// the BotID/subtype guard above. A bot whose message happens to
+			// arrive in plain-user shape must not slip past the /slack/agents
+			// allowlist. Only humans and allowlisted agents ingress.
+			return nil
+		}
 	}
 
 	p := transport.Participant{
@@ -614,9 +622,12 @@ func (t *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 	// task thread, not wherever the trigger happened to sit.
 	threadTS := msg.ThreadKey
 	if msg.SourceTaskID != "" {
-		if rootTS := t.ensureTaskThreadRoot(ctx, msg.SourceTaskID); rootTS != "" {
-			threadTS = rootTS
-		}
+		// A task message belongs in its task's ONE thread, full stop. Anchor on
+		// the task root — and if the root can't be ensured, post to the channel
+		// (threadTS = ""), NOT the inbound ThreadKey: threading task work under
+		// some unrelated inbound thread would cross-wire task context and break
+		// the one-task-one-thread contract.
+		threadTS = t.ensureTaskThreadRoot(ctx, msg.SourceTaskID)
 	}
 	if threadTS != "" {
 		opts = append(opts, slack.MsgOptionTS(threadTS))

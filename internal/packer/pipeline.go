@@ -68,10 +68,11 @@ func Gather(brain BrainHandle, req ContextRequest, opts GatherOptions, audienceT
 		rb.Items = append(rb.Items, RawItem{Ref: "plan:" + req.TaskID, Kind: KindPlan, Body: plan})
 	}
 
-	if audienceTier == BotUntrusted {
-		// Untrusted audience gets envelope + approved plan step only. No
-		// learnings, no wiki, no roster — nothing retrieved from the brain at
-		// large, regardless of the target bot's own tier.
+	// Fail closed: only the explicitly-trusted tiers unlock broad retrieval.
+	// Checking != BotUntrusted would let an invalid/corrupted enum value (e.g.
+	// an out-of-range int) leak learnings/wiki/roster. BotUntrusted and any
+	// unrecognized tier get envelope + approved plan step only.
+	if audienceTier != BotFirstParty && audienceTier != BotHosted {
 		return rb, nil
 	}
 
@@ -177,11 +178,12 @@ func Classify(raw RawBundle, audience BotTrust, policy EgressPolicy, sc SecretSc
 			audit = append(audit, ItemAudit{Ref: it.Ref, Kind: it.Kind, Class: ExportDenied})
 			continue
 		}
-		body := res.Content
-		if class == ExportAllowed {
-			body = it.Body // hosted tier: emit as-is (still scanned for safety)
-		}
-		out.Items = append(out.Items, ContextItem{Ref: it.Ref, Kind: it.Kind, Body: body, Class: class, Redactions: res.Redactions})
+		// Always emit the SCANNED content, even on the hosted (ExportAllowed)
+		// tier. res.OK only means no poison/entropy deny tripped — the scanner
+		// still redacts ordinary secrets/PII into res.Content, and re-emitting
+		// the raw it.Body would leak exactly those. Class stays ExportAllowed
+		// for audit; the content is the redacted-safe version.
+		out.Items = append(out.Items, ContextItem{Ref: it.Ref, Kind: it.Kind, Body: res.Content, Class: class, Redactions: res.Redactions})
 		audit = append(audit, ItemAudit{Ref: it.Ref, Kind: it.Kind, Class: class, Redactions: res.Redactions})
 	}
 

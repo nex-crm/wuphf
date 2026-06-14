@@ -70,7 +70,10 @@ func syncManifestForSlackChannel(slug, channelID, name string) {
 				return nil
 			}
 		}
-		members := []string{manifest.Lead}
+		members := make([]string, 0, len(manifest.Members)+1)
+		if manifest.Lead != "" {
+			members = append(members, manifest.Lead)
+		}
 		for _, m := range manifest.Members {
 			if m.Slug != "" && m.Slug != manifest.Lead {
 				members = append(members, m.Slug)
@@ -122,6 +125,17 @@ func (b *Broker) createSlackChannel(channelID, name string) (*teamChannel, error
 			return existing, fmt.Errorf("%w: %q already bridges slack channel %s", errSlackChannelAlreadyBridges, slug, existing.Surface.RemoteID)
 		}
 		return existing, errChannelAlreadyExists
+	}
+
+	// One Slack channel must bind to exactly one office slug. A different name
+	// derives a different slug, so the per-slug check above would miss a second
+	// binding of the SAME remote channel id — reject it here so attribution and
+	// the outbound thread mapping stay one-to-one.
+	for i := range b.channels {
+		ch := &b.channels[i]
+		if ch.Surface != nil && ch.Surface.Provider == "slack" && ch.Surface.RemoteID == channelID {
+			return ch, fmt.Errorf("%w: slack channel %s already bridges office channel %q", errSlackChannelAlreadyBridges, channelID, ch.Slug)
+		}
 	}
 
 	ch, cerr := b.createChannelLocked(channelCreateInput{

@@ -153,6 +153,15 @@ func spaFileServer(assets fs.FS) http.Handler {
 				files.ServeHTTP(w, r)
 				return
 			}
+			// A missing hashed asset is a genuine 404, NOT a client route. Never
+			// SPA-fall-back under /assets/: index.html served there could be
+			// cached against the immutable hashed URL (Cache-Control: immutable,
+			// see cacheControlMiddleware) and pin a stale/broken bundle. Client
+			// routes never live under /assets/.
+			if strings.HasPrefix(rel, "assets/") {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
