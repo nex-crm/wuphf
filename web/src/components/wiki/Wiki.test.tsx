@@ -387,4 +387,71 @@ describe("<Wiki>", () => {
     // The load actually finished — "0 articles" is now honest.
     expect(screen.getByText(/0 articles/)).toBeInTheDocument();
   });
+
+  it("folds the left page tree to a rail and back, persisting the choice", async () => {
+    vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([]);
+    const { container } = render(
+      <Wiki articlePath={null} onNavigate={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("wk-home")).toBeInTheDocument(),
+    );
+
+    const layout = container.querySelector(".wiki-layout");
+    expect(layout).toHaveAttribute("data-left-collapsed", "false");
+    expect(screen.getByTestId("wk-sidebar-home")).toBeInTheDocument();
+
+    // Collapse → the layout reports the fold and the menu yields to a rail.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse Pages panel" }),
+    );
+    expect(layout).toHaveAttribute("data-left-collapsed", "true");
+    expect(screen.queryByTestId("wk-sidebar-home")).not.toBeInTheDocument();
+    expect(globalThis.localStorage.getItem("wuphf:wiki:panels")).toContain(
+      '"left":true',
+    );
+
+    // Expand from the rail restores the full sidebar.
+    fireEvent.click(screen.getByRole("button", { name: "Expand Pages panel" }));
+    expect(layout).toHaveAttribute("data-left-collapsed", "false");
+    expect(screen.getByTestId("wk-sidebar-home")).toBeInTheDocument();
+  });
+
+  it("folds the right details rail on an article page", async () => {
+    vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([]);
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "people/customer-x",
+      title: "Customer X",
+      content: "Body text.",
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 10,
+      categories: [],
+    });
+    const { container } = render(
+      <Wiki articlePath="people/customer-x" onNavigate={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
+    );
+
+    const layout = container.querySelector(".wiki-layout");
+    expect(layout).toHaveAttribute("data-right-collapsed", "false");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse Details panel" }),
+    );
+    expect(layout).toHaveAttribute("data-right-collapsed", "true");
+    expect(
+      screen.getByRole("button", { name: "Expand Details panel" }),
+    ).toBeInTheDocument();
+    expect(globalThis.localStorage.getItem("wuphf:wiki:panels")).toContain(
+      '"right":true',
+    );
+  });
 });

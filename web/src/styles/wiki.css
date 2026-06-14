@@ -124,17 +124,30 @@
 
 /* ─── Layout: persistent page-tree sidebar + content (+ article right rail) ─── */
 .wiki-layout {
+  /* Either flanking panel can fold to a thin rail (--wk-panel-rail) so the
+     reading column reclaims the width. The active column widths live in
+     these custom props; the data-*-collapsed attributes below swap them, and
+     the grid templates simply consume them. */
+  --wk-panel-rail: 44px;
+  --wk-col-left: var(--wk-sidebar-left);
+  --wk-col-right: var(--wk-sidebar-right);
   display: grid;
-  grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
+  grid-template-columns: var(--wk-col-left) minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 /* The article view adds docmost's right "details" rail. */
 .wiki-layout[data-view="article"] {
-  grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr) var(
-      --wk-sidebar-right
-    );
+  grid-template-columns: var(--wk-col-left) minmax(0, 1fr) var(--wk-col-right);
+}
+.wiki-layout[data-left-collapsed="true"] {
+  --wk-col-left: var(--wk-panel-rail);
+}
+/* The right rail only exists in the article view, so its collapse is scoped
+   there to avoid shrinking a column that other views never render. */
+.wiki-layout[data-view="article"][data-right-collapsed="true"] {
+  --wk-col-right: var(--wk-panel-rail);
 }
 .wiki-layout > .wk-article-col,
 .wiki-layout > .wk-home,
@@ -146,6 +159,112 @@
 /* Full-page editor spans the article + right-rail tracks. */
 .wk-article-col--editing {
   grid-column: 2 / -1;
+}
+
+/* ─── Collapsible panel chrome (left page tree + right details rail) ───
+   Both flanking panels share one fold-away vocabulary: a quiet icon button
+   inside the open panel, and — once folded — a thin full-height rail that
+   reads as a clickable strip with a vertical label. */
+
+/* Header row that hosts the in-panel collapse button. */
+.wk-sidebar-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 24px;
+  margin-bottom: 4px;
+}
+.wk-right-rail-head {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.wk-panel-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--wk-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+.wk-panel-collapse:hover {
+  background: var(--wk-row-hover);
+  color: var(--wk-text);
+}
+.wk-panel-collapse:focus-visible {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: -2px;
+}
+
+/* Folded state: the panel shrinks to the rail width and shows only the rail. */
+.wk-nav-sidebar.is-collapsed,
+.wk-right-sidebar.is-collapsed {
+  padding: 0;
+  overflow: hidden;
+}
+.wk-right-sidebar.is-collapsed {
+  /* Give the folded right rail the same offset surface as the left rail so
+     the two read as matching strips rather than a stray border on paper. */
+  background: var(--wk-sidebar-bg);
+}
+.wk-panel-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 14px 0;
+  border: 0;
+  background: transparent;
+  color: var(--wk-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+.wk-panel-rail:hover {
+  background: var(--wk-row-hover);
+  color: var(--wk-text);
+}
+.wk-panel-rail:focus-visible {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: -2px;
+}
+.wk-panel-rail-icon {
+  flex: none;
+}
+.wk-panel-rail-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* Subtle arrival fade so the fold doesn't read as a hard cut. Opacity only —
+   compositor-friendly — and silenced under reduced-motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .wk-panel-rail {
+    animation: wk-panel-rail-in 160ms ease;
+  }
+}
+@keyframes wk-panel-rail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ─── Article Contents panel (right rail, docmost "On this page") ─── */
