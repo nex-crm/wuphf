@@ -82,6 +82,13 @@ func (b *Broker) fireHumanAdmitHook(ctx context.Context, session humanSession) {
 	if b == nil {
 		return
 	}
+	// Enroll the admitted human into the entity context-graph + wiki pipeline
+	// (human_entity_facts.go) so they get a people/<slug> article the CEO can
+	// read when deciding who to loop into a task. Runs regardless of whether a
+	// share transport hook is installed, since invite-admitted humans never
+	// appear on Slack (slack_entity_facts.go covers only bridged humans).
+	// Best-effort: enrollHumanEntity logs and returns on any failure.
+	b.enrollHumanEntity(ctx, session.HumanSlug, session.DisplayName, "joined the office via a share invite")
 	hp := b.humanAdmitHook.Load()
 	if hp == nil {
 		return
