@@ -66,7 +66,7 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 			Configured:         composio.Configured(),
 			SupportsConnect:    true,
 			SupportsDisconnect: true,
-			Detail:             providerDetail(composio.Configured(), "COMPOSIO_API_KEY and COMPOSIO_USER_ID are required for OAuth-managed integrations."),
+			Detail:             providerDetail(composio.Configured(), "Not connected"),
 		},
 	}}
 

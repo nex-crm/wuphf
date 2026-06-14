@@ -843,7 +843,14 @@ func ResolveMinimaxAPIKey() string {
 }
 
 // ResolveComposioUserID resolves the Composio user identity WUPHF should use.
-// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email.
+// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email >
+// workspace identifier > "default".
+//
+// The user_id only namespaces this office's connected accounts on Composio's
+// side — any stable string works. It must never be empty once Composio is
+// signed in, or the catalog (which gates on a non-empty identity) stays blank
+// even though available integrations don't need a per-user identity. So a
+// signed-in office with no recorded email still falls back to a stable id.
 func ResolveComposioUserID() string {
 	if ResolveNoNex() {
 		return ""
@@ -855,7 +862,12 @@ func ResolveComposioUserID() string {
 		return v
 	}
 	cfg, _ := Load()
-	return strings.TrimSpace(cfg.Email)
+	for _, candidate := range []string{cfg.Email, cfg.WorkspaceSlug, cfg.WorkspaceID} {
+		if v := strings.TrimSpace(candidate); v != "" {
+			return v
+		}
+	}
+	return "default"
 }
 
 // ResolveActionProvider resolves the preferred external action provider.

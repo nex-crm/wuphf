@@ -344,6 +344,42 @@ func TestIsComposioConfigured(t *testing.T) {
 	})
 }
 
+func TestResolveComposioUserID(t *testing.T) {
+	t.Run("prefers email", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{Email: "owner@example.com", WorkspaceSlug: "acme"})
+			if got := ResolveComposioUserID(); got != "owner@example.com" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("falls back to workspace slug", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{WorkspaceSlug: "acme"})
+			if got := ResolveComposioUserID(); got != "acme" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("never empty so a signed-in office can browse", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{})
+			if got := ResolveComposioUserID(); got != "default" {
+				t.Fatalf("expected the default identity, got %q", got)
+			}
+		})
+	})
+	t.Run("env override wins", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			t.Setenv("WUPHF_COMPOSIO_USER_ID", "u_env")
+			_ = Save(Config{Email: "owner@example.com"})
+			if got := ResolveComposioUserID(); got != "u_env" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+}
+
 func TestResolveGeminiAPIKeyEnvOverride(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_GEMINI_API_KEY", "wuphf-gemini")
