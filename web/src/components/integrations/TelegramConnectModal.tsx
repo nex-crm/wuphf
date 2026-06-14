@@ -255,7 +255,7 @@ export function TelegramConnectModal({
                 >
                   Slack{" "}
                   <span style={{ opacity: 0.6 }}>
-                    — bring WUPHF agents in and coordinate your other AI agents
+                    — run your office and coordinate other AI agents
                   </span>
                 </button>
               </li>
@@ -275,17 +275,6 @@ export function TelegramConnectModal({
                 >
                   OpenClaw{" "}
                   <span style={{ opacity: 0.6 }}>— TUI only for now</span>
-                </button>
-              </li>
-              <li style={{ marginBottom: 4 }}>
-                <button
-                  type="button"
-                  data-testid="tg-provider-slack"
-                  className="wk-editor-cancel"
-                  style={{ width: "100%", textAlign: "left", opacity: 0.5 }}
-                  disabled={true}
-                >
-                  Slack <span style={{ opacity: 0.6 }}>— coming soon</span>
                 </button>
               </li>
               <li style={{ marginBottom: 4 }}>

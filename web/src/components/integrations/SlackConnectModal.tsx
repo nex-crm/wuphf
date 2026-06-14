@@ -148,7 +148,7 @@ export function SlackConnectModal({
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
-      showNotice("Copy failed — select the text and copy manually.", "error");
+      showNotice("Copy failed. Select the text and copy it manually.", "error");
     }
   }, [manifest]);
 
@@ -214,7 +214,7 @@ export function SlackConnectModal({
     setConnectingAgents(false);
     if (failures > 0) {
       showNotice(
-        `Connected ${targets.length - failures} of ${targets.length} agents — add the rest later from Integrations.`,
+        `Connected ${targets.length - failures} of ${targets.length} agents. Add the rest later from Integrations.`,
         "error",
       );
     }
@@ -263,7 +263,7 @@ export function SlackConnectModal({
       }
       if (!aborted.current) {
         setError(
-          "Your office is taking longer than usual to connect to Slack. It may still be coming up — close this and check the channel in a moment.",
+          "Your office is taking longer than usual to connect to Slack. It may still be coming up. Close this and check the channel in a moment.",
         );
         setStep("channel");
       }
@@ -336,23 +336,22 @@ export function SlackConnectModal({
           {step === "intro" && (
             <div className="sc-body">
               <p className="sc-lead">
-                In about two minutes, WUPHF's agents join your Slack — and the
-                other AI agents in the channel start working together. The CEO
-                pulls them into the work and coordinates it, every task gets its
-                own thread, and the team wiki is one tab away. No terminal, no
-                config files.
+                Two minutes from here, your WUPHF agents are in Slack, working
+                alongside the other AI agents in your channel. The CEO routes
+                the work, every task gets its own thread, and the team wiki is
+                one tab away. No terminal, no config files.
               </p>
               <ul className="sc-checklist">
                 <li>
-                  <b>Create a Slack app</b> from a manifest we generate (one
-                  paste).
+                  <b>Create a Slack app</b> from a manifest we generate. One
+                  paste.
                 </li>
                 <li>
                   <b>Paste two tokens</b> so the office can read and post.
                 </li>
                 <li>
-                  <b>Pick a channel</b> — then invite your other AI agents and
-                  WUPHF coordinates them.
+                  <b>Pick a channel.</b> Invite your other AI agents and the CEO
+                  coordinates them.
                 </li>
               </ul>
               <div className="sc-actions">
@@ -570,9 +569,9 @@ export function SlackConnectModal({
           {step === "team" && (
             <div className="sc-body sc-team">
               <p className="sc-lead">
-                WUPHF found these AI agents already in your channel. Connect
-                them and the CEO pulls them into tasks and coordinates the work
-                — each in its own thread.
+                These AI agents are already in your channel. Connect them so the
+                CEO can hand them tasks and coordinate the work, each in its own
+                thread.
               </p>
               <ul className="sc-agents">
                 {discoveredBots.map((bot) => (
@@ -619,18 +618,17 @@ export function SlackConnectModal({
           {step === "done" && (
             <div className="sc-body sc-done">
               <p className="sc-lead">
-                WUPHF's agents are now in Slack
+                Your agents are live
                 {identity?.workspace ? (
                   <>
                     {" "}
-                    on <b>{identity.workspace}</b>
+                    in <b>{identity.workspace}</b>
                   </>
                 ) : null}
-                . <b>Invite your other AI agents to the channel</b> — vendor
-                bots or your team's own — and WUPHF's CEO pulls them into the
-                work and coordinates them. @-mention the team to kick off a
-                task; every task gets its own thread, and the <b>wuphf</b> Home
-                tab shows the board and wiki.
+                . @-mention the team to start a task; each one runs in its own
+                thread. Invite your other AI agents to the channel (vendor bots
+                or your own) and the CEO coordinates them. The <b>wuphf</b> Home
+                tab has the board and wiki.
               </p>
               <div className="sc-nextcard">
                 <span className="sc-nextcard-k">Next</span>

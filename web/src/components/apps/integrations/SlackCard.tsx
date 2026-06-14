@@ -32,10 +32,10 @@ export function SlackDetail({ cfg }: { cfg: ConfigSnapshot }) {
   return (
     <div>
       <p className="op-card-blurb">
-        Bring WUPHF's agents into Slack and make your other AI agents — vendor
-        bots, your team's own — work together in a channel. WUPHF's CEO pulls
-        them into the work and coordinates them, with every task in its own
-        thread. A guided wizard handles setup.
+        Run your WUPHF office in a Slack channel. The CEO coordinates the other
+        AI agents already in the channel (vendor bots or your own) and gives
+        every task its own thread. A guided wizard handles setup: create the
+        app, paste two tokens, pick a channel.
       </p>
       <div className="op-card-actions">
         <button
