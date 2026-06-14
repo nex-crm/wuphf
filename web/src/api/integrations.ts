@@ -150,6 +150,7 @@ export async function getIntegrationAudit(
 export type ComposioSigninStatus =
   | "idle"
   | "cli_missing"
+  | "installing"
   | "awaiting_login"
   | "provisioning"
   | "done"
