@@ -12,7 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/modelcontextprotocol/go-sdk v1.6.0
+	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/sahilm/fuzzy v0.1.2
 	github.com/slack-go/slack v0.25.0
 	go.uber.org/goleak v1.3.0
@@ -20,7 +20,7 @@ require (
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
 	golang.org/x/text v0.37.0
-	google.golang.org/genai v1.56.0
+	google.golang.org/genai v1.58.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.1
 )
