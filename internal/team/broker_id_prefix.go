@@ -84,6 +84,22 @@ func (b *Broker) refreshIDPrefixFromWorkspaceLocked() {
 	}
 }
 
+// IDPrefix returns the active Linear-style ID prefix (e.g. "NEX", "OFFICE")
+// under b.mu, falling back to defaultIDPrefix when unset. Exposed so surfaces
+// that render task ids into links (e.g. the Slack thread reporter) can match
+// the same "<PREFIX>-<digits>" shape the broker mints.
+func (b *Broker) IDPrefix() string {
+	if b == nil {
+		return defaultIDPrefix
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if p := strings.TrimSpace(b.idPrefix); p != "" {
+		return p
+	}
+	return defaultIDPrefix
+}
+
 // allocateIssueIDLocked mints the next Issue ID using the current
 // prefix and the broker's monotonic counter. Caller is responsible for
 // incrementing b.counter before calling. Returns e.g. "NEX-42".

@@ -747,6 +747,10 @@ func (t *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 	addressed := leadingMentionSlugs(msg.Content)
 	msg.From = t.displayNameForOffice(msg.From)
 	text := t.renderOfficeTags(formatSlackOutbound(msg), addressed)
+	// Hyperlink any task id ("OFFICE-111") to its WUPHF deep link. Runs AFTER
+	// formatSlackOutbound has escaped every dynamic field, so only the matched
+	// id (built from the broker's own prefix, never message text) becomes a link.
+	text = t.renderTaskLinks(text)
 	// No per-message task footnote: task messages now thread under the task's
 	// single root card (which carries the task definition + web link), so a
 	// repeated "↳ task" line on every reply would just clutter the thread.
@@ -856,6 +860,51 @@ func (t *SlackTransport) renderOfficeTags(text string, addressed map[string]bool
 	text = replaceMentionToken(text, "@human", "Human")
 	text = replaceMentionToken(text, "@you", "Human")
 	return text
+}
+
+// renderTaskLinks rewrites every task id of the shape "<IDPrefix>-<digits>"
+// (e.g. "OFFICE-111") into a Slack link to that task in the web app, e.g.
+// "<https://host/tasks/OFFICE-111|OFFICE-111>". It is injection-safe by
+// construction: it runs AFTER formatSlackOutbound has escaped the surrounding
+// dynamic text, the prefix comes from the broker (never message text), and the
+// only matched-from-text component is the numeric suffix (digits only, which
+// cannot carry Slack control characters). When no WebURL is configured the text
+// is returned unchanged — a bare id is more useful than a dead link.
+func (t *SlackTransport) renderTaskLinks(text string) string {
+	if t.Broker == nil {
+		return text
+	}
+	webURL := strings.TrimRight(strings.TrimSpace(t.Broker.WebURL()), "/")
+	if webURL == "" {
+		return text
+	}
+	re := taskIDLinkRegexp(t.Broker.IDPrefix())
+	if re == nil {
+		return text
+	}
+	return re.ReplaceAllStringFunc(text, func(id string) string {
+		return fmt.Sprintf("<%s/tasks/%s|%s>", webURL, id, id)
+	})
+}
+
+// taskIDLinkRegexp returns a regexp that matches whole "<prefix>-<digits>"
+// task ids for the given prefix. The leading \b is an ASCII word boundary, so a
+// prefix glued to a longer word (e.g. "XOFFICE-1") is not rewritten. The
+// trailing \D-or-end guard ensures the full numeric run is captured (so
+// "OFFICE-12" is linked as "OFFICE-12", never "OFFICE-1"). Returns nil when the
+// prefix is empty. RE2 has no lookahead, so the right-hand non-digit is matched
+// and reattached by the caller via a single capturing group around the id.
+func taskIDLinkRegexp(prefix string) *regexp.Regexp {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return nil
+	}
+	pat := `\b` + regexp.QuoteMeta(prefix) + `-\d+`
+	re, err := regexp.Compile(pat)
+	if err != nil {
+		return nil
+	}
+	return re
 }
 
 // replaceMentionToken replaces whole-token occurrences of token in text with

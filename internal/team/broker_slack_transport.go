@@ -60,6 +60,7 @@ func (b *Broker) EnsureSlackTransportRunning() {
 	cardsDone := make(chan struct{})
 	entitiesDone := make(chan struct{})
 	thinkingDone := make(chan struct{})
+	reportingDone := make(chan struct{})
 
 	go func() {
 		defer close(done)
@@ -94,15 +95,24 @@ func (b *Broker) EnsureSlackTransportRunning() {
 			log.Printf("[transport] slack: thinking-status loop exited: %v", err)
 		}
 	}()
+	// Task-thread reporter: pings assignees on subtask assignment, mirrors
+	// lifecycle transitions, and links new wiki articles into the right thread.
+	go func() {
+		defer close(reportingDone)
+		if err := st.runTaskReporting(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[transport] slack: task-reporting loop exited: %v", err)
+		}
+	}()
 
 	b.slackTransport = st
 	b.slackTransportStop = func() {
 		cancel()
-		<-done         // Run returns before broker.Stop()
-		<-dispatchDone // outbound dispatcher
-		<-cardsDone    // task-card sync loop
-		<-entitiesDone // entity fact sync loop
-		<-thinkingDone // native thinking-status loop
+		<-done          // Run returns before broker.Stop()
+		<-dispatchDone  // outbound dispatcher
+		<-cardsDone     // task-card sync loop
+		<-entitiesDone  // entity fact sync loop
+		<-thinkingDone  // native thinking-status loop
+		<-reportingDone // task-thread reporting loop
 	}
 	log.Printf("[transport] slack: started (%d channel(s))", len(st.ChannelMap))
 }
