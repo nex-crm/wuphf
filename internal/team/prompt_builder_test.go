@@ -191,6 +191,60 @@ func TestPromptBuilder_RendersPriorLearningsWhenMarkdownMemoryActive(t *testing.
 	}
 }
 
+func TestPromptBuilder_CEOSeesHumansAndDelegationInstruction(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{{Slug: "ceo", Name: "CEO", Role: "ceo"}}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+		humans: func() []humanPromptEntry {
+			return []humanPromptEntry{
+				{Slug: "sarah-chen", Name: "Sarah Chen", Context: "Sarah Chen is a person in the team knowledge graph."},
+			}
+		},
+	}
+
+	ceoPrompt := pb.Build("ceo")
+	for _, want := range []string{
+		"== HUMANS IN THE OFFICE ==",
+		"@sarah-chen — Sarah Chen",
+		"never set a human as a task `owner`",
+		"participants",
+		"approval or sign-off",
+	} {
+		if !strings.Contains(ceoPrompt, want) {
+			t.Errorf("CEO prompt missing humans/delegation fragment %q", want)
+		}
+	}
+
+	// A specialist (non-lead) prompt must NOT carry the CEO planning block.
+	specialistPrompt := pb.Build("fe")
+	if strings.Contains(specialistPrompt, "== HUMANS IN THE OFFICE ==") {
+		t.Error("specialist prompt should not carry the CEO HUMANS planning block")
+	}
+}
+
+func TestPromptBuilder_CEOHumansBlockOmittedWhenNoHumans(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members:     func() []officeMember { return []officeMember{{Slug: "ceo", Name: "CEO", Role: "ceo"}} },
+		policies:    func() []officePolicy { return nil },
+		nameFor:     func(slug string) string { return slug },
+		humans:      func() []humanPromptEntry { return nil },
+	}
+	if strings.Contains(pb.Build("ceo"), "== HUMANS IN THE OFFICE ==") {
+		t.Error("HUMANS block should be omitted when the office has no humans")
+	}
+}
+
 func TestHeadlessSandboxNote_ForbidsNestedOfficeAndParentSearches(t *testing.T) {
 	note := headlessSandboxNote()
 	for _, want := range []string{
