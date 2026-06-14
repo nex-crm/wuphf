@@ -2,6 +2,16 @@
    holds under every theme; used by both the visual-artifact viewer and the
    wiki markdown read view. */
 
+/* Wiki article context: give the pill breathing room below before the byline
+   ("Last edited by …"). Collapses to nothing when no attribution renders. */
+.article-attribution-row {
+  margin: 4px 0 12px;
+}
+
+.article-attribution-row:empty {
+  margin: 0;
+}
+
 .article-attribution {
   display: inline-flex;
   align-items: center;

@@ -587,7 +587,9 @@ export default function WikiArticle({
             </div>
           </div>
           <ArticleTitle title={article.title} />
-          <ArticleAttribution articleRef={path} />
+          <div className="article-attribution-row">
+            <ArticleAttribution articleRef={path} />
+          </div>
           {byline}
           <ArticleBadges article={article} />
           <ArticleTabPanels
