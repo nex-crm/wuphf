@@ -57,6 +57,9 @@ func deriveIDPrefix(companyName string) string {
 // workspace still gets a personal, scannable prefix. Candidates that carry
 // no letters (and would only resolve to defaultIDPrefix) are skipped so a
 // blank or symbol-only company name doesn't mask a usable workspace name.
+// deriveIDPrefix can only return defaultIDPrefix for letter-free input — a
+// real word like "Office" truncates to "OFFIC" at idPrefixMaxLen — so this
+// guard never skips a legitimately-named workspace, only junk candidates.
 // Returns "" when neither yields a real prefix, letting callers fall through.
 func workspaceIDPrefix(companyName, workspaceName string) string {
 	for _, candidate := range []string{companyName, workspaceName} {
@@ -91,9 +94,10 @@ func (b *Broker) refreshIDPrefixFromWorkspaceLocked() {
 			break
 		}
 	}
-	// No registry match (e.g. a single default instance not created through
-	// the spaces orchestrator): derive from the local config's company name
-	// before giving up on the neutral default.
+	// No usable prefix from the registry — either no row matched this runtime
+	// home (e.g. a single default instance not created through the spaces
+	// orchestrator) or the matched row had only symbol-only names. Derive from
+	// the local config's company name before giving up on the neutral default.
 	if cfg, err := config.Load(); err == nil {
 		if p := workspaceIDPrefix(cfg.CompanyName, ""); p != "" {
 			b.idPrefix = p

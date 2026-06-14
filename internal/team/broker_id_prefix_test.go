@@ -17,9 +17,11 @@ func TestDeriveIDPrefix(t *testing.T) {
 		{"", defaultIDPrefix},
 	}
 	for _, c := range cases {
-		if got := deriveIDPrefix(c.in); got != c.want {
-			t.Errorf("deriveIDPrefix(%q) = %q, want %q", c.in, got, c.want)
-		}
+		t.Run(c.in, func(t *testing.T) {
+			if got := deriveIDPrefix(c.in); got != c.want {
+				t.Errorf("deriveIDPrefix(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }
 

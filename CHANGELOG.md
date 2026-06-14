@@ -125,6 +125,17 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Fixed
 
+- **Task/Issue ids are now personal to each workspace instead of always reading
+  `OFFICE-N`.** The Linear-style prefix is minted from the workspace's company
+  name, but that field is optional and stays blank unless the human picks a
+  brand during onboarding — so `refreshIDPrefixFromWorkspaceLocked` fell through
+  to the hardcoded `OFFICE` default for every workspace, even though each
+  workspace always has a required Name. The prefix is now derived from the
+  company name, then the workspace name (`acme-revops` → `ACMER-1`), then the
+  local config's company name, only falling back to `OFFICE` when none is
+  usable. A new `workspaceIDPrefix` helper skips letter-free candidates so a
+  symbol-only company name can't mask a usable workspace name. Adds table tests
+  plus a live-path regression test that seeds the workspace registry.
 - **Agent runner correctness across provider routing, event ordering, terminal
   races, resume expiry, and receipt reconciliation.** Broker-resolved
   `providerKind` now flows into runner cost and receipt attribution, runner
