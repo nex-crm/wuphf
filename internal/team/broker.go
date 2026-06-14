@@ -713,6 +713,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/slack/app-manifest", b.requireAuth(b.handleSlackAppManifest))
 	mux.HandleFunc("/slack/tokens", b.requireAuth(b.handleSlackTokens))
 	mux.HandleFunc("/slack/status", b.requireAuth(b.handleSlackStatus))
+	mux.HandleFunc("/slack/discover", b.requireAuth(b.handleSlackDiscover))
 	mux.HandleFunc("/slack/agents", b.requireAuth(b.handleSlackAgents))
 	mux.HandleFunc("/slack/agents/spawn", b.requireAuth(b.handleSlackAgentsSpawn))
 	mux.HandleFunc("/slack/agents/spawn/complete", b.requireAuth(b.handleSlackAgentsSpawnComplete))

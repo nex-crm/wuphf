@@ -7,7 +7,10 @@ import {
 } from "react";
 
 import {
+  connectSlackAgent,
   connectSlackChannel,
+  type DiscoveredSlackBot,
+  discoverSlackBots,
   getSlackAppManifest,
   getSlackOnboardingStatus,
   type SlackAppManifest,
@@ -25,13 +28,21 @@ import {
 } from "./SlackConnectIllustrations";
 import "../../styles/slack-onboarding.css";
 
-type Step = "intro" | "create" | "tokens" | "channel" | "activating" | "done";
+type Step =
+  | "intro"
+  | "create"
+  | "tokens"
+  | "channel"
+  | "activating"
+  | "team"
+  | "done";
 
 const STEPS: { key: Step; label: string }[] = [
   { key: "intro", label: "Overview" },
   { key: "create", label: "Create app" },
   { key: "tokens", label: "Tokens" },
   { key: "channel", label: "Channel" },
+  { key: "team", label: "Agents" },
   { key: "done", label: "Live" },
 ];
 
@@ -48,6 +59,7 @@ const ILLO: Record<Step, (p: { className?: string }) => ReactElement> = {
   tokens: SlackTokensIllo,
   channel: SlackChannelIllo,
   activating: SlackActivatingIllo,
+  team: SlackBridgeIllo,
   done: SlackLiveIllo,
 };
 
@@ -57,6 +69,7 @@ const HEADLINE: Record<Step, string> = {
   tokens: "Paste your two tokens",
   channel: "Choose the channel",
   activating: "Bringing your agents online",
+  team: "Bring your other AI agents in",
   done: "Your agents are live in Slack",
 };
 
@@ -94,6 +107,12 @@ export function SlackConnectModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activatePhase, setActivatePhase] = useState(0);
+  // Discovered "other AI agents" in the connected channel + which to connect.
+  const [discoveredBots, setDiscoveredBots] = useState<DiscoveredSlackBot[]>(
+    [],
+  );
+  const [selectedBots, setSelectedBots] = useState<Set<string>>(new Set());
+  const [connectingAgents, setConnectingAgents] = useState(false);
   const aborted = useRef(false);
 
   // Reset to a clean slate whenever the wizard is (re)opened.
@@ -104,6 +123,9 @@ export function SlackConnectModal({
       setError(null);
       setActivatePhase(0);
       setCopied(false);
+      setDiscoveredBots([]);
+      setSelectedBots(new Set());
+      setConnectingAgents(false);
     }
     return () => {
       aborted.current = true;
@@ -145,6 +167,60 @@ export function SlackConnectModal({
     }
   }, [botToken, appToken]);
 
+  // After the transport is live, discover the other AI agents already in the
+  // channel. If any are connectable, show the "team" step; otherwise skip
+  // straight to done. Best-effort — discovery never blocks going live.
+  const discoverAndRoute = useCallback(async (chId: string) => {
+    try {
+      const { bots } = await discoverSlackBots(chId);
+      const connectable = bots.filter((b) => !b.already_registered);
+      if (aborted.current) return;
+      if (connectable.length > 0) {
+        setDiscoveredBots(connectable);
+        setSelectedBots(new Set(connectable.map((b) => b.user_id)));
+        setStep("team");
+        return;
+      }
+    } catch {
+      // discovery is best-effort — never block going live on it
+    }
+    if (!aborted.current) setStep("done");
+  }, []);
+
+  const toggleBot = useCallback((userId: string) => {
+    setSelectedBots((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }, []);
+
+  // Register the selected bots as foreign agents so the CEO can coordinate them.
+  // Best-effort per bot: a failure is surfaced as a notice, not a hard stop —
+  // the office is already live, and the rest can be added later from Integrations.
+  const connectAgents = useCallback(async () => {
+    setConnectingAgents(true);
+    const targets = discoveredBots.filter((b) => selectedBots.has(b.user_id));
+    let failures = 0;
+    for (const bot of targets) {
+      try {
+        await connectSlackAgent(bot.user_id, bot.name);
+      } catch {
+        failures += 1;
+      }
+    }
+    if (aborted.current) return;
+    setConnectingAgents(false);
+    if (failures > 0) {
+      showNotice(
+        `Connected ${targets.length - failures} of ${targets.length} agents — add the rest later from Integrations.`,
+        "error",
+      );
+    }
+    setStep("done");
+  }, [discoveredBots, selectedBots]);
+
   // The activation sequence: connect the channel — which hot-starts the Socket
   // Mode transport in-process, no broker restart — then poll /slack/status until
   // the transport reports a live connection. The office stays up the whole time,
@@ -172,7 +248,12 @@ export function SlackConnectModal({
           if (st.ready) {
             setActivatePhase(2);
             await new Promise((r) => setTimeout(r, 600));
-            if (!aborted.current) setStep("done");
+            if (aborted.current) return;
+            // Transport is live — discover the other AI agents already in this
+            // channel so the user can connect them in one click. If any are
+            // connectable, show the "team" step; otherwise go straight to done
+            // (the done step still teaches them to invite their agents).
+            await discoverAndRoute(channelId.trim());
             return;
           }
         } catch {
@@ -192,7 +273,7 @@ export function SlackConnectModal({
         setStep("channel");
       }
     }
-  }, [channelId, channelName]);
+  }, [channelId, channelName, discoverAndRoute]);
 
   if (!open) return null;
 
@@ -483,6 +564,55 @@ export function SlackConnectModal({
               <p className="sc-muted">
                 This takes a few seconds while your office connects to Slack.
               </p>
+            </div>
+          )}
+
+          {step === "team" && (
+            <div className="sc-body sc-team">
+              <p className="sc-lead">
+                WUPHF found these AI agents already in your channel. Connect
+                them and the CEO pulls them into tasks and coordinates the work
+                — each in its own thread.
+              </p>
+              <ul className="sc-agents">
+                {discoveredBots.map((bot) => (
+                  <li key={bot.user_id} className="sc-agent">
+                    <label className="sc-agent-label">
+                      <input
+                        type="checkbox"
+                        checked={selectedBots.has(bot.user_id)}
+                        onChange={() => toggleBot(bot.user_id)}
+                        data-testid={`sc-agent-${bot.user_id}`}
+                      />
+                      <span className="sc-agent-name">{bot.name}</span>
+                      {bot.real_name && bot.real_name !== bot.name ? (
+                        <span className="sc-agent-id">{bot.real_name}</span>
+                      ) : null}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="sc-actions">
+                <button
+                  type="button"
+                  className="sc-btn sc-btn-ghost"
+                  onClick={() => setStep("done")}
+                  disabled={connectingAgents}
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  className="sc-btn sc-btn-primary"
+                  data-testid="sc-connect-agents"
+                  onClick={connectAgents}
+                  disabled={connectingAgents || selectedBots.size === 0}
+                >
+                  {connectingAgents
+                    ? "Connecting…"
+                    : `Connect ${selectedBots.size} agent${selectedBots.size === 1 ? "" : "s"}`}
+                </button>
+              </div>
             </div>
           )}
 

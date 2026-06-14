@@ -82,6 +82,10 @@ type fakeSlackAPI struct {
 
 	members    map[string][]string
 	membersErr error
+	// memberPages, when set for a channel, serves paginated membership: each
+	// inner slice is one page and the Cursor param is the 0-based page index.
+	// Falls back to members[channel] when unset.
+	memberPages map[string][][]string
 
 	updates   []fakeUpdate
 	updateErr error
@@ -264,6 +268,20 @@ func (f *fakeSlackAPI) GetUsersInConversationContext(_ context.Context, params *
 	defer f.mu.Unlock()
 	if f.membersErr != nil {
 		return nil, "", f.membersErr
+	}
+	if pages, ok := f.memberPages[params.ChannelID]; ok {
+		idx := 0
+		if params.Cursor != "" {
+			idx, _ = strconv.Atoi(params.Cursor)
+		}
+		if idx < 0 || idx >= len(pages) {
+			return nil, "", nil
+		}
+		next := ""
+		if idx+1 < len(pages) {
+			next = strconv.Itoa(idx + 1)
+		}
+		return pages[idx], next, nil
 	}
 	return f.members[params.ChannelID], "", nil
 }

@@ -66,3 +66,34 @@ export function connectSlackChannel(
 export function getSlackOnboardingStatus(): Promise<SlackOnboardingStatus> {
   return get<SlackOnboardingStatus>("/slack/status");
 }
+
+/** A bot already present in a bridged channel — an "other AI agent" to connect. */
+export interface DiscoveredSlackBot {
+  user_id: string;
+  name: string;
+  real_name?: string;
+  already_registered: boolean;
+  registered_slug?: string;
+}
+
+/** Discover the bots (other AI agents) already in a bridged Slack channel. */
+export function discoverSlackBots(
+  channelId: string,
+): Promise<{ channel_id: string; bots: DiscoveredSlackBot[] }> {
+  return get<{ channel_id: string; bots: DiscoveredSlackBot[] }>(
+    `/slack/discover?channel_id=${encodeURIComponent(channelId)}`,
+  );
+}
+
+/** Register a discovered bot as a foreign agent so the CEO can coordinate it. */
+export function connectSlackAgent(
+  userId: string,
+  name: string,
+): Promise<{ slug: string; name: string; user_id: string; created: boolean }> {
+  return post<{
+    slug: string;
+    name: string;
+    user_id: string;
+    created: boolean;
+  }>("/slack/agents", { user_id: userId, name });
+}

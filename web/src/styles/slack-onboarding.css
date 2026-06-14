@@ -636,3 +636,50 @@
     transform: none;
   }
 }
+
+/* Team step — the "other AI agents" discovered in the channel, ready to connect. */
+.sc-agents {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.sc-agent {
+  border: 1px solid var(--wk-border);
+  border-radius: 10px;
+  background: var(--wk-paper);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.sc-agent:hover {
+  background: var(--wk-row-hover, color-mix(in srgb, var(--wk-accent) 6%, transparent));
+  border-color: color-mix(in srgb, var(--wk-accent) 40%, var(--wk-border));
+}
+.sc-agent-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font: 500 14px / 1.4 var(--wk-display);
+  color: var(--wk-text);
+}
+.sc-agent-label input {
+  accent-color: var(--wk-accent);
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.sc-agent-name {
+  font-weight: 600;
+}
+.sc-agent-id {
+  margin-left: auto;
+  color: var(--wk-text-muted);
+  font: 400 12px / 1.4 var(--wk-mono, var(--wk-display));
+}
