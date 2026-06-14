@@ -57,6 +57,15 @@ func (b *Broker) handleSlackConnect(w http.ResponseWriter, r *http.Request) {
 	// the transport, which only starts when a slack surface channel exists at
 	// boot, would silently skip after every restart (mirrors the Telegram flow).
 	syncManifestForSlackChannel(ch.Slug, channelID, name)
+
+	// Hot-start: bring the Slack transport up in-process now that a channel is
+	// bound, so the connection is live without a broker re-exec. Idempotent — if
+	// the transport is already running it just refreshes the live channel map to
+	// include this newly-connected channel. createSlackChannel has already
+	// released b.mu, so this call is safe (EnsureSlackTransportRunning reads
+	// surface channels under b.mu itself).
+	b.EnsureSlackTransportRunning()
+
 	writeJSON(w, http.StatusOK, map[string]any{"channel_slug": ch.Slug, "name": ch.Name})
 }
 

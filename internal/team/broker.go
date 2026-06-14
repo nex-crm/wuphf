@@ -257,6 +257,17 @@ type Broker struct {
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 
+	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
+	// transport is started in-process — at boot by RegisterTransports and at
+	// runtime by handleSlackConnect — so connecting a channel from the web app
+	// brings Socket Mode up live, with no broker re-exec. slackTransportMu guards
+	// the start/stop pair; slackTransport is the live adapter (nil when not
+	// running) and slackTransportStop cancels its goroutines and waits for them
+	// to drain (nil when not running).
+	slackTransportMu   sync.Mutex
+	slackTransport     *SlackTransport
+	slackTransportStop func()
+
 	// nowFn is the clock used by rate-limit logic. nil means time.Now.
 	// Inject a fake clock in tests to avoid real-time sleeps.
 	nowFn func() time.Time

@@ -285,6 +285,28 @@ func newSlackTransport(broker *Broker, botToken, appToken string, api slackAPI) 
 	}
 }
 
+// refreshChannelMap merges the broker's current "slack" surface channels into the
+// live ChannelMap so a channel connected after the transport started begins
+// bridging without a restart. Socket Mode already receives every workspace event;
+// inbound routing (routeInbound) filters by ChannelMap and outbound Send looks up
+// the same map, so adding an entry is sufficient for both directions. Existing
+// entries are preserved. The surface snapshot is taken before mapsMu is held so
+// the broker lock (SurfaceChannels → b.mu) is never acquired under mapsMu.
+func (t *SlackTransport) refreshChannelMap() {
+	if t.Broker == nil {
+		return
+	}
+	surfaces := t.Broker.SurfaceChannels("slack")
+	t.mapsMu.Lock()
+	defer t.mapsMu.Unlock()
+	for _, ch := range surfaces {
+		if ch.Surface == nil || ch.Surface.RemoteID == "" {
+			continue
+		}
+		t.ChannelMap[ch.Surface.RemoteID] = ch.Slug
+	}
+}
+
 // Name returns "slack" — the stable adapter name used as AdapterName in every
 // Participant value this transport creates.
 func (t *SlackTransport) Name() string { return "slack" }
