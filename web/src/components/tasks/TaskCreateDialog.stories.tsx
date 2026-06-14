@@ -2,16 +2,9 @@ import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import type { Channel, OfficeMember } from "../../api/client";
+import type { OfficeMember } from "../../api/client";
 import { Button } from "../ui/Button";
 import { TaskCreateDialog } from "./TaskCreateDialog";
-
-const SAMPLE_CHANNELS: Channel[] = [
-  { slug: "general", name: "General" },
-  { slug: "bookkeeping", name: "Bookkeeping" },
-  { slug: "sales-pipeline", name: "Sales pipeline" },
-  { slug: "ops-week", name: "Ops week" },
-];
 
 const SAMPLE_MEMBERS: OfficeMember[] = [
   { slug: "ceo", name: "CEO", role: "supervisor", emoji: "👔" },
@@ -20,17 +13,11 @@ const SAMPLE_MEMBERS: OfficeMember[] = [
   { slug: "researcher", name: "Researcher", role: "specialist", emoji: "🔍" },
 ];
 
-function buildClient(opts?: {
-  channels?: Channel[];
-  members?: OfficeMember[];
-}) {
+function buildClient(opts?: { members?: OfficeMember[] }) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
-  });
-  client.setQueryData(["channels"], {
-    channels: opts?.channels ?? SAMPLE_CHANNELS,
   });
   client.setQueryData(["office-members"], {
     members: opts?.members ?? SAMPLE_MEMBERS,
@@ -39,18 +26,12 @@ function buildClient(opts?: {
 }
 
 interface HarnessProps {
-  defaultChannel?: string;
   defaultAssignee?: string;
   startOpen?: boolean;
   client?: QueryClient;
 }
 
-function Harness({
-  defaultChannel,
-  defaultAssignee,
-  startOpen = true,
-  client,
-}: HarnessProps) {
+function Harness({ defaultAssignee, startOpen = true, client }: HarnessProps) {
   const [open, setOpen] = useState(startOpen);
   const queryClient = client ?? buildClient();
   // Reflect the prop into local state when the story re-mounts so toggling
@@ -84,7 +65,6 @@ function Harness({
         <TaskCreateDialog
           open={open}
           onOpenChange={setOpen}
-          defaultChannel={defaultChannel}
           defaultAssignee={defaultAssignee}
           navigateOnCreate={false}
         />
@@ -101,7 +81,7 @@ const meta: Meta<typeof Harness> = {
     docs: {
       description: {
         component:
-          "Linear-inspired task creation dialog. Title is the hero input, description is a markdown textarea, channel + assignee live as chip-style pickers in the footer. Cmd/Ctrl+Enter submits.",
+          "Linear-inspired task creation dialog. Title is the hero input, description is a markdown textarea, the assignee lives as a chip-style picker in the footer. Cmd/Ctrl+Enter submits.",
       },
     },
   },
@@ -114,17 +94,11 @@ export const Default: Story = {
   args: { startOpen: true },
 };
 
-export const PreselectedChannel: Story = {
-  args: { startOpen: true, defaultChannel: "bookkeeping" },
-};
-
 export const PreselectedAssignee: Story = {
   args: { startOpen: true, defaultAssignee: "bookkeeper" },
 };
 
-export const NoChannelsYet: Story = {
+export const NoMembersYet: Story = {
   args: { startOpen: true },
-  render: (args) => (
-    <Harness {...args} client={buildClient({ channels: [], members: [] })} />
-  ),
+  render: (args) => <Harness {...args} client={buildClient({ members: [] })} />,
 };

@@ -7,7 +7,12 @@ import { track } from "../lib/analytics";
 export interface CreateTaskFormInput {
   title: string;
   details?: string;
-  channel: string;
+  /**
+   * Channel slug to file the task under. Optional: channels are no longer a
+   * user-facing concept (every task gets its own channel), so creation
+   * surfaces omit this and the broker defaults it to "general".
+   */
+  channel?: string;
   assignee?: string;
   createdBy?: string;
 }
@@ -32,7 +37,7 @@ export function useCreateTask() {
     mutationFn: async (input) => {
       const response = await post<TaskResponse>("/tasks", {
         action: "create",
-        channel: input.channel.trim() || "general",
+        channel: input.channel?.trim() || "general",
         title: input.title.trim(),
         details: input.details?.trim() || "",
         owner: input.assignee?.trim() || "",

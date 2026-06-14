@@ -9,10 +9,9 @@ import {
   useState,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FastArrowDown, Hashtag, KeyframeSolid, User } from "iconoir-react";
+import { FastArrowDown, KeyframeSolid, User } from "iconoir-react";
 
 import { getConfig } from "../../api/client";
-import { useChannels } from "../../hooks/useChannels";
 import { useCreateTask } from "../../hooks/useCreateTask";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { router } from "../../lib/router";
@@ -25,14 +24,11 @@ import {
 } from "../ui/Dialog";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 
-const DEFAULT_CHANNEL = "general";
 const AUTO_ASSIGN = "";
 
 export interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Pre-select a channel — used when opened from a channel header. */
-  defaultChannel?: string;
   /** Pre-select an assignee — used when opened from an agent subspace. */
   defaultAssignee?: string;
   /** Navigate to the new task's detail page on success. Default: true. */
@@ -50,24 +46,20 @@ export interface TaskCreateDialogProps {
 export function TaskCreateDialog({
   open,
   onOpenChange,
-  defaultChannel,
   defaultAssignee,
   navigateOnCreate = true,
 }: TaskCreateDialogProps) {
   const titleId = useId();
   const detailsId = useId();
-  const channelId = useId();
   const assigneeId = useId();
 
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
-  const [channel, setChannel] = useState(defaultChannel ?? DEFAULT_CHANNEL);
   const [assignee, setAssignee] = useState(defaultAssignee ?? AUTO_ASSIGN);
   const [createMore, setCreateMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
 
-  const channelsQuery = useChannels();
   const membersQuery = useOfficeMembers();
   const createTask = useCreateTask();
   const { data: cfg } = useQuery({
@@ -76,7 +68,6 @@ export function TaskCreateDialog({
     staleTime: 60_000,
   });
 
-  const channels = channelsQuery.data ?? [];
   const members = membersQuery.data ?? [];
   const leadSlug = useMemo(
     () => resolveLeadSlug(cfg?.team_lead_slug, members),
@@ -87,12 +78,11 @@ export function TaskCreateDialog({
     if (open) {
       setTitle("");
       setDetails("");
-      setChannel(defaultChannel ?? DEFAULT_CHANNEL);
       setAssignee(defaultAssignee ?? AUTO_ASSIGN);
       setError(null);
       queueMicrotask(() => titleRef.current?.focus());
     }
-  }, [open, defaultChannel, defaultAssignee]);
+  }, [open, defaultAssignee]);
 
   const canSubmit = title.trim().length > 0 && !createTask.isPending;
 
@@ -105,11 +95,6 @@ export function TaskCreateDialog({
     return member ? member.name : assignee;
   }, [assignee, members, leadSlug]);
 
-  const channelLabel = useMemo(() => {
-    const c = channels.find((entry) => entry.slug === channel);
-    return c ? c.slug : channel;
-  }, [channel, channels]);
-
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     setError(null);
@@ -117,7 +102,6 @@ export function TaskCreateDialog({
       const result = await createTask.mutateAsync({
         title,
         details,
-        channel,
         // Empty selection routes to the office lead so the CEO's scoping
         // interview fires and picks a specialist owner.
         assignee: assignee || leadSlug || undefined,
@@ -143,7 +127,6 @@ export function TaskCreateDialog({
     createTask,
     title,
     details,
-    channel,
     assignee,
     leadSlug,
     createMore,
@@ -182,10 +165,6 @@ export function TaskCreateDialog({
             <KeyframeSolid width={14} height={14} aria-hidden="true" />
           </span>
           <span className="issue-create-eyebrow-label">New task</span>
-          <span className="issue-create-eyebrow-sep" aria-hidden="true">
-            ·
-          </span>
-          <span>#{channelLabel}</span>
           {defaultAssignee ? (
             <>
               <span className="issue-create-eyebrow-sep" aria-hidden="true">
@@ -228,31 +207,6 @@ export function TaskCreateDialog({
         </div>
 
         <div className="issue-create-chips">
-          <PropertyChip
-            icon={<Hashtag width={14} height={14} aria-hidden="true" />}
-            label={channelLabel}
-            htmlFor={channelId}
-            disabled={channelsQuery.isPending}
-          >
-            <select
-              id={channelId}
-              value={channel}
-              onChange={(e) => setChannel(e.target.value)}
-              className="issue-create-chip-select"
-              data-testid="issue-create-channel"
-              aria-label="Channel"
-            >
-              {!channels.some((c) => c.slug === channel) ? (
-                <option value={channel}>#{channel}</option>
-              ) : null}
-              {channels.map((c) => (
-                <option key={c.slug} value={c.slug}>
-                  #{c.slug}
-                </option>
-              ))}
-            </select>
-          </PropertyChip>
-
           <PropertyChip
             icon={<User width={14} height={14} aria-hidden="true" />}
             label={assigneeLabel}
