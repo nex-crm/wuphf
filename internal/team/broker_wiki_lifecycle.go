@@ -214,11 +214,6 @@ func (b *Broker) initWikiWorker() {
 	// (default 25m). Set the interval to "0" or "disabled" to silence the cron.
 	b.startSkillCompileCron(lifecycleCtx)
 	b.startSkillCompileEventListener(lifecycleCtx)
-
-	// Stage B synthesizer: lazily constructed alongside the Stage A scanner so
-	// the compile cron drives both passes from a single trigger. Tests can
-	// inject a fake via SetSkillSynthesizer.
-	b.ensureSkillSynthesizer()
 }
 
 // requireWikiWorker is the standard retry-and-503 helper for HTTP handlers

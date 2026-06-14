@@ -1,7 +1,11 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-/** Chip-style category tags row above the page footer. */
+/** Wikipedia-style category line above the page footer. */
+
+import { categoryLabel } from "./WikiCategoryPage";
+import { categoryPath } from "./wikiPaths";
 
 interface CategoriesFooterProps {
+  /** Category slugs (path kinds): "companies", "people", "playbooks", … */
   tags: string[];
   onSelect?: (tag: string) => void;
 }
@@ -17,7 +21,7 @@ export default function CategoriesFooter({
       {tags.map((tag) => (
         <a
           key={tag}
-          href={`#/wiki?category=${encodeURIComponent(tag)}`}
+          href={`#/wiki/${categoryPath(tag)}`}
           onClick={(e) => {
             if (onSelect) {
               e.preventDefault();
@@ -25,7 +29,7 @@ export default function CategoriesFooter({
             }
           }}
         >
-          {tag}
+          {categoryLabel(tag)}
         </a>
       ))}
     </div>

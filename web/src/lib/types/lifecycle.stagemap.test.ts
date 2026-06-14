@@ -7,7 +7,7 @@ import stageMap from "./lifecycleStageMap.json";
 // grouping (stageForState) to the shared source of truth lifecycleStageMap.json.
 // The Go broker grouping (lifecycleStageFor) has its own oracle against the same
 // file (internal/team/lifecycle_stage_oracle_test.go), so the two independent
-// language copies of the 13->7 table cannot drift without a red test on a side.
+// language copies of the 12->7 table cannot drift without a red test on a side.
 
 // The wire lifecycle states, mirrored from the Go wireLifecycleStates list.
 // Excludes any Go-only migration fallback (e.g. "unknown"). Keep in sync with
@@ -16,7 +16,6 @@ const EXPECTED_WIRE_STATES = [
   "drafting",
   "intake",
   "ready",
-  "planning",
   "running",
   "review",
   "changes_requested",

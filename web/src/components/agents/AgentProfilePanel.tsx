@@ -55,6 +55,12 @@ const GATEWAY_LABELS: Record<string, string> = {
 interface AgentProfilePanelProps {
   agent: OfficeMember;
   onClose: () => void;
+  /**
+   * When true, renders only the scrollable body (skips the panel header and
+   * close button). Use this when the shell header is owned by the caller,
+   * e.g. inside AgentSubspace's Config tab.
+   */
+  headless?: boolean;
 }
 
 function arrayOrEmpty<T>(value: unknown): T[] {
@@ -288,12 +294,6 @@ function taskStatusBadgeClass(raw: string): string {
 
 function PermissionsSection({ agent }: { agent: OfficeMember }) {
   const isLead = agent.built_in === true || agent.slug === "ceo";
-  // The broker normalizes a blank permission_mode to "plan" at member
-  // construction (broker_member_construction.go), so only an explicit "auto"
-  // is non-plan-first; blank/unset displays as plan-first. Trim + lowercase so
-  // " Auto " / "AUTO" don't slip through as plan-first.
-  const planFirst =
-    (agent.permission_mode ?? "").trim().toLowerCase() !== "auto";
 
   return (
     <div className="agent-profile-section">
@@ -303,12 +303,6 @@ function PermissionsSection({ agent }: { agent: OfficeMember }) {
           <span className="agent-profile-perm-label">role</span>
           <span className="agent-profile-perm-value">
             {isLead ? "lead agent" : "team member"}
-          </span>
-        </div>
-        <div className="agent-profile-perm-row">
-          <span className="agent-profile-perm-label">autonomy</span>
-          <span className="agent-profile-perm-value">
-            {planFirst ? "plan first" : "auto"}
           </span>
         </div>
         <div className="agent-profile-perm-row">
@@ -510,7 +504,7 @@ function RuntimeSection({
     );
     setDraftModel(binding.model ?? "");
     setSaveError(null);
-  }, [agent.slug, binding.kind, binding.model, llmKinds]);
+  }, [binding.kind, binding.model, llmKinds]);
 
   // Lead agents (CEO, other built-ins) can have their runtime changed from
   // this panel too. The broker's built-in gate only fires on remove, not on
@@ -562,7 +556,7 @@ function RuntimeSection({
               {gatewayLabel} gateway
             </span>
           </span>
-          {binding.model && (
+          {!!binding.model && (
             <>
               <span className="op-runtime-label">model</span>
               <span
@@ -631,7 +625,7 @@ function RuntimeSection({
           runtime here to pin this agent.
         </p>
       )}
-      {saveError && (
+      {!!saveError && (
         <div
           className="agent-wizard-error"
           style={{ marginTop: 8 }}
@@ -678,7 +672,8 @@ function RuntimeSection({
 // empty values are rejected (the name is required at the broker layer
 // anyway). Applies to every agent including the lead — the broker's
 // built-in gate fires only on remove, not on update.
-function EditableName({ agent }: { agent: OfficeMember }) {
+// Exported so AgentSubspace's shell header can render it outside the panel.
+export function EditableName({ agent }: { agent: OfficeMember }) {
   const queryClient = useQueryClient();
   const initial = agent.name || agent.slug;
   const [editing, setEditing] = useState(false);
@@ -787,7 +782,7 @@ function EditableName({ agent }: { agent: OfficeMember }) {
         }}
         aria-label="Agent name"
       />
-      {saveError && (
+      {!!saveError && (
         <span
           style={{
             fontSize: 11,
@@ -803,7 +798,11 @@ function EditableName({ agent }: { agent: OfficeMember }) {
   );
 }
 
-export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
+export function AgentProfilePanel({
+  agent,
+  onClose,
+  headless = false,
+}: AgentProfilePanelProps) {
   const defaultHarness = useDefaultHarness();
 
   const { data: skills = [] } = useQuery({
@@ -857,53 +856,55 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
 
   return (
     <div className="agent-panel agent-profile-panel">
-      {/* Header */}
-      <div className="agent-panel-header">
-        <div className="agent-panel-identity">
-          <div className="agent-panel-avatar avatar-with-harness">
-            <PixelAvatar
-              slug={agent.slug}
-              size={36}
-              className="pixel-avatar-panel"
-            />
-            <HarnessBadge
-              kind={resolveHarness(agent.provider, defaultHarness)}
-              size={18}
-              className="harness-badge-on-avatar"
-            />
-          </div>
-          <div
-            style={{
-              minWidth: 0,
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-            }}
-          >
-            <div
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <EditableName agent={agent} />
-              <span
-                className={`status-dot ${statusClass}`}
-                style={{ marginLeft: -2 }}
+      {/* Header — hidden when the shell owns the header (headless mode) */}
+      {!headless ? (
+        <div className="agent-panel-header">
+          <div className="agent-panel-identity">
+            <div className="agent-panel-avatar avatar-with-harness">
+              <PixelAvatar
+                slug={agent.slug}
+                size={36}
+                className="pixel-avatar-panel"
+              />
+              <HarnessBadge
+                kind={resolveHarness(agent.provider, defaultHarness)}
+                size={18}
+                className="harness-badge-on-avatar"
               />
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <StatusBadge status={agent.status} />
+            <div
+              style={{
+                minWidth: 0,
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+              }}
+            >
+              <div
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <EditableName agent={agent} />
+                <span
+                  className={`status-dot ${statusClass}`}
+                  style={{ marginLeft: -2 }}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <StatusBadge status={agent.status} />
+              </div>
             </div>
           </div>
+          <button
+            type="button"
+            className="agent-panel-close"
+            onClick={onClose}
+            aria-label="Close agent profile"
+          >
+            <Xmark width={20} height={20} />
+          </button>
         </div>
-        <button
-          type="button"
-          className="agent-panel-close"
-          onClick={onClose}
-          aria-label="Close agent profile"
-        >
-          <Xmark width={20} height={20} />
-        </button>
-      </div>
+      ) : null}
 
       {/* Scrollable body */}
       <div className="agent-profile-body">

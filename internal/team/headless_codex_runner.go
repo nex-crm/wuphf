@@ -34,14 +34,11 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		return err
 	}
 
-	workspaceDir := strings.TrimSpace(l.cwd)
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)); worktreeDir != "" {
-		workspaceDir = worktreeDir
-	}
-	workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir)
-	if workspaceDir == "" {
-		workspaceDir = "."
-	}
+	// Workspace isolation (V3-N5): task worktree when this turn's task has
+	// one, else the agent's scratch dir inside the office runtime home.
+	// NEVER the broker process launch cwd — the v3 live run had agents
+	// writing into (and `git checkout`-reverting) the founder's host repo.
+	workspaceDir, isTaskWorktree := l.headlessTurnWorkspace(slug, headlessTurnTaskID(ctx))
 
 	overrides, err := l.buildCodexOfficeConfigOverrides(slug)
 	if err != nil {
@@ -50,23 +47,14 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 
 	args := make([]string, 0, 16+len(overrides)*2)
 	// Sandbox posture for this turn:
-	//   - plan posture (task in LifecycleStatePlanning): -s read-only — Codex's
-	//     native plan/read-only mode. The repo cannot change, so the owner
-	//     explores and writes its plan (via MCP notebook_write + a channel post,
-	//     which read-only does not block) without risk of touching the repo
-	//     before "Approve & Start". Wins over unsafe/worktree bypass: a planning
-	//     turn must stay read-only even for local_worktree coding tasks.
-	//   - local-worktree / unsafe execute turn: full bypass. The child Codex
+	//   - local-worktree / unsafe turn: full bypass. The child Codex
 	//     sandbox rejects both apply_patch and shell writes even with
 	//     workspace-write, which leaves coding tasks permanently unable to land
 	//     edits.
-	//   - office / non-editing execute turn: workspace-write.
-	switch {
-	case l.resolveTurnPosture(ctx, slug) == posturePlan:
-		args = append(args, "-a", "never", "-s", "read-only")
-	case l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug):
+	//   - office / non-editing turn: workspace-write.
+	if l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug) {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	default:
+	} else {
 		args = append(args, "-a", "never", "-s", "workspace-write")
 	}
 	args = append(args, "--disable", "plugins")
@@ -95,7 +83,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	cmd := headlessCodexCommandContext(ctx, "codex", args...)
 	cmd.Dir = workspaceDir
 	cmd.Env = l.buildHeadlessCodexEnv(slug, workspaceDir, firstNonEmpty(channel...))
-	if workspaceDir != strings.TrimSpace(l.cwd) {
+	if isTaskWorktree {
 		cmd.Env = append(cmd.Env, "WUPHF_WORKTREE_PATH="+workspaceDir)
 	}
 	stdinText := buildHeadlessCodexPrompt(l.buildPrompt(slug), notification)
@@ -352,13 +340,6 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	relay.Flush()
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)
-		// In plan posture (-s read-only) the final message IS the plan; surface
-		// it as a plan card. Codex has no ExitPlanMode, and read-only does not
-		// block MCP, so the owner may also have written its notebook + posted —
-		// the silent-gated post below avoids a duplicate channel message.
-		if l.resolveTurnPosture(ctx, slug) == posturePlan {
-			emitHeadlessPlan(agentStream, turnID, HeadlessProviderCodex, slug, taskID, text)
-		}
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "fallback-post-error: "+err.Error())
@@ -594,15 +575,11 @@ func normalizeHeadlessWorkspaceDir(path string) string {
 }
 
 func (l *Launcher) headlessCodexWorkspaceCacheDir(workspaceDir string) string {
+	// No fallback to l.cwd / process cwd (V3-N5): the resolved turn
+	// workspace is never empty on the headless path, and a cache dir must
+	// never be minted inside the host launch directory. Empty in → empty
+	// out; the caller simply skips the GOCACHE/GOTMPDIR overrides.
 	base := strings.TrimSpace(workspaceDir)
-	if base == "" {
-		base = strings.TrimSpace(l.cwd)
-	}
-	if base == "" {
-		if wd, err := os.Getwd(); err == nil {
-			base = wd
-		}
-	}
 	if base == "" {
 		return ""
 	}

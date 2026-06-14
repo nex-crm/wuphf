@@ -21,6 +21,7 @@ package team
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -250,7 +251,8 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "wiki backend is not active"})
 		return
 	}
-	if _, err := worker.NotebookRead(body.SourcePath); err != nil {
+	sourceBytes, err := worker.NotebookRead(body.SourcePath)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": fmt.Sprintf("source notebook entry %q not found", body.SourcePath),
 		})
@@ -259,6 +261,22 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 	if _, err := readArticle(worker.Repo(), body.TargetWikiPath); err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": fmt.Sprintf("target wiki path %q already exists", body.TargetWikiPath),
+		})
+		return
+	}
+	// B2 knowledge-integrity: double submissions of the same (target path,
+	// source content) collapse onto the open promotion instead of stacking
+	// a duplicate review. The v3 run queued the SAME four wiki files twice
+	// each ([17:39:51] — 8 reviews, 4 distinct paths), doubling the human's
+	// queue for zero information. Content is compared by hash so a genuine
+	// revision (same paths, new content) still submits normally.
+	if existing := findOpenDuplicatePromotion(rl, worker, strings.TrimSpace(body.TargetWikiPath), sourceBytes); existing != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"promotion_id":  existing.ID,
+			"reviewer_slug": existing.ReviewerSlug,
+			"state":         existing.State,
+			"human_only":    existing.HumanOnly,
+			"deduplicated":  true,
 		})
 		return
 	}
@@ -303,6 +321,33 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		"state":         promotion.State,
 		"human_only":    promotion.HumanOnly,
 	})
+}
+
+// findOpenDuplicatePromotion returns an open (pending / in-review)
+// promotion targeting the same wiki path with byte-identical source
+// content, or nil. Candidate source bodies are read through the worker;
+// unreadable candidates are skipped (never collapse on a guess).
+func findOpenDuplicatePromotion(rl *ReviewLog, worker *WikiWorker, targetPath string, sourceBytes []byte) *Promotion {
+	if rl == nil || worker == nil || targetPath == "" {
+		return nil
+	}
+	want := sha256.Sum256(sourceBytes)
+	for _, p := range rl.List("all") {
+		if p == nil || p.TargetPath != targetPath {
+			continue
+		}
+		if p.State != PromotionPending && p.State != PromotionInReview {
+			continue
+		}
+		candidate, err := worker.NotebookRead(p.SourcePath)
+		if err != nil {
+			continue
+		}
+		if sha256.Sum256(candidate) == want {
+			return p
+		}
+	}
+	return nil
 }
 
 // handleReviewList returns all active reviews or a scoped slice.
@@ -610,7 +655,63 @@ func (b *Broker) reviewRequestChanges(w http.ResponseWriter, r *http.Request, id
 	b.mu.Lock()
 	b.postNotebookPromotionResolvedCardLocked(updated.ID, updated.SourcePath, updated.TargetPath, body.ActorSlug, PromotionDecisionChangesRequested, body.Rationale, updated.SourceSlug)
 	b.mu.Unlock()
+	// A human "request changes" is actionable feedback, not just a state
+	// stamp: turn it into a task owned by the notebook's author so the
+	// revision actually gets scheduled (founder directive, review-in-place).
+	if isHumanReviewActor(body.ActorSlug) {
+		b.createReviewChangeTask(updated, body.ActorSlug, body.Rationale)
+	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// isHumanReviewActor reports whether a review actor_slug denotes the human
+// operator. The web UI posts an empty actor_slug for human actions; "human"
+// and "you" are the trusted human pseudo-slugs used elsewhere on the task
+// surface.
+func isHumanReviewActor(actorSlug string) bool {
+	switch strings.ToLower(strings.TrimSpace(actorSlug)) {
+	case "", "human", "you":
+		return true
+	default:
+		return false
+	}
+}
+
+// createReviewChangeTask creates the follow-up task for a human
+// request-changes decision: owned by the notebook entry's author agent,
+// carrying the reviewer's comment verbatim plus the notebook path and the
+// resubmit instruction. Best-effort composition — the review transition is
+// the primary record, so a task-create failure is logged, never bounced
+// back onto the review response. Caller must NOT hold b.mu (MutateTask
+// locks internally). Returns the created task ID, or "" on failure.
+func (b *Broker) createReviewChangeTask(p *Promotion, actorSlug, rationale string) string {
+	if p == nil || strings.TrimSpace(p.SourceSlug) == "" {
+		return ""
+	}
+	title := strings.TrimSpace(b.reviewItemForPromotion(p).EntryTitle)
+	if title == "" {
+		title = notebookEntrySlug(p.SourcePath)
+	}
+	createdBy := strings.TrimSpace(actorSlug)
+	if createdBy == "" {
+		createdBy = "human"
+	}
+	details := strings.TrimSpace(rationale) +
+		"\n\nNotebook item: " + p.SourcePath +
+		"\nRevise the notebook entry to address this feedback, then resubmit it for review."
+	resp, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Update notebook item: " + title,
+		Details:   details,
+		Owner:     p.SourceSlug,
+		CreatedBy: createdBy,
+	})
+	if err != nil {
+		log.Printf("review %s: request-changes follow-up task create failed: %v", p.ID, err)
+		return ""
+	}
+	return resp.Task.ID
 }
 
 func (b *Broker) reviewReject(w http.ResponseWriter, r *http.Request, id string) {

@@ -4,6 +4,7 @@
  * opt-in with `VITE_NOTEBOOK_MOCK=true` for isolated UI work.
  */
 
+import { track } from "../lib/analytics";
 import {
   MOCK_AGENTS,
   MOCK_REVIEWS,
@@ -298,9 +299,13 @@ export async function fetchCatalog(): Promise<NotebookCatalogSummary> {
   };
 }
 
-export async function fetchAgentEntries(
-  agentSlug: string,
-): Promise<{ agent: NotebookAgentSummary | null; entries: NotebookEntry[] }> {
+export async function fetchAgentEntries(agentSlug: string): Promise<{
+  agent: NotebookAgentSummary | null;
+  entries: NotebookEntry[];
+  /** Reviews touching this agent's entries — lets the notebook viewer
+   *  render the in-place review bar without a second /review/list fetch. */
+  reviews: ReviewItem[];
+}> {
   if (!shouldUseMocks()) {
     // Backend exposes list-by-slug; synthesize the agent header client-side
     // from the catalog so one route missing doesn't blank the page.
@@ -345,10 +350,18 @@ export async function fetchAgentEntries(
         };
       }),
     );
-    return { agent, entries };
+    return {
+      agent,
+      entries,
+      reviews: reviews.filter((review) => review.agent_slug === agentSlug),
+    };
   }
   const agent = MOCK_AGENTS.find((a) => a.agent_slug === agentSlug) ?? null;
-  return { agent, entries: mockAgentEntries(agentSlug) };
+  return {
+    agent,
+    entries: mockAgentEntries(agentSlug),
+    reviews: MOCK_REVIEWS.filter((review) => review.agent_slug === agentSlug),
+  };
 }
 
 export async function fetchEntry(
@@ -448,6 +461,9 @@ export async function promoteEntry(
       rationale: opts.rationale ?? "Ready for team wiki review.",
       reviewer_slug: opts.reviewer_slug,
     });
+    track("notebook_entry_promoted", {
+      reviewer_assigned: !!opts.reviewer_slug,
+    });
     if (submitted?.promotion_id) {
       const full = await fetchReview(submitted.promotion_id).catch(() => null);
       if (full) return full;
@@ -507,6 +523,10 @@ export async function updateReviewState(
       await client.post<unknown>(`/review/${encodeURIComponent(id)}/${verb}`, {
         actor_slug: opts.actor_slug ?? "",
         rationale: opts.rationale ?? "",
+      });
+      track("review_action", {
+        action: verb.replace(/-/g, "_"),
+        target: "notebook",
       });
       return await fetchReview(id);
     }

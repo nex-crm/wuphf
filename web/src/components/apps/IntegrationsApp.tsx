@@ -24,11 +24,11 @@ import {
 } from "../../api/integrations";
 import { showNotice } from "../ui/Toast";
 import { ActionGrantsPanel } from "./integrations/ActionGrantsPanel";
-import { ComposioOnboarding } from "./integrations/ComposioOnboarding";
 import {
   IntegrationDetailHeader,
   IntegrationListRow,
 } from "./integrations/CardShell";
+import { ComposioOnboarding } from "./integrations/ComposioOnboarding";
 import { ToolkitBrandLogo } from "./integrations/IntegrationLogos";
 import { INTEGRATIONS } from "./integrations/registry";
 import {
@@ -807,8 +807,18 @@ export function IntegrationsApp() {
       ) : !composioKeySet ? (
         // First run: no Composio key connected → onboarding instead of an empty
         // catalog. Once connected, config + integrations re-fetch and the home
-        // (browse + search) renders.
-        <ComposioOnboarding onConnected={() => void cfgQuery.refetch()} />
+        // (browse + search) renders. The transport registry (Telegram, Hermes,
+        // OpenClaw) does not depend on Composio, so it stays visible below the
+        // onboarding hero — these integrations must never disappear behind the
+        // Composio key gate.
+        <>
+          <ComposioOnboarding onConnected={() => void cfgQuery.refetch()} />
+          <RegistryListView
+            ctx={ctx}
+            available={available}
+            onOpen={setSelectedId}
+          />
+        </>
       ) : (
         <>
           <IntegrationsHome
@@ -821,7 +831,9 @@ export function IntegrationsApp() {
             ctx={ctx}
             onSearch={setSearch}
             onConnected={setConnected}
-            onOpenToolkit={(item) => setSelectedToolkitKey(toolkitIdentity(item))}
+            onOpenToolkit={(item) =>
+              setSelectedToolkitKey(toolkitIdentity(item))
+            }
             onOpenRegistry={setSelectedId}
             isError={integrationsQuery.isError}
             error={integrationsQuery.error}

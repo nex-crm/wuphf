@@ -459,10 +459,13 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 		if msg.ReplyTo != "" {
 			threadNote = " ↳ " + msg.ReplyTo
 		}
-		// Truncate content to avoid token explosion when agents return long code
-		// blocks or reports. 800 chars is enough for context without burning tokens.
-		// team_poll is background context; agents who need the full output can read
-		// it directly from the thread via a targeted team_poll with thread_id.
+		// Truncate AGENT/SYSTEM content to avoid token explosion when agents
+		// return long code blocks or reports. Human-authored messages are NEVER
+		// clipped: the human's words are the work contract, and the 800-char
+		// clip silently dropped the tail of long human redline messages
+		// (ten-out-of-ten Wave E handoff; v3 [18:05–18:10]: half the message
+		// read, half dropped). Agents who need a full agent thread can read it
+		// via a targeted team_poll with thread_id.
 		const pollContentLimit = 800
 		if msg.Kind == "automation" || msg.From == "wuphf" || msg.From == "nex" {
 			source := msg.Source
@@ -485,12 +488,19 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 			continue
 		}
 		content := msg.Content
-		if len(content) > pollContentLimit {
+		if !isHumanPollSender(msg.From) && len(content) > pollContentLimit {
 			content = content[:pollContentLimit] + "…"
 		}
 		lines = append(lines, fmt.Sprintf("%s %s%s @%s: %s%s", ts, msg.ID, threadNote, msg.From, content, tagNote))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// isHumanPollSender reports whether a poll line's sender is the human —
+// human content reaches agents in full, never clipped.
+func isHumanPollSender(from string) bool {
+	from = strings.ToLower(strings.TrimSpace(from))
+	return from == "you" || from == "human" || strings.HasPrefix(from, "human:")
 }
 
 func latestHumanRequestSummary(messages []brokerMessage) string {

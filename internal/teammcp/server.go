@@ -149,7 +149,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		mcp.AddTool(server, readOnlyTool(
 			"read_conversation",
-			"LAST RESORT: Read recent 1:1 messages only when the pushed notification is missing context you genuinely need. Do NOT call this before every reply.",
+			"Read recent 1:1 messages when the pushed notification is missing context you need. Pull freely rather than guessing; skip it only when the push already answers the question.",
 		), handleTeamPoll)
 
 		mcp.AddTool(server, officeWriteTool(
@@ -165,7 +165,8 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		registerContextTools(server)
 		registerSharedMemoryTools(server)
 
-		registerSkillAuthoringTools(server)
+		registerSkillTools(server)
+		registerRoutineTools(server)
 
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
@@ -177,6 +178,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		// private chat. Same gate as the office and DM branches below.
 		if slug == "" || slug == "ceo" || slug == team.LibrarianSlug {
 			registerNotebookReviewTool(server)
+			// The wiki-curation roles also link wiki articles to tasks, so the
+			// context-packer can hand those refs to first-party agents.
+			registerWikiLinkTool(server)
 		}
 
 		if hasActionProvider() {
@@ -218,9 +222,11 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
-		registerSkillAuthoringTools(server)
+		registerSkillTools(server)
+		registerRoutineTools(server)
 		if isLead || isLibrarian {
 			registerNotebookReviewTool(server)
+			registerWikiLinkTool(server)
 		}
 		if hasActionProvider() {
 			registerActionTools(server)
@@ -288,7 +294,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 	mcp.AddTool(server, officeWriteTool(
 		"team_task",
-		"Create, claim, assign, complete, block, resume, or release a shared task in the office task list.",
+		"Create, define, claim, assign, complete, block, resume, or release a shared task in the office task list. action=define sets the structured task definition (goal, deliverables+format, success_criteria, access_needed) — the intake contract the owner executes against.",
 	), handleTeamTask)
 
 	if slug == "artist" {
@@ -324,7 +330,8 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"team_skill_run",
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
-	registerSkillAuthoringTools(server)
+	registerSkillTools(server)
+	registerRoutineTools(server)
 
 	// Gate external-action tools behind a configured provider. Registering 14
 	// empty action tools inflates the MCP tool schema and pushes the total
@@ -360,12 +367,19 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_member",
 			"Propose creating (or remove) an office-wide member. Reuse an existing teammate whenever one can cover the work. Creating a NEW member ALWAYS requires explicit human approval: this tool raises an approval request and blocks until the human decides, then returns an error if they decline so you assign the work to an existing specialist instead.",
 		), handleTeamMember)
+		// Human-chat-feedback policy writer (core-loop step 11): CEO-only,
+		// fires only on explicit human operating feedback.
+		registerPolicyTools(server)
 	}
 	// Promotion-review tool: the lead AND the Librarian (wiki curator) get it.
 	// Kept out of the lead-only block above so the Librarian does not also gain
 	// team_plan / team_channel / team_member.
 	if isLead || isLibrarian {
 		registerNotebookReviewTool(server)
+		// link_task_wiki rides with the wiki-curation roles: the CEO/Librarian
+		// link the canonical articles a task needs so the context-packer can
+		// hand exactly those refs to first-party agents.
+		registerWikiLinkTool(server)
 	}
 }
 

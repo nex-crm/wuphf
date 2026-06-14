@@ -111,3 +111,30 @@ func TestLifecycleTransitionRejectsNonCanonicalState(t *testing.T) {
 		t.Fatal("expected error for LifecycleStateUnknown (it is the migration fallback, not a valid target), got nil")
 	}
 }
+
+// ── Parked tasks raise no start-ceremony notice ──────────────────────────
+
+// The Approve & Start ceremony is retired: entering drafting (now the
+// explicit "parked" state) must raise NO Inbox notice — there is no
+// activation button to hint at, and a deliberate park needs no nag.
+// Regression guard for the removed awaiting-start notice flow.
+func TestParkedEntryRaisesNoInboxNotice(t *testing.T) {
+	b := newTestBroker(t)
+
+	b.mu.Lock()
+	b.tasks = []teamTask{{ID: "OFFICE-7", TaskType: "issue", Owner: "ceo", Channel: "general"}}
+	_, err := b.transitionLifecycleLocked("OFFICE-7", LifecycleStateDrafting, "composer park")
+	b.mu.Unlock()
+	if err != nil {
+		t.Fatalf("transition to drafting: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.requests {
+		if b.requests[i].IssueID == "OFFICE-7" {
+			t.Fatalf("parking must raise no inbox request, found kind=%q title=%q",
+				b.requests[i].Kind, b.requests[i].Title)
+		}
+	}
+}

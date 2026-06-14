@@ -191,14 +191,13 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 			return toolError(err), nil, nil
 		}
 		body := map[string]any{
-			"action":          "create",
-			"slug":            slug,
-			"name":            strings.TrimSpace(args.Name),
-			"role":            strings.TrimSpace(args.Role),
-			"expertise":       args.Expertise,
-			"personality":     strings.TrimSpace(args.Personality),
-			"permission_mode": strings.TrimSpace(args.PermissionMode),
-			"created_by":      actor,
+			"action":      "create",
+			"slug":        slug,
+			"name":        strings.TrimSpace(args.Name),
+			"role":        strings.TrimSpace(args.Role),
+			"expertise":   args.Expertise,
+			"personality": strings.TrimSpace(args.Personality),
+			"created_by":  actor,
 		}
 		if pkind := strings.TrimSpace(args.Provider); pkind != "" || strings.TrimSpace(args.Model) != "" {
 			p := map[string]any{"kind": pkind, "model": strings.TrimSpace(args.Model)}

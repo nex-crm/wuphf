@@ -40,7 +40,7 @@ export function SkillDetailRoute({ skillName }: SkillDetailRouteProps) {
   }, [skillName]);
 
   // Pull skill metadata from the cached catalog (already populated by
-  // SkillsApp + AgentSkillsTab via the same key).
+  // SkillsApp via the same key).
   const { data: catalog } = useQuery({
     queryKey: ["skills", "all"],
     queryFn: () => getSkillsList("all"),

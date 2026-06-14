@@ -98,13 +98,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Owner:   strings.TrimSpace(item.Assignee),
 		}); existing != nil {
 			titleToID[strings.TrimSpace(item.Title)] = existing.ID
-			// Spec freeze: a re-plan must not rewrite an already-approved
-			// (Running+/terminal) task's human-approved spec BODY (Details).
-			// Classification/routing (TaskType/ExecutionMode), dependency wiring,
-			// and runtime config (effort/provider/model) stay adjustable — the
-			// system recomputes these. See specIsFrozen.
-			specFrozen := specIsFrozen(existing.LifecycleState)
-			if details := strings.TrimSpace(item.Details); details != "" && !specFrozen {
+			if details := strings.TrimSpace(item.Details); details != "" {
 				existing.Details = details
 			}
 			if taskType := strings.TrimSpace(item.TaskType); taskType != "" {
@@ -144,15 +138,6 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Effective Plan-first: honor an explicit per-task choice; otherwise
-		// default from the owner agent's autonomy (PermissionMode "plan" →
-		// plan-first). This is what makes a "plan" agent's delegated work run
-		// the owner through the provider's native plan mode before executing.
-		planFirst := item.PlanFirstEnabled()
-		if item.PlanFirst == nil {
-			planFirst = b.ownerDefaultsToPlanFirstLocked(strings.TrimSpace(item.Assignee))
-		}
-
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
@@ -183,35 +168,35 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Effort:        strings.TrimSpace(item.Effort),
 			Provider:      providerKind,
 			Model:         strings.TrimSpace(item.Model),
-			PlanFirst:     planFirst,
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
 		b.refreshPlannedTaskBlockStateLocked(&task)
-		// Lifecycle routing (Phase 5 Plan mode + Phase 3 Backlog):
-		//   - Backlog (Park): assigned but parked in Drafting — non-executable,
-		//     shows in Backlog, dispatches nobody. Activated via "Approve &
-		//     Start", which routes through PlanFirst (Drafting→Planning or
-		//     Drafting→Running) in the decision handler.
-		//   - Plan first + real owner (start now): land in Planning so the owner
-		//     is dispatched to write a plan first (plan-only packet), then
-		//     "Approve & Start" → Running. Overrides the in_progress promotion.
-		//   - Plan first OFF (start now): leave the in_progress promotion in
-		//     place → runs immediately, no plan/approval gate.
-		// (Auto-owner Plan-first tasks plan after the CEO assigns a specialist;
-		// the reassign path routes them into Planning.)
-		switch {
-		case item.Park:
+		// Lifecycle routing: Backlog (Park) is the ONE deliberate way to
+		// land a task in Drafting — assigned but parked, non-executable,
+		// shows in Backlog, dispatches nobody. The human starts it later
+		// from the task page ("Parked — start", the one remaining start
+		// affordance). Start-now tasks keep the in_progress promotion and
+		// run immediately — creation is the authorization.
+		if item.Park {
 			if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
 				rollbackPlan()
 				http.Error(w, "failed to park task", http.StatusInternalServerError)
 				return
 			}
-		case task.PlanFirst && task.status == "in_progress":
-			if err := b.applyLifecycleStateLocked(&task, LifecycleStatePlanning); err != nil {
+		} else if strings.EqualFold(strings.TrimSpace(task.status), "in_progress") && task.LifecycleState == "" {
+			// Start-now task: stamp the typed Running state to match the bare
+			// status. Without this the typed LifecycleState stays empty, and
+			// everything keyed on the typed pre-merge state silently no-ops for
+			// HTTP-created tasks — the owner's messages never get SourceTaskID
+			// stamped (so they never thread under the task), and the Slack task
+			// card never recognises the task as active. The /tasks mutation path
+			// already routes through applyLifecycleStateLocked(Running); /task-plan
+			// must too. prev=="" so no duplicate lifecycle card is emitted.
+			if err := b.applyLifecycleStateLocked(&task, LifecycleStateRunning); err != nil {
 				rollbackPlan()
-				http.Error(w, "failed to start planning", http.StatusInternalServerError)
+				http.Error(w, "failed to start task", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -228,6 +213,21 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			rollbackPlan()
 			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 			return
+		}
+		// Give every task with a real owner its own thread root: post the task
+		// card (definition + link) and anchor task.ThreadID on it. This scopes
+		// the owner's turn context to the task's own thread (notification_context.go)
+		// instead of raw channel scrollback — the boundary that stops one task's
+		// history bleeding into another. HTTP-created tasks never set ThreadID
+		// otherwise; agent/MCP-created tasks carry it from the call. Auto-owner
+		// (ownerless) tasks are skipped: they have no owner to dispatch yet and
+		// must go through CEO triage first — a system-authored card here would
+		// also race the triage wake message (broker_tasks_auto.go). Their thread
+		// root is established when triage assigns a real owner and work starts.
+		if strings.TrimSpace(task.ThreadID) == "" && strings.TrimSpace(task.Owner) != "" && !isAutoOwner(task.Owner) {
+			if rootID := b.postIssueCreatedCardLocked(createdBy, &task); rootID != "" {
+				task.ThreadID = rootID
+			}
 		}
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", taskChannel, createdBy, truncateSummary(task.Title, 140), task.ID)

@@ -27,7 +27,6 @@ func (b *Broker) Actions() []officeActionLog {
 }
 
 func sanitizeOfficeActionLog(action officeActionLog) officeActionLog {
-	action.Summary = redactSecretsInText(action.Summary)
 	if len(action.SignalIDs) > 0 {
 		action.SignalIDs = append([]string(nil), action.SignalIDs...)
 	}
@@ -41,8 +40,8 @@ func sanitizeActionMetadata(metadata map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(metadata))
 	for key, value := range metadata {
-		key = redactSecretsInText(strings.TrimSpace(key))
-		value = redactSecretsInText(strings.TrimSpace(value))
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 		if key == "" || value == "" {
 			continue
 		}

@@ -1508,6 +1508,58 @@ body {
   line-height: 1.5;
   color: var(--text-tertiary, var(--text-secondary));
 }
+.composio-onb-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--bg-card-soft, var(--bg-card));
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: var(--radius-md);
+}
+.composio-onb-panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.composio-onb-panel-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.composio-onb-panel-note code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.composio-onb-wait {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.composio-onb-error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--red);
+}
+.composio-onb-fallback-toggle {
+  appearance: none;
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.composio-onb-fallback-toggle:hover {
+  color: var(--text);
+}
 .badge-muted {
   background: var(--bg-warm);
   color: var(--text-tertiary);

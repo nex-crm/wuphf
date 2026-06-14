@@ -66,6 +66,7 @@ type Broker struct {
 	memberIndex       map[string]int                  // slug → index into members; guarded by mu
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
+	webURL            string                          // base URL of the web UI, set by LaunchWeb; guarded by mu
 	channels          []teamChannel
 	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
@@ -108,11 +109,15 @@ type Broker struct {
 	// actionGrants are persisted, human-issued standing approvals for a specific
 	// (agent, platform, action_id). The resolver reads them to skip the approval
 	// modal for pre-authorized actions. Human-minted only. Guarded by b.mu.
-	actionGrants        []actionGrant
+	actionGrants []actionGrant
+	// composioSignin is the in-memory "Sign in with Composio" CLI flow state
+	// (broker_composio_signin.go). Carries its own mutex; zero value ready.
+	composioSignin      composioSigninFlow
 	humanInvites        []humanInvite
 	humanSessions       []humanSession
 	humanSessionRevoke  map[string]chan struct{} // session ID → closed on revoke
 	actions             []officeActionLog
+	distillInFlight     map[string]struct{}
 	signals             []officeSignalRecord
 	decisions           []officeDecisionRecord
 	watchdogs           []watchdogAlert
@@ -133,12 +138,17 @@ type Broker struct {
 	// updates the company name during onboarding. Existing task-N IDs
 	// are left untouched — only new allocations carry the new prefix.
 	// Guarded by b.mu.
-	idPrefix                string
-	notificationSince       string
-	insightsSince           string
-	pendingInterview        *humanInterview
-	usage                   teamUsageState
-	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
+	idPrefix          string
+	notificationSince string
+	insightsSince     string
+	pendingInterview  *humanInterview
+	usage             teamUsageState
+	externalDelivered map[string]struct{}            // message IDs already queued for external delivery
+	slackTaskCards    map[string]slackTaskCardRecord // task ID → posted Slack lifecycle card (persisted)
+	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
+	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
+	// nil means the real Slack Web API. Tests inject a fake.
+	slackSpawnAuthTest      slackSpawnAuthTestFunc
 	messageSubscribers      map[int]chan channelMessage
 	actionSubscribers       map[int]chan officeActionLog
 	activity                map[string]agentActivitySnapshot
@@ -178,11 +188,14 @@ type Broker struct {
 	scanTracker             *scanStatusTracker
 	nextSubscriberID        int
 	agentStreams            map[string]*agentStreamBuffer
-	mu                      sync.Mutex
-	officeMemberMutationMu  sync.Mutex
-	stateWriteMu            sync.Mutex
-	stateWriteSeq           atomic.Uint64
-	stateWriteApplied       atomic.Uint64
+	// mu is the broker's single big lock. contendedMutex == sync.Mutex
+	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
+	// long holder wedging every endpoint is visible in the log.
+	mu                     contendedMutex
+	officeMemberMutationMu sync.Mutex
+	stateWriteMu           sync.Mutex
+	stateWriteSeq          atomic.Uint64
+	stateWriteApplied      atomic.Uint64
 	// configMu serializes handleConfig POST reads/writes so concurrent
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
@@ -244,6 +257,17 @@ type Broker struct {
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 
+	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
+	// transport is started in-process — at boot by RegisterTransports and at
+	// runtime by handleSlackConnect — so connecting a channel from the web app
+	// brings Socket Mode up live, with no broker re-exec. slackTransportMu guards
+	// the start/stop pair; slackTransport is the live adapter (nil when not
+	// running) and slackTransportStop cancels its goroutines and waits for them
+	// to drain (nil when not running).
+	slackTransportMu   sync.Mutex
+	slackTransport     *SlackTransport
+	slackTransportStop func()
+
 	// nowFn is the clock used by rate-limit logic. nil means time.Now.
 	// Inject a fake clock in tests to avoid real-time sleeps.
 	nowFn func() time.Time
@@ -258,18 +282,6 @@ type Broker struct {
 	skillCompileInflight  bool
 	skillCompileCoalesced bool
 	skillScanner          *SkillScanner
-	// Skill synthesizer (Stage B) plumbing. Same coalesce semantics as
-	// Stage A; metrics + counters live on skillCompileMetrics.StageBProposalsTotal.
-	skillSynthesizer    *SkillSynthesizer
-	skillSynthInflight  bool
-	skillSynthCoalesced bool
-	// Hermes-style per-agent activity counter (Stage B'). Increments on
-	// every agent MCP tool call; resets on team_skill_create / team_skill_patch;
-	// fires a "skill_review_nudge" task when the threshold is crossed. Owns
-	// its own mutex so it can be hit from the tool-event hot path without
-	// blocking on b.mu. Lazily constructed by ensureSkillCounter so tests
-	// that never spawn a real agent pay no cost.
-	skillCounter *SkillCounter
 	// recentlyRejectedSkills holds in-memory snapshots of skills rejected in
 	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
@@ -561,6 +573,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
+	// Single derived-stats source: every surface-level count (header
+	// strip, board lane headers, dashboard tiles, inbox badge, wiki
+	// home) reads this one endpoint so the numbers cannot drift.
+	mux.HandleFunc("/office/stats", b.requireAuth(b.handleOfficeStats))
 	mux.HandleFunc("/office-members/generate", b.requireAuth(b.handleGenerateMember))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
 	mux.HandleFunc("/channels/dm", b.requireAuth(b.handleCreateDM))
@@ -623,6 +639,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
 	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
@@ -655,6 +672,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
 	mux.HandleFunc("/reset-dm", b.requireAuth(b.handleResetDM))
 	mux.HandleFunc("/policies", b.requireAuth(b.handlePolicies))
+	mux.HandleFunc("/policies/", b.requireAuth(b.handlePoliciesSubpath))
 	mux.HandleFunc("/signals", b.requireAuth(b.handleSignals))
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
@@ -667,6 +685,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/integrations/audit", b.requireAuth(b.handleIntegrationAudit))
 	mux.HandleFunc("/integrations/resolve", b.requireAuth(b.handleIntegrationResolve))
 	mux.HandleFunc("/integrations/grants", b.requireAuth(b.handleIntegrationGrants))
+	// "Sign in with Composio" — the broker drives the composio CLI so the
+	// user never copy/pastes an API key. See broker_composio_signin.go.
+	mux.HandleFunc("/integrations/composio/signin/start", b.requireAuth(b.handleComposioSigninStart))
+	mux.HandleFunc("/integrations/composio/signin/status", b.requireAuth(b.handleComposioSigninStatus))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
@@ -684,6 +706,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
+	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
+	mux.HandleFunc("/slack/agents", b.requireAuth(b.handleSlackAgents))
+	mux.HandleFunc("/slack/agents/spawn", b.requireAuth(b.handleSlackAgentsSpawn))
+	mux.HandleFunc("/slack/agents/spawn/complete", b.requireAuth(b.handleSlackAgentsSpawnComplete))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
@@ -836,8 +862,7 @@ func (b *Broker) Stop() {
 // to the attacker's origin. Validate both RemoteAddr AND Host here.
 
 // SSE handlers and the tool-event audit channel (handleEvents,
-// handleAgentStream, handleAgentToolEvent, recordAgentToolEvent,
-// SkillCounter helpers) moved to broker_sse.go.
+// handleAgentStream, handleAgentToolEvent) moved to broker_sse.go.
 
 // ServeWebUI starts a static file server for the web UI on the given port.
 // Returns an error if the port cannot be bound (e.g. already in use).
@@ -953,6 +978,21 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 	return out
 }
 
+// SetWebURL records the web UI's base URL so surfaces that link back to the
+// app (e.g. the Slack App Home tab) can build real links.
+func (b *Broker) SetWebURL(url string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.webURL = strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+// WebURL returns the web UI's base URL, or "" before LaunchWeb has run.
+func (b *Broker) WebURL() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.webURL
+}
+
 // EnsureBridgedMember registers a bridged external agent as an office member
 // so it appears in the sidebar and can be @mentioned. Idempotent — calling with
 // an existing slug is a no-op. CreatedBy tags the source (e.g. "openclaw") so
@@ -1042,6 +1082,20 @@ func (b *Broker) EnsureDirectChannel(agentSlug string) (string, error) {
 
 // PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
 func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
+	return b.postInboundSurfaceMessage(from, channel, content, provider, "")
+}
+
+// PostInboundSurfaceMessageInThread is the thread-aware inbound path: when a
+// surface reply arrives inside a thread (threadRootKey is the surface's thread
+// root id — Slack's thread_ts), the broker maps it to the task whose thread
+// root that is and folds the reply into the task's thread (ReplyTo +
+// SourceTaskID). This is what keeps a foreign agent's in-thread reply scoped
+// to the task instead of leaking into the channel's shared context.
+func (b *Broker) PostInboundSurfaceMessageInThread(from, channel, content, provider, threadRootKey string) (channelMessage, error) {
+	return b.postInboundSurfaceMessage(from, channel, content, provider, threadRootKey)
+}
+
+func (b *Broker) postInboundSurfaceMessage(from, channel, content, provider, threadRootKey string) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
@@ -1067,6 +1121,45 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		SourceLabel: provider,
 		Content:     strings.TrimSpace(content),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	// Thread mapping: a reply inside a task's Slack thread is folded into that
+	// task's internal thread so the task context (and only that task) sees it.
+	// Set before appendMessageLocked, whose owner-based auto-stamp does NOT
+	// fire for non-owner foreign agents or humans — the thread is the only
+	// signal that ties their reply to the task.
+	// Scope the fold to Slack and to the message's own channel: the root key is
+	// a Slack thread_ts, so a non-Slack inbound (Telegram reply_to, etc.) or a
+	// reply that lands in a different channel must never be folded into a Slack
+	// task thread by a key collision or replay.
+	if provider == "slack" {
+		if root := b.slackTaskByRootTSLocked(threadRootKey); root != nil &&
+			normalizeChannelSlug(root.Channel) == channel {
+			msg.SourceTaskID = root.ID
+			if strings.TrimSpace(msg.ReplyTo) == "" && strings.TrimSpace(root.ThreadID) != "" {
+				msg.ReplyTo = strings.TrimSpace(root.ThreadID)
+			}
+		}
+	}
+	// Promote @slug mentions into tags, mirroring handlePostMessage's
+	// auto-promote: surface humans (Slack/Telegram) expect "@agent" to
+	// notify exactly like web humans do. Same lead-routing guard as the web
+	// path: when the lead is mentioned, do NOT fan out to other mentioned
+	// agents — the human's intent is for the lead to route.
+	if b.senderMayAutoPromoteLocked(from) {
+		mentioned := extractMentionedSlugs(msg.Content)
+		leadSlug := officeLeadSlugFrom(b.members)
+		leadMentioned := leadSlug != "" && containsString(mentioned, leadSlug)
+		for _, slug := range mentioned {
+			if b.findMemberLocked(slug) == nil {
+				continue
+			}
+			if leadMentioned && slug != leadSlug {
+				continue
+			}
+			if !containsString(msg.Tagged, slug) {
+				msg.Tagged = append(msg.Tagged, slug)
+			}
+		}
 	}
 	msg = b.appendMessageLocked(msg)
 	// Mark as already delivered so it doesn't bounce back to the same surface

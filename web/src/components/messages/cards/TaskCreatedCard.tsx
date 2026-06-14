@@ -64,13 +64,14 @@ export function TaskCreatedCard({ payload }: TaskCreatedCardProps) {
     });
   }
 
-  // CTA + eyebrow shift when the Task is awaiting human approval —
-  // this is the most common state immediately after creation and the
-  // human is the gate. Other states render with a neutral "Open" CTA.
-  const eyebrow = isDrafting ? "Task ready for review" : "Task created";
-  const cta = isDrafting ? "Review & Approve →" : "Open →";
+  // CTA + eyebrow shift when the Task is PARKED (drafting) — the one
+  // state where the human holds the start affordance. Created tasks land
+  // running by default (creation is the authorization), so most cards
+  // render the neutral "Open" CTA.
+  const eyebrow = isDrafting ? "Task parked" : "Task created";
+  const cta = isDrafting ? "Open to start →" : "Open →";
   const helpText = isDrafting
-    ? "Awaiting your approval — open to read, comment, or edit before starting."
+    ? "Parked — open the task page to read, edit, or start it."
     : null;
 
   return (

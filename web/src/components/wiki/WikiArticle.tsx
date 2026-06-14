@@ -1,9 +1,7 @@
 // biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { useQueryClient } from "@tanstack/react-query";
-import type { PluggableList } from "unified";
 
 import type { EntityKind } from "../../api/entity";
 import { detectPlaybook } from "../../api/playbook";
@@ -27,18 +25,12 @@ import {
 import { useInlineArtifacts } from "../../hooks/useInlineArtifacts";
 import { formatAgentName } from "../../lib/agentName";
 import { keyedByOccurrence } from "../../lib/reactKeys";
-import {
-  extractRichArtifactIds,
-  stripStandaloneRichArtifactReferenceLines,
-} from "../../lib/richArtifactReferences";
-import {
-  buildMarkdownComponents,
-  buildRehypePlugins,
-  buildRemarkPlugins,
-} from "../../lib/wikiMarkdownConfig";
-import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
+import { ArticleAttribution } from "./ArticleAttribution";
+import ArticleContents from "./ArticleContents";
+import ArticleReadView from "./ArticleReadView";
 import ArticleStatusBanner from "./ArticleStatusBanner";
 import ArticleTitle from "./ArticleTitle";
+import { makeWikilinkResolver } from "./articleContent";
 import Byline from "./Byline";
 import CategoriesFooter from "./CategoriesFooter";
 import CiteThisPagePanel from "./CiteThisPagePanel";
@@ -47,7 +39,6 @@ import EntityRelatedPanel from "./EntityRelatedPanel";
 import { useFocusTrap } from "./editor/inserts/useFocusTrap";
 import FactsOnFile from "./FactsOnFile";
 import HatBar, { type HatBarTab } from "./HatBar";
-import Hatnote from "./Hatnote";
 import { consumeMaintenanceTarget } from "./maintenanceTarget";
 import { consumeOpenInEdit } from "./openInEditTarget";
 import PageFooter from "./PageFooter";
@@ -55,15 +46,18 @@ import PageStatsPanel from "./PageStatsPanel";
 import PlaybookExecutionLog from "./PlaybookExecutionLog";
 import PlaybookSkillBadge from "./PlaybookSkillBadge";
 import ReferencedBy from "./ReferencedBy";
+import RequestAIChangeControl from "./RequestAIChangeControl";
 import SeeAlso from "./SeeAlso";
 import type { SourceItem } from "./Sources";
 import Sources from "./Sources";
 import TeamLearningPanel from "./TeamLearningPanel";
-import TocBox, { type TocEntry } from "./TocBox";
+import type { TocEntry } from "./TocBox";
 import { WIKI_TREE_QUERY_KEY } from "./tree/WikiTree";
 import VersionHistory from "./VersionHistory";
 import WikiEditor from "./WikiEditor";
 import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
+import { CollapsedPanelRail, PanelCollapseButton } from "./WikiPanelChrome";
+import { categoryPath } from "./wikiPaths";
 
 const STALENESS_STALE_DAYS = 30;
 const STALENESS_AGING_DAYS = 7;
@@ -208,9 +202,12 @@ interface WikiArticleProps {
    * additive trigger on top of the local refreshNonce used by inline edits.
    */
   externalRefreshNonce?: number;
+  /** Folds the right details rail to a thin strip when true. */
+  rightCollapsed?: boolean;
+  /** Toggles the right rail collapse. Omitted → no collapse affordance. */
+  onToggleRightCollapse?: () => void;
 }
 
-type MarkdownComponents = ReturnType<typeof buildMarkdownComponents>;
 type DetectedEntity = { kind: EntityKind; slug: string };
 type DetectedPlaybook = NonNullable<ReturnType<typeof detectPlaybook>>;
 
@@ -308,6 +305,8 @@ export default function WikiArticle({
   catalog,
   onNavigate,
   externalRefreshNonce = 0,
+  rightCollapsed = false,
+  onToggleRightCollapse,
 }: WikiArticleProps) {
   const [tab, setTab] = useState<HatBarTab>("article");
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -450,23 +449,9 @@ export default function WikiArticle({
     }));
   }, [historyCommits]);
 
-  const catalogSlugs = useMemo(
-    () => new Set(catalog.map((c) => c.path)),
-    [catalog],
-  );
   const resolver = useMemo(
-    () => (slug: string) => catalogSlugs.has(slug),
-    [catalogSlugs],
-  );
-
-  const remarkPlugins: PluggableList = useMemo(
-    () => buildRemarkPlugins(resolver),
-    [resolver],
-  );
-  const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), []);
-  const markdownComponents = useMemo(
-    () => buildMarkdownComponents({ resolver, onNavigate, articlePath: path }),
-    [resolver, onNavigate, path],
+    () => makeWikilinkResolver(catalog.map((c) => c.path)),
+    [catalog],
   );
 
   if (loading && !timedOut) {
@@ -532,6 +517,16 @@ export default function WikiArticle({
   // experience of the reference app. The column spans the article + right-rail
   // grid tracks (see `.wk-article-col--editing`) and the editor fills its
   // height. The HatBar stays so the writer can switch back to the article view.
+  // Category line at the bottom — derived from the article's path kind
+  // ("team/companies/acme.md" → companies) when the backend sends no
+  // explicit categories. Links to the auto-generated category index page.
+  const pathCategories =
+    article.categories.length > 0
+      ? article.categories
+      : breadcrumbSegments.length > 2 && breadcrumbSegments[0] === "team"
+        ? [breadcrumbSegments[1]]
+        : [];
+
   if (tab === "edit") {
     return (
       <main
@@ -548,9 +543,9 @@ export default function WikiArticle({
           tab={tab}
           article={article}
           catalog={catalog}
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          markdownComponents={markdownComponents}
+          resolver={resolver}
+          onNavigate={onNavigate}
+          onEditSection={() => setTab("edit")}
           visualArtifact={visualArtifact}
           inlineArtifacts={inlineArtifacts}
           onEditorSaved={handleEditorSaved}
@@ -564,76 +559,94 @@ export default function WikiArticle({
   return (
     <>
       <main className="wk-article-col">
-        <LiveEditingBanner liveAgent={liveAgent} article={article} />
-        <ArticleSetupPanels
-          entity={entity}
-          playbook={playbook}
-          onEntitySynthesized={() => setRefreshNonce((n) => n + 1)}
-        />
-        <HatBar
-          active={tab}
-          onChange={setTab}
-          rightRail={context ? [context] : undefined}
-        />
-        <ArticleDeleteControl
-          title={article.title}
-          path={article.path}
-          onDeleted={() => onNavigate("")}
-        />
-        <ArticleBreadcrumb
-          article={article}
-          segments={breadcrumbSegments}
-          onNavigate={onNavigate}
-        />
-        <ArticleTitle title={article.title} />
-        {byline}
-        <ArticleBadges article={article} />
-        <Hatnote>
-          This article is auto-generated from team activity. See the commit
-          history for the full trail.
-        </Hatnote>
-        <ArticleTabPanels
-          tab={tab}
-          article={article}
-          catalog={catalog}
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          markdownComponents={markdownComponents}
-          visualArtifact={visualArtifact}
-          inlineArtifacts={inlineArtifacts}
-          onEditorSaved={handleEditorSaved}
-          onEditorCancel={handleEditorCancel}
-          onVersionRestored={handleVersionRestored}
-        />
-        <ArticleRelatedPanels
-          visible={tab === "article"}
-          entity={entity}
-          playbook={playbook}
-        />
-        <SeeAlso
-          items={article.backlinks.map((b) => ({
-            slug: b.path,
-            display: b.title,
-          }))}
-          onNavigate={onNavigate}
-        />
-        <SourcesPanel
-          historyError={historyError}
-          sourceItems={sourceItems}
-          historyLoading={historyLoading}
-        />
-        <CategoriesFooter tags={article.categories} />
-        <PageFooter
-          lastEditedBy={formatAgentName(article.last_edited_by)}
-          lastEditedTs={article.last_edited_ts}
-          articlePath={article.path}
-        />
+        <div className="wk-article-page">
+          <LiveEditingBanner liveAgent={liveAgent} article={article} />
+          <ArticleSetupPanels
+            entity={entity}
+            playbook={playbook}
+            onEntitySynthesized={() => setRefreshNonce((n) => n + 1)}
+          />
+          <HatBar
+            active={tab}
+            onChange={setTab}
+            rightRail={context ? [context] : undefined}
+          />
+          {/* One clean header row: breadcrumb left (single line, middle
+              segments truncate), page actions right. The title sits BELOW
+              on its own line — previously the two floated toolbars
+              overlapped the wrapping breadcrumb. */}
+          <div className="wk-article-header" data-testid="wk-article-header">
+            <ArticleBreadcrumb
+              article={article}
+              segments={breadcrumbSegments}
+              onNavigate={onNavigate}
+            />
+            <div className="wk-article-actions">
+              <RequestAIChangeControl
+                title={article.title}
+                path={article.path}
+              />
+              <ArticleDeleteControl
+                title={article.title}
+                path={article.path}
+                onDeleted={() => onNavigate("")}
+              />
+            </div>
+          </div>
+          <ArticleTitle title={article.title} />
+          <div className="article-attribution-row">
+            <ArticleAttribution articleRef={path} />
+          </div>
+          {byline}
+          <ArticleBadges article={article} />
+          <ArticleTabPanels
+            tab={tab}
+            article={article}
+            catalog={catalog}
+            resolver={resolver}
+            onNavigate={onNavigate}
+            onEditSection={() => setTab("edit")}
+            visualArtifact={visualArtifact}
+            inlineArtifacts={inlineArtifacts}
+            onEditorSaved={handleEditorSaved}
+            onEditorCancel={handleEditorCancel}
+            onVersionRestored={handleVersionRestored}
+          />
+          <ArticleRelatedPanels
+            visible={tab === "article"}
+            entity={entity}
+            playbook={playbook}
+          />
+          <SeeAlso
+            items={article.backlinks.map((b) => ({
+              slug: b.path,
+              display: b.title,
+            }))}
+            onNavigate={onNavigate}
+          />
+          <SourcesPanel
+            historyError={historyError}
+            sourceItems={sourceItems}
+            historyLoading={historyLoading}
+          />
+          <CategoriesFooter
+            tags={pathCategories}
+            onSelect={(tag) => onNavigate(categoryPath(tag))}
+          />
+          <PageFooter
+            lastEditedBy={formatAgentName(article.last_edited_by)}
+            lastEditedTs={article.last_edited_ts}
+            articlePath={article.path}
+          />
+        </div>
       </main>
       <ArticleRightSidebar
         article={article}
         toc={toc}
         onNavigate={onNavigate}
         onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
+        collapsed={rightCollapsed}
+        onToggleCollapse={onToggleRightCollapse}
       />
     </>
   );
@@ -863,8 +876,11 @@ function ArticleBreadcrumb({
   segments: string[];
   onNavigate: (path: string) => void;
 }) {
+  // The repo-root "team" segment is plumbing, not a space — docmost-style
+  // breadcrumbs read "space / parent / page".
+  const displaySegments = segments[0] === "team" ? segments.slice(1) : segments;
   return (
-    <div className="wk-breadcrumb">
+    <nav className="wk-breadcrumb" aria-label="Breadcrumb">
       <a
         href="#/wiki"
         onClick={(e) => {
@@ -872,21 +888,34 @@ function ArticleBreadcrumb({
           onNavigate("");
         }}
       >
-        Team Wiki
+        Wiki
       </a>
-      {keyedByOccurrence(segments, (seg) => seg).map(
+      {keyedByOccurrence(displaySegments, (seg) => seg).map(
         ({ key, value: seg, index: i }) => (
           <span key={key} style={{ display: "contents" }}>
-            <span className="sep">›</span>
-            {i < segments.length - 1 ? (
-              <a href="#">{seg}</a>
+            <span className="sep" aria-hidden="true">
+              /
+            </span>
+            {i < displaySegments.length - 1 ? (
+              // Middle segments are path kinds (companies, people, …) —
+              // the wiki's "spaces". They link to the auto-generated
+              // category index page, not a folder.
+              <a
+                href={`#/wiki/${categoryPath(seg)}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onNavigate(categoryPath(seg));
+                }}
+              >
+                {seg}
+              </a>
             ) : (
-              <span>{article.title}</span>
+              <span aria-current="page">{article.title}</span>
             )}
           </span>
         ),
       )}
-    </div>
+    </nav>
   );
 }
 
@@ -921,9 +950,9 @@ function ArticleTabPanels({
   tab,
   article,
   catalog,
-  remarkPlugins,
-  rehypePlugins,
-  markdownComponents,
+  resolver,
+  onNavigate,
+  onEditSection,
   visualArtifact,
   inlineArtifacts,
   onEditorSaved,
@@ -933,9 +962,9 @@ function ArticleTabPanels({
   tab: HatBarTab;
   article: WikiArticleT;
   catalog: WikiCatalogEntry[];
-  remarkPlugins: PluggableList;
-  rehypePlugins: PluggableList;
-  markdownComponents: MarkdownComponents;
+  resolver: (slug: string) => boolean;
+  onNavigate: (path: string) => void;
+  onEditSection: () => void;
   visualArtifact: RichArtifactDetail | null;
   inlineArtifacts: RichArtifactDetail[];
   onEditorSaved: (newSha: string) => void;
@@ -943,59 +972,19 @@ function ArticleTabPanels({
   onVersionRestored: (newSha: string) => void;
 }) {
   switch (tab) {
-    case "article": {
-      // The body may contain standalone `visual-artifact:<id>` marker lines
-      // the agent hand-wrote. Strip them so they never render as raw text,
-      // then embed each referenced artifact inline. Dedupe the promoted
-      // artifact against the inline set so it is not embedded twice when the
-      // body also references its id.
-      const renderedContent = stripStandaloneRichArtifactReferenceLines(
-        article.content,
-      );
-      // Dedupe the promoted artifact against the body's inline markers.
-      // We key off the ids referenced in article.content (known
-      // synchronously) rather than the resolved inlineArtifacts list. The
-      // two fetches (promoted-path vs by-id) settle independently, so
-      // comparing against the resolved list would let the promoted embed
-      // flash in before the inline fetch lands and produce a transient
-      // double-render. The body markers are stable from first paint, so the
-      // promoted embed is suppressed up-front whenever the body also
-      // references it.
-      const referencedIds = new Set(extractRichArtifactIds(article.content));
-      const showPromoted =
-        visualArtifact !== null &&
-        !referencedIds.has(visualArtifact.artifact.id);
+    case "article":
       return (
-        <div className="wk-article-body" data-testid="wk-article-body">
-          {showPromoted && visualArtifact ? (
-            <RichArtifactEmbed
-              title={visualArtifact.artifact.title}
-              html={visualArtifact.html}
-            />
-          ) : null}
-          {/* A body can reference the same artifact id twice, which would
-            collide on a pure-id key. keyedByOccurrence appends an occurrence
-            suffix to duplicates so each embed gets a stable, unique key. */}
-          {keyedByOccurrence(
-            inlineArtifacts,
-            (detail) => detail.artifact.id,
-          ).map(({ key, value: detail }) => (
-            <RichArtifactEmbed
-              key={key}
-              title={detail.artifact.title}
-              html={detail.html}
-            />
-          ))}
-          <ReactMarkdown
-            remarkPlugins={remarkPlugins}
-            rehypePlugins={rehypePlugins}
-            components={markdownComponents}
-          >
-            {renderedContent}
-          </ReactMarkdown>
-        </div>
+        <ArticleReadView
+          content={article.content}
+          title={article.title}
+          articlePath={article.path}
+          resolver={resolver}
+          onNavigate={onNavigate}
+          onEditSection={onEditSection}
+          visualArtifact={visualArtifact}
+          inlineArtifacts={inlineArtifacts}
+        />
       );
-    }
     case "edit":
       return (
         <WikiEditor
@@ -1073,11 +1062,15 @@ function ArticleRightSidebar({
   toc,
   onNavigate,
   onMaintenanceApplied,
+  collapsed = false,
+  onToggleCollapse,
 }: {
   article: WikiArticleT;
   toc: TocEntry[];
   onNavigate: (path: string) => void;
   onMaintenanceApplied: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   // Consume the WikiLint "Suggest fix" hand-off exactly once per article
   // path. The consume call removes the slot from sessionStorage, so it is a
@@ -1098,9 +1091,31 @@ function ArticleRightSidebar({
       setInitialMaintenanceAction(target);
     }
   }, [article.path]);
+
+  if (collapsed && onToggleCollapse) {
+    return (
+      <aside className="wk-right-sidebar is-collapsed">
+        <CollapsedPanelRail
+          side="right"
+          label="Details"
+          onExpand={onToggleCollapse}
+        />
+      </aside>
+    );
+  }
+
   return (
     <aside className="wk-right-sidebar">
-      <TocBox entries={toc} />
+      {onToggleCollapse ? (
+        <div className="wk-right-rail-head">
+          <PanelCollapseButton
+            side="right"
+            label="Details"
+            onClick={onToggleCollapse}
+          />
+        </div>
+      ) : null}
+      <ArticleContents entries={toc} />
       <PageStatsPanel
         revisions={article.revisions}
         contributors={article.contributors.length}

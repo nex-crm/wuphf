@@ -501,14 +501,7 @@ func (s *EntitySynthesizer) readBrief(relPath string) (string, bool) {
 
 // headSHA returns the current repo HEAD short SHA.
 func (s *EntitySynthesizer) headSHA(ctx context.Context) (string, error) {
-	repo := s.worker.Repo()
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	out, err := repo.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", err, out)
-	}
-	return strings.TrimSpace(out), nil
+	return wikiRepoHeadSHA(ctx, s.worker.Repo())
 }
 
 // briefPath resolves the canonical wiki path for an entity brief.

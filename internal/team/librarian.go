@@ -45,15 +45,14 @@ func librarianOfficeMember(createdAt string) officeMember {
 		createdAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	return officeMember{
-		Slug:           LibrarianSlug,
-		Name:           librarianName,
-		Role:           librarianRole,
-		Expertise:      append([]string(nil), librarianExpertise...),
-		Personality:    librarianPersonality,
-		PermissionMode: "plan",
-		BuiltIn:        true,
-		CreatedBy:      "wuphf",
-		CreatedAt:      createdAt,
+		Slug:        LibrarianSlug,
+		Name:        librarianName,
+		Role:        librarianRole,
+		Expertise:   append([]string(nil), librarianExpertise...),
+		Personality: librarianPersonality,
+		BuiltIn:     true,
+		CreatedBy:   "wuphf",
+		CreatedAt:   createdAt,
 	}
 }
 

@@ -43,16 +43,15 @@ type officeMemberListEntry struct {
 }
 
 type officeMemberMutationBody struct {
-	Action         string                    `json:"action"`
-	Slug           string                    `json:"slug"`
-	Name           string                    `json:"name"`
-	Role           string                    `json:"role"`
-	Expertise      []string                  `json:"expertise"`
-	Personality    string                    `json:"personality"`
-	PermissionMode string                    `json:"permission_mode"`
-	AllowedTools   []string                  `json:"allowed_tools"`
-	CreatedBy      string                    `json:"created_by"`
-	Provider       *provider.ProviderBinding `json:"provider,omitempty"`
+	Action       string                    `json:"action"`
+	Slug         string                    `json:"slug"`
+	Name         string                    `json:"name"`
+	Role         string                    `json:"role"`
+	Expertise    []string                  `json:"expertise"`
+	Personality  string                    `json:"personality"`
+	AllowedTools []string                  `json:"allowed_tools"`
+	CreatedBy    string                    `json:"created_by"`
+	Provider     *provider.ProviderBinding `json:"provider,omitempty"`
 }
 
 type officeMemberMutationResult struct {
@@ -155,6 +154,10 @@ func cloneOfficeMemberForRead(member officeMember) officeMember {
 		openclaw := *member.Provider.Openclaw
 		clone.Provider.Openclaw = &openclaw
 	}
+	if member.Provider.Slack != nil {
+		slack := *member.Provider.Slack
+		clone.Provider.Slack = &slack
+	}
 	return clone
 }
 
@@ -229,15 +232,14 @@ func (b *Broker) createOfficeMember(r *http.Request, slug string, body officeMem
 		}
 	}
 	member := officeMember{
-		Slug:           slug,
-		Name:           strings.TrimSpace(body.Name),
-		Role:           strings.TrimSpace(body.Role),
-		Expertise:      normalizeStringList(body.Expertise),
-		Personality:    strings.TrimSpace(body.Personality),
-		PermissionMode: strings.TrimSpace(body.PermissionMode),
-		AllowedTools:   normalizeStringList(body.AllowedTools),
-		CreatedBy:      strings.TrimSpace(body.CreatedBy),
-		CreatedAt:      now,
+		Slug:         slug,
+		Name:         strings.TrimSpace(body.Name),
+		Role:         strings.TrimSpace(body.Role),
+		Expertise:    normalizeStringList(body.Expertise),
+		Personality:  strings.TrimSpace(body.Personality),
+		AllowedTools: normalizeStringList(body.AllowedTools),
+		CreatedBy:    strings.TrimSpace(body.CreatedBy),
+		CreatedAt:    now,
 	}
 	if body.Provider != nil {
 		member.Provider = *body.Provider
@@ -477,9 +479,6 @@ func (b *Broker) updateOfficeMember(r *http.Request, slug string, body officeMem
 	}
 	if body.Personality != "" {
 		member.Personality = strings.TrimSpace(body.Personality)
-	}
-	if body.PermissionMode != "" {
-		member.PermissionMode = strings.TrimSpace(body.PermissionMode)
 	}
 	if body.AllowedTools != nil {
 		member.AllowedTools = normalizeStringList(body.AllowedTools)

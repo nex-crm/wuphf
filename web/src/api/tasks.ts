@@ -1,3 +1,4 @@
+import { track, trackOn } from "../lib/analytics";
 import { isLifecycleState, type LifecycleState } from "../lib/types/lifecycle";
 import { get, post } from "./client";
 
@@ -79,12 +80,57 @@ export interface TaskMemoryWorkflow {
   completed_at?: string;
 }
 
-export interface TaskDraftSpec {
-  goal?: string;
-  context?: string;
-  approach?: string;
-  acceptance?: string;
-  drafted_at?: string;
+/**
+ * Machine-checkable definition of done on a task (U1.1, broker
+ * task_verification.go). Mirrors the Go `TaskVerification` wire shape.
+ * `kind` is one of "command" | "artifact" | "url" | "none", kept as
+ * `string` (same convention as `lifecycle_state`) so an unknown kind
+ * from a newer broker doesn't fail parsing.
+ */
+export interface TaskVerification {
+  kind: string;
+  /** Kind-specific: shell command, artifact path/glob, or http(s) URL. */
+  spec?: string;
+  /** When true the broker blocks complete/approve until the check passes. */
+  required?: boolean;
+}
+
+/**
+ * Stamped outcome of the most recent verification run. Mirrors the Go
+ * `TaskVerificationResult` wire shape.
+ */
+export interface TaskVerificationResult {
+  pass: boolean;
+  kind: string;
+  /** Check output tail / failure detail — the proof. */
+  detail?: string;
+  /** RFC3339 timestamp of the run. */
+  checked_at: string;
+}
+
+/**
+ * One concrete artifact a task must produce, with the exact format the
+ * human expects. Mirrors the Go `TaskDeliverable` wire shape (R4 intake).
+ */
+export interface TaskDeliverable {
+  name: string;
+  /** Exact format (e.g. "markdown table in the wiki", "CSV", "PR"). */
+  format?: string;
+}
+
+/**
+ * Structured task definition set at intake (core-loop R4, broker
+ * task_definition.go). The contract the owner executes against: goal,
+ * deliverables (+format), success criteria, and the tool/context access
+ * the work needs. Mirrors the Go `TaskDefinition` wire shape.
+ */
+export interface TaskDefinition {
+  goal: string;
+  deliverables?: TaskDeliverable[];
+  success_criteria?: string[];
+  access_needed?: string[];
+  /** RFC3339 timestamp stamped by the broker when the definition was set. */
+  defined_at?: string;
 }
 
 export interface Task {
@@ -137,8 +183,19 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
-  issue_draft_spec?: TaskDraftSpec;
   memory_workflow?: TaskMemoryWorkflow;
+  /** Machine-checkable definition of done (U1). Absent on legacy tasks. */
+  verification?: TaskVerification;
+  /** Outcome of the most recent verification run. Absent until first run. */
+  verification_result?: TaskVerificationResult;
+  /** Structured intake contract (R4). Absent until the CEO/human defines. */
+  definition?: TaskDefinition;
+  /**
+   * Delivered-artifact reference (core-loop B1): a wiki-relative path or
+   * visual-artifact id recorded by the completing mutation. Tasks with a
+   * `definition` cannot reach done until this is set.
+   */
+  artifact?: string;
 }
 
 /**
@@ -151,10 +208,20 @@ export interface Task {
  * rather than failing.
  */
 export function taskToLifecycleState(task: Task | undefined): LifecycleState {
-  if (task?.pipeline_stage === "draft") return "drafting";
-  if (task?.pipeline_stage === "plan") return "planning";
+  // The broker's typed lifecycle_state is the source of truth and wins over
+  // every legacy field. Pre-fix, pipeline_stage==="draft" was checked FIRST,
+  // so a task whose typed state had moved on (legacy mutations preserve the
+  // stale pipeline_stage tuple) still rendered "drafting" with a live
+  // Approve & Start button — the human's click was then judged by the broker
+  // against a state the page never showed (ICP-eval v3 [19:04]: zero-work
+  // tasks closed terminally at the click; [20:08]: board "approved" vs page
+  // "drafting" for the same task).
   const ls = task?.lifecycle_state;
   if (ls && isLifecycleState(ls)) return ls;
+  if (task?.pipeline_stage === "draft") return "drafting";
+  // Legacy plan-mode tasks (removed core-loop R3) persisted pipeline_stage
+  // "plan" with status in_progress; the status map below resolves them to
+  // "running", matching the broker's legacy-state shim.
   switch (task?.status) {
     case "open":
       return "intake";
@@ -196,13 +263,6 @@ export interface CreateTaskInput {
    * "Backlog" action sets this; "Start now" leaves it false.
    */
   park?: boolean;
-  /**
-   * Plan mode (Phase 5): when true, the owner plans autonomously before
-   * executing — it writes a plan to its notebook and waits for "Approve &
-   * Start". When false, the task runs immediately with no plan/approval gate.
-   * The composer's "Plan first" toggle defaults ON and always sends a value.
-   */
-  plan_first?: boolean;
   depends_on?: string[];
 }
 
@@ -227,6 +287,21 @@ export function createTasks(
     channel: opts?.channel || "general",
     created_by: opts?.createdBy || "human",
     tasks,
+  }).then((r) => {
+    // One task_created per planned task — properties come from the input, never
+    // the task title/details content.
+    for (const t of tasks) {
+      track("task_created", {
+        source: "home",
+        owner_agent: t.assignee || "",
+        provider: t.provider,
+        model: t.model,
+        effort: t.effort,
+        has_details: !!(t.details && t.details.trim()),
+        start_mode: t.park ? "backlog" : "start",
+      });
+    }
+    return r;
   });
 }
 
@@ -236,13 +311,17 @@ export function reassignTask(
   channel: string,
   actor = "human",
 ) {
-  return post<TaskResponse>("/tasks", {
-    action: "reassign",
-    id: taskId,
-    owner: newOwner,
-    channel: channel || "general",
-    created_by: actor,
-  });
+  return trackOn(
+    post<TaskResponse>("/tasks", {
+      action: "reassign",
+      id: taskId,
+      owner: newOwner,
+      channel: channel || "general",
+      created_by: actor,
+    }),
+    "task_status_changed",
+    { action: "reassign" },
+  );
 }
 
 export type TaskStatusAction =
@@ -288,7 +367,9 @@ export function updateTaskStatus(
     body.memory_workflow_override_reason = overrideReason;
     body.override_reason = overrideReason;
   }
-  return post<TaskResponse>("/tasks", body);
+  return trackOn(post<TaskResponse>("/tasks", body), "task_status_changed", {
+    action,
+  });
 }
 
 export function getTasks(
@@ -315,7 +396,8 @@ export type TaskActivityEventKind =
   | "comment"
   | "action"
   | "request"
-  | "sub_issue";
+  | "sub_issue"
+  | "turn";
 
 export type TaskActivityRequestStatus = "open" | "answered" | "canceled";
 
@@ -350,6 +432,9 @@ export interface TaskActivityEvent {
   lifecycle?: TaskActivityLifecycle;
   request?: TaskActivityRequest;
   sub_issue?: TaskActivitySubIssue;
+  /** kind="turn" only: knowledge-item ids the turn's work packet injected
+   *  ("learning:<id>", "wiki:<ref>", "upstream:<task>", "journal:<task>"). */
+  context_used?: string[];
 }
 
 export interface TaskActivityResponse {
@@ -388,28 +473,42 @@ export function createSubTask(opts: {
   details?: string;
   owner?: string;
 }) {
-  return post<TaskResponse>("/tasks", {
-    action: "create",
-    channel: opts.channel || "general",
-    title: opts.title,
-    details: opts.details || "",
-    owner: opts.owner || "",
-    created_by: "human",
-    task_type: "issue",
-    parent_issue_id: opts.parentTaskId,
-  });
+  return trackOn(
+    post<TaskResponse>("/tasks", {
+      action: "create",
+      channel: opts.channel || "general",
+      title: opts.title,
+      details: opts.details || "",
+      owner: opts.owner || "",
+      created_by: "human",
+      task_type: "issue",
+      parent_issue_id: opts.parentTaskId,
+    }),
+    "task_created",
+    {
+      source: "subtask",
+      owner_agent: opts.owner || "",
+      has_details: !!(opts.details && opts.details.trim()),
+      start_mode: "start",
+    },
+  );
 }
 
-/** Reopen a closed Task (rejected/cancelled/approved) back to drafting
- *  so the human can re-approve to restart work. The broker preserves
- *  the title/details/owner and just resets the lifecycle. */
+/** Reopen a closed Task (rejected/cancelled/approved). The broker
+ *  preserves title/details/owner and resets the lifecycle: an owned task
+ *  reopens straight into running (owner re-dispatched); an ownerless one
+ *  lands ready and dispatches on assignment. */
 export function reopenTask(taskId: string, channel: string) {
-  return post<TaskResponse>("/tasks", {
-    action: "reopen",
-    id: taskId,
-    channel: channel || "general",
-    created_by: "human",
-  });
+  return trackOn(
+    post<TaskResponse>("/tasks", {
+      action: "reopen",
+      id: taskId,
+      channel: channel || "general",
+      created_by: "human",
+    }),
+    "task_status_changed",
+    { action: "reopen" },
+  );
 }
 
 export function getOfficeTasks(opts?: {

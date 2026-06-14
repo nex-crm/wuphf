@@ -14,9 +14,11 @@
  * the task, not the agent, so nothing here mutates an agent's binding. Dispatch
  * prefers the task's runtime over the owner's (soft-default) binding.
  *
- * Every task is assigned: the owner chip defaults to "Auto" (the CEO picks the
- * best specialist) and also lists the CEO + specialists. "Start now" dispatches
- * the owner (Auto → CEO triages); "Backlog" parks the task assigned until the
+ * Every task is assigned: the owner chip defaults to the CEO (the team lead)
+ * so the very first task a new user creates starts immediately instead of
+ * parking ownerless behind a CEO-staffing hop. "Auto" stays an explicit
+ * option (the CEO picks the best specialist). "Start now" dispatches the
+ * owner (Auto → CEO triages); "Backlog" parks the task assigned until the
  * user starts it; "Routine" hands off to the recurring-routine composer.
  */
 
@@ -44,6 +46,7 @@ import {
   runtimeKindFromMember,
 } from "../../lib/providerBinding";
 import { router } from "../../lib/router";
+import { resolveLeadSlug } from "../../lib/slashCommands";
 import { HOME_COMPOSER_DRAFT_CHANNEL, useAppStore } from "../../stores/app";
 
 type CreateMode = "start" | "backlog" | "routine";
@@ -101,18 +104,23 @@ export function TaskComposer() {
       : (llmKinds[0] ?? "claude-code");
 
   const [prompt, setPrompt] = useState("");
-  const [ownerSlug, setOwnerSlug] = useState<string>(AUTO_OWNER);
+  // Owner default: the CEO (team lead), NOT "Auto". An Auto default sent a
+  // brand-new user's first task into an ownerless "awaiting staffing" hop
+  // that read exactly like the removed approval wall. `null` means "the
+  // default" so a late-resolving team_lead_slug still applies unless the
+  // user explicitly picked someone.
+  const [ownerChoice, setOwnerChoice] = useState<string | null>(null);
   const [providerKind, setProviderKind] = useState<"" | LLMRuntimeKind>("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
-  // Plan mode (Phase 5): default ON. When on, the owner plans autonomously
-  // (writes a plan to its notebook) and waits for "Approve & Start" before
-  // executing. When off, the task runs immediately with no plan/approval gate.
-  const [planFirst, setPlanFirst] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const submitLockRef = useRef(false);
+
+  // The configured team lead (default "ceo") is the composer's default owner.
+  const leadSlug = resolveLeadSlug(configQuery.data?.team_lead_slug, members);
+  const ownerSlug = ownerChoice ?? leadSlug;
 
   // The selected owner's stored binding seeds the chips as a starting point.
   // "auto" (and any owner without a binding) seeds from the global default
@@ -195,7 +203,6 @@ export function TaskComposer() {
             model: model.trim() || undefined,
             effort: effort || undefined,
             park: mode === "backlog",
-            plan_first: planFirst,
           },
         ],
         { channel: DEFAULT_CHANNEL, createdBy: "human" },
@@ -264,8 +271,8 @@ export function TaskComposer() {
       <div className="task-composer">
         <h1 className="task-composer-title">What do you want to get done?</h1>
         <p className="task-composer-subtitle">
-          Describe the outcome. The team specs it, gets your approval, then runs
-          it.
+          Describe the outcome. The team starts on it immediately — you review
+          the delivered work.
         </p>
         <form className="task-composer-form" onSubmit={handleSubmit}>
           <textarea
@@ -284,16 +291,23 @@ export function TaskComposer() {
               <select
                 className="task-chip-select"
                 value={ownerSlug}
-                onChange={(e) => setOwnerSlug(e.target.value)}
+                onChange={(e) => setOwnerChoice(e.target.value)}
                 data-testid="task-composer-owner"
               >
-                {/* Auto is the floor: the CEO picks the best specialist. */}
-                <option value={AUTO_OWNER}>Auto</option>
+                {/* The roster may still be loading; keep the default lead
+                    selectable so the select never falls back to Auto. */}
+                {members.some((m) => m.slug === leadSlug) ? null : (
+                  <option value={leadSlug}>CEO</option>
+                )}
                 {members.map((m) => (
                   <option key={m.slug} value={m.slug}>
                     {m.name || m.slug}
                   </option>
                 ))}
+                {/* Auto stays an explicit opt-in: the CEO picks the best
+                    specialist. It is no longer the default — an ownerless
+                    first task read as "parked" to new users. */}
+                <option value={AUTO_OWNER}>Auto — CEO picks</option>
               </select>
             </label>
 
@@ -368,24 +382,6 @@ export function TaskComposer() {
             this task only.
           </p>
 
-          <label
-            className="task-composer-planfirst"
-            data-testid="task-composer-planfirst"
-          >
-            <input
-              type="checkbox"
-              checked={planFirst}
-              onChange={(e) => setPlanFirst(e.target.checked)}
-              data-testid="task-composer-planfirst-input"
-            />
-            <span>
-              <strong>Plan first</strong> —{" "}
-              {planFirst
-                ? "the owner writes a plan for your approval before starting the work."
-                : "off: the owner starts the work immediately, no plan or approval."}
-            </span>
-          </label>
-
           {error ? (
             <p
               className="task-composer-error"
@@ -402,28 +398,20 @@ export function TaskComposer() {
               className="task-composer-btn task-composer-btn-primary"
               disabled={submitting}
               title={
-                planFirst
-                  ? isAuto
-                    ? "Create and have the CEO assign an owner who plans it first for your approval"
-                    : `Assign @${ownerSlug} to plan it first for your approval`
-                  : isAuto
-                    ? "Create and have the CEO assign + start it now"
-                    : `Assign @${ownerSlug} and start now`
+                isAuto
+                  ? "Create and have the CEO assign + start it now"
+                  : `Assign @${ownerSlug} and start now`
               }
               data-testid="task-composer-start"
             >
-              {submitting
-                ? "Creating…"
-                : planFirst
-                  ? "Plan & start"
-                  : "Start now"}
+              {submitting ? "Creating…" : "Start now"}
             </button>
             <button
               type="button"
               className="task-composer-btn"
               onClick={() => void handleCreate("backlog")}
               disabled={submitting}
-              title="Park in the backlog (assigned) — nobody starts until you activate it"
+              title="Park in the backlog (assigned) — nobody starts until you start it from the task page"
               data-testid="task-composer-backlog"
             >
               Backlog

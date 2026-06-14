@@ -80,7 +80,37 @@ describe("<InlineReviewThread>", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(onApprove).toHaveBeenCalled();
+    // Request changes is a two-step gesture: the broker requires a
+    // rationale (400 "rationale is required" without one), so the first
+    // click reveals the textarea + confirm instead of firing empty.
     await user.click(screen.getByRole("button", { name: "Request changes" }));
-    expect(onRequestChanges).toHaveBeenCalled();
+    expect(onRequestChanges).not.toHaveBeenCalled();
+    await user.type(
+      screen.getByTestId("nb-review-rationale-input"),
+      "Merge with the existing brief.",
+    );
+    await user.click(screen.getByTestId("nb-review-rationale-submit"));
+    expect(onRequestChanges).toHaveBeenCalledWith(
+      "Merge with the existing brief.",
+    );
+  });
+
+  it("refuses to submit request-changes with an empty rationale", async () => {
+    const onRequestChanges = vi.fn();
+    render(
+      <InlineReviewThread
+        reviewerSlug="ceo"
+        state="in-review"
+        comments={COMMENTS}
+        onRequestChanges={onRequestChanges}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Request changes" }));
+    await user.click(screen.getByTestId("nb-review-rationale-submit"));
+    expect(onRequestChanges).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /what needs to change/i,
+    );
   });
 });

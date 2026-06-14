@@ -350,6 +350,25 @@ func (w *ObsidianWatcher) fire(ctx context.Context, rel string) {
 		return
 	}
 
+	// Echo guard (B3/B4 knowledge-integrity): internal writers — the wiki
+	// worker, promotion applies, and this watcher's own sentinel commits —
+	// write the file AND commit it, so by the time the debounce fires the
+	// file is identical to HEAD. Only a file that is actually dirty vs HEAD
+	// is an external edit worth attributing. Without this guard the watcher
+	// stamped a fresh timestamp sentinel on every echo, committing a
+	// human-attributed "wiki: external edit" on top of every agent commit
+	// and re-triggering itself into a commit storm.
+	dirtyCtx, dirtyCancel := context.WithTimeout(ctx, obsidianWatcherCommitTimout)
+	dirty, derr := w.repo.PathDirty(dirtyCtx, rel)
+	dirtyCancel()
+	if derr != nil {
+		w.logf("obsidian watcher: dirty check %s: %v", rel, derr)
+		return
+	}
+	if !dirty {
+		return
+	}
+
 	body := string(content)
 	if stamped, ferr := applyHumanEditSentinel(body, time.Now().UTC()); ferr == nil {
 		body = stamped

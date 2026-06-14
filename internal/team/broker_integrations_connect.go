@@ -129,7 +129,6 @@ func (b *Broker) ensureIntegrationDecisionLocked(spec integrationDecisionCard) s
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	req = sanitizeHumanInterview(req)
 	b.scheduleRequestLifecycleLocked(&req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)

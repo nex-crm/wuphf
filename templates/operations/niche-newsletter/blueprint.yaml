@@ -59,7 +59,6 @@ starter:
       emoji: "⚙️"
       name: CEO
       role: Owns priorities, approvals, and escalation decisions
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -68,7 +67,6 @@ starter:
       name: Editor
       role: Writes, edits, and schedules the issues in one consistent voice
       employee_blueprint: workflow-automation-builder
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -80,7 +78,6 @@ starter:
       emoji: "📈"
       name: Growth
       role: Grows the subscriber list and the open rate
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -92,7 +89,6 @@ starter:
       emoji: "💸"
       name: Monetization
       role: Turns the audience into revenue, sponsors and a paid tier
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -104,7 +100,6 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns fact-checking, QA, and approval gates before a send
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { LLMRuntimeKind } from "../../api/client";
@@ -338,6 +339,177 @@ function VerifyClipFigure() {
   );
 }
 
+interface CollapsibleConfigSectionProps {
+  /** Stable testid for the <section> (kept to match existing tests). */
+  sectionTestId: string;
+  /** Prefix for the heading/body/toggle ids and the toggle testid. */
+  idBase: string;
+  title: string;
+  /** Short note shown to the right of the title in the collapsed header. */
+  toggleHint: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}
+
+// Shared disclosure shell for the secondary config sections (API keys, local
+// model, custom endpoint). All three are fallbacks to CLI login, so each
+// starts collapsed. The body stays mounted (hidden) so in-progress field
+// state survives a collapse. Extracted to a module-level component so the
+// PrePickScreen render body stays within the per-function line budget.
+function CollapsibleConfigSection({
+  sectionTestId,
+  idBase,
+  title,
+  toggleHint,
+  open,
+  onToggle,
+  children,
+}: CollapsibleConfigSectionProps) {
+  return (
+    <section
+      className="pre-pick-section"
+      data-testid={sectionTestId}
+      aria-labelledby={`${idBase}-h`}
+    >
+      <button
+        type="button"
+        className={`pre-pick-section-toggle${open ? " open" : ""}`}
+        data-testid={`${idBase}-toggle`}
+        aria-expanded={open}
+        aria-controls={`${idBase}-body`}
+        onClick={onToggle}
+      >
+        <span className="pre-pick-section-toggle-chevron" aria-hidden="true">
+          &rsaquo;
+        </span>
+        <span className="pre-pick-section-heading" id={`${idBase}-h`}>
+          {title}
+        </span>
+        <span className="pre-pick-section-toggle-hint">{toggleHint}</span>
+      </button>
+      <div
+        className="pre-pick-section-collapse"
+        id={`${idBase}-body`}
+        hidden={!open}
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+interface ApiKeysSectionProps {
+  open: boolean;
+  onToggle: () => void;
+  apiKeys: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}
+
+function ApiKeysSection({
+  open,
+  onToggle,
+  apiKeys,
+  onChange,
+}: ApiKeysSectionProps) {
+  return (
+    <CollapsibleConfigSection
+      sectionTestId="pre-pick-api-keys"
+      idBase="pre-pick-api-keys"
+      title="API keys"
+      toggleHint="Optional — paste a key instead of CLI login"
+      open={open}
+      onToggle={onToggle}
+    >
+      <p className="pre-pick-section-hint">
+        Use CLI login or paste a key. CLI login is the primary path; keys are a
+        fallback or alternative.
+      </p>
+      <div className="key-group">
+        {API_KEY_FIELDS.map((field) => (
+          <PrePickApiKeyRow
+            key={field.key}
+            field={field}
+            value={apiKeys[field.key] ?? ""}
+            onChange={(v) => onChange(field.key, v)}
+          />
+        ))}
+      </div>
+    </CollapsibleConfigSection>
+  );
+}
+
+interface LocalModelSectionProps {
+  open: boolean;
+  onToggle: () => void;
+  selected: readonly string[];
+  onToggleProvider: (kind: string) => void;
+}
+
+function LocalModelSection({
+  open,
+  onToggle,
+  selected,
+  onToggleProvider,
+}: LocalModelSectionProps) {
+  return (
+    <CollapsibleConfigSection
+      sectionTestId="pre-pick-local-section"
+      idBase="pre-pick-local"
+      title="Local model"
+      toggleHint="Optional — run inference on this machine"
+      open={open}
+      onToggle={onToggle}
+    >
+      <p className="pre-pick-section-hint">
+        Run inference on this machine. No cloud key required.
+      </p>
+      <LocalProviderPicker selected={selected} onToggle={onToggleProvider} />
+    </CollapsibleConfigSection>
+  );
+}
+
+interface CustomEndpointSectionProps {
+  open: boolean;
+  onToggle: () => void;
+  oaiUrl: string;
+  oaiKey: string;
+  onChangeUrl: (value: string) => void;
+  onChangeKey: (value: string) => void;
+}
+
+function CustomEndpointSection({
+  open,
+  onToggle,
+  oaiUrl,
+  oaiKey,
+  onChangeUrl,
+  onChangeKey,
+}: CustomEndpointSectionProps) {
+  return (
+    <CollapsibleConfigSection
+      sectionTestId="pre-pick-oai-section"
+      idBase="pre-pick-oai"
+      title="Custom endpoint"
+      toggleHint="Optional — OpenAI-compatible server"
+      open={open}
+      onToggle={onToggle}
+    >
+      <p className="pre-pick-section-hint">
+        Any server that speaks the OpenAI REST protocol (LiteLLM, vLLM,
+        llama.cpp server, etc.). For OpenClaw or Hermes, use the Integrations
+        app after onboarding.
+      </p>
+      <OpenAICompatibleInput
+        endpointUrl={oaiUrl}
+        apiKey={oaiKey}
+        onChangeUrl={onChangeUrl}
+        onChangeKey={onChangeKey}
+      />
+    </CollapsibleConfigSection>
+  );
+}
+
 export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   const [prereqs, setPrereqs] = useState<PrereqResult[]>([]);
   const [prereqsLoaded, setPrereqsLoaded] = useState(false);
@@ -350,6 +522,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   // API key state (one entry per API_KEY_FIELDS entry)
   const [apiKeys, setApiKeys] =
     useState<Record<string, string>>(EMPTY_API_KEYS);
+
+  // The fallback config sections (keys / local / custom endpoint) are all
+  // secondary to CLI login, so each starts collapsed. Bodies stay mounted
+  // (hidden) when closed so in-progress field state survives a collapse.
+  const [apiKeysOpen, setApiKeysOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const [oaiOpen, setOaiOpen] = useState(false);
 
   const [localProviders, setLocalProviders] = useState<LLMRuntimeKind[]>([]);
 
@@ -571,188 +750,160 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   return (
     <div className="pre-pick-screen" data-testid="pre-pick-screen">
       <div className="pre-pick-body">
-        <div className="pre-pick-hero">
-          <div className="pre-pick-eyebrow">WUPHF</div>
-          <h1 className="pre-pick-headline">Pick a default runtime.</h1>
-          <p className="pre-pick-subhead">
-            This is the runtime new agents will inherit when they are created.
-            You can change it later in Settings, and most agents can be moved to
-            a different runtime one at a time from their profile. Agents
-            imported through a gateway (OpenClaw, Hermes) are managed from the
-            Integrations app instead.
-          </p>
-        </div>
+        {/* The hero, provider cards, and the grouped options card all live in
+            one left column so they read top-down on a single left edge. The
+            "Set up & verify" clip sits in the right column as a product-window
+            exhibit (stacking under the column on narrow viewports). */}
+        <div className="pre-pick-split">
+          <div className="pre-pick-left">
+            <div className="pre-pick-hero">
+              <div className="pre-pick-eyebrow">WUPHF</div>
+              <h1 className="pre-pick-headline">Pick a default runtime.</h1>
+              <p className="pre-pick-subhead">
+                New agents inherit this runtime when they're created — you can
+                change it later in Settings, one agent at a time. Gateway
+                imports (OpenClaw, Hermes) are managed from the Integrations
+                app.
+              </p>
+            </div>
 
-        {/* ── Section 1: CLI runtime cards ─────────────────────────────── */}
-        <div className="pre-pick-card-grid">
-          {runtimes.map((state) => (
-            <RuntimeCard
-              key={state.spec.label}
-              state={state}
-              prereqsLoaded={prereqsLoaded}
-              isSubmitting={submitting === state.spec.label}
-              anySubmitting={anySubmitting}
-              expanded={expandedGuide === state.spec.binary}
-              selected={
-                state.spec.provider !== null &&
-                selectedProviders.includes(state.spec.provider)
-              }
-              onToggle={(spec) => {
-                if (spec.provider) toggleProvider(spec.provider);
-              }}
-              onInstall={openInstallPage}
-              onCopySignIn={handleCopySignIn}
-              onToggleGuide={handleToggleGuide}
-            />
-          ))}
-        </div>
+            {/* ── Section 1: CLI runtime cards ─────────────────────────── */}
+            <div className="pre-pick-providers">
+              <div className="pre-pick-card-grid">
+                {runtimes.map((state) => (
+                  <RuntimeCard
+                    key={state.spec.label}
+                    state={state}
+                    prereqsLoaded={prereqsLoaded}
+                    isSubmitting={submitting === state.spec.label}
+                    anySubmitting={anySubmitting}
+                    expanded={expandedGuide === state.spec.binary}
+                    selected={
+                      state.spec.provider !== null &&
+                      selectedProviders.includes(state.spec.provider)
+                    }
+                    onToggle={(spec) => {
+                      if (spec.provider) toggleProvider(spec.provider);
+                    }}
+                    onInstall={openInstallPage}
+                    onCopySignIn={handleCopySignIn}
+                    onToggleGuide={handleToggleGuide}
+                  />
+                ))}
+              </div>
 
-        {/* ── Guided setup + verify panel for the expanded runtime ──────── */}
-        {expandedRuntime ? (
-          <RuntimeGuidePanel
-            key={expandedRuntime.spec.binary}
-            runtime={expandedRuntime.spec.binary}
-            label={expandedRuntime.spec.label}
-            onVerified={handleVerified}
-          />
-        ) : null}
+              {/* ── Guided setup + verify panel for the expanded runtime ── */}
+              {expandedRuntime ? (
+                <RuntimeGuidePanel
+                  key={expandedRuntime.spec.binary}
+                  runtime={expandedRuntime.spec.binary}
+                  label={expandedRuntime.spec.label}
+                  onVerified={handleVerified}
+                />
+              ) : null}
 
-        {/* ── Advance when a runtime has verified ready ─────────────────── */}
-        {anyRuntimeReady && expandedRuntime ? (
-          <div className="pre-pick-secondary-row">
-            <button
-              type="button"
-              className="btn btn-primary pre-pick-next-button"
-              data-testid="pre-pick-next"
-              disabled={anySubmitting}
-              onClick={() =>
-                void commitChoice(
-                  expandedRuntime.spec.provider,
-                  expandedRuntime.spec.label,
-                )
-              }
-            >
-              {submitting === expandedRuntime.spec.label
-                ? "Opening your office…"
-                : "Next  →"}
-            </button>
-          </div>
-        ) : null}
+              {/* ── Advance when a runtime has verified ready ───────────── */}
+              {anyRuntimeReady && expandedRuntime ? (
+                <div className="pre-pick-secondary-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary pre-pick-next-button"
+                    data-testid="pre-pick-next"
+                    disabled={anySubmitting}
+                    onClick={() =>
+                      void commitChoice(
+                        expandedRuntime.spec.provider,
+                        expandedRuntime.spec.label,
+                      )
+                    }
+                  >
+                    {submitting === expandedRuntime.spec.label
+                      ? "Opening your office…"
+                      : "Next  →"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
 
-        {/* What "Set up & verify" looks like. Sits BELOW the runtime cards so
-            the providers stay first; the clip illustrates the verify flow. */}
-        <VerifyClipFigure />
-
-        {/* ── Section 2: API keys ──────────────────────────────────────── */}
-        <section
-          className="pre-pick-section"
-          data-testid="pre-pick-api-keys"
-          aria-labelledby="pre-pick-api-keys-h"
-        >
-          <h2 className="pre-pick-section-heading" id="pre-pick-api-keys-h">
-            API keys
-          </h2>
-          <p className="pre-pick-section-hint">
-            Use CLI login or paste a key. CLI login is the primary path; keys
-            are a fallback or alternative.
-          </p>
-          <div className="key-group">
-            {API_KEY_FIELDS.map((field) => (
-              <PrePickApiKeyRow
-                key={field.key}
-                field={field}
-                value={apiKeys[field.key] ?? ""}
-                onChange={(v) => handleApiKeyChange(field.key, v)}
+            {/* ── Secondary config (one grouped card, all collapsed) ─────── */}
+            <div className="pre-pick-config-group">
+              <ApiKeysSection
+                open={apiKeysOpen}
+                onToggle={() => setApiKeysOpen((open) => !open)}
+                apiKeys={apiKeys}
+                onChange={handleApiKeyChange}
               />
-            ))}
-          </div>
-        </section>
+              <LocalModelSection
+                open={localOpen}
+                onToggle={() => setLocalOpen((open) => !open)}
+                selected={localProviders}
+                onToggleProvider={toggleLocalProvider}
+              />
+              <CustomEndpointSection
+                open={oaiOpen}
+                onToggle={() => setOaiOpen((open) => !open)}
+                oaiUrl={oaiUrl}
+                oaiKey={oaiKey}
+                onChangeUrl={setOaiUrl}
+                onChangeKey={setOaiKey}
+              />
+            </div>
 
-        {/* ── Section 3: Local provider picker ────────────────────────── */}
-        <section
-          className="pre-pick-section"
-          data-testid="pre-pick-local-section"
-          aria-labelledby="pre-pick-local-h"
-        >
-          <h2 className="pre-pick-section-heading" id="pre-pick-local-h">
-            Local model
-          </h2>
-          <p className="pre-pick-section-hint">
-            Run inference on this machine. No cloud key required.
-          </p>
-          <LocalProviderPicker
-            selected={localProviders}
-            onToggle={toggleLocalProvider}
-          />
-        </section>
+            {/* ── Submit from form sections ──────────────────────────────── */}
+            {canContinueFromForm ? (
+              <div className="pre-pick-secondary-row">
+                <button
+                  type="button"
+                  className="btn btn-primary pre-pick-form-submit"
+                  data-testid="pre-pick-form-submit"
+                  disabled={anySubmitting}
+                  onClick={() => void commitChoice("form", "form")}
+                >
+                  {submitting === "form"
+                    ? "Opening your office…"
+                    : "Continue  →"}
+                </button>
+                {selectedProviderLabels.length > 0 ? (
+                  <div className="pre-pick-selected-summary">
+                    Selected: {selectedProviderLabels.join(", ")}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
-        {/* ── Section 4: OpenAI-compatible endpoint ───────────────────── */}
-        <section
-          className="pre-pick-section"
-          data-testid="pre-pick-oai-section"
-          aria-labelledby="pre-pick-oai-h"
-        >
-          <h2 className="pre-pick-section-heading" id="pre-pick-oai-h">
-            Custom endpoint
-          </h2>
-          <p className="pre-pick-section-hint">
-            Any server that speaks the OpenAI REST protocol (LiteLLM, vLLM,
-            llama.cpp server, etc.). For OpenClaw or Hermes, use the
-            Integrations app after onboarding.
-          </p>
-          <OpenAICompatibleInput
-            endpointUrl={oaiUrl}
-            apiKey={oaiKey}
-            onChangeUrl={setOaiUrl}
-            onChangeKey={setOaiKey}
-          />
-        </section>
+            {/* ── Skip / sandbox affordance ──────────────────────────────── */}
+            <div className="pre-pick-secondary-row">
+              <button
+                type="button"
+                className="pre-pick-secondary-button"
+                data-testid="pre-pick-skip"
+                disabled={anySubmitting}
+                onClick={() => void commitChoice(null, "skip")}
+              >
+                {submitting === "skip"
+                  ? "Opening your office…"
+                  : "I will add one later  →"}
+              </button>
+            </div>
 
-        {/* ── Submit from form sections ────────────────────────────────── */}
-        {canContinueFromForm ? (
-          <div className="pre-pick-secondary-row">
-            <button
-              type="button"
-              className="btn btn-primary pre-pick-form-submit"
-              data-testid="pre-pick-form-submit"
-              disabled={anySubmitting}
-              onClick={() => void commitChoice("form", "form")}
-            >
-              {submitting === "form" ? "Opening your office…" : "Continue  →"}
-            </button>
-            {selectedProviderLabels.length > 0 ? (
-              <div className="pre-pick-selected-summary">
-                Selected: {selectedProviderLabels.join(", ")}
+            <p className="pre-pick-helper">
+              You can change this any time in{" "}
+              <strong>Settings &rarr; Runtimes</strong>.
+            </p>
+
+            {submitError ? (
+              <div role="alert" className="pre-pick-error">
+                {submitError}
               </div>
             ) : null}
           </div>
-        ) : null}
 
-        {/* ── Skip / sandbox affordance ────────────────────────────────── */}
-        <div className="pre-pick-secondary-row">
-          <button
-            type="button"
-            className="pre-pick-secondary-button"
-            data-testid="pre-pick-skip"
-            disabled={anySubmitting}
-            onClick={() => void commitChoice(null, "skip")}
-          >
-            {submitting === "skip"
-              ? "Opening your office…"
-              : "I will add one later  →"}
-          </button>
+          {/* What "Set up & verify" looks like — illustration of the verify
+              flow, kept beside the providers on the right. */}
+          <aside className="pre-pick-aside">
+            <VerifyClipFigure />
+          </aside>
         </div>
-
-        <p className="pre-pick-helper">
-          You can change this any time in{" "}
-          <strong>Settings &rarr; Runtimes</strong>.
-        </p>
-
-        {submitError ? (
-          <div role="alert" className="pre-pick-error">
-            {submitError}
-          </div>
-        ) : null}
       </div>
     </div>
   );

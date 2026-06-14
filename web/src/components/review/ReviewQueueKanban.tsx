@@ -11,7 +11,13 @@ import ReviewColumn from "./ReviewColumn";
 import ReviewDetail from "./ReviewDetail";
 import "../../styles/notebook.css";
 
-/** `/reviews` 5-column Kanban + detail drawer backed by the broker review log. */
+/**
+ * `/reviews` 5-column Kanban backed by the broker review log. The board is
+ * the queue OVERVIEW; clicking a card opens the notebook item itself (the
+ * notebook viewer route carries the in-place Approve / Request-changes bar)
+ * via `onOpenEntry`. The detail drawer remains the fallback for callers
+ * that don't pass a navigator and for reviews missing entry coordinates.
+ */
 
 type ReviewColumnState = Extract<
   ReviewState,
@@ -38,10 +44,18 @@ function reviewColumnState(state: ReviewState): ReviewColumnState {
   return state;
 }
 
-export default function ReviewQueueKanban() {
+interface ReviewQueueKanbanProps {
+  /** Opens the notebook entry view for a review card (in-place review). */
+  onOpenEntry?: (agentSlug: string, entrySlug: string) => void;
+}
+
+export default function ReviewQueueKanban({
+  onOpenEntry,
+}: ReviewQueueKanbanProps = {}) {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -90,20 +104,39 @@ export default function ReviewQueueKanban() {
     ? (reviews.find((r) => r.id === activeId) ?? null)
     : null;
 
-  const handleStateChange = async (id: string, nextState: ReviewState) => {
+  const handleStateChange = async (
+    id: string,
+    nextState: ReviewState,
+    rationale?: string,
+  ): Promise<boolean> => {
+    setActionError(null);
     // Optimistic update.
     setReviews((prev) =>
       prev.map((r) => (r.id === id ? { ...r, state: nextState } : r)),
     );
     try {
-      await updateReviewState(id, nextState);
-    } catch {
-      // Rollback on failure.
+      await updateReviewState(id, nextState, { rationale });
+      return true;
+    } catch (err: unknown) {
+      // Rollback AND say so. The live v3 run returned 400/409/500 across
+      // the whole queue with zero feedback — the human watched a frozen
+      // board and concluded every review control was dead ([18:14:39]).
+      setActionError(
+        err instanceof Error ? err.message : "Review action failed.",
+      );
       setRefreshTick((n) => n + 1);
+      return false;
     }
   };
 
-  const totalCounts = `${reviews.length} reviews · ${grouped.pending.length + grouped["in-review"].length + grouped["changes-requested"].length} open · ${grouped.approved.length} recently approved`;
+  // Honest header (C4 / V3-N7): never render "0 reviews · 0 open" as
+  // fact while the load is still pending or failed — the v3 eval caught
+  // the header claiming zeros over a hung /review/list.
+  const totalCounts = loading
+    ? "Loading…"
+    : error
+      ? "Unavailable"
+      : `${reviews.length} reviews · ${grouped.pending.length + grouped["in-review"].length + grouped["changes-requested"].length} open · ${grouped.approved.length} recently approved`;
 
   return (
     <div className="notebook-surface" data-testid="review-queue-surface">
@@ -133,6 +166,15 @@ export default function ReviewQueueKanban() {
           <h1 className="nb-review-queue-title">Reviews</h1>
           <div className="nb-review-queue-meta">{totalCounts}</div>
         </header>
+        {actionError ? (
+          <p
+            className="nb-error"
+            role="alert"
+            data-testid="nb-review-board-action-error"
+          >
+            Could not update the review: {actionError}
+          </p>
+        ) : null}
         {loading ? (
           <div className="nb-loading" aria-busy="true">
             Loading reviews…
@@ -140,7 +182,7 @@ export default function ReviewQueueKanban() {
         ) : error ? (
           <>
             <p className="nb-error" role="alert">
-              Error: {error}
+              Broker not responding — {error}
             </p>
             <button
               type="button"
@@ -150,6 +192,10 @@ export default function ReviewQueueKanban() {
               Retry
             </button>
           </>
+        ) : reviews.length === 0 ? (
+          <p className="nb-empty-prompt" data-testid="review-queue-empty">
+            No reviews yet — agent submissions land here for your sign-off.
+          </p>
         ) : (
           <ul className="nb-review-columns">
             {STATE_ORDER.map((state) => (
@@ -158,7 +204,14 @@ export default function ReviewQueueKanban() {
                 title={STATE_TITLE[state]}
                 items={grouped[state]}
                 activeId={activeId}
-                onOpenCard={(id) => setActiveId(id)}
+                onOpenCard={(id) => {
+                  const review = reviews.find((r) => r.id === id);
+                  if (onOpenEntry && review?.agent_slug && review.entry_slug) {
+                    onOpenEntry(review.agent_slug, review.entry_slug);
+                    return;
+                  }
+                  setActiveId(id);
+                }}
               />
             ))}
           </ul>
@@ -168,13 +221,18 @@ export default function ReviewQueueKanban() {
         <ReviewDetail
           review={active}
           onClose={() => setActiveId(null)}
+          actionError={actionError}
           onApprove={(id) => {
-            void handleStateChange(id, "approved");
-            setActiveId(null);
+            void handleStateChange(id, "approved").then((ok) => {
+              if (ok) setActiveId(null);
+            });
           }}
-          onRequestChanges={(id) => {
-            void handleStateChange(id, "changes-requested");
-            setActiveId(null);
+          onRequestChanges={(id, rationale) => {
+            void handleStateChange(id, "changes-requested", rationale).then(
+              (ok) => {
+                if (ok) setActiveId(null);
+              },
+            );
           }}
         />
       ) : null}

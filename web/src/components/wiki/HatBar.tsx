@@ -1,8 +1,8 @@
-/** Wikipedia-style tabs at the top of the article (Article / Talk / Edit / History / Raw). */
+/** Minimal docmost-style view tabs at the top of the article (Read / Edit / History / Raw). */
 
 import { keyedByOccurrence } from "../../lib/reactKeys";
 
-export type HatBarTab = "article" | "talk" | "edit" | "history" | "raw";
+export type HatBarTab = "article" | "edit" | "history" | "raw";
 
 interface HatBarProps {
   active: HatBarTab;
@@ -12,20 +12,19 @@ interface HatBarProps {
 }
 
 const LABELS: Record<HatBarTab, string> = {
-  article: "Article",
-  talk: "Talk",
-  edit: "Edit source",
+  article: "Read",
+  edit: "Edit",
   history: "History",
   raw: "Raw markdown",
 };
 
-const ORDER: HatBarTab[] = ["article", "talk", "edit", "history", "raw"];
+const ORDER: HatBarTab[] = ["article", "edit", "history", "raw"];
 
 export default function HatBar({
   active,
   onChange,
   rightRail,
-  disabledTabs = ["talk"],
+  disabledTabs = [],
 }: HatBarProps) {
   return (
     <nav className="wk-hatbar" aria-label="Article views">

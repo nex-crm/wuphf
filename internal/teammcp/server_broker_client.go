@@ -137,7 +137,7 @@ func trustedEnvAgentSlug() string {
 func isProtectedActorSlug(slug string) bool {
 	s := strings.ToLower(strings.TrimSpace(slug))
 	switch s {
-	case "human", "you", "system", "nex", "broker", "librarian":
+	case "human", "you", "system", "nex", "broker", "librarian", "ceo":
 		return true
 	}
 	return strings.HasPrefix(s, "human:")

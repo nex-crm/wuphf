@@ -11,6 +11,11 @@ import {
 
 const RECONNECT_GRACE_MS = 5000;
 
+// Usage refreshes are bound to agent activity (a turn settling is what
+// moves the meter) but throttled so a chatty activity stream doesn't
+// turn into a /usage request per event.
+const USAGE_INVALIDATE_THROTTLE_MS = 10_000;
+
 function activeBrokerChannel(): string | null {
   // SSE handler runs outside the React tree. Parse window.location.hash
   // directly so we don't depend on the TanStack router being started in
@@ -142,6 +147,7 @@ export function useBrokerEvents(enabled: boolean) {
       // no-op on the regular shell surfaces. Closes nex-crm/wuphf#936.
       void queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
     });
+    let lastUsageInvalidateAt = 0;
     source.addEventListener("activity", (event) => {
       // CRITICAL REGRESSION: cache invalidation MUST keep firing — other
       // surfaces (workspace presence, member list) depend on it. The new
@@ -149,6 +155,14 @@ export function useBrokerEvents(enabled: boolean) {
       // can never block the invalidation path.
       void queryClient.invalidateQueries({ queryKey: ["office-members"] });
       void queryClient.invalidateQueries({ queryKey: ["channel-members"] });
+      // Usage pill truth (C2): agent activity is when spend moves, so
+      // nudge the shared ["usage"] query — throttled — instead of
+      // letting the collapsed pill wait out its poll interval.
+      const now = Date.now();
+      if (now - lastUsageInvalidateAt >= USAGE_INVALIDATE_THROTTLE_MS) {
+        lastUsageInvalidateAt = now;
+        void queryClient.invalidateQueries({ queryKey: ["usage"] });
+      }
       try {
         const snapshot = parseActivitySnapshot(event);
         if (snapshot) {

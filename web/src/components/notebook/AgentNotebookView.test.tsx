@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { NotebookAgentSummary, NotebookEntry } from "../../api/notebook";
+import type {
+  NotebookAgentSummary,
+  NotebookEntry,
+  ReviewItem,
+} from "../../api/notebook";
 import * as api from "../../api/notebook";
 import AgentNotebookView from "./AgentNotebookView";
 
@@ -49,6 +54,7 @@ describe("<AgentNotebookView>", () => {
     vi.spyOn(api, "fetchAgentEntries").mockResolvedValue({
       agent: PM_AGENT,
       entries: PM_ENTRIES,
+      reviews: [],
     });
     render(
       <AgentNotebookView
@@ -72,6 +78,7 @@ describe("<AgentNotebookView>", () => {
     vi.spyOn(api, "fetchAgentEntries").mockResolvedValue({
       agent: PM_AGENT,
       entries: PM_ENTRIES,
+      reviews: [],
     });
     render(
       <AgentNotebookView
@@ -92,6 +99,7 @@ describe("<AgentNotebookView>", () => {
     vi.spyOn(api, "fetchAgentEntries").mockResolvedValue({
       agent: { ...PM_AGENT, total: 0 },
       entries: [],
+      reviews: [],
     });
     render(
       <AgentNotebookView
@@ -126,6 +134,7 @@ describe("<AgentNotebookView>", () => {
     vi.spyOn(api, "fetchAgentEntries").mockResolvedValue({
       agent: null,
       entries: [],
+      reviews: [],
     });
     render(
       <AgentNotebookView
@@ -137,6 +146,118 @@ describe("<AgentNotebookView>", () => {
     );
     await waitFor(() =>
       expect(screen.getByText(/Agent not found/)).toBeInTheDocument(),
+    );
+  });
+
+  // ── In-place review bar (founder directive: review the notebook item
+  // itself — Approve / Request changes live on the entry view). ──────────
+
+  const ACME_REVIEW: ReviewItem = {
+    id: "r-acme",
+    agent_slug: "pm",
+    entry_slug: "acme",
+    entry_title: "Customer Acme rough notes",
+    proposed_wiki_path: "team/accounts/acme.md",
+    excerpt: "Body.",
+    reviewer_slug: "ceo",
+    state: "in-review",
+    submitted_ts: new Date().toISOString(),
+    updated_ts: new Date().toISOString(),
+    comments: [],
+  };
+
+  function renderWithActiveReview() {
+    vi.spyOn(api, "fetchAgentEntries").mockResolvedValue({
+      agent: PM_AGENT,
+      entries: [{ ...PM_ENTRIES[0], status: "in-review" }],
+      reviews: [ACME_REVIEW],
+    });
+    render(
+      <AgentNotebookView
+        agentSlug="pm"
+        entrySlug="acme"
+        onNavigateCatalog={() => {}}
+        onSelectEntry={() => {}}
+      />,
+    );
+  }
+
+  it("renders the in-place review bar when the entry has an actionable review", async () => {
+    renderWithActiveReview();
+    await waitFor(() =>
+      expect(screen.getByTestId("nb-inline-review")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Request changes" }),
+    ).toBeInTheDocument();
+  });
+
+  it("approves the review in place via the existing approve action", async () => {
+    const updateSpy = vi
+      .spyOn(api, "updateReviewState")
+      .mockResolvedValue({ ...ACME_REVIEW, state: "approved" });
+    renderWithActiveReview();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Approve" }),
+      ).toBeInTheDocument(),
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith("r-acme", "approved", {
+        rationale: undefined,
+      });
+    });
+  });
+
+  it("request-changes requires text and submits the typed comment", async () => {
+    const updateSpy = vi
+      .spyOn(api, "updateReviewState")
+      .mockResolvedValue({ ...ACME_REVIEW, state: "changes-requested" });
+    renderWithActiveReview();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Request changes" }),
+      ).toBeInTheDocument(),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Request changes" }));
+    // Empty submit is rejected with a visible error and NO call.
+    await user.click(screen.getByTestId("nb-review-rationale-submit"));
+    expect(screen.getByText(/Say what needs to change/)).toBeInTheDocument();
+    expect(updateSpy).not.toHaveBeenCalled();
+    // Typing the comment and submitting fires the review call — the broker
+    // composes the owner task from this one request.
+    await user.type(
+      screen.getByTestId("nb-review-rationale-input"),
+      "Fold the access steps into one checklist.",
+    );
+    await user.click(screen.getByTestId("nb-review-rationale-submit"));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith("r-acme", "changes-requested", {
+        rationale: "Fold the access steps into one checklist.",
+      });
+    });
+  });
+
+  it("surfaces a visible error when an in-place review action fails", async () => {
+    vi.spyOn(api, "updateReviewState").mockRejectedValue(
+      new Error("rationale is required"),
+    );
+    renderWithActiveReview();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Approve" }),
+      ).toBeInTheDocument(),
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("nb-review-action-error")).toBeInTheDocument(),
     );
   });
 });

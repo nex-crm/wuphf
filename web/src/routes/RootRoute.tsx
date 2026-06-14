@@ -16,7 +16,12 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 
-import { get, initApi } from "../api/client";
+import {
+  ApiError,
+  get,
+  getInjectedAnalyticsConfig,
+  initApi,
+} from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
@@ -35,6 +40,12 @@ import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useOfficeTasks } from "../hooks/useOfficeTasks";
+import {
+  configureAnalytics,
+  identifyWorkspace,
+  track,
+  trackPageview,
+} from "../lib/analytics";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { directChannelSlug, useAppStore } from "../stores/app";
@@ -227,6 +238,13 @@ class ErrorBoundary extends Component<
       /Failed to fetch dynamically imported module/i.test(message) ||
       /Importing a module script failed/i.test(message) ||
       error?.name === "ChunkLoadError";
+    // Record the failure shape (class name + chunk flag) — never the raw
+    // message, which can contain content.
+    track("app_error", {
+      boundary: "root",
+      error_name: error?.name || "Error",
+      is_chunk_error: isChunkError,
+    });
     if (isChunkError && typeof window !== "undefined") {
       const key = "wuphf:chunk-reload-attempted";
       if (!window.sessionStorage.getItem(key)) {
@@ -497,7 +515,9 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
             onNavigateWiki={(path) => navigateWikiArticle(path || null)}
           />
         )}
-        {current === "reviews" && <ReviewQueueKanban />}
+        {current === "reviews" && (
+          <ReviewQueueKanban onOpenEntry={navigateNotebookEntry} />
+        )}
       </div>
     </div>
   );
@@ -695,7 +715,7 @@ function MainContent() {
     case "agents":
       return <AgentsTool />;
     case "agent-detail":
-      return <AgentDetail agentSlug={route.agentSlug} />;
+      return <AgentDetail agentSlug={route.agentSlug} tab={route.tab} />;
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
     case "routine-detail":
@@ -769,6 +789,65 @@ function NotFoundSurface({ pathname }: { pathname: string }) {
   );
 }
 
+// ── Broker-unreachable fallback ────────────────────────────────────────
+//
+// During a broker wedge (503s / timeouts on the bootstrap queries) the app
+// used to render a blank white body. Classify bootstrap failures: a broker
+// that RESPONDED with a client error (e.g. 404 — onboarding not mounted on
+// a fresh install) falls through to the onboarding gate as before; a 5xx,
+// network failure, or timeout means the broker is unreachable/wedged and
+// gets this honest full-page state instead of a blank body.
+
+/** Exported for the bootstrap-fallback regression test. */
+export function isBrokerUnreachableError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status >= 500;
+  }
+  // Anything non-HTTP (fetch TypeError, AbortSignal timeout surfaced as
+  // "Broker not responding — request timed out.") means we never got an
+  // answer from the broker.
+  return true;
+}
+
+const BOOT_RETRY_MS = 5_000;
+
+function BrokerUnreachableScreen({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      data-testid="broker-unreachable"
+      role="alert"
+      style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 12,
+        padding: 32,
+        textAlign: "center",
+        color: "var(--text-secondary)",
+        fontSize: 14,
+      }}
+    >
+      <strong style={{ fontSize: 16, color: "var(--text)" }}>
+        WUPHF can&rsquo;t reach the office broker — retrying…
+      </strong>
+      <span style={{ color: "var(--text-tertiary)" }}>
+        The broker isn&rsquo;t answering. We retry automatically every few
+        seconds; you can also retry now.
+      </span>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={onRetry}
+        data-testid="broker-unreachable-retry"
+      >
+        Retry now
+      </button>
+    </div>
+  );
+}
+
 function RoutedBody() {
   const matches = useMatches();
   const leaf = matches.at(-1);
@@ -817,6 +896,55 @@ export default function RootRoute() {
   const [inCeoOnboarding, setInCeoOnboarding] = useState(false);
   // onboarding phase from /onboarding/state — set once on boot if available.
   const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
+  // Broker-unreachable bootstrap failure (5xx / network / timeout). While
+  // set, the shell renders BrokerUnreachableScreen — never a blank body.
+  // bootAttempt re-runs the bootstrap effect (Retry button + auto-retry).
+  const [bootError, setBootError] = useState(false);
+  const [bootAttempt, setBootAttempt] = useState(0);
+
+  // Manual SPA pageviews (autocapture is off). We subscribe to the router
+  // singleton rather than useRouterState so this works even where RootRoute is
+  // rendered without a RouterProvider (the bootstrap-fallback tests). Fires the
+  // matched route pattern plus pathname on every navigation; a no-op until
+  // analytics is configured.
+  useEffect(() => {
+    const emit = () => {
+      const loc = router.state.location;
+      const { matches } = router.state;
+      const routeId = matches[matches.length - 1]?.routeId ?? "";
+      if (loc?.pathname) trackPageview(routeId || loc.pathname, loc.pathname);
+    };
+    emit();
+    return router.subscribe("onResolved", emit);
+  }, []);
+
+  // Group events by workspace, keyed by a hashed id (never the raw id or name)
+  // so cohort analysis is possible without identifying the workspace. Gated on
+  // apiReady so it only runs after a successful boot — that keeps it out of the
+  // bootstrap-fallback path (and its mocked get() sequence) entirely. Reads via
+  // get() (not a hook) so it needs no provider context. No-op until analytics
+  // is configured.
+  useEffect(() => {
+    if (!apiReady) return;
+    let cancelled = false;
+    void get<{
+      workspace_id?: string;
+      blueprint?: string;
+      company_size?: string;
+    }>("/config")
+      .then((cfg) => {
+        if (!cancelled && cfg?.workspace_id) {
+          identifyWorkspace(cfg.workspace_id, {
+            blueprint: cfg.blueprint,
+            company_size: cfg.company_size,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [apiReady]);
 
   // When CEO onboarding is active (phase set, not "complete"), pin a
   // generic landing URL (#general) to the home composer (index `/`) so the
@@ -897,16 +1025,22 @@ export default function RootRoute() {
 
   useEffect(() => {
     let cancelled = false;
+    let unreachable = false;
     initApi()
       .then(() => {
         if (cancelled) return;
         setBrokerConnected(true);
+        // Configure product analytics from the broker's runtime injection
+        // (dormant unless a PostHog key resolves; respects the consent
+        // toggles). Best-effort and non-blocking — never gates boot.
+        configureAnalytics(getInjectedAnalyticsConfig() ?? undefined);
         return get<{ onboarded?: boolean; phase?: string }>(
           "/onboarding/state",
         );
       })
       .then((s) => {
         if (cancelled || !s) return;
+        setBootError(false);
         if (s.onboarded === true) {
           setOnboardingComplete(true);
         } else if (typeof s.phase === "string" && s.phase) {
@@ -915,20 +1049,55 @@ export default function RootRoute() {
           setInCeoOnboarding(true);
         }
       })
-      .catch(() => {
-        // Endpoint unreachable — fall through to PrePickScreen. Safer default
-        // for fresh installs where the broker may not have mounted onboarding.
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isBrokerUnreachableError(err)) {
+          // Broker wedged (5xx) or never answered (network failure /
+          // timeout): render the honest full-page fallback instead of a
+          // blank body or a misleading fresh-install screen.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[WUPHF boot] broker unreachable (attempt ${bootAttempt + 1})`,
+            err,
+          );
+          unreachable = true;
+          setBootError(true);
+          return;
+        }
+        // Broker answered with a client error (e.g. onboarding endpoint
+        // not mounted on a fresh install) — clear any prior wedge state
+        // and fall through to PrePickScreen.
+        setBootError(false);
       })
       .finally(() => {
-        if (!cancelled) setApiReady(true);
+        // Keep apiReady false while unreachable so SSE hooks stay idle and
+        // the fallback owns the page until a retry succeeds.
+        if (!(cancelled || unreachable)) setApiReady(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [setBrokerConnected, setOnboardingComplete]);
+  }, [bootAttempt, setBrokerConnected, setOnboardingComplete]);
+
+  // Auto-retry while the broker is unreachable — the fallback copy promises
+  // "retrying…", so keep that promise without requiring a click. Reads
+  // bootAttempt (not a functional update) so a failed retry — which leaves
+  // bootError true but bumps the attempt — re-arms the timer.
+  useEffect(() => {
+    if (!bootError) return;
+    const next = bootAttempt + 1;
+    const timer = setTimeout(() => {
+      setBootAttempt(next);
+    }, BOOT_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [bootError, bootAttempt]);
 
   let body: ReactNode;
-  if (!apiReady) {
+  if (bootError) {
+    body = (
+      <BrokerUnreachableScreen onRetry={() => setBootAttempt((a) => a + 1)} />
+    );
+  } else if (!apiReady) {
     body = (
       <div
         style={{

@@ -119,6 +119,17 @@ func (b *Broker) loadState() error {
 		}
 	}
 	b.messages = state.Messages
+	// Messages loaded from disk predate this boot — a previous run already
+	// relayed them (or they are plain history). Seed the delivered set so the
+	// outbound dispatcher never replays channel history to an external surface
+	// after a restart; externalDelivered is in-memory only, and a cold map made
+	// ExternalQueue re-queue every surfaced message on boot.
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{}, len(b.messages))
+	}
+	for _, msg := range b.messages {
+		b.externalDelivered[msg.ID] = struct{}{}
+	}
 	b.incidents = state.Incidents
 	b.members = state.Members
 	b.channels = state.Channels
@@ -153,6 +164,8 @@ func (b *Broker) loadState() error {
 	b.schedulerRevisions = cloneSchedulerRevisions(state.SchedulerRevisions)
 	healStuckRoutines(b.scheduler)
 	b.skills = state.Skills
+	b.slackTaskCards = state.SlackTaskCards
+	b.slackSpawns = state.SlackSpawns
 	// Backfill OwnerAgents for skills persisted before per-agent scoping
 	// landed. Agent-created skills get auto-enabled for their creator so
 	// they keep working after upgrade; human-created skills stay
@@ -194,37 +207,23 @@ func (b *Broker) loadState() error {
 	// match Store lookups keyed by "engineering__human".
 	for i := range b.messages {
 		b.messages[i].Channel = channel.MigrateDMSlugString(b.messages[i].Channel)
-		b.messages[i] = sanitizeChannelMessageSecrets(b.messages[i])
+		// redaction removed (core-loop R1): messages stored and shown verbatim
 	}
 	for i := range b.incidents {
 		b.incidents[i] = sanitizeIncidentRecord(b.incidents[i])
 	}
 	for i := range b.tasks {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
-		b.tasks[i] = sanitizeTeamTask(b.tasks[i])
-	}
-	for i := range b.watchdogs {
-		b.watchdogs[i] = sanitizeWatchdogAlert(b.watchdogs[i])
-	}
-	for i := range b.scheduler {
-		b.scheduler[i] = sanitizeSchedulerJob(b.scheduler[i])
 	}
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
-		b.requests[i] = sanitizeHumanInterview(b.requests[i])
 	}
 	if b.pendingInterview != nil {
-		pending := sanitizeHumanInterview(*b.pendingInterview)
+		pending := *b.pendingInterview
 		b.pendingInterview = &pending
 	}
 	for i := range b.actions {
 		b.actions[i] = sanitizeOfficeActionLog(b.actions[i])
-	}
-	for i := range b.signals {
-		b.signals[i] = sanitizeOfficeSignalRecord(b.signals[i])
-	}
-	for i := range b.decisions {
-		b.decisions[i] = sanitizeOfficeDecisionRecord(b.decisions[i])
 	}
 	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
@@ -269,9 +268,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		}
 	}
 	messages := make([]channelMessage, len(b.messages))
-	for i, msg := range b.messages {
-		messages[i] = sanitizeChannelMessageSecrets(msg)
-	}
+	copy(messages, b.messages)
 	actions := make([]officeActionLog, len(b.actions))
 	for i, action := range b.actions {
 		actions[i] = sanitizeOfficeActionLog(action)
@@ -281,33 +278,21 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		incidents[i] = sanitizeIncidentRecord(inc)
 	}
 	requests := make([]humanInterview, len(b.requests))
-	for i, req := range b.requests {
-		requests[i] = sanitizeHumanInterview(req)
-	}
+	copy(requests, b.requests)
 	approvalAudit := make([]ApprovalAuditEntry, len(b.approvalAudit))
 	for i, entry := range b.approvalAudit {
 		approvalAudit[i] = sanitizeApprovalAuditEntry(entry)
 	}
 	signals := make([]officeSignalRecord, len(b.signals))
-	for i, sig := range b.signals {
-		signals[i] = sanitizeOfficeSignalRecord(sig)
-	}
+	copy(signals, b.signals)
 	decisions := make([]officeDecisionRecord, len(b.decisions))
-	for i, dec := range b.decisions {
-		decisions[i] = sanitizeOfficeDecisionRecord(dec)
-	}
+	copy(decisions, b.decisions)
 	watchdogs := make([]watchdogAlert, len(b.watchdogs))
-	for i, alert := range b.watchdogs {
-		watchdogs[i] = sanitizeWatchdogAlert(alert)
-	}
+	copy(watchdogs, b.watchdogs)
 	tasks := make([]teamTask, len(b.tasks))
-	for i, task := range b.tasks {
-		tasks[i] = sanitizeTeamTask(task)
-	}
+	copy(tasks, b.tasks)
 	scheduler := make([]schedulerJob, len(b.scheduler))
-	for i, job := range b.scheduler {
-		scheduler[i] = sanitizeSchedulerJob(job)
-	}
+	copy(scheduler, b.scheduler)
 	state := brokerState{
 		ChannelStore:       channelStoreRaw,
 		Messages:           messages,
@@ -332,6 +317,8 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		SchedulerActivity:  cloneSchedulerActivity(b.schedulerActivity),
 		SchedulerRevisions: cloneSchedulerRevisions(b.schedulerRevisions),
 		Skills:             b.skills,
+		SlackTaskCards:     b.cloneSlackTaskCardsLocked(),
+		SlackSpawns:        b.cloneSlackSpawnsLocked(),
 		HumanInvites:       b.humanInvites,
 		HumanSessions:      b.humanSessions,
 		SharedMemory:       b.sharedMemory,
@@ -345,7 +332,13 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 			return usage
 		}(),
 	}
-	data, err := json.MarshalIndent(state, "", "  ")
+	// Compact marshal, not MarshalIndent: this runs UNDER b.mu (the state
+	// is shared by reference, so the snapshot above is only safe to encode
+	// while the lock is held), and on a busy office the state file reaches
+	// megabytes. Indent roughly doubles both the encode CPU spent inside
+	// the lock and the bytes written per save (F1, ten-out-of-ten Wave F).
+	// The file is machine-read on load; pipe through `jq .` to inspect.
+	data, err := json.Marshal(state)
 	if err != nil {
 		return brokerStateWrite{}, err
 	}
@@ -417,6 +410,7 @@ func (b *Broker) isDefaultBrokerStateLocked() bool {
 		len(b.policies) == 0 &&
 		len(b.scheduler) == 0 &&
 		len(b.skills) == 0 &&
+		len(b.slackSpawns) == 0 &&
 		len(b.sharedMemory) == 0 &&
 		isDefaultChannelState(b.channels) &&
 		isDefaultOfficeMemberState(b.members) &&

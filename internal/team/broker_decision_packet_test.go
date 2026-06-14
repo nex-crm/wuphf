@@ -530,6 +530,14 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 	// a concurrent Enqueue send).
 	relPath := wikiPromotionPath(taskID)
 	expectedPath := filepath.Join(wikiRoot, relPath)
+	// The promotion is enqueued from a background goroutine; cancelling
+	// before that goroutine runs makes the late Enqueue hit a drained
+	// worker ("worker is not running" — the CI race flake). Wait for the
+	// artifact first, then drain.
+	testTickUntil(t, 5*time.Second, func() bool {
+		_, err := os.Stat(expectedPath)
+		return err == nil
+	})
 	cancel()
 	<-worker.Done()
 	body, err := os.ReadFile(expectedPath)

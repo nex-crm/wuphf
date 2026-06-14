@@ -27,9 +27,13 @@ vi.mock("../../api/client", () => ({
   getSkillsList: vi.fn(),
 }));
 
-vi.mock("../../api/tasks", () => ({
-  getOfficeTasks: vi.fn(),
-}));
+vi.mock("../../api/tasks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/tasks")>();
+  return {
+    ...actual,
+    getOfficeTasks: vi.fn(),
+  };
+});
 
 // Router navigation — avoid "not in browser context" errors in jsdom.
 vi.mock("../../lib/router", () => ({
@@ -37,13 +41,13 @@ vi.mock("../../lib/router", () => ({
 }));
 
 const mockGetOfficeTasks = vi.mocked(getOfficeTasks);
-const mockGet = vi.mocked(get);
-const mockGetConfig = vi.mocked(getConfig);
 const mockGetOfficeMembers = vi.mocked(getOfficeMembers);
 const mockGetAllRequests = vi.mocked(getAllRequests);
 const mockGetSkillsList = vi.mocked(getSkillsList);
 const mockGetScheduler = vi.mocked(getScheduler);
 const mockGetLocalProvidersStatus = vi.mocked(getLocalProvidersStatus);
+const mockGet = vi.mocked(get);
+const mockGetConfig = vi.mocked(getConfig);
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -61,9 +65,7 @@ function emptyDefaults() {
   mockGetSkillsList.mockResolvedValue({ skills: [] });
   mockGetScheduler.mockResolvedValue({ jobs: [] });
   mockGetLocalProvidersStatus.mockResolvedValue([]);
-  mockGetConfig.mockResolvedValue({
-    llm_provider_priority: [],
-  });
+  mockGetConfig.mockResolvedValue({ llm_provider_priority: [] });
   mockGet.mockResolvedValue({ prereqs: [] });
 }
 
@@ -73,331 +75,315 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("OfficeOverviewApp full data render", () => {
-  it("renders all section headings with data loaded", async () => {
-    mockGetOfficeTasks.mockResolvedValue({
-      tasks: [
+describe("OfficeOverviewApp", () => {
+  describe("full data render", () => {
+    it("renders all section headings with data loaded", async () => {
+      mockGetOfficeTasks.mockResolvedValue({
+        tasks: [
+          {
+            id: "t1",
+            title: "Ship landing page",
+            status: "in_progress",
+            owner: "alex",
+            channel: "general",
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: "t2",
+            title: "Fix auth bug",
+            status: "blocked",
+            owner: "riley",
+            channel: "eng",
+            updated_at: new Date().toISOString(),
+          },
+        ],
+      });
+      mockGetOfficeMembers.mockResolvedValue({
+        members: [
+          {
+            slug: "alex",
+            name: "Alex",
+            role: "engineer",
+            status: "shipping",
+            task: "Ship landing page",
+          },
+        ],
+      });
+      mockGetAllRequests.mockResolvedValue({
+        requests: [
+          {
+            id: "r1",
+            from: "alex",
+            question: "Should I proceed with the deployment?",
+            status: "open",
+            blocking: true,
+          },
+        ],
+      });
+      mockGetSkillsList.mockResolvedValue({
+        skills: [
+          {
+            name: "deploy-frontend",
+            title: "Deploy frontend",
+            status: "active" as const,
+            created_by: "alex",
+            updated_at: new Date().toISOString(),
+          },
+        ],
+      });
+      mockGetScheduler.mockResolvedValue({
+        jobs: [
+          {
+            slug: "daily-digest",
+            label: "Daily digest",
+            next_run: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            enabled: true,
+          },
+        ],
+      });
+      mockGetLocalProvidersStatus.mockResolvedValue([]);
+
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByTestId("office-overview-app"),
+      ).toBeInTheDocument();
+
+      expect(screen.getByText("Office overview")).toBeInTheDocument();
+      expect(screen.getByText("Active runs")).toBeInTheDocument();
+      expect(screen.getByText("Blocked tasks")).toBeInTheDocument();
+      expect(screen.getByText("Agents working now")).toBeInTheDocument();
+      expect(screen.getByText("Pending reviews")).toBeInTheDocument();
+      expect(screen.getByText("Compiled skills")).toBeInTheDocument();
+      expect(screen.getByText("Next scheduled routines")).toBeInTheDocument();
+      expect(screen.getByText("Recent artifacts")).toBeInTheDocument();
+
+      // Spot-check data in sections. Task titles, questions, etc. can appear
+      // in multiple sections (active runs, recent artifacts, agent task label,
+      // request label + body). Use getAllByText to allow duplicates.
+      const shipLandingMatches =
+        await screen.findAllByText("Ship landing page");
+      expect(shipLandingMatches.length).toBeGreaterThanOrEqual(1);
+      const fixAuthMatches = screen.getAllByText("Fix auth bug");
+      expect(fixAuthMatches.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("Alex")).toBeInTheDocument();
+      // The question text shows up as both label and body in the request card.
+      const deployQuestionMatches = screen.getAllByText(
+        "Should I proceed with the deployment?",
+      );
+      expect(deployQuestionMatches.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("Deploy frontend")).toBeInTheDocument();
+      expect(screen.getByText("Daily digest")).toBeInTheDocument();
+    });
+  });
+
+  describe("empty states", () => {
+    beforeEach(() => {
+      emptyDefaults();
+    });
+
+    it("shows empty states for active runs when no tasks are running", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText("No tasks are running right now."),
+      ).toBeInTheDocument();
+    });
+
+    it("shows empty state for blocked tasks when nothing is blocked", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText(
+          "Nothing is blocked. Agents are moving freely.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("shows empty state for agents when all are idle", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText("No agents are visibly active right now."),
+      ).toBeInTheDocument();
+    });
+
+    it("shows empty state for pending reviews when no requests exist", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText("No pending requests from agents."),
+      ).toBeInTheDocument();
+    });
+
+    it("shows empty state for compiled skills when none exist", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText(/No compiled skills yet/),
+      ).toBeInTheDocument();
+    });
+
+    it("shows empty state for scheduled jobs when none exist", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText("No upcoming scheduled routines."),
+      ).toBeInTheDocument();
+    });
+
+    it("shows empty state for recent artifacts when no tasks exist", async () => {
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(
+        await screen.findByText("No recent task activity."),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("connected providers", () => {
+    beforeEach(() => {
+      emptyDefaults();
+    });
+
+    it("does not show offline providers", async () => {
+      mockGetConfig.mockResolvedValue({
+        llm_provider: "ollama",
+        llm_provider_priority: ["ollama"],
+      });
+      mockGetLocalProvidersStatus.mockResolvedValue([
         {
-          id: "t1",
-          title: "Ship landing page",
-          status: "in_progress",
-          owner: "alex",
-          channel: "general",
-          updated_at: new Date().toISOString(),
+          kind: "ollama",
+          binary_installed: true,
+          binary_path: "/usr/local/bin/ollama",
+          endpoint: "http://localhost:11434",
+          model: "llama3",
+          reachable: false,
+          probed: true,
+          platform_supported: true,
         },
+      ]);
+
+      render(wrap(<OfficeOverviewApp />));
+
+      await screen.findByText("Active runs");
+      expect(screen.queryByText("ollama")).not.toBeInTheDocument();
+    });
+
+    it("shows connected providers and links to Settings and Provider Doctor", async () => {
+      mockGetConfig.mockResolvedValue({
+        llm_provider: "exo",
+        llm_provider_priority: ["exo"],
+      });
+      mockGetLocalProvidersStatus.mockResolvedValue([
         {
-          id: "t2",
-          title: "Fix auth bug",
-          status: "blocked",
-          owner: "riley",
-          channel: "eng",
-          updated_at: new Date().toISOString(),
+          kind: "exo",
+          binary_installed: true,
+          endpoint: "http://localhost:52415",
+          model: "llama-3.2-3b",
+          reachable: true,
+          probed: true,
+          platform_supported: true,
         },
-      ],
+      ]);
+
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(await screen.findByText("1 provider connected")).toBeInTheDocument();
+      expect(screen.getByText("Exo")).toBeInTheDocument();
+      expect(await screen.findByText("Settings")).toBeInTheDocument();
+      expect(screen.getByText("Provider Doctor")).toBeInTheDocument();
     });
-    mockGetOfficeMembers.mockResolvedValue({
-      members: [
+
+    it("does not show connected providers that are not configured", async () => {
+      mockGetConfig.mockResolvedValue({
+        llm_provider: "codex",
+        llm_provider_priority: ["codex"],
+      });
+      mockGetLocalProvidersStatus.mockResolvedValue([
         {
-          slug: "alex",
-          name: "Alex",
-          role: "engineer",
-          status: "shipping",
-          task: "Ship landing page",
+          kind: "exo",
+          binary_installed: true,
+          endpoint: "http://localhost:52415",
+          model: "llama-3.2-3b",
+          reachable: true,
+          probed: true,
+          platform_supported: true,
         },
-      ],
-    });
-    mockGetAllRequests.mockResolvedValue({
-      requests: [
-        {
-          id: "r1",
-          from: "alex",
-          question: "Should I proceed with the deployment?",
-          status: "open",
-          blocking: true,
-        },
-      ],
-    });
-    mockGetSkillsList.mockResolvedValue({
-      skills: [
-        {
-          name: "deploy-frontend",
-          title: "Deploy frontend",
-          status: "proposed" as const,
-          created_by: "alex",
-        },
-      ],
-    });
-    mockGetScheduler.mockResolvedValue({
-      jobs: [
-        {
-          slug: "daily-digest",
-          label: "Daily digest",
-          next_run: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-          enabled: true,
-        },
-      ],
-    });
-    mockGetLocalProvidersStatus.mockResolvedValue([]);
-    mockGetConfig.mockResolvedValue({
-      llm_provider_priority: [],
-    });
-    mockGet.mockResolvedValue({ prereqs: [] });
+      ]);
 
-    render(wrap(<OfficeOverviewApp />));
+      render(wrap(<OfficeOverviewApp />));
 
-    expect(
-      await screen.findByTestId("office-overview-app"),
-    ).toBeInTheDocument();
-
-    expect(screen.getByText("Office overview")).toBeInTheDocument();
-    expect(screen.getByText("Active runs")).toBeInTheDocument();
-    expect(screen.getByText("Blocked tasks")).toBeInTheDocument();
-    expect(screen.getByText("Agents working now")).toBeInTheDocument();
-    expect(screen.getByText("Pending reviews")).toBeInTheDocument();
-    expect(screen.getByText("Wiki proposals")).toBeInTheDocument();
-    expect(screen.getByText("Next scheduled routines")).toBeInTheDocument();
-    expect(screen.getByText("Recent artifacts")).toBeInTheDocument();
-
-    // Spot-check data in sections. Task titles, questions, etc. can appear
-    // in multiple sections (active runs, recent artifacts, agent task label,
-    // request label + body). Use getAllByText to allow duplicates.
-    const shipLandingMatches = await screen.findAllByText("Ship landing page");
-    expect(shipLandingMatches.length).toBeGreaterThanOrEqual(1);
-    const fixAuthMatches = screen.getAllByText("Fix auth bug");
-    expect(fixAuthMatches.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Alex")).toBeInTheDocument();
-    // The question text shows up as both label and body in the request card.
-    const deployQuestionMatches = screen.getAllByText(
-      "Should I proceed with the deployment?",
-    );
-    expect(deployQuestionMatches.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Deploy frontend")).toBeInTheDocument();
-    expect(screen.getByText("Daily digest")).toBeInTheDocument();
-  });
-});
-
-describe("OfficeOverviewApp empty states", () => {
-  beforeEach(() => {
-    emptyDefaults();
-  });
-
-  it("shows empty states for active runs when no tasks are running", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("No tasks are running right now."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows empty state for blocked tasks when nothing is blocked", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("Nothing is blocked. Agents are moving freely."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows empty state for agents when all are idle", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("No agents are visibly active right now."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows empty state for pending reviews when no requests exist", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("No pending requests from agents."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows empty state for wiki proposals when none are pending", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("No skill proposals awaiting review."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows empty state for scheduled jobs when none exist", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("No upcoming scheduled routines."),
-    ).toBeInTheDocument();
-  });
-
-  it("shows empty state for recent artifacts when no tasks exist", async () => {
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(
-      await screen.findByText("No recent task activity."),
-    ).toBeInTheDocument();
-  });
-});
-
-describe("OfficeOverviewApp connected providers", () => {
-  beforeEach(() => {
-    emptyDefaults();
-  });
-
-  it("does not show offline providers", async () => {
-    mockGetConfig.mockResolvedValue({
-      llm_provider: "ollama",
-      llm_provider_priority: ["ollama"],
-    });
-    mockGetLocalProvidersStatus.mockResolvedValue([
-      {
-        kind: "ollama",
-        binary_installed: true,
-        binary_path: "/usr/local/bin/ollama",
-        endpoint: "http://localhost:11434",
-        model: "llama3",
-        reachable: false,
-        probed: true,
-        platform_supported: true,
-      },
-    ]);
-
-    render(wrap(<OfficeOverviewApp />));
-
-    await screen.findByText("Active runs");
-    expect(screen.queryByText("ollama")).not.toBeInTheDocument();
-  });
-
-  it("shows connected providers and links to Settings and Provider Doctor", async () => {
-    mockGetConfig.mockResolvedValue({
-      llm_provider: "exo",
-      llm_provider_priority: ["exo"],
-    });
-    mockGetLocalProvidersStatus.mockResolvedValue([
-      {
-        kind: "exo",
-        binary_installed: true,
-        endpoint: "http://localhost:52415",
-        model: "llama-3.2-3b",
-        reachable: true,
-        probed: true,
-        platform_supported: true,
-      },
-    ]);
-
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(await screen.findByText("1 provider connected")).toBeInTheDocument();
-    expect(screen.getByText("Exo")).toBeInTheDocument();
-    expect(await screen.findByText("Settings")).toBeInTheDocument();
-    expect(screen.getByText("Provider Doctor")).toBeInTheDocument();
-  });
-
-  it("does not show connected providers that are not configured", async () => {
-    mockGetConfig.mockResolvedValue({
-      llm_provider: "codex",
-      llm_provider_priority: ["codex"],
-    });
-    mockGetLocalProvidersStatus.mockResolvedValue([
-      {
-        kind: "exo",
-        binary_installed: true,
-        endpoint: "http://localhost:52415",
-        model: "llama-3.2-3b",
-        reachable: true,
-        probed: true,
-        platform_supported: true,
-      },
-    ]);
-
-    render(wrap(<OfficeOverviewApp />));
-
-    await screen.findByText("Active runs");
-    expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Exo")).not.toBeInTheDocument();
-  });
-
-  it("does not show provider section when providers list is empty", async () => {
-    mockGetLocalProvidersStatus.mockResolvedValue([]);
-
-    render(wrap(<OfficeOverviewApp />));
-
-    await screen.findByText("Active runs");
-    expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
-  });
-
-  it("does not show provider section when no provider is connected", async () => {
-    mockGetLocalProvidersStatus.mockResolvedValue([
-      {
-        kind: "ollama",
-        binary_installed: false,
-        endpoint: "http://localhost:11434",
-        model: "llama3",
-        reachable: false,
-        probed: true,
-        platform_supported: true,
-      },
-    ]);
-
-    render(wrap(<OfficeOverviewApp />));
-
-    await screen.findByText("Active runs");
-    expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
-  });
-});
-
-describe("OfficeOverviewApp section links", () => {
-  beforeEach(() => {
-    emptyDefaults();
-  });
-
-  it("renders View board link when active tasks exist", async () => {
-    mockGetOfficeTasks.mockResolvedValue({
-      tasks: [
-        {
-          id: "t1",
-          title: "Active task",
-          status: "in_progress",
-          updated_at: new Date().toISOString(),
-        },
-      ],
+      await screen.findByText("Active runs");
+      expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Exo")).not.toBeInTheDocument();
     });
 
-    render(wrap(<OfficeOverviewApp />));
+    it("does not show provider section when providers list is empty", async () => {
+      mockGetLocalProvidersStatus.mockResolvedValue([]);
 
-    // There are two "View board" links (active + blocked sections).
-    const links = await screen.findAllByText("View board");
-    expect(links.length).toBeGreaterThanOrEqual(1);
-  });
+      render(wrap(<OfficeOverviewApp />));
 
-  it("renders Answer link when pending requests exist", async () => {
-    mockGetAllRequests.mockResolvedValue({
-      requests: [
-        {
-          id: "r1",
-          from: "alex",
-          question: "Approve this?",
-          status: "open",
-        },
-      ],
+      await screen.findByText("Active runs");
+      expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
     });
 
-    render(wrap(<OfficeOverviewApp />));
-
-    expect(await screen.findByText("Answer")).toBeInTheDocument();
   });
 
-  it("renders Review link when skill proposals exist", async () => {
-    mockGetSkillsList.mockResolvedValue({
-      skills: [
-        {
-          name: "my-skill",
-          status: "proposed" as const,
-        },
-      ],
+  describe("section links", () => {
+    beforeEach(() => {
+      emptyDefaults();
     });
 
-    render(wrap(<OfficeOverviewApp />));
+    it("renders View board link when active tasks exist", async () => {
+      mockGetOfficeTasks.mockResolvedValue({
+        tasks: [
+          {
+            id: "t1",
+            title: "Active task",
+            status: "in_progress",
+            updated_at: new Date().toISOString(),
+          },
+        ],
+      });
 
-    expect(await screen.findByText("Review")).toBeInTheDocument();
+      render(wrap(<OfficeOverviewApp />));
+
+      // There are two "View board" links (active + blocked sections).
+      const links = await screen.findAllByText("View board");
+      expect(links.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("renders Answer link when pending requests exist", async () => {
+      mockGetAllRequests.mockResolvedValue({
+        requests: [
+          {
+            id: "r1",
+            from: "alex",
+            question: "Approve this?",
+            status: "open",
+          },
+        ],
+      });
+
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(await screen.findByText("Answer")).toBeInTheDocument();
+    });
+
+    it("renders View all link when compiled skills exist", async () => {
+      mockGetSkillsList.mockResolvedValue({
+        skills: [
+          {
+            name: "my-skill",
+            status: "active" as const,
+          },
+        ],
+      });
+
+      render(wrap(<OfficeOverviewApp />));
+
+      expect(await screen.findByText("View all")).toBeInTheDocument();
+    });
   });
 });

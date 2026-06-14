@@ -3,17 +3,14 @@ package team
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
 // Server-Sent Events: per-broker fanout (handleEvents) and per-agent
 // stdout streaming (handleAgentStream). Plus the tool-call audit channel
-// (handleAgentToolEvent + recordAgentToolEvent) which writes into the
-// per-agent stream and drives the SkillCounter nudge for skill_review.
+// (handleAgentToolEvent) which writes into the per-agent stream.
 //
 // SSE wire shape:
 //   - Content-Type: text/event-stream
@@ -214,109 +211,7 @@ func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Drive the Hermes counter. We only count once per tool call so we
-	// branch on phase=="call" — the call/result/error fan-out from a
-	// single tool invocation must NOT triple-count. team_skill_create /
-	// team_skill_patch reset the tally; everything else increments and
-	// may fire a skill_review_nudge task.
-	b.recordAgentToolEvent(slug, body.Phase, body.Tool, body.Args)
-
 	w.WriteHeader(http.StatusOK)
-}
-
-// recordAgentToolEvent updates the broker's SkillCounter for one
-// tool-event payload. It is split out from handleAgentToolEvent so tests
-// can drive the counter directly without going through HTTP, and so the
-// b.mu acquisition for the nudge task creation is centralized in one
-// place.
-//
-// We only act on phase=="call" — the call/result/error fan-out per tool
-// invocation must not triple-count. Empty phase is treated as "call" for
-// backward compatibility; older agents that didn't tag the phase still
-// only post one event per call.
-func (b *Broker) recordAgentToolEvent(slug, phase, tool, args string) {
-	slug = strings.TrimSpace(slug)
-	tool = strings.TrimSpace(tool)
-	if slug == "" || tool == "" {
-		return
-	}
-	phase = strings.TrimSpace(phase)
-	if phase != "" && phase != "call" {
-		// result / error events from the same call — already counted.
-		return
-	}
-	counter := b.ensureSkillCounter()
-	if counter == nil {
-		return
-	}
-
-	// Skill-authoring tools reset the counter (the agent just codified
-	// something). Everything else increments.
-	if IsSkillAuthoringTool(tool) {
-		counter.Reset(slug)
-		return
-	}
-
-	summary := skillCounterSummaryFromArgs(tool, args)
-	shouldNudge, _ := counter.Increment(slug, tool, summary)
-	if !shouldNudge {
-		return
-	}
-
-	b.mu.Lock()
-	taskID, err := b.fireSkillReviewNudgeLocked(slug)
-	if err == nil {
-		atomic.AddInt64(&b.skillCompileMetrics.CounterNudgesFiredTotal, 1)
-		if saveErr := b.saveLocked(); saveErr != nil {
-			slog.Warn("skill_counter_nudge_persist_failed",
-				"agent", slug, "task_id", taskID, "err", saveErr)
-		}
-	}
-	b.mu.Unlock()
-	if err != nil {
-		slog.Warn("skill_counter_nudge_create_failed",
-			"agent", slug, "err", err)
-	}
-}
-
-// ensureSkillCounter lazily constructs the SkillCounter. Like the other
-// skill-* singletons, the counter is built on first use so tests that
-// never trigger an agent tool call pay no cost.
-func (b *Broker) ensureSkillCounter() *SkillCounter {
-	b.mu.Lock()
-	if b.skillCounter != nil {
-		c := b.skillCounter
-		b.mu.Unlock()
-		return c
-	}
-	c := NewSkillCounter()
-	b.skillCounter = c
-	b.mu.Unlock()
-	return c
-}
-
-// SetSkillCounter replaces the broker's counter — used by tests to inject
-// a counter with a specific threshold / cooldown / clock without going
-// through env vars.
-func (b *Broker) SetSkillCounter(c *SkillCounter) {
-	b.mu.Lock()
-	b.skillCounter = c
-	b.mu.Unlock()
-}
-
-// skillCounterSummaryFromArgs renders a one-line summary of a tool call
-// for the per-agent ring buffer. The args field is a JSON-encoded
-// string (as posted by the MCP client), so we don't try to parse it —
-// we just trim and truncate. Real human review of the nudge task uses
-// the agent's own activity stream for full detail.
-func skillCounterSummaryFromArgs(tool, args string) string {
-	args = strings.TrimSpace(args)
-	if args == "" {
-		return tool
-	}
-	// Collapse whitespace runs so the summary stays single-line.
-	args = strings.Join(strings.Fields(args), " ")
-	return truncateSummary(args, 120)
 }
 
 // formatAgentToolEvent renders one structured audit record for the per-agent

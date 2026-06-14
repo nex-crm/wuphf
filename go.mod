@@ -14,6 +14,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/sahilm/fuzzy v0.1.2
+	github.com/slack-go/slack v0.25.0
 	go.uber.org/goleak v1.3.0
 	golang.org/x/net v0.55.0
 	golang.org/x/sync v0.20.0

@@ -173,16 +173,15 @@ type operationStarterDefaults struct {
 }
 
 type operationStarterAgent struct {
-	Slug           string   `json:"slug"`
-	Emoji          string   `json:"emoji,omitempty"`
-	Name           string   `json:"name"`
-	Role           string   `json:"role,omitempty"`
-	Checked        bool     `json:"checked"`
-	Type           string   `json:"type,omitempty"`
-	PermissionMode string   `json:"permissionMode,omitempty"`
-	BuiltIn        bool     `json:"builtIn,omitempty"`
-	Expertise      []string `json:"expertise,omitempty"`
-	Personality    string   `json:"personality,omitempty"`
+	Slug        string   `json:"slug"`
+	Emoji       string   `json:"emoji,omitempty"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role,omitempty"`
+	Checked     bool     `json:"checked"`
+	Type        string   `json:"type,omitempty"`
+	BuiltIn     bool     `json:"builtIn,omitempty"`
+	Expertise   []string `json:"expertise,omitempty"`
+	Personality string   `json:"personality,omitempty"`
 }
 
 type operationStarterChannel struct {

@@ -16,16 +16,17 @@ afterEach(() => {
 });
 
 describe("<HatBar>", () => {
-  it("marks the active tab and disables the Talk tab by default", () => {
+  it("marks the active tab and renders the four view tabs", () => {
     render(<HatBar active="article" />);
-    const talk = screen.getByRole("button", { name: "Talk" });
-    expect(talk).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Article" })).toHaveClass(
-      "active",
-    );
+    expect(screen.getByRole("button", { name: "Read" })).toHaveClass("active");
+    for (const label of ["Read", "Edit", "History", "Raw markdown"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    // The Wikipedia-era Talk tab is gone (docmost-minimal tab set).
+    expect(screen.queryByRole("button", { name: "Talk" })).toBeNull();
   });
 
-  it("fires onChange when a non-active, non-disabled tab is clicked", () => {
+  it("fires onChange when a non-active tab is clicked", () => {
     const onChange = vi.fn();
     render(<HatBar active="article" onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: "History" }));
@@ -34,15 +35,17 @@ describe("<HatBar>", () => {
 
   it("does not fire onChange when a disabled tab is clicked", () => {
     const onChange = vi.fn();
-    render(<HatBar active="article" onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: "Talk" }));
+    render(
+      <HatBar active="article" onChange={onChange} disabledTabs={["edit"]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("fires onChange when the Edit source tab is clicked", () => {
+  it("fires onChange when the Edit tab is clicked", () => {
     const onChange = vi.fn();
     render(<HatBar active="article" onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(onChange).toHaveBeenCalledWith("edit");
   });
 

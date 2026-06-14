@@ -16,12 +16,12 @@ import (
 )
 
 // skillTombstonePath is the wiki-relative path of the YAML-body markdown file
-// that records rejected skill proposals. The .md extension is required to pass
+// that records human-rejected skills. The .md extension is required to pass
 // validateArticlePath in wiki_git.go. The skill scanner skips team/skills/.rejected.md
-// by name so it is never promoted as a skill proposal.
+// by name so the compiler never re-creates a rejected skill.
 const skillTombstonePath = "team/skills/.rejected.md"
 
-// SkillTombstoneEntry records a single rejected skill proposal.
+// SkillTombstoneEntry records a single human-rejected skill.
 type SkillTombstoneEntry struct {
 	// Slug is the skill's normalised name slug.
 	Slug string `yaml:"slug"`

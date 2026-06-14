@@ -38,7 +38,6 @@ func (s *agentStreamBuffer) Push(line string) {
 
 func (s *agentStreamBuffer) PushTask(taskID, line string) {
 	taskID = strings.TrimSpace(taskID)
-	line = redactSecretsInText(line)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lines = append(s.lines, agentStreamLine{
@@ -351,7 +350,7 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 		current.Activity = update.Activity
 	}
 	if update.Detail != "" {
-		current.Detail = redactSecretsInText(update.Detail)
+		current.Detail = update.Detail
 	}
 	if update.LastTime != "" {
 		current.LastTime = update.LastTime
@@ -590,6 +589,13 @@ func (b *Broker) runActivityWatchdog(ctx context.Context) {
 			// Expire blocking connect/fallback cards the human never answered so
 			// they cannot wedge a channel forever (slice 3b backstop).
 			b.expireStaleIntegrationDecisionsLocked(now)
+			// Silent-stall honesty (Wave F2): a RUNNING task with no
+			// observable trace for taskStallThreshold gets a visible
+			// stall marker + one honest chat line; markers self-clear
+			// when activity resumes (broker_task_stall.go).
+			if b.markSilentRunningTasksLocked(now, taskStallThreshold) {
+				_ = b.saveLocked()
+			}
 			b.mu.Unlock()
 		}
 	}

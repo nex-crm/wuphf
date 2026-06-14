@@ -47,6 +47,13 @@ func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notific
 			return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
 		case isOpenAICompatKind(kind):
 			return l.runHeadlessOpenAICompatTurn(ctx, slug, notification, channel...)
+		case kind == provider.KindSlack:
+			// Foreign Slack agents have no local runtime: their "turn" is the
+			// outbound Slack relay (a real <@U…> mention), which the transport
+			// dispatcher already delivered. Falling through to the Claude
+			// runner would spawn a doomed subprocess for an agent that acts on
+			// its own in Slack — so the queued turn is a deliberate no-op.
+			return nil
 		default:
 			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
 		}
@@ -124,6 +131,12 @@ type headlessCodexTurn struct {
 	// and the staleness/min-age preemption floors so the agent absorbs
 	// the human input before resuming any prior agent-originated work.
 	FromHuman bool
+	// ContextUsed is the manifest of knowledge items the work packet
+	// injected ("learning:<id>", "wiki:<ref>", "upstream:<task>",
+	// "journal:<task>"). Recorded at packet-build time — deterministic,
+	// not model-self-reported — and stamped onto the task ledger entry
+	// when the turn settles (B4 context transparency).
+	ContextUsed []string
 }
 
 type headlessCodexActiveTurn struct {

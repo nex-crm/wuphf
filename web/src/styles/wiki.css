@@ -13,9 +13,20 @@
  * rendering — it just makes the aliases resolve everywhere.
  */
 :root {
+  /* ── Color tokens, docmost-derived ────────────────────────────────
+     The relationships (not the hex values) are taken from docmost as a
+     visual reference: a clean white reading surface, a subtly offset
+     sidebar panel (their #f6f7f9-over-white / dark-8-over-dark-7), light
+     hairline borders, a restrained blue accent, and text-alpha washes
+     for hover/selected rows. Every value below is DERIVED from the
+     active theme's global tokens so Nex Dark and Noir Gold remap
+     legibly with zero hardcoded colors. */
   --wk-paper: var(--bg);
   --wk-paper-dark: var(--bg-warm);
   --wk-surface: var(--bg-card);
+  /* Sidebar panel: the theme's offset surface (docmost's navbar sits a
+     step off the body in both their light and dark themes). */
+  --wk-sidebar-bg: var(--bg-warm);
   --wk-text: var(--text);
   --wk-text-muted: var(--text-secondary);
   --wk-text-tertiary: var(--text-tertiary);
@@ -28,8 +39,16 @@
   --wk-border: var(--border);
   --wk-border-light: var(--border-light);
   --wk-border-strong: var(--border-dark);
-  --wk-wikilink: var(--olive-500);
+  /* Accent: docmost runs a single restrained blue; we map that role onto
+     the theme accent so Noir Gold goes gold, Nex Dark goes violet, etc. */
+  --wk-accent: var(--accent);
+  --wk-wikilink: var(--accent);
   --wk-wikilink-broken: var(--red);
+  /* Row washes (tree rows, menu items): docmost uses gray-step hovers
+     (gray-2/gray-3 light, dark-5/dark-6 dark). Text-alpha mixes give the
+     same relationship in every theme. */
+  --wk-row-hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --wk-row-active: color-mix(in srgb, var(--text) 10%, transparent);
   --wk-amber: var(--olive-500);
   --wk-amber-text: #b8860b; /* dark amber for readable text on light amber bg */
   --wk-stale-text: #b94040; /* dark red for readable text on light red bg */
@@ -52,31 +71,41 @@
     --shadow-popover,
     0 8px 24px -8px rgba(0, 0, 0, 0.32)
   );
+  /* ── Type tokens, docmost-derived ────────────────────────────────
+     One sans family end to end (their reading register), headings at
+     600 with tight line-height and a -0.01em tracking, body at 16px on
+     a generous 1.65 line. The serif-era token names below stay defined
+     as aliases because older surfaces (refclone, notebook bridges)
+     still reference them — they now resolve to the same sans stack. */
   --wk-display: var(--font-sans);
-  --wk-body-serif: "Newsreader", "Georgia", ui-serif, serif;
+  --wk-heading-font: var(--font-sans);
+  --wk-body-font: var(--font-sans);
+  --wk-body-serif: var(--wk-body-font); /* legacy alias */
+  --wk-title-serif: var(--wk-heading-font); /* legacy alias */
+  --wk-body-sans: var(--wk-body-font);
   --wk-chrome: var(--font-sans);
   --wk-mono: var(--font-mono);
-  --wk-sidebar-left: 240px;
+  --wk-body-size: 16px;
+  --wk-body-lh: 1.65;
+  --wk-h1-size: 2.5rem; /* page title — docmost .page-title h1 */
+  --wk-h2-size: 1.5rem;
+  --wk-h3-size: 1.25rem;
+  --wk-h4-size: 1.125rem;
+  --wk-heading-weight: 600;
+  --wk-heading-lh: 1.2;
+  --wk-heading-track: -0.01em;
+  /* ── Layout tokens, docmost-derived ──────────────────────────────
+     300px navbar, 900px content container with 3rem gutters (≈ 800px
+     reading measure), 280px right rail. */
+  --wk-sidebar-left: 300px;
   --wk-sidebar-right: 280px;
-  --wk-article-max: 640px;
+  --wk-article-max: 800px;
+  --wk-infobox-width: 280px;
 }
 .wiki-root {
-  /* Warm-journal cohesion. Shift the wiki's surface tokens off pure white
-     toward a soft warm off-white, so the rich editor's warm palette reads as a
-     SUBTLE step within the wiki rather than a foreign island. Scoped to
-     .wiki-root on purpose: the global --wk-* aliases at :root are reused by
-     non-wiki chrome (the Telegram /connect modal), which must stay neutral.
-     Theme-aware — a small wash of the brand gold over the active theme's base,
-     so light gets a cream off-white and dark/Noir get a subtly warmer dark
-     instead of a bleached light tint. */
-  --wk-paper: color-mix(in srgb, #c78a1f 5%, var(--bg));
-  --wk-surface: color-mix(in srgb, #c78a1f 3%, var(--bg-card));
-  --wk-paper-dark: color-mix(in srgb, #c78a1f 8%, var(--bg-warm));
-  --wk-border: color-mix(in srgb, #c78a1f 13%, var(--border));
-  --wk-border-light: color-mix(in srgb, #c78a1f 9%, var(--border-light));
   background: var(--wk-paper);
   color: var(--wk-text);
-  line-height: 1.6;
+  line-height: var(--wk-body-lh);
   font-family: var(--wk-chrome);
   -webkit-font-smoothing: antialiased;
   height: 100%;
@@ -93,128 +122,291 @@
   text-decoration: none;
 }
 
-/* ─── 3-column layout ─── */
+/* ─── Layout: persistent page-tree sidebar + content (+ article right rail) ─── */
 .wiki-layout {
+  /* Either flanking panel can fold to a thin rail (--wk-panel-rail) so the
+     reading column reclaims the width. The active column widths live in
+     these custom props; the data-*-collapsed attributes below swap them, and
+     the grid templates simply consume them. */
+  --wk-panel-rail: 44px;
+  --wk-col-left: var(--wk-sidebar-left);
+  --wk-col-right: var(--wk-sidebar-right);
   display: grid;
-  grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr) var(
-      --wk-sidebar-right
-    );
+  grid-template-columns: var(--wk-col-left) minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
-.wiki-layout > .wk-catalog,
+/* The article view adds docmost's right "details" rail. */
+.wiki-layout[data-view="article"] {
+  grid-template-columns: var(--wk-col-left) minmax(0, 1fr) var(--wk-col-right);
+}
+.wiki-layout[data-left-collapsed="true"] {
+  --wk-col-left: var(--wk-panel-rail);
+}
+/* The right rail only exists in the article view, so its collapse is scoped
+   there to avoid shrinking a column that other views never render. */
+.wiki-layout[data-view="article"][data-right-collapsed="true"] {
+  --wk-col-right: var(--wk-panel-rail);
+}
 .wiki-layout > .wk-article-col,
+.wiki-layout > .wk-home,
+.wiki-layout > .wk-category-page,
 .wiki-layout > .wk-toc-col {
   min-height: 0;
   overflow-y: auto;
 }
-/* Catalog has no right rail — give the main column all the remaining space. */
-.wiki-layout[data-view="catalog"] {
-  grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
+/* Full-page editor spans the article + right-rail tracks. */
+.wk-article-col--editing {
+  grid-column: 2 / -1;
 }
 
-/* ─── LEFT NAV ─── */
+/* ─── Collapsible panel chrome (left page tree + right details rail) ───
+   Both flanking panels share one fold-away vocabulary: a quiet icon button
+   inside the open panel, and — once folded — a thin full-height rail that
+   reads as a clickable strip with a vertical label. */
+
+/* Header row that hosts the in-panel collapse button. */
+.wk-sidebar-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 24px;
+  margin-bottom: 4px;
+}
+.wk-right-rail-head {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.wk-panel-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--wk-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+.wk-panel-collapse:hover {
+  background: var(--wk-row-hover);
+  color: var(--wk-text);
+}
+.wk-panel-collapse:focus-visible {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: -2px;
+}
+
+/* Folded state: the panel shrinks to the rail width and shows only the rail. */
+.wk-nav-sidebar.is-collapsed,
+.wk-right-sidebar.is-collapsed {
+  padding: 0;
+  overflow: hidden;
+}
+.wk-right-sidebar.is-collapsed {
+  /* Give the folded right rail the same offset surface as the left rail so
+     the two read as matching strips rather than a stray border on paper. */
+  background: var(--wk-sidebar-bg);
+}
+.wk-panel-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 14px 0;
+  border: 0;
+  background: transparent;
+  color: var(--wk-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+.wk-panel-rail:hover {
+  background: var(--wk-row-hover);
+  color: var(--wk-text);
+}
+.wk-panel-rail:focus-visible {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: -2px;
+}
+.wk-panel-rail-icon {
+  flex: none;
+}
+.wk-panel-rail-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* Subtle arrival fade so the fold doesn't read as a hard cut. Opacity only —
+   compositor-friendly — and silenced under reduced-motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .wk-panel-rail {
+    animation: wk-panel-rail-in 160ms ease;
+  }
+}
+@keyframes wk-panel-rail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ─── Article Contents panel (right rail, docmost "On this page") ─── */
+.wk-contents {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--wk-border-light);
+}
+.wk-contents-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.wk-contents-title {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wk-text-muted);
+}
+.wk-contents-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-contents-item a {
+  display: block;
+  padding: 3px 8px;
+  border-left: 2px solid transparent;
+  border-radius: 0 4px 4px 0;
+  color: var(--wk-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.wk-contents-item a:hover {
+  background: var(--wk-row-hover);
+  color: var(--wk-text);
+}
+.wk-contents-item.is-active > a {
+  border-left-color: var(--wk-accent);
+  color: var(--wk-text);
+  font-weight: 600;
+}
+.wk-contents-lvl-2 a {
+  padding-left: 22px;
+  font-size: 12px;
+}
+.wk-contents-item .wk-num {
+  color: var(--wk-text-tertiary);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── LEFT NAV — persistent page-tree sidebar (docmost-derived panel) ─── */
 .wk-nav-sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--wk-surface);
+  background: var(--wk-sidebar-bg);
   border-right: 1px solid var(--wk-border);
-  padding: 20px 12px 0;
+  padding: 12px 12px 0;
   font-family: var(--wk-chrome);
   font-size: 13px;
   overflow: hidden;
   min-height: 0;
+  user-select: none;
 }
-.wk-nav-sidebar-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 16px 0 16px;
-  scrollbar-width: none;
-}
-.wk-nav-sidebar-scroll::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-.wk-nav-sidebar-scroll > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.wk-nav-sidebar h3 {
-  font-family: var(--wk-chrome);
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--neutral-300);
-  margin: 0 0 4px;
-  padding: 0 10px;
-}
-.wk-nav-sidebar ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* Fixed menu links above the tree (Overview / Recent changes / Wiki health):
+   docmost menu rows — 13px/500, small radius, muted ink that lifts on hover,
+   text-alpha washes for hover/active. */
+.wk-sidebar-menu {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--wk-border);
 }
-.wk-nav-sidebar li a {
+.wk-sidebar-menu-link {
   display: flex;
   align-items: center;
-  padding: 6px 10px;
-  color: var(--wk-text-muted);
+  padding: 5px 8px;
   border-radius: var(--radius-sm);
-  font-family: var(--wk-chrome);
   font-size: 13px;
+  font-weight: 500;
   line-height: 1.3;
+  color: var(--wk-text-muted);
   cursor: pointer;
 }
-.wk-nav-sidebar li a:hover {
-  background: var(--wk-paper-dark);
+.wk-sidebar-menu-link:hover {
+  background: var(--wk-row-hover);
   color: var(--wk-text);
 }
-.wk-nav-sidebar li.current a {
-  background: var(--wk-amber-bg);
+.wk-sidebar-menu-link.is-active {
+  background: var(--wk-row-active);
   color: var(--wk-text);
-  font-weight: 500;
+}
+.wk-sidebar-menu-link:focus-visible {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: -2px;
+}
+/* "Pages" section label above the tree. */
+.wk-sidebar-pages-label {
+  font-size: var(--text-2xs, 10px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--wk-text-tertiary);
+  padding: 0 8px;
+  margin-bottom: 4px;
 }
 .wk-nav-sidebar .search {
   width: 100%;
   border: 1px solid var(--wk-border);
   border-radius: var(--radius-sm);
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--wk-chrome);
   margin: 0;
-  background: var(--wk-paper);
+  background: var(--wk-surface);
+  color: var(--wk-text);
   outline: none;
   transition: border-color 0.15s;
 }
 .wk-nav-sidebar .search:focus {
-  border-color: var(--wk-wikilink);
-}
-.wk-nav-sidebar .tools-sep {
-  border: 0;
-  border-top: 1px solid var(--wk-border);
-  margin: 8px 0 0;
-}
-.wk-nav-sidebar .tools li a::before {
-  content: "→ ";
-  color: var(--wk-text-tertiary);
-  font-family: var(--wk-mono);
+  border-color: var(--wk-accent);
 }
 
 /* ─── CENTER article column ─── */
 /* position: relative creates the positioning context for .pam-wrap (see
  * styles/pam.css) — Pam's desk hangs off the top-right of the column. */
 .wk-article-col {
-  padding: 0 64px 120px;
+  padding: 0 48px 120px;
   position: relative;
+}
+/* Centered content column: docmost's 900px container minus its 3rem
+   gutters ≈ an 800px reading measure, with breathing room above. */
+.wk-article-page {
+  max-width: var(--wk-article-max);
+  margin: 0 auto;
+  padding-top: 24px;
 }
 
 .wk-article-col-visual {
@@ -263,18 +455,21 @@
   }
 }
 
-/* ─── Hat-bar ─── */
+/* ─── View tabs (Read / Edit / History / Raw) — docmost-minimal pattern:
+   quiet 13px/500 labels, a 2px underline on the active tab, no boxes. ─── */
 .wk-hatbar {
   border-bottom: 1px solid var(--wk-border);
   display: flex;
+  gap: 2px;
   font-family: var(--wk-chrome);
-  font-size: 12px;
+  font-size: 13px;
   padding-top: 0;
   margin-bottom: 0;
 }
 .wk-hatbar .wk-tab {
-  padding: 8px 14px 10px;
+  padding: 8px 12px 10px;
   color: var(--wk-text-muted);
+  font-weight: 500;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   cursor: pointer;
@@ -282,17 +477,22 @@
   border-left: 0;
   border-right: 0;
   border-top: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   font-family: inherit;
   font-size: inherit;
+  transition:
+    color 0.12s,
+    background-color 0.12s;
 }
 .wk-hatbar .wk-tab.active {
   color: var(--wk-text);
-  border-bottom-color: var(--wk-text);
-  font-weight: 500;
-  background: var(--wk-paper);
+  border-bottom-color: var(--wk-accent);
+  font-weight: 600;
+  background: transparent;
 }
 .wk-hatbar .wk-tab:hover:not(.active):not(:disabled) {
   color: var(--wk-text);
+  background: var(--wk-row-hover);
 }
 .wk-hatbar .wk-tab:disabled {
   opacity: 0.45;
@@ -309,53 +509,100 @@
   padding: 8px 0 10px;
 }
 
-.wk-breadcrumb {
-  font-family: var(--wk-chrome);
-  font-size: 12px;
-  color: var(--wk-text-muted);
-  margin: 20px 0 16px;
+/* Article header row — breadcrumb left, page actions right, title below.
+   Replaces the old floated toolbars that overlapped the wrapping
+   breadcrumb in narrow viewports. */
+.wk-article-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 0 12px;
+}
+.wk-article-header .wk-breadcrumb {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* When narrow, middle segments give way first; the leaf keeps the most
+   room but still ellipsizes rather than pushing the actions off-row. */
+.wk-article-header .wk-breadcrumb a,
+.wk-article-header .wk-breadcrumb [aria-current="page"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.wk-article-header .wk-breadcrumb .sep {
+  flex-shrink: 0;
+}
+.wk-article-header .wk-breadcrumb [aria-current="page"] {
+  flex-shrink: 0.5;
+}
+.wk-article-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* Breadcrumbs — docmost pattern: small sans crumbs ("space / parent / page"),
+   "/" separators, no underline, the current page in plain text. */
+.wk-breadcrumb {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text-muted);
+  margin: 16px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .wk-breadcrumb a {
   color: var(--wk-text-muted);
   cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 .wk-breadcrumb a:hover {
-  color: var(--wk-wikilink);
+  color: var(--wk-text);
 }
 .wk-breadcrumb .sep {
   color: var(--wk-text-tertiary);
 }
-
-/* ─── Title ─── */
-.wk-article-title {
-  font-family: var(--wk-display);
-  font-size: 52px;
-  font-weight: 500;
-  line-height: 1.05;
-  letter-spacing: -0.015em;
+.wk-breadcrumb [aria-current="page"] {
   color: var(--wk-text);
-  font-variation-settings: "opsz" 100;
+}
+
+/* ─── Page title — docmost's .page-title h1: 2.5rem/700, tight leading ─── */
+.wk-article-title {
+  font-family: var(--wk-heading-font);
+  /* Cap the title scale: --wk-h1-size (2.5rem) is the ceiling on wide
+     viewports; short/narrow viewports ramp down toward 1.5rem so the
+     title never renders enormous relative to the reading column. */
+  font-size: clamp(1.5rem, 1.05rem + 2.2vw, var(--wk-h1-size));
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: var(--wk-heading-track);
+  color: var(--wk-text);
   margin: 0 0 4px;
 }
 .wk-strapline {
-  font-family: var(--wk-body-serif);
-  font-style: italic;
-  font-size: 15px;
-  color: var(--wk-text-muted);
-  margin-bottom: 14px;
+  font-family: var(--wk-body-font);
+  font-size: 14px;
+  color: var(--wk-text-tertiary);
+  margin-bottom: 12px;
 }
-.wk-title-divider {
+/* docmost runs no rule under the title — keep the hook, drop the line. */
+.wk-title-divider,
+.wk-title-rule {
   border: 0;
-  border-top: 1px solid var(--wk-text);
-  border-bottom: 1px solid var(--wk-text);
-  height: 3px;
-  margin: 14px 0 24px;
+  height: 0;
+  margin: 0 0 8px;
 }
 
-/* ─── Byline ─── */
+/* ─── Byline — docmost's "By {name} · updated" row under the title ─── */
 .wk-byline {
   display: flex;
   align-items: center;
@@ -377,11 +624,10 @@
   font-weight: 500;
 }
 .wk-byline .wk-ts {
-  background: var(--wk-amber-bg);
+  background: var(--wk-row-hover);
   padding: 2px 8px;
   border-radius: 4px;
-  color: var(--wk-text);
-  font-family: var(--wk-mono);
+  color: var(--wk-text-muted);
   font-size: 12px;
   display: inline-flex;
   align-items: center;
@@ -391,7 +637,7 @@
   content: "";
   width: 6px;
   height: 6px;
-  background: var(--wk-amber);
+  background: var(--wk-accent);
   border-radius: 50%;
   display: inline-block;
   animation: wk-pulse 1.8s ease-in-out infinite;
@@ -496,59 +742,189 @@
   text-underline-offset: 3px;
 }
 
-/* ─── Body ─── */
+/* ─── Body — docmost reading register: 16px sans on a 1.65 line, headings
+   600/1.2 with -0.01em tracking, heading top margins equal to their own
+   font size (their h2 = 1.5rem size + 1.5rem margin-top, etc.). ─── */
 .wk-article-body {
-  font-family: var(--wk-body-serif);
-  font-size: 18px;
-  line-height: 1.72;
+  font-family: var(--wk-body-font);
+  font-size: var(--wk-body-size);
+  line-height: var(--wk-body-lh);
   color: var(--wk-text);
-  max-width: var(--wk-article-max);
+  max-width: none;
 }
 .wk-article-body p {
-  margin: 0 0 18px;
+  margin: 0.5em 0;
 }
 .wk-article-body h2 {
-  font-family: var(--wk-display);
-  font-size: 28px;
-  font-weight: 500;
-  line-height: 1.2;
-  margin: 40px 0 14px;
-  letter-spacing: -0.01em;
-  font-variation-settings: "opsz" 36;
-  border-bottom: 1px solid var(--wk-border);
-  padding-bottom: 6px;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h2-size);
+  font-weight: var(--wk-heading-weight);
+  line-height: var(--wk-heading-lh);
+  margin: 1.5rem 0 0.5rem;
+  letter-spacing: var(--wk-heading-track);
+}
+.wk-article-body h2 a {
+  color: inherit;
 }
 .wk-article-body h3 {
-  font-family: var(--wk-display);
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 1.3;
-  margin: 28px 0 10px;
-  font-variation-settings: "opsz" 24;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h3-size);
+  font-weight: var(--wk-heading-weight);
+  line-height: var(--wk-heading-lh);
+  letter-spacing: var(--wk-heading-track);
+  margin: 1.25rem 0 0.5rem;
+}
+.wk-article-body h3 a {
+  color: inherit;
+}
+.wk-article-body h4 {
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h4-size);
+  font-weight: var(--wk-heading-weight);
+  line-height: 1.1;
+  margin: 1.125rem 0 0.5rem;
+}
+.wk-article-body blockquote {
+  margin: 0.75em 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--wk-border-strong);
+  color: var(--wk-text-muted);
+}
+/* Wikipedia's per-section [ edit ] affordance, right of each H2. */
+.wk-article-body h2 .wk-section-edit {
+  float: right;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--wk-text-tertiary);
+  user-select: none;
+  margin-top: 10px;
+}
+.wk-section-edit-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--wk-wikilink);
+  cursor: pointer;
+}
+.wk-section-edit-btn:hover {
+  text-decoration: underline;
+}
+
+/* ─── Footnote citations ([^n] → superscript [n] + References block) ─── */
+.wk-article-body sup:has(> a[data-footnote-ref]) {
+  line-height: 0;
+}
+.wk-article-body a[data-footnote-ref] {
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-wikilink);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wk-article-body a[data-footnote-ref]::before {
+  content: "[";
+}
+.wk-article-body a[data-footnote-ref]::after {
+  content: "]";
+}
+.wk-article-body section[data-footnotes] {
+  margin-top: 40px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--wk-text);
+}
+.wk-article-body section[data-footnotes] h2 {
+  font-size: 26px;
+}
+.wk-article-body section[data-footnotes] ol {
+  margin-left: 22px;
+}
+.wk-article-body section[data-footnotes] li {
+  margin-bottom: 5px;
+}
+.wk-article-body a[data-footnote-backref] {
+  font-family: var(--wk-chrome);
+  text-decoration: none;
+  color: var(--wk-wikilink);
+  margin-left: 4px;
+}
+/* Brief highlight wash on the jump target after a citation/TOC click. */
+.wk-jump-flash {
+  animation: wk-jump-flash-fade 1.6s ease-out;
+}
+@keyframes wk-jump-flash-fade {
+  0%,
+  40% {
+    background-color: var(--wk-amber-bg);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wk-jump-flash {
+    animation: none;
+    background-color: var(--wk-amber-bg);
+  }
+}
+
+/* ─── Hover previews (page preview card + citation popover) ─── */
+.wk-hover-preview {
+  position: fixed;
+  z-index: 60;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border-strong);
+  border-radius: 4px;
+  box-shadow: var(--wk-shadow-popover);
+  padding: 12px 14px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--wk-text);
+}
+.wk-hover-preview-title {
+  font-family: var(--wk-title-serif);
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.wk-hover-preview-body {
+  color: var(--wk-text-muted);
 }
 .wk-article-body ul,
 .wk-article-body ol {
-  margin: 0 0 18px 24px;
+  margin: 0.25rem 0 0.75rem 24px;
   padding: 0;
 }
 .wk-article-body li {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+.wk-article-body li p {
+  margin: 0;
 }
 .wk-article-body strong {
   font-weight: 600;
 }
+/* Wikilinks — docmost link voice: accent ink, a quiet solid underline that
+   strengthens on hover (their 0.07em bottom-border treatment). */
 .wk-article-body a.wk-wikilink,
 .wk-article-body a[data-wikilink="true"] {
   color: var(--wk-wikilink);
+  font-weight: 500;
   text-decoration: underline;
-  text-decoration-style: dashed;
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--wk-wikilink) 35%,
+    transparent
+  );
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
-  transition: text-decoration-style 100ms;
+  transition: text-decoration-color 100ms;
 }
 .wk-article-body a.wk-wikilink:hover,
 .wk-article-body a[data-wikilink="true"]:hover {
-  text-decoration-style: solid;
+  text-decoration-color: var(--wk-wikilink);
 }
 .wk-article-body a.wk-wikilink.wk-broken,
 .wk-article-body a[data-wikilink="true"][data-broken="true"] {
@@ -566,63 +942,88 @@
   font-family: var(--wk-mono);
   background: var(--wk-code-bg);
   padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 0.88em;
+  border-radius: var(--radius-sm);
+  font-size: 0.875em;
+}
+.wk-article-body pre {
+  background: var(--wk-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  margin: 0.75em 0;
+  overflow-x: auto;
+  tab-size: 4;
+}
+.wk-article-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.875rem;
 }
 
+/* Tables — docmost grid: fixed layout, 1px cell borders, tinted header row. */
 .wk-article-body table {
   border-collapse: collapse;
   width: 100%;
-  margin: 0 0 18px;
+  margin: 1rem 0;
   font-size: 14px;
   font-family: var(--wk-chrome, inherit);
 }
 .wk-article-body table th,
 .wk-article-body table td {
-  padding: 8px 12px;
+  padding: 6px 10px;
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--wk-border, rgba(0, 0, 0, 0.08));
+  border: 1px solid var(--wk-border);
 }
 .wk-article-body table th {
   font-weight: 600;
   color: var(--wk-text, inherit);
-  border-bottom: 1px solid var(--wk-text, rgba(0, 0, 0, 0.35));
-  background: transparent;
+  background: var(--wk-paper-dark);
 }
 .wk-article-body table tbody tr:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--wk-row-hover);
 }
 
-/* ─── Infobox ─── */
+/* ─── Infobox (right-floating, from B2's `## Summary` definition list) —
+   restyled as a clean docmost-flavored card: light border, soft radius,
+   quiet left-aligned header, no banner tint. ─── */
 .wk-infobox {
   float: right;
-  width: 260px;
+  width: var(--wk-infobox-width);
   margin: 4px 0 18px 24px;
   padding: 0;
-  border: 1px solid var(--wk-text);
-  background: var(--wk-paper-dark);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--wk-surface);
   font-family: var(--wk-chrome);
   font-size: 13px;
   line-height: 1.45;
+  overflow: hidden;
 }
 .wk-infobox .wk-ib-title {
-  background: var(--wk-text);
-  color: var(--wk-paper);
-  font-family: var(--wk-display);
-  font-size: 14px;
-  font-weight: 500;
+  background: var(--wk-paper-dark);
+  color: var(--wk-text);
+  border-bottom: 1px solid var(--wk-border);
+  font-family: var(--wk-heading-font);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: var(--wk-heading-track);
   padding: 8px 12px;
-  text-align: center;
+  text-align: left;
 }
 .wk-infobox .wk-ib-body {
-  padding: 12px;
+  padding: 10px 12px;
 }
 .wk-infobox dl {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 10px;
   margin: 0;
+}
+.wk-infobox .wk-ib-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 0 10px;
+  padding: 4px 0;
+}
+.wk-infobox .wk-ib-row + .wk-ib-row {
+  border-top: 1px solid var(--wk-border-light);
 }
 .wk-infobox dt {
   color: var(--wk-text-muted);
@@ -633,6 +1034,7 @@
   color: var(--wk-text);
   font-variant-numeric: tabular-nums;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .wk-infobox .wk-ib-section {
   margin-top: 10px;
@@ -646,20 +1048,18 @@
   margin: 48px 0 24px;
 }
 .wk-see-also h2 {
-  font-family: var(--wk-display);
-  font-size: 22px;
-  font-weight: 500;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h2-size);
+  font-weight: var(--wk-heading-weight);
+  letter-spacing: var(--wk-heading-track);
   margin: 0 0 12px;
-  border-bottom: 1px solid var(--wk-border);
-  padding-bottom: 6px;
 }
 .wk-see-also ul {
   list-style: disc;
   margin: 0 0 0 24px;
   padding: 0;
-  font-family: var(--wk-body-serif);
-  font-size: 16px;
-  font-style: italic;
+  font-family: var(--wk-body-font);
+  font-size: 15px;
 }
 .wk-see-also li {
   margin-bottom: 4px;
@@ -667,8 +1067,6 @@
 }
 .wk-see-also a {
   color: var(--wk-wikilink);
-  text-decoration: underline;
-  text-decoration-style: dashed;
 }
 
 /* ─── Sources ─── */
@@ -1058,157 +1456,32 @@
   display: inline-block;
 }
 
-/* ─── Catalog (landing) ─── */
-.wk-catalog {
-  padding: 40px 64px 120px;
-  /* Fill the grid cell. A prior `margin: 0 auto` was causing the element
-     to auto-shrink to its content width (the header text) inside a grid
-     cell, squeezing the catalog grid below to one-letter wide cards. */
-  width: 100%;
-  max-width: 1280px;
-}
-.wk-catalog-header {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    "title stats"
-    "clone clone";
-  row-gap: 10px;
-  column-gap: 16px;
-  align-items: baseline;
-  margin-bottom: 32px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--wk-border);
-}
-.wk-catalog-title {
-  grid-area: title;
-}
-.wk-catalog-stats {
-  grid-area: stats;
-}
-.wk-catalog-clone {
-  grid-area: clone;
-  font-size: 13px;
-  color: var(--wk-text-muted);
-}
-.wk-catalog-clone code {
-  font-family: var(--wk-mono);
-  font-size: 12px;
-  background: var(--wk-code-bg);
-  border: 1px solid var(--wk-border);
-  padding: 2px 6px;
-  border-radius: 2px;
-  color: var(--wk-text);
-  user-select: all;
-}
-.wk-catalog-title {
-  font-family: var(--wk-display);
-  font-size: 48px;
-  font-weight: 500;
-  font-variation-settings: "opsz" 100;
-  color: var(--wk-text);
-  margin: 0;
-}
-.wk-catalog-stats {
-  font-family: var(--wk-mono);
-  font-size: 12px;
-  color: var(--wk-text-muted);
-}
-.wk-catalog-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 24px;
-}
-@media (max-width: 1024px) {
-  .wk-catalog-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 720px) {
-  .wk-catalog-grid {
-    grid-template-columns: 1fr;
-  }
-}
-.wk-catalog-card {
-  background: var(--wk-surface);
-  border: 1px solid var(--wk-border);
-  padding: 20px;
-}
-.wk-catalog-card h3 {
-  font-family: var(--wk-chrome);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--wk-text-tertiary);
-  margin: 0 0 10px;
+/* ─── Shell load states (loading / broker-not-responding) ─── */
+.wk-shell-state {
   display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.wk-catalog-card h3 .wk-count {
-  color: var(--wk-text);
-  background: var(--wk-paper-dark);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-family: var(--wk-mono);
-  font-size: 11px;
-}
-.wk-catalog-card ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.wk-catalog-card li {
-  display: grid;
-  grid-template-columns: 16px 1fr auto;
-  grid-template-rows: auto;
-  column-gap: 8px;
-  align-items: baseline;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--wk-border-light);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 48px;
+  color: var(--wk-text-muted);
+  font-family: var(--wk-chrome);
   font-size: 14px;
 }
-.wk-catalog-card li:last-child {
-  border-bottom: 0;
+.wk-shell-state-msg {
+  margin: 0;
 }
-.wk-catalog-card li .wk-avatar {
-  image-rendering: pixelated;
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
-  align-self: center;
-}
-.wk-catalog-card li .wk-title {
-  font-family: var(--wk-body-serif);
-  color: var(--wk-text);
+.wk-shell-retry {
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text);
   cursor: pointer;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.wk-catalog-card li .wk-title:hover {
-  color: var(--wk-wikilink);
-}
-.wk-catalog-card li .wk-when {
-  font-family: var(--wk-mono);
-  font-size: 11px;
-  color: var(--wk-text-tertiary);
-  white-space: nowrap;
-}
-/* Narrow cards: drop the timestamp so the title gets full width. */
-@container wk-cat (max-width: 200px) {
-  .wk-catalog-card li {
-    grid-template-columns: 16px 1fr;
-  }
-  .wk-catalog-card li .wk-when {
-    display: none;
-  }
-}
-.wk-catalog-card {
-  container-type: inline-size;
-  container-name: wk-cat;
+.wk-shell-retry:hover {
+  border-color: var(--wk-border-strong);
+  background: var(--wk-row-hover);
 }
 
 /* ─── Loading / error states ─── */
@@ -1526,195 +1799,7 @@
   color: var(--wk-wikilink);
 }
 
-/* ─── v1.3 dynamic sections ─── */
-.wk-section-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.wk-section-header {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: default;
-}
-.wk-section-count,
-.wk-tree-count {
-  color: var(--wk-text-tertiary);
-  font-family: var(--wk-mono);
-  font-size: var(--text-2xs);
-  font-weight: 500;
-}
-.wk-section-discovered {
-  cursor: pointer;
-}
-.wk-section-discovered:hover .wk-section-title {
-  color: var(--wk-text);
-}
-.wk-section-marker {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--wk-text-tertiary);
-  opacity: 0.7;
-}
-.wk-section-new {
-  font-family: var(--wk-chrome);
-  font-size: 9px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 1px 5px;
-  border-radius: 3px;
-  /* Accent-tinted "NEW" pill. Light: pale tertiary wash + deep tertiary
-     ink (well past 4.5:1). Dark themes re-tint this in their own files
-     because the pale accent surface would flash near-white on a dark
-     ground; see nex-dark.css / noir-gold.css. */
-  background: var(--accent-bg);
-  color: var(--accent-warm);
-}
-.wk-section-empty {
-  padding: 4px 10px;
-  color: var(--wk-text-tertiary);
-  font-size: 11px;
-  font-family: var(--wk-chrome);
-}
-.wk-nav-sidebar ul.wk-tree,
-.wk-nav-sidebar .wk-tree-children {
-  gap: 0;
-}
-.wk-tree-folder {
-  display: flex;
-  flex-direction: column;
-}
-.wk-tree-folder-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  min-height: 28px;
-  padding: 5px 10px;
-  color: var(--wk-text-muted);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-family: var(--wk-chrome);
-  font-size: 12px;
-  line-height: 1.3;
-  text-align: left;
-}
-.wk-tree-folder-btn:hover {
-  background: var(--wk-paper-dark);
-  color: var(--wk-text);
-}
-.wk-tree-folder-btn:focus-visible,
-.wk-tree-article a:focus-visible {
-  outline: 2px solid var(--wk-wikilink);
-  outline-offset: 1px;
-}
-.wk-tree-chevron {
-  width: 10px;
-  color: var(--wk-text-tertiary);
-  font-family: var(--wk-mono);
-  font-size: var(--text-2xs);
-  line-height: 1;
-  text-align: center;
-}
-.wk-tree-folder-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wk-tree-count {
-  margin-left: auto;
-}
-.wk-tree-children {
-  margin-left: 12px;
-  padding-left: 8px;
-  border-left: 1px solid var(--wk-border-light);
-}
-.wk-tree-article-link {
-  gap: 6px;
-}
-.wk-tree-article-link.is-nested {
-  padding-left: 8px;
-}
-.wk-tree-file-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--wk-border-strong);
-  flex: 0 0 auto;
-}
-.wk-tree-article-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wk-section-banner {
-  margin: 6px 0 8px;
-  padding: 8px 10px;
-  background: var(--wk-amber-bg);
-  border-left: 3px solid var(--wk-amber);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 11px;
-  font-family: var(--wk-chrome);
-  color: var(--wk-text);
-  line-height: 1.4;
-}
-.wk-section-banner-body {
-  flex: 1;
-}
-.wk-section-banner-dismiss {
-  background: transparent;
-  border: none;
-  color: var(--wk-text-tertiary);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 2px;
-}
-.wk-section-banner-dismiss:hover {
-  color: var(--wk-text);
-}
-
-/* Catalog header audit link */
-.wk-catalog-audit-link {
-  font-family: inherit;
-  color: var(--wk-wikilink);
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font-size: inherit;
-  text-decoration: underline dashed;
-  text-underline-offset: 2px;
-}
-.wk-catalog-audit-link:hover {
-  text-decoration-style: solid;
-}
-
-/* ─── New-article button + Edit source editor (v1.3 human-editable wiki) ─── */
-.wk-catalog-new-link {
-  font-family: inherit;
-  color: var(--wk-wikilink);
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font-size: inherit;
-  text-decoration: underline dashed;
-  text-underline-offset: 2px;
-}
-.wk-catalog-new-link:hover {
-  text-decoration-style: solid;
-}
-
+/* ─── Edit source editor (v1.3 human-editable wiki) ─── */
 .wk-editor {
   display: flex;
   flex-direction: column;
@@ -1910,32 +1995,47 @@
   font-size: 13px;
 }
 
-/* Article-view toolbar: holds the read-mode Delete affordance so a reader can
-   remove a page without hunting through the sidebar tree's kebab. */
+/* Article-view toolbar: the read-mode page actions (Request changes via AI,
+   Delete page). Each control wraps itself in .wk-article-toolbar; the
+   .wk-article-actions row in the article header lays consecutive toolbars
+   out side by side — no floats, so they can never overlap the breadcrumb. */
 .wk-article-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin: 6px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .wk-article-delete-btn {
   font-family: var(--wk-chrome);
   font-size: 12px;
+  font-weight: 500;
   padding: 4px 12px;
   border: 1px solid var(--wk-border);
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--wk-wikilink-broken);
+  background: var(--wk-surface);
+  color: var(--wk-text-muted);
   cursor: pointer;
   transition:
     background-color 0.12s,
-    border-color 0.12s;
+    border-color 0.12s,
+    color 0.12s;
 }
 .wk-article-delete-btn:hover {
-  background: var(--wk-paper-dark);
+  background: var(--wk-row-hover);
+  color: var(--wk-wikilink-broken);
   border-color: var(--wk-wikilink-broken);
 }
 .wk-article-delete-btn:focus-visible {
   outline: 2px solid var(--wk-wikilink-broken);
+  outline-offset: 1px;
+}
+/* The librarian "Request changes via AI" trigger shares the delete button's
+   shell but keeps neutral ink that warms to the accent instead of red. */
+.wk-article-ai-change-btn:hover {
+  color: var(--wk-accent);
+  border-color: var(--wk-accent);
+}
+.wk-article-ai-change-btn:focus-visible {
+  outline: 2px solid var(--wk-accent);
   outline-offset: 1px;
 }
 
@@ -2774,28 +2874,29 @@
   min-width: 0;
 }
 
-/* The ProseMirror surface. Mirrors `.wk-article-body` so the rich editor and
-   the preview pane read the same — serif body on paper. */
+/* The ProseMirror surface. Mirrors `.wk-article-body` exactly (same tokens),
+   so read and edit views are near-identical — the docmost contract. */
 .wk-tiptap-editor__content .ProseMirror {
-  font-family: var(--wk-body-serif);
-  font-size: 18px;
-  line-height: 1.72;
+  font-family: var(--wk-body-font);
+  font-size: var(--wk-body-size);
+  line-height: var(--wk-body-lh);
   color: var(--wk-text);
   background: var(--wk-paper);
   border: 1px solid var(--wk-border);
-  padding: 18px 20px;
+  border-radius: var(--radius-md, 8px);
+  padding: 18px 24px;
   min-height: 480px;
   outline: none;
   box-sizing: border-box;
 }
 .wk-tiptap-editor__content .ProseMirror:focus-within {
-  border-color: var(--wk-wikilink);
+  border-color: var(--wk-accent);
 }
 .wk-tiptap-editor__content .ProseMirror > * + * {
   margin-top: 0;
 }
 .wk-tiptap-editor__content .ProseMirror p {
-  margin: 0 0 18px;
+  margin: 0.5em 0;
 }
 
 /* Empty-document placeholder (Tiptap Placeholder extension). */
@@ -2808,47 +2909,50 @@
 }
 
 .wk-tiptap-editor__content .ProseMirror h1 {
-  font-family: var(--wk-display);
-  font-size: 34px;
-  font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  margin: 36px 0 16px;
+  font-family: var(--wk-heading-font);
+  font-size: 1.875rem; /* docmost in-content h1 */
+  font-weight: var(--wk-heading-weight);
+  line-height: var(--wk-heading-lh);
+  letter-spacing: var(--wk-heading-track);
+  margin: 1.875rem 0 0.5rem;
 }
 .wk-tiptap-editor__content .ProseMirror h2 {
-  font-family: var(--wk-display);
-  font-size: 28px;
-  font-weight: 500;
-  line-height: 1.2;
-  margin: 40px 0 14px;
-  letter-spacing: -0.01em;
-  border-bottom: 1px solid var(--wk-border);
-  padding-bottom: 6px;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h2-size);
+  font-weight: var(--wk-heading-weight);
+  line-height: var(--wk-heading-lh);
+  margin: 1.5rem 0 0.5rem;
+  letter-spacing: var(--wk-heading-track);
 }
 .wk-tiptap-editor__content .ProseMirror h3 {
-  font-family: var(--wk-display);
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 1.3;
-  margin: 28px 0 10px;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h3-size);
+  font-weight: var(--wk-heading-weight);
+  line-height: var(--wk-heading-lh);
+  letter-spacing: var(--wk-heading-track);
+  margin: 1.25rem 0 0.5rem;
 }
 .wk-tiptap-editor__content .ProseMirror h4 {
-  font-family: var(--wk-display);
-  font-size: 17px;
-  font-weight: 600;
-  margin: 22px 0 8px;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h4-size);
+  font-weight: var(--wk-heading-weight);
+  line-height: 1.1;
+  margin: 1.125rem 0 0.5rem;
 }
 .wk-tiptap-editor__content .ProseMirror ul,
 .wk-tiptap-editor__content .ProseMirror ol {
-  margin: 0 0 18px 24px;
+  margin: 0.25rem 0 0.75rem 24px;
   padding: 0;
 }
 .wk-tiptap-editor__content .ProseMirror li {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+.wk-tiptap-editor__content .ProseMirror li p {
+  margin: 0;
 }
 .wk-tiptap-editor__content .ProseMirror blockquote {
-  margin: 0 0 18px;
-  padding-left: 16px;
+  margin: 0.75em 0;
+  padding-left: 1rem;
   border-left: 3px solid var(--wk-border-strong);
   color: var(--wk-text-muted);
 }
@@ -3129,44 +3233,7 @@
   font-weight: 600;
 }
 
-/* ─── Slice 2: wiki drag-and-drop file tree ─── */
-.wk-nav-mode-toggle {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  margin-bottom: 8px;
-  background: var(--wk-paper-dark);
-  border: 1px solid var(--wk-border);
-  border-radius: var(--radius-sm);
-}
-.wk-nav-mode-tab {
-  flex: 1;
-  font-family: var(--wk-chrome);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: calc(var(--radius-sm) - 1px);
-  background: transparent;
-  color: var(--wk-text-muted);
-  cursor: pointer;
-  transition:
-    background-color 0.15s,
-    color 0.15s;
-}
-.wk-nav-mode-tab:hover {
-  color: var(--wk-text);
-}
-.wk-nav-mode-tab.is-active {
-  background: var(--wk-surface);
-  color: var(--wk-text);
-  box-shadow: var(--wk-shadow-popover);
-}
-.wk-nav-mode-tab:focus-visible {
-  outline: 2px solid var(--wk-wikilink);
-  outline-offset: 1px;
-}
-
+/* ─── The page tree (primary navigation) ─── */
 .wk-tree2 {
   display: flex;
   flex-direction: column;
@@ -3223,8 +3290,8 @@
     border-color 0.15s;
 }
 .wk-tree2-new:hover {
-  background: var(--wk-amber-bg);
-  border-color: var(--wk-amber);
+  background: var(--wk-row-hover);
+  border-color: var(--wk-border-strong);
 }
 .wk-tree2-new:focus-visible {
   outline: 2px solid var(--wk-wikilink);
@@ -3316,13 +3383,18 @@
   min-height: 28px;
   border-radius: var(--radius-sm);
 }
+/* Row states — docmost tree: hover/selected are gray-step washes (their
+   gray-3 / dark-6), drop targets carry the accent. */
+.wk-tree2-row-inner:hover {
+  background: var(--wk-row-hover);
+}
 .wk-tree2-row.is-selected .wk-tree2-row-inner {
-  background: var(--wk-amber-bg);
+  background: var(--wk-row-active);
 }
 .wk-tree2-row.is-drop-target .wk-tree2-row-inner {
-  outline: 2px dashed var(--wk-amber);
+  outline: 2px solid var(--wk-accent);
   outline-offset: -2px;
-  background: var(--wk-amber-banner);
+  background: color-mix(in srgb, var(--wk-accent) 12%, transparent);
 }
 .wk-tree2-row.is-busy .wk-tree2-row-inner {
   opacity: 0.6;
@@ -3345,6 +3417,7 @@
 .wk-tree2-caret--leaf {
   cursor: default;
 }
+/* Row label — docmost tree text: 14px/500 muted ink, full ink when active. */
 .wk-tree2-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -3357,7 +3430,8 @@
   border-radius: var(--radius-sm);
   color: var(--wk-text-muted);
   font-family: var(--wk-chrome);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1.3;
   text-align: left;
   cursor: pointer;
@@ -3388,9 +3462,12 @@
   width: 15px;
   height: 15px;
 }
-/* Folders carry a touch of the warm accent so structure reads at a glance. */
+/* Folders (the root "spaces") read slightly stronger than leaf pages. */
 .wk-tree2-row[data-node-type="dir"] .wk-tree2-icon {
-  color: var(--wk-amber);
+  color: var(--wk-text-muted);
+}
+.wk-tree2-row[data-node-type="dir"] .wk-tree2-label {
+  color: var(--wk-text);
 }
 .wk-tree2-row[aria-selected="true"] .wk-tree2-icon,
 .wk-tree2-row.is-selected .wk-tree2-icon {
@@ -3719,4 +3796,249 @@
 }
 .wk-diff-context {
   color: var(--wk-text-muted);
+}
+
+/* ─── Overview page (docmost space-home register: a quiet landing beside
+   the always-visible page tree — title, search, recently updated) ─── */
+.wk-home {
+  padding: 0 48px 120px;
+}
+.wk-home-masthead {
+  max-width: var(--wk-article-max);
+  margin: 48px auto 32px;
+  text-align: left;
+}
+.wk-home-title {
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h1-size);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: var(--wk-heading-track);
+  margin: 0 0 6px;
+  color: var(--wk-text);
+}
+.wk-home-tagline {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  color: var(--wk-text-muted);
+  margin: 0 0 24px;
+}
+.wk-home-search {
+  position: relative;
+  text-align: left;
+}
+.wk-home-search-input {
+  width: 100%;
+  padding: 10px 16px;
+  font-family: var(--wk-chrome);
+  font-size: 15px;
+  color: var(--wk-text);
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-md, 8px);
+  outline: none;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+.wk-home-search-input:focus {
+  border-color: var(--wk-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wk-accent) 20%, transparent);
+}
+.wk-home-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border-strong);
+  border-radius: 6px;
+  box-shadow: var(--wk-shadow-popover);
+}
+.wk-home-suggestions a {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  color: var(--wk-text);
+}
+.wk-home-suggestions a:hover {
+  background: var(--wk-paper-dark);
+}
+.wk-home-suggestions .wk-suggestion-group {
+  color: var(--wk-text-tertiary);
+  font-size: 12px;
+}
+.wk-home-suggestions-foot button {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--wk-border-light);
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-wikilink);
+  cursor: pointer;
+}
+.wk-home-results {
+  margin-top: 24px;
+  text-align: left;
+  font-family: var(--wk-chrome);
+}
+.wk-home-results h2 {
+  font-family: var(--wk-title-serif);
+  font-size: 20px;
+  font-weight: 400;
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 4px;
+}
+.wk-home-results ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-home-results li {
+  margin: 0 0 10px;
+}
+.wk-home-results a {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  display: block;
+}
+.wk-home-snippet {
+  font-size: 13px;
+  color: var(--wk-text-muted);
+}
+.wk-home-empty {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text-tertiary);
+  font-style: italic;
+}
+.wk-home-grid {
+  max-width: var(--wk-article-max);
+  margin: 0 auto;
+}
+.wk-home-card {
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-md, 8px);
+  padding: 18px 20px;
+}
+.wk-home-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--wk-border);
+  margin-bottom: 12px;
+}
+.wk-home-card h2 {
+  font-family: var(--wk-heading-font);
+  font-size: 1rem;
+  font-weight: var(--wk-heading-weight);
+  letter-spacing: var(--wk-heading-track);
+  margin: 0 0 8px;
+}
+.wk-home-card-head h2 {
+  margin: 0 0 8px;
+}
+.wk-home-new-btn {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  background: var(--wk-surface);
+  color: var(--wk-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
+}
+.wk-home-new-btn:hover {
+  background: var(--wk-row-hover);
+  border-color: var(--wk-border-strong);
+}
+.wk-home-new-btn:focus-visible {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: 1px;
+}
+.wk-home-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+}
+.wk-home-recent li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--wk-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wk-home-recent li:last-child {
+  border-bottom: 0;
+}
+.wk-home-recent-msg {
+  color: var(--wk-text);
+}
+.wk-home-recent-meta {
+  color: var(--wk-text-tertiary);
+  font-size: 12px;
+}
+.wk-home-recent-path {
+  font-family: var(--wk-mono);
+  font-size: 11px;
+}
+
+/* ─── Category index pages ─── */
+.wk-category-page {
+  padding: 0 48px 120px;
+  font-family: var(--wk-chrome);
+}
+.wk-category-inner {
+  max-width: var(--wk-article-max);
+  margin: 24px auto 0;
+}
+.wk-category-summary {
+  font-size: 14px;
+  color: var(--wk-text-muted);
+  margin: 0 0 20px;
+}
+.wk-category-letter h2 {
+  font-family: var(--wk-title-serif);
+  font-size: 22px;
+  font-weight: 400;
+  margin: 18px 0 8px;
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 2px;
+}
+.wk-category-letter ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2;
+  column-gap: 40px;
+  font-size: 14px;
+}
+@media (max-width: 860px) {
+  .wk-category-letter ul {
+    columns: 1;
+  }
+}
+.wk-category-letter li {
+  padding: 3px 0;
+  break-inside: avoid;
 }

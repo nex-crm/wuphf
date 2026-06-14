@@ -15,6 +15,11 @@ import {
   type TaskActivityEvent,
   type TaskActivityEventKind,
 } from "../../api/tasks";
+import {
+  humanizeLifecycleState,
+  humanizeStateTokens,
+  humanizeTurnOutcome,
+} from "../../lib/humanizeActivity";
 import { router } from "../../lib/router";
 
 interface TaskActivityFeedProps {
@@ -40,6 +45,7 @@ const FEED_KINDS: ReadonlySet<TaskActivityEventKind> = new Set([
   "lifecycle",
   "request",
   "sub_issue",
+  "turn",
 ]);
 
 export function TaskActivityFeed({ taskId }: TaskActivityFeedProps) {
@@ -154,22 +160,53 @@ function ActivityRow({ event }: { event: TaskActivityEvent }) {
         {event.kind === "lifecycle" && event.lifecycle ? (
           <div className="issue-activity-feed-lifecycle">
             <span className="issue-activity-feed-state">
-              {event.lifecycle.from || "—"}
+              {humanizeLifecycleState(event.lifecycle.from ?? "") || "—"}
             </span>
             <ArrowRight width={12} height={12} aria-hidden="true" />
             <span className="issue-activity-feed-state">
-              {event.lifecycle.to || "—"}
+              {humanizeLifecycleState(event.lifecycle.to ?? "") || "—"}
             </span>
           </div>
         ) : null}
-        {event.summary ? (
-          <p className="issue-activity-feed-summary">{event.summary}</p>
-        ) : null}
+        <ActivitySummary event={event} />
         {event.kind === "request" && event.request ? (
           <RequestResolution req={event.request} />
         ) : null}
+        {event.kind === "turn" ? (
+          <TurnContextList items={event.context_used} />
+        ) : null}
       </div>
     </li>
+  );
+}
+
+/**
+ * Render-boundary humanization (ten-out-of-ten E1): the activity feed is a
+ * human surface, so raw runtime exhaust never renders verbatim. Settled
+ * turn outcomes route through humanizeTurnOutcome ("signal: killed:
+ * signal: killed" → an honest one-liner, v3 [18:14:10]); other summaries
+ * get lifecycle enum tokens replaced with plain labels.
+ */
+function ActivitySummary({ event }: { event: TaskActivityEvent }) {
+  const raw = event.summary?.trim() ?? "";
+  if (!raw) return null;
+  const text =
+    event.kind === "turn" ? humanizeTurnOutcome(raw) : humanizeStateTokens(raw);
+  if (!text) return null;
+  return <p className="issue-activity-feed-summary">{text}</p>;
+}
+
+/**
+ * B4 context transparency: the knowledge-item ids a turn's work packet
+ * injected ("learning:<id>", "wiki:<ref>", ...), recorded deterministically
+ * at packet-build time and surfaced under the turn's activity entry.
+ */
+function TurnContextList({ items }: { items?: string[] }) {
+  if (!items || items.length === 0) {
+    return null;
+  }
+  return (
+    <p className="issue-activity-feed-context">context: {items.join(", ")}</p>
   );
 }
 
@@ -215,8 +252,10 @@ function iconForKind(kind: TaskActivityEventKind) {
       return <HelpCircle width={14} height={14} aria-hidden="true" />;
     case "sub_issue":
       return <GitFork width={14} height={14} aria-hidden="true" />;
-    case "action":
+    case "turn":
+      return <Refresh width={14} height={14} aria-hidden="true" />;
     default:
+      // "action" and any future kinds.
       return <CheckCircle width={14} height={14} aria-hidden="true" />;
   }
 }
@@ -233,8 +272,10 @@ function verbForEvent(event: TaskActivityEvent): string {
       return "asked";
     case "sub_issue":
       return "added a sub-task";
-    case "action":
+    case "turn":
+      return "ran a turn";
     default:
+      // "action" and any future kinds.
       return event.summary || "took action";
   }
 }

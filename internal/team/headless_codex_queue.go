@@ -104,6 +104,14 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	if turn.EnqueuedAt.IsZero() {
 		turn.EnqueuedAt = time.Now()
 	}
+	// B4 pre-task bookend: the FIRST headless-turn enqueue for an
+	// (agent, task) pair queues the agent's pre-task research note
+	// (task_notebook_bookends.go). Only the in-memory dedupe runs on this
+	// path; the broker reads + notebook write happen in a queued goroutine
+	// and ride the wiki worker queue.
+	if turn.TaskID != "" {
+		l.queueTaskNotebookPreBookend(slug, turn.TaskID)
+	}
 
 	var cancel context.CancelFunc
 	var staleAge time.Duration
@@ -454,9 +462,19 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 				l.recoverFailedHeadlessTurn(slug, exhaustedTurn, startedAt, err.Error())
 			default:
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
-				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
-				l.recoverFailedHeadlessTurn(slug, turn, startedAt, err.Error())
+				detail := err.Error()
+				if isTurnKilledError(err) {
+					// Killed turn (SIGKILL/SIGTERM): post one honest
+					// system note and humanize the detail that flows
+					// into progress + recovery, so the user never has
+					// to parse raw `signal: killed` exhaust (Wave F2).
+					detail = turnKilledHumanDetail(slug)
+					l.postTurnKilledNote(slug, turn.Channel)
+				}
+				l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), headlessProgressMetrics{})
+				l.recoverFailedHeadlessTurn(slug, turn, startedAt, detail)
 			}
+			l.recordTaskLedgerEntry(slug, turn, startedAt, err)
 			l.finishHeadlessTurn(lane)
 		}()
 		l.headless.mu.Lock()
@@ -716,12 +734,13 @@ func (l *Launcher) beginHeadlessCodexTurn(lane headlessLane) (headlessCodexTurn,
 	// the agent has several tasks in flight at once. See headless_runtime.go.
 	turnCtx = withHeadlessTurnTaskID(turnCtx, turn.TaskID)
 	startedAt := time.Now()
-	workspaceDir := ""
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug, turn.TaskID); worktreeDir != "" {
-		workspaceDir = worktreeDir
-	} else if codingAgentSlugs[slug] {
-		workspaceDir = normalizeHeadlessWorkspaceDir(l.cwd)
-	}
+	// Launch-param record (V3-N5): the active turn carries the working
+	// directory the runner will execute in — the task worktree when this
+	// turn's task has one, else the agent's scratch dir inside the office
+	// runtime home. Never the broker process launch cwd. The recovery
+	// durability guard keys off the snapshot delta; a non-git scratch dir
+	// snapshots to "" so it never trips that guard.
+	workspaceDir, _ := l.headlessTurnWorkspace(slug, turn.TaskID)
 	l.headless.active[lane] = &headlessCodexActiveTurn{
 		Turn:              turn,
 		StartedAt:         startedAt,

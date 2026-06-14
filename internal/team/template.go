@@ -12,12 +12,11 @@ import (
 )
 
 type generatedMemberTemplate struct {
-	Slug           string   `json:"slug"`
-	Name           string   `json:"name"`
-	Role           string   `json:"role"`
-	Expertise      []string `json:"expertise"`
-	Personality    string   `json:"personality"`
-	PermissionMode string   `json:"permission_mode"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role"`
+	Expertise   []string `json:"expertise"`
+	Personality string   `json:"personality"`
 	// Provider and Model are CEO suggestions for the agent's runtime. The
 	// AgentWizard pre-fills its picker from these when the suggested
 	// provider is in the install's registered LLM provider list (i.e. a
@@ -50,7 +49,6 @@ Required schema:
   "role": "Role / title",
   "expertise": ["area", "area"],
   "personality": "one short paragraph",
-  "permission_mode": "plan",
   "provider": "claude-code | codex | opencode | mlx-lm | ollama | exo",
   "model": "runtime-specific model identifier or empty"
 }
@@ -60,7 +58,6 @@ Constraints:
 - Keep the teammate narrow and domain-specific.
 - Pick a role that complements the existing office rather than overlapping heavily.
 - If the prompt is vague, still make a crisp decision.
-- permission_mode should usually be "plan" unless the role clearly needs autonomous editing/coding.
 - "provider" is the LLM runtime the agent should run on. Pick one of:
   claude-code, codex, opencode (cloud) or mlx-lm, ollama, exo (local).
   Never suggest "openclaw", "openclaw-http", or "hermes-agent" — those are
@@ -104,9 +101,6 @@ func parseGeneratedMemberTemplate(raw string) (generatedMemberTemplate, error) {
 	}
 	if tmpl.Personality == "" {
 		tmpl.Personality = inferOfficePersonality(tmpl.Slug, tmpl.Role)
-	}
-	if tmpl.PermissionMode == "" {
-		tmpl.PermissionMode = "plan"
 	}
 	// Sanitize provider/model: drop suggestions that name a gateway kind so
 	// the wizard never has to handle them. Per-agent gateway bindings are

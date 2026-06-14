@@ -12,7 +12,7 @@ const BASE = {
   task_id: "OFFICE-7",
   title: "Ship the migration",
   owner: "pam",
-  from_state: "planning",
+  from_state: "drafting",
   to_state: "in_progress",
   transition: "started" as const,
 };
@@ -30,7 +30,7 @@ describe("TaskLifecycleCard", () => {
     expect(card.tagName).toBe("BUTTON");
     expect(card).not.toHaveAttribute("data-static");
     expect(card.textContent).toMatch(/Open →/);
-    expect(card.textContent).toMatch(/planning → in_progress/);
+    expect(card.textContent).toMatch(/Parked → In progress/);
 
     fireEvent.click(card);
     expect(navigate).toHaveBeenCalledWith({
@@ -48,9 +48,27 @@ describe("TaskLifecycleCard", () => {
     expect(card.className).toMatch(/issue-lifecycle-card--static/);
     expect(card.textContent).not.toMatch(/Open →/);
     // The transition itself is still surfaced as inline history.
-    expect(card.textContent).toMatch(/planning → in_progress/);
+    expect(card.textContent).toMatch(/Parked → In progress/);
 
     fireEvent.click(card);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("humanizes lifecycle enums in the transition meta (E1)", () => {
+    // ICP-eval v3 [17:33:18]: "running → blocked_on_pr_merge" rendered raw
+    // on a chat card — engineering jargon at the human boundary.
+    render(
+      <TaskLifecycleCard
+        payload={{
+          ...BASE,
+          from_state: "running",
+          to_state: "blocked_on_pr_merge",
+          transition: "blocked",
+        }}
+      />,
+    );
+    const card = screen.getByTestId("issue-lifecycle-card");
+    expect(card.textContent).toMatch(/Running →\s*Blocked on review merge/);
+    expect(card.textContent).not.toMatch(/blocked_on_pr_merge/);
   });
 });

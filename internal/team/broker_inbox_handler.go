@@ -156,6 +156,15 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	var packetCopy DecisionPacket
 	if packet != nil {
 		packetCopy = *packet
+		// Read-time coherence: the detail surface renders the packet's
+		// lifecycleState while the board renders the task's. Serve the
+		// task's live typed state so the two endpoints can never disagree
+		// even if a write path missed the packet re-stamp (ICP-eval v3
+		// [20:08:01]: board "approved" vs task page "drafting" for the
+		// same task).
+		if taskSnapshot.LifecycleState != "" {
+			packetCopy.LifecycleState = taskSnapshot.LifecycleState
+		}
 	}
 	b.mu.Unlock()
 
@@ -446,6 +455,33 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 	if err := b.recordTaskDecisionInternal(id, action, dActor, comment); err != nil {
 		if errors.Is(err, ErrUnknownDecisionAction) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrHumanObjectionOpen) {
+			// Human-sovereignty gate: a non-human approve hit an open
+			// human request-changes objection. 409 (not 500) with the
+			// full message so the blocked agent reads whose "no" stands
+			// and how to proceed.
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		// Truthful-approve gates (artifact-required, approve-on-running)
+		// surface as typed TaskMutationErrors. Map them to the same status
+		// table the /tasks mutation endpoint uses and carry the full
+		// message — a silent 500 here is exactly the "dead button with no
+		// rendered error" failure the v3 eval graded ([18:03], [19:04]).
+		var mutationErr *TaskMutationError
+		if errors.As(err, &mutationErr) {
+			status := http.StatusConflict
+			switch mutationErr.Kind {
+			case TaskMutationInvalid:
+				status = http.StatusBadRequest
+			case TaskMutationForbidden:
+				status = http.StatusForbidden
+			case TaskMutationNotFound:
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, map[string]string{"error": mutationErr.Message})
 			return
 		}
 		log.Printf("broker: record decision task=%q action=%q: %v", id, action, err)

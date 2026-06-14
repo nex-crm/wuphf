@@ -413,10 +413,8 @@ func TestPromptBuilder_VisualArtifactSelectivityRulePresentOnEverySurface(t *tes
 		"Artifact turns: AT MOST two chat messages",
 		"Non-artifact turns: AT MOST one chat message",
 		"No plan preamble",
-		// Unsolicited-tools ban — the hard ban on skill/task/wiki creation.
+		// Unsolicited-tools ban — the hard ban on task/wiki creation.
 		"DO NOT CALL these tools without an explicit human request",
-		"team_skill_create",
-		"make this a skill",
 		"team_task create / complete",
 		"team_wiki_write",
 		"save to wiki",
@@ -521,7 +519,7 @@ func TestPromptBuilder_ToolSearchAcceptanceLanguagePreserved(t *testing.T) {
 			"do it ONCE at the very start of your turn",
 			"single ToolSearch call",
 			"Load ONLY the schemas you actually plan to use",
-			"Do NOT preload team_skill_create or team_wiki_write",
+			"Do NOT preload team_wiki_write",
 			"Never call ToolSearch a second time in the same turn",
 			"Do NOT narrate the tool-loading process",
 		} {
@@ -543,9 +541,10 @@ func TestPromptBuilder_ToolSearchAcceptanceLanguagePreserved(t *testing.T) {
 
 func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
 	// Live demo failure 2026-05-29: after answering a coffee question, the
-	// agent called team_skill_create to codify "research-html-article" and
-	// team_task to mark a task complete. Neither was requested. Pin an
-	// explicit ban so these tools are not called for self-codification.
+	// agent self-codified a skill and called team_task to mark a task
+	// complete. Neither was requested. team_skill_create is gone entirely
+	// (core-loop R5); pin the ban on the remaining tools plus the absence
+	// of any skill-creation tool mention.
 	pb := &promptBuilder{
 		isOneOnOne:  func() bool { return false },
 		isFocusMode: func() bool { return false },
@@ -564,10 +563,8 @@ func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
 	}
 	for _, slug := range []string{"ceo", "pm"} {
 		got := pb.Build(slug)
-		// Ban must apply to all three tool families.
+		// Ban must apply to the remaining tool families.
 		for _, want := range []string{
-			"team_skill_create — ONLY when the human literally says",
-			"Answering a question well is NOT permission to codify",
 			"team_task create / complete — ONLY when the human assigned a task",
 			"Do not invent a task to mark complete after a chat answer",
 			"team_wiki_write — ONLY when the human says",
@@ -576,6 +573,9 @@ func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s prompt missing unsolicited-tool ban %q", slug, want)
 			}
+		}
+		if strings.Contains(got, "team_skill_create") {
+			t.Fatalf("%s prompt still mentions team_skill_create — the tool was removed", slug)
 		}
 	}
 }
@@ -979,6 +979,133 @@ func TestVisualArtifactForcingBlock_CoversIssueSpecs(t *testing.T) {
 				"visualArtifactForcingBlock missing required Issue-spec language %q\n--- got ---\n%s",
 				want, got,
 			)
+		}
+	}
+}
+
+// TestPromptBuilder_PoliciesFilteredByAgentAssignment pins the B3
+// always-loaded contract for policies: a policy scoped to another agent
+// stays OUT of this agent's prompt; nil-scope (all agents) and own-scope
+// policies are rendered.
+func TestPromptBuilder_PoliciesFilteredByAgentAssignment(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			}
+		},
+		policies: func() []officePolicy {
+			return []officePolicy{
+				{ID: "a", Rule: "applies to everyone"},
+				{ID: "b", Rule: "eng-only deploy checklist", Agents: []string{"eng"}},
+				{ID: "c", Rule: "ceo-only hiring review", Agents: []string{"ceo"}},
+			}
+		},
+		nameFor: func(slug string) string { return slug },
+	}
+
+	eng := pb.Build("eng")
+	if !strings.Contains(eng, "applies to everyone") || !strings.Contains(eng, "eng-only deploy checklist") {
+		t.Fatalf("eng prompt must carry all-agents + eng-scoped policies:\n%s", eng)
+	}
+	if strings.Contains(eng, "ceo-only hiring review") {
+		t.Fatalf("eng prompt must NOT carry a policy scoped to another agent")
+	}
+
+	ceo := pb.Build("ceo")
+	if !strings.Contains(ceo, "ceo-only hiring review") || strings.Contains(ceo, "eng-only deploy checklist") {
+		t.Fatalf("ceo prompt scope filter broken:\n%s", ceo)
+	}
+}
+
+// TestPromptBuilder_GroundingBlockOnLeadAndSpecialist pins the
+// anti-fabrication contract (ICP-eval v2 [00:47]/[00:50]: three invented
+// humans shipped in a customer QBR): both office surfaces must carry the
+// grounding rule, and the block itself must name the sourcing contract,
+// the [NEEDS CONFIRMATION] escape hatch, and the no-hits honesty rule.
+func TestPromptBuilder_GroundingBlockOnLeadAndSpecialist(t *testing.T) {
+	block := groundingBlock()
+	for _, want := range []string{
+		"== GROUNDING",
+		"RETRIEVED CONTEXT",
+		"human_interview",
+		"[NEEDS CONFIRMATION:",
+		"firing offense",
+		"no hits",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("groundingBlock missing %q", want)
+		}
+	}
+
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO", Role: "ceo"},
+				{Slug: "eng", Name: "Engineer", Role: "eng"},
+			}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+	}
+	for _, slug := range []string{"ceo", "eng"} {
+		if got := pb.Build(slug); !strings.Contains(got, "== GROUNDING") {
+			t.Errorf("prompt for %q missing the grounding block", slug)
+		}
+	}
+}
+
+// TestPromptBuilder_DestructiveVCSGuardOnLeadAndSpecialist pins the
+// destructive-git contract (ICP-eval v3 V3-N6: a human "Stop" was answered
+// with `git checkout HEAD`, destroying the session's deliverable). Both
+// office surfaces must carry the guard; the block itself must name the
+// work-discarding commands, the ask-first contract, and the Stop=pause rule.
+func TestPromptBuilder_DestructiveVCSGuardOnLeadAndSpecialist(t *testing.T) {
+	block := destructiveVCSGuardBlock()
+	for _, want := range []string{
+		"== DESTRUCTIVE GIT GUARD",
+		"push --force",
+		"what would be lost",
+		"human_interview",
+		"never yours to destroy",
+		"PAUSE and report state",
+		"do NOT revert",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("destructiveVCSGuardBlock missing %q", want)
+		}
+	}
+	// The guard is paid on every turn: keep the body under 80 words.
+	if words := len(strings.Fields(block)); words > 95 { // header + <=80-word body
+		t.Errorf("destructiveVCSGuardBlock too long: %d words", words)
+	}
+
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO", Role: "ceo"},
+				{Slug: "eng", Name: "Engineer", Role: "eng"},
+			}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+	}
+	for _, slug := range []string{"ceo", "eng"} {
+		if got := pb.Build(slug); !strings.Contains(got, "== DESTRUCTIVE GIT GUARD") {
+			t.Errorf("prompt for %q missing the destructive git guard", slug)
 		}
 	}
 }

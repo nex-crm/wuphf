@@ -3,11 +3,33 @@
  * Mirrors every method from the legacy IIFE in index.legacy.html.
  */
 
+import type { InjectedAnalyticsConfig } from "../lib/analytics";
+import { trackOn } from "../lib/analytics";
+
 const apiBase = "/api";
 let brokerDirect = "http://localhost:7890";
 let useProxy = true;
 let token: string | null = null;
 const brokerHandshakeTimeoutMs = 8000;
+
+// The analytics config the broker injects via /api-token. Captured at boot so
+// RootRoute can configure PostHog without a second round trip. Null until
+// initApi runs (or when the broker omits the block, e.g. older servers).
+let injectedAnalytics: InjectedAnalyticsConfig | null = null;
+
+/** The PostHog runtime config the broker injected at boot, if any. */
+export function getInjectedAnalyticsConfig(): InjectedAnalyticsConfig | null {
+  return injectedAnalytics;
+}
+
+/** Coarse length bucket for a message body — never the content itself. */
+function lengthBucket(text: string): "empty" | "short" | "medium" | "long" {
+  const n = text.trim().length;
+  if (n === 0) return "empty";
+  if (n < 80) return "short";
+  if (n < 400) return "medium";
+  return "long";
+}
 
 // ── Init ──
 
@@ -19,6 +41,9 @@ export async function initApi(): Promise<void> {
     token = nextToken;
     if (brokerUrl) {
       brokerDirect = String(brokerUrl).replace(/\/+$/, "");
+    }
+    if (data && typeof data.analytics === "object" && data.analytics !== null) {
+      injectedAnalytics = data.analytics as InjectedAnalyticsConfig;
     }
     useProxy = true;
   } catch {
@@ -114,6 +139,80 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Default timeout for read (GET) requests. Without it, a wedged broker
+ * left every list surface on an eternal spinner (the Notebooks tab sat
+ * on "Loading bookshelf…" for 60s+ in the v3 eval) because plain
+ * `fetch` never gives up. 20s is generous for any healthy list
+ * endpoint while still letting surfaces flip to an honest
+ * "broker not responding — retry" state. Callers with a longer-running
+ * read can pass their own `timeoutMs`.
+ */
+export const GET_TIMEOUT_MS = 20_000;
+
+interface GetOptions {
+  signal?: AbortSignal;
+  /** Override the default GET_TIMEOUT_MS for slow endpoints. */
+  timeoutMs?: number;
+}
+
+/**
+ * Builds the signal for a GET: the caller's signal when provided,
+ * otherwise a timeout signal so no read can hang forever. Exported for
+ * the regression test pinning the no-eternal-spinner contract.
+ */
+export function getRequestSignal(options?: GetOptions): AbortSignal {
+  if (options?.signal) return options.signal;
+  return AbortSignal.timeout(options?.timeoutMs ?? GET_TIMEOUT_MS);
+}
+
+function describeGetError(err: unknown): Error | null {
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return new Error("Broker not responding — request timed out.");
+  }
+  return null;
+}
+
+/**
+ * Turn a broker error body into a human-readable message. The broker
+ * answers many failures with a JSON envelope (`{"error":"wiki backend
+ * is not active"}`); rendering that envelope verbatim leaked raw JSON
+ * into every surface that shows `err.message` (the wiki did exactly
+ * that during a broker wedge). When the body is JSON carrying a
+ * sentence-shaped `error`/`message` string, surface that string as
+ * plain text — sentence-cased with a trailing period. Code-shaped
+ * values (`store_busy`, no whitespace) are NOT prose; keep the raw
+ * body so programmatic consumers and error reports stay precise.
+ */
+export function humanizeApiErrorBody(bodyText: string): string | null {
+  if (!bodyText) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const rec = parsed as Readonly<Record<string, unknown>>;
+  // Envelopes that carry payload beyond the message (e.g. the wiki 409
+  // conflict shape with current_sha/current_content) are data, not prose —
+  // callers parse them out of the message text, so leave those intact.
+  if (Object.keys(rec).some((k) => k !== "error" && k !== "message")) {
+    return null;
+  }
+  const candidate = [rec.error, rec.message].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  if (!candidate) return null;
+  const text = candidate.trim();
+  // A code-like token (no whitespace) is not a sentence — leave it alone.
+  if (!/\s/.test(text)) return null;
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -128,7 +227,10 @@ export class ApiError extends Error {
     readonly errorCode?: string | null;
     readonly retryAfter?: string | null;
   }) {
-    super(args.bodyText || `${args.status} ${args.statusText}`);
+    super(
+      humanizeApiErrorBody(args.bodyText) ??
+        (args.bodyText || `${args.status} ${args.statusText}`),
+    );
     this.name = "ApiError";
     this.status = args.status;
     this.statusText = args.statusText;
@@ -141,6 +243,7 @@ export class ApiError extends Error {
 export async function get<T = unknown>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
+  options?: GetOptions,
 ): Promise<T> {
   let url = baseURL() + path;
   if (params) {
@@ -152,7 +255,15 @@ export async function get<T = unknown>(
       .join("&");
     if (qs) url += `?${qs}`;
   }
-  const r = await fetch(url, { headers: authHeaders() });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: authHeaders(),
+      signal: getRequestSignal(options),
+    });
+  } catch (err) {
+    throw describeGetError(err) ?? err;
+  }
   if (!r.ok) {
     throw await apiErrorFromResponse(r);
   }
@@ -162,6 +273,7 @@ export async function get<T = unknown>(
 export async function getText(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
+  options?: GetOptions,
 ): Promise<string> {
   let url = baseURL() + path;
   if (params) {
@@ -173,7 +285,15 @@ export async function getText(
       .join("&");
     if (qs) url += `?${qs}`;
   }
-  const r = await fetch(url, { headers: authHeaders() });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: authHeaders(),
+      signal: getRequestSignal(options),
+    });
+  } catch (err) {
+    throw describeGetError(err) ?? err;
+  }
   if (!r.ok) {
     throw await apiErrorFromResponse(r);
   }
@@ -333,7 +453,6 @@ export interface Message {
    * Server-assigned message kind. Empty/absent for plain chat. Known kinds:
    *  - "agent_issue"        legacy agent-authored issue banner
    *  - "system_auth_error"  system-authored provider-auth failure card (#933)
-   *  - "issue_draft_section" CEO-authored issue draft section
    *  - "ceo_*"              onboarding cards (form_field, chip_row, etc.)
    * The SPA's MessageBubble dispatches on this field to pick a renderer.
    */
@@ -393,7 +512,11 @@ export function postMessage(
   };
   if (replyTo) body.reply_to = replyTo;
   if (tagged && tagged.length > 0) body.tagged = tagged;
-  return post<Message>("/messages", body);
+  return trackOn(post<Message>("/messages", body), "message_sent", {
+    is_reply: !!replyTo,
+    mention_count: tagged?.length ?? 0,
+    length_bucket: lengthBucket(content),
+  });
 }
 
 export function getThreadMessages(channel: string, threadId: string) {
@@ -483,12 +606,6 @@ export interface OfficeMember {
   task?: string;
   channel?: string;
   provider?: ProviderBinding | string;
-  /**
-   * Agent autonomy. "plan" → the agent's tasks plan-first by default (the owner
-   * runs read-only in the provider's native plan mode and waits for Approve &
-   * Start); "auto" → executes immediately. Serialized as `permission_mode`.
-   */
-  permission_mode?: string;
   /** Broker-provided: serialized as `built_in`. Built-ins cannot be removed. (CEO is guarded by a separate slug check.) */
   built_in?: boolean;
   /** Per-channel disabled state when the list is sourced from `/members?channel=…`. */
@@ -572,24 +689,36 @@ export function getChannels() {
 }
 
 export function createChannel(slug: string, name: string, description: string) {
-  return post("/channels", {
-    action: "create",
-    slug,
-    name: name || slug,
-    description,
-    created_by: "you",
-  });
+  return trackOn(
+    post("/channels", {
+      action: "create",
+      slug,
+      name: name || slug,
+      description,
+      created_by: "you",
+    }),
+    "channel_created",
+    { kind: "channel" },
+  );
 }
 
 export function generateChannel(prompt: string) {
-  return postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000);
+  return trackOn(
+    postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000),
+    "channel_created",
+    { kind: "generated" },
+  );
 }
 
 export function createDM(agentSlug: string) {
-  return post<DMChannelResponse>("/channels/dm", {
-    members: ["human", agentSlug],
-    type: "direct",
-  });
+  return trackOn(
+    post<DMChannelResponse>("/channels/dm", {
+      members: ["human", agentSlug],
+      type: "direct",
+    }),
+    "channel_created",
+    { kind: "dm" },
+  );
 }
 
 // ── Requests ──
@@ -609,10 +738,6 @@ export interface SkillSimilarRef {
 }
 
 export interface InterviewMetadata {
-  /** Set on enhance_skill_proposal interviews (PR 7 task #15). */
-  enhances_slug?: string;
-  /** Set on ambiguous-band skill_proposal interviews (PR 7 task #15). */
-  similar_to_existing?: SkillSimilarRef;
   [key: string]: unknown;
 }
 
@@ -636,10 +761,8 @@ export interface AgentRequest {
   updated_at?: string;
   /** Echoes the entity slug the request is about (e.g. a skill name). */
   reply_to?: string;
-  /** Structured metadata. Used by the enhance-existing UX (PR 7 task #14). */
+  /** Structured metadata attached by the broker (kind-specific). */
   metadata?: InterviewMetadata;
-  /** Full candidate spec on enhance_skill_proposal interviews. */
-  enhance_candidate?: Skill;
   redacted?: boolean;
   redaction_count?: number;
   redaction_reasons?: string[];
@@ -707,7 +830,9 @@ export function answerRequest(
 ) {
   const body: Record<string, string> = { id, choice_id: choiceId };
   if (customText) body.custom_text = customText;
-  return post("/requests/answer", body);
+  return trackOn(post("/requests/answer", body), "interview_answered", {
+    has_custom_text: !!customText,
+  });
 }
 
 export function cancelRequest(id: string) {
@@ -740,14 +865,18 @@ export interface CreateActionGrantInput {
 // (agent, platform, action_id) without re-prompting. Backs the approval
 // modal's "Approve & always allow" button (deterministic-integrations slice 5b).
 export function createActionGrant(input: CreateActionGrantInput) {
-  return post<{ grant: ActionGrant }>("/integrations/grants", {
-    action: "grant",
-    agent_slug: input.agentSlug,
-    platform: input.platform,
-    action_scope: input.actionScope,
-    channel: input.channel,
-    issue_id: input.issueId,
-  });
+  return trackOn(
+    post<{ grant: ActionGrant }>("/integrations/grants", {
+      action: "grant",
+      agent_slug: input.agentSlug,
+      platform: input.platform,
+      action_scope: input.actionScope,
+      channel: input.channel,
+      issue_id: input.issueId,
+    }),
+    "integration_action",
+    { action: "grant", platform: input.platform },
+  );
 }
 
 export function getActionGrants() {
@@ -755,10 +884,14 @@ export function getActionGrants() {
 }
 
 export function revokeActionGrant(id: string) {
-  return post<{ grant: ActionGrant }>("/integrations/grants", {
-    action: "revoke",
-    id,
-  });
+  return trackOn(
+    post<{ grant: ActionGrant }>("/integrations/grants", {
+      action: "revoke",
+      id,
+    }),
+    "integration_action",
+    { action: "revoke" },
+  );
 }
 
 // ── Signals / Decisions / Watchdogs / Actions ──
@@ -821,288 +954,8 @@ export {
   restoreSchedulerRevision,
   runSchedulerJob,
 } from "./scheduler";
-
-// ── Skills ──
-
-export type SkillStatus = "active" | "proposed" | "archived" | "disabled";
-
-export interface SkillMetadata {
-  wuphf?: {
-    source_articles?: string[];
-  };
-}
-
-export type OwnerAgents = string[];
-
-export interface Skill {
-  name: string;
-  title?: string;
-  description?: string;
-  source?: string;
-  content?: string;
-  trigger?: string;
-  parameters?: unknown;
-  status?: SkillStatus;
-  created_by?: string;
-  created_at?: string;
-  updated_at?: string;
-  /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
-  owner_agents?: OwnerAgents;
-  /** Set on ambiguous-band proposals by the similarity gate (PR 7 task #15). */
-  similar_to_existing?: SkillSimilarRef;
-  metadata?: SkillMetadata;
-}
-
-export type SkillsListScope = "active" | "all";
-
-export function getSkills() {
-  return get<{ skills: Skill[] }>("/skills");
-}
-
-/**
- * Fetch the skill catalog. With scope="all" the legacy /skills endpoint
- * accepts include_archived + include_disabled flags (PR 7 task #18) so the
- * Skills app can render every section (Pending / Active / Disabled /
- * Archived) from a single query — keeping body content intact for the
- * SidePanel preview and the enhance-existing patchSkill flow.
- *
- * scope="active" returns the legacy default (active + proposed + disabled,
- * archived hidden) for callers that don't need the archived bucket.
- */
-export function getSkillsList(scope: SkillsListScope = "all") {
-  const params: Record<string, string> = {};
-  if (scope === "all") {
-    params.include_archived = "true";
-    params.include_disabled = "true";
-  }
-  return get<{ skills: Skill[] }>("/skills", params);
-}
-
-export interface DisableSkillResponse {
-  skill?: Skill;
-}
-
-export function disableSkill(name: string): Promise<DisableSkillResponse> {
-  return post<DisableSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/disable`,
-    {},
-  );
-}
-
-export interface EnableSkillResponse {
-  skill?: Skill;
-}
-
-export function enableSkill(name: string): Promise<EnableSkillResponse> {
-  return post<EnableSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/enable`,
-    {},
-  );
-}
-
-export interface SkillOwnerToggleResponse {
-  skill?: Skill;
-}
-
-/**
- * Enable a specific skill for a specific agent. Adds the agent slug to
- * the skill's owner_agents list (idempotent). Only OwnerAgents members
- * can invoke a skill via team_skill_run — see the AVAILABLE SKILLS /
- * DISCOVERABLE SKILLS split in the agent prompt.
- */
-export function enableSkillForAgent(
-  name: string,
-  agent: string,
-): Promise<SkillOwnerToggleResponse> {
-  return post<SkillOwnerToggleResponse>(
-    `/skills/${encodeURIComponent(name)}/enable-for`,
-    { agent },
-  );
-}
-
-/** Remove an agent from the skill's owner_agents list (idempotent). */
-export function disableSkillForAgent(
-  name: string,
-  agent: string,
-): Promise<SkillOwnerToggleResponse> {
-  return post<SkillOwnerToggleResponse>(
-    `/skills/${encodeURIComponent(name)}/disable-for`,
-    { agent },
-  );
-}
-
-export interface RestoreArchivedSkillResponse {
-  skill?: Skill;
-}
-
-export function restoreArchivedSkill(
-  name: string,
-): Promise<RestoreArchivedSkillResponse> {
-  return post<RestoreArchivedSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/restore`,
-    {},
-  );
-}
-
-export interface ArchiveSkillResponse {
-  ok?: boolean;
-  skill?: Skill;
-}
-
-export function archiveSkill(name: string): Promise<ArchiveSkillResponse> {
-  return post<ArchiveSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/archive`,
-    {},
-  );
-}
-
-export interface InvokeSkillResult {
-  channel?: string;
-  skill?: Skill;
-  task_id?: string;
-}
-
-export function invokeSkill(
-  name: string,
-  params?: Record<string, unknown>,
-): Promise<InvokeSkillResult> {
-  return post<InvokeSkillResult>(
-    `/skills/${encodeURIComponent(name)}/invoke`,
-    params ?? {},
-  );
-}
-
-// ── Skill compile (PR 1a wiki-skill-compile) ──
-
-export interface CompileError {
-  slug: string;
-  reason: string;
-}
-
-export interface CompileResult {
-  scanned: number;
-  matched: number;
-  proposed: number;
-  deduped: number;
-  rejected_by_guard: number;
-  errors: CompileError[];
-  duration_ms: number;
-  trigger: string;
-}
-
-export interface CompileQueued {
-  queued: true;
-}
-
-export interface CompileSkipped {
-  skipped: string;
-}
-
-export type CompileResponse = CompileResult | CompileQueued | CompileSkipped;
-
-export function compileSkills(opts?: {
-  dry_run?: boolean;
-  scope_path?: string;
-}) {
-  return post<CompileResponse>("/skills/compile", opts ?? {});
-}
-
-export interface SkillCompileStats {
-  last_run_at?: string;
-  total_runs?: number;
-  total_proposed?: number;
-  total_deduped?: number;
-  total_rejected_by_guard?: number;
-  [key: string]: unknown;
-}
-
-export function getSkillCompileStats() {
-  return get<SkillCompileStats>("/skills/compile/stats");
-}
-
-export interface ApproveSkillResponse {
-  skill?: Skill;
-}
-
-export function approveSkill(name: string): Promise<ApproveSkillResponse> {
-  return post<ApproveSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/approve`,
-    {},
-  );
-}
-
-export interface RejectSkillResponse {
-  ok: boolean;
-  undo_token: string;
-  skill_name: string;
-  expires_in: number;
-}
-
-export function rejectSkill(
-  name: string,
-  reason?: string,
-): Promise<RejectSkillResponse> {
-  return post<RejectSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/reject`,
-    reason ? { reason } : {},
-  );
-}
-
-export interface UndoRejectSkillResponse {
-  skill?: Skill;
-}
-
-export function undoRejectSkill(
-  undoToken: string,
-): Promise<UndoRejectSkillResponse> {
-  return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
-    undo_token: undoToken,
-  });
-}
-
-export interface PatchSkillRequest {
-  old_string: string;
-  new_string: string;
-  replace_all?: boolean;
-}
-
-export interface PatchSkillResponse {
-  skill?: Skill;
-}
-
-/**
- * Edit-tool style find/replace patch against a skill's body.
- * Used by the enhance-existing flow (PR 7 task #14) to fold a candidate
- * proposal into an existing skill without losing provenance.
- */
-export function patchSkill(
-  name: string,
-  body: PatchSkillRequest,
-): Promise<PatchSkillResponse> {
-  return post<PatchSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/patch`,
-    body,
-  );
-}
-
-export interface EditSkillContentResponse {
-  skill?: Skill;
-}
-
-/**
- * Full SKILL.md body replacement. Caller passes the entire rendered
- * SKILL.md (frontmatter + body). The broker re-parses, re-runs the
- * safety scan with the original creator's trust level, and rewrites the
- * wiki article. Used by the full-screen skill detail editor.
- */
-export function editSkillContent(
-  name: string,
-  content: string,
-): Promise<EditSkillContentResponse> {
-  return put<EditSkillContentResponse>(`/skills/${encodeURIComponent(name)}`, {
-    content,
-  });
-}
+// ── Skills (moved to ./skills to respect the file-size budget) ──
+export * from "./skills";
 
 // ── Memory ──
 
@@ -1219,6 +1072,12 @@ export interface ConfigSnapshot {
   telegram_token_set?: boolean;
   openclaw_token_set?: boolean;
   openclaw_gateway_url?: string;
+  // Product-analytics consent (PostHog). Both default true. `analytics_configured`
+  // reports whether the broker injects a key; the frontend ORs it with its own
+  // build-time key to decide whether the toggles are meaningful to show.
+  analytics_telemetry_enabled?: boolean;
+  analytics_session_recording_enabled?: boolean;
+  analytics_configured?: boolean;
   config_path?: string;
 }
 
@@ -1255,6 +1114,9 @@ export type ConfigUpdate = Partial<{
   telegram_bot_token: string;
   openclaw_token: string;
   openclaw_gateway_url: string;
+  // Product-analytics consent toggles.
+  analytics_telemetry_enabled: boolean;
+  analytics_session_recording_enabled: boolean;
 }>;
 
 export function getConfig() {

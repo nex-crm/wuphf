@@ -139,6 +139,15 @@ type humanInterview struct {
 	RedactionCount   int      `json:"redaction_count,omitempty"`
 	RedactionReasons []string `json:"redaction_reasons,omitempty"`
 	DedupeKey        string   `json:"dedupe_key,omitempty"`
+	// AlsoAsking lists additional agent slugs subscribed to this interview's
+	// answer. When an agent raises a HUMAN-directed interview whose question
+	// is semantically similar to this still-pending one, the broker attaches
+	// that agent here instead of stacking a duplicate card (live smoke run:
+	// FIVE agents asked "which CRM?" in five separate blocking interviews).
+	// Subscribers poll the same request id, so the one human answer fans out
+	// to every asker through the existing answer-delivery path. Additive
+	// wire field (omitempty); only ever set on kind=interview requests.
+	AlsoAsking []string `json:"also_asking,omitempty"`
 	// IssueID links this request back to the parent Issue (team_task)
 	// that scopes the work. Populated by team_action_execute via the
 	// auto-resolve gate (resolveActionIssue) so every approval card has
@@ -236,13 +245,8 @@ type teamTask struct {
 	// "codex", …); Model is the runtime-specific model id. Empty means "fall
 	// back to the owner's binding, then the global default". Wire keys
 	// "provider"/"model" are additive + stable per the migration plan.
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
-	// PlanFirst records whether the task ran (or will run) the "Plan mode"
-	// planning phase before execution (Phase 5). Set from the composer's
-	// "Plan first" toggle (default ON). Used to route a parked Plan-first task
-	// into Planning on activation. Wire key "plan_first" is additive + stable.
-	PlanFirst        bool `json:"plan_first,omitempty"`
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model,omitempty"`
 	reviewState      string
 	SourceSignalID   string   `json:"source_signal_id,omitempty"`
 	SourceDecisionID string   `json:"source_decision_id,omitempty"`
@@ -282,6 +286,13 @@ type teamTask struct {
 	// for v1 the task carries its own copy so the routing logic does not
 	// need a Lane-B dependency.
 	Tags []string `json:"tags,omitempty"`
+	// WikiRefs are wiki-relative article paths explicitly linked to this task.
+	// The Slack context-packer treats them as the ONLY wiki content a first-party
+	// foreign bot may receive ("explicitly task-linked wiki refs"), never free
+	// WikiIndex.Search, which would be a retrieval-injection / over-share path.
+	// Empty for every task until something links an article, so the safe default
+	// is "no wiki egress". Wire key "wiki_refs" is additive + stable.
+	WikiRefs []string `json:"wiki_refs,omitempty"`
 	// ReviewStartedAt is the RFC3339 timestamp at which the task entered
 	// the review state. The convergence sweeper compares this against
 	// ReviewTimeoutSeconds (or the package-level default) to decide
@@ -299,16 +310,81 @@ type teamTask struct {
 	ReminderAt           string          `json:"reminder_at,omitempty"`
 	RecheckAt            string          `json:"recheck_at,omitempty"`
 	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	// IssueDraftSpec holds the four-section spec produced by the CEO draft
-	// writer (Phase 4). Stored as a typed struct rather than a JSON blob in
-	// Details so callers can read sections without re-parsing.
-	// Design choice: explicit typed field over JSON-in-Details avoids
-	// ambiguity between "a task with a long Details string" and "an issue
-	// with a structured spec".
-	IssueDraftSpec *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	CompletedAt    string          `json:"completed_at,omitempty"`
+	// Verification is the machine-checkable definition of done (U1.1,
+	// task_verification.go). When Required, the broker runs the check and
+	// blocks complete/approve until it passes. VerificationResult is the
+	// stamped outcome of the most recent run (pass or fail), kept so the
+	// failure output rides into the owner's next execution packet and the
+	// done card can show proof.
+	Verification       *TaskVerification       `json:"verification,omitempty"`
+	VerificationResult *TaskVerificationResult `json:"verification_result,omitempty"`
+	// Definition is the R4 structured intake contract (task_definition.go):
+	// goal, deliverables (+format), success criteria, and the tool/context
+	// access the work needs. Set by the CEO/human via team_task action=define
+	// before the task is staffed; rendered prominently in execution packets.
+	// Nil on legacy tasks and on work created before intake defined it.
+	Definition *TaskDefinition `json:"definition,omitempty"`
+	// Artifact is the delivered-artifact reference for the completion hook
+	// (core-loop B1, task_completion_hook.go): a wiki-relative path or
+	// visual-artifact id recorded via TaskPostRequest.ArtifactPath. Tasks
+	// WITH a Definition cannot reach done until this is set; tasks without
+	// one keep legacy behavior. Wire key "artifact" is additive.
+	Artifact string `json:"artifact,omitempty"`
+	// ChangesRequested is the LATEST request-changes verdict on this task
+	// (any reviewer — human or agent). Stored on the task itself so the
+	// feedback TEXT rides into the owner's next execution packet and wake
+	// notification ("CHANGES REQUESTED by <actor>: <text>") instead of
+	// living only in the Decision Packet feedback log, which agents
+	// reported they could not read (ICP-eval v2, J2). Refreshed on every
+	// request_changes; cleared when a HUMAN actor approves or completes
+	// the task. Wire key "changes_requested" is additive.
+	ChangesRequested *TaskReviewObjection `json:"changes_requested,omitempty"`
+	// HumanObjection is the open human "no": set when a HUMAN actor
+	// issues request_changes on this task. While non-nil, approve and
+	// complete by ANY agent — including the CEO/lead — return
+	// TaskMutationForbidden naming the objection; only a human actor can
+	// approve/complete (which clears it) or refresh it with another
+	// request_changes. The human's no is sovereign (core-loop fix family
+	// #1, ICP-eval v2 J2: "CEO self-approves over a human rejection").
+	// Wire key "human_objection" is additive.
+	HumanObjection *TaskReviewObjection `json:"human_objection,omitempty"`
+	// HumanNotePending is the latest human message posted into this task's
+	// channel while the task was running, not yet consumed by a packet
+	// build. The owner's NEXT packet renders it at the very top ("HUMAN
+	// POSTED WHILE YOU WORKED") and consumes it. When Halt is set (the
+	// message led with stop/wait/hold), submit_for_review and complete by
+	// any agent are blocked until a packet build has consumed the note —
+	// the structural backstop for the ignored mid-turn stop order
+	// (ICP-eval v2 [00:50]). Wire key "human_note_pending" is additive.
+	// Always assign a fresh struct — never mutate in place — so
+	// mutation-snapshot rollbacks stay correct.
+	HumanNotePending *TaskHumanNote `json:"human_note_pending,omitempty"`
+	// Ledger is the per-turn journal (task_ledger.go, U2.3): distilled
+	// records of what each headless turn on this task said, mutated, and
+	// how it ended. Rendered into every participant's packet as the living
+	// task brief. Bounded to taskLedgerMaxEntries.
+	Ledger []TaskLedgerEntry `json:"ledger,omitempty"`
+	// DonePostedFor is the CompletedAt timestamp the deterministic done-post
+	// (task_completion_hook.go postTaskDeliveredLocked) was emitted for.
+	// Exactly one task_delivered chat post + one Inbox notice per
+	// (task, terminal transition): re-stamps of the same landing (status
+	// flapping non-done→done within one delivery, replayed mutations) are
+	// suppressed, while a real rework cycle (request_changes clears
+	// CompletedAt, the re-landing stamps a new one) posts again. Wire key
+	// "done_posted_for" is additive (ten-out-of-ten A4, v3 6× done-messages).
+	DonePostedFor string `json:"done_posted_for,omitempty"`
+	// StalledSince is the RFC3339 timestamp at which the silent-stall
+	// watchdog (broker_task_stall.go) observed this RUNNING task had
+	// produced no observable trace — no non-system channel message, no
+	// non-system action, no ledger bump — for taskStallThreshold. Empty
+	// when the task is not stalled; cleared automatically when fresh
+	// activity lands or the task leaves running. Lifecycle-state-adjacent
+	// honesty marker (ten-out-of-ten Wave F2, v3 [19:05:30] 21-minute
+	// running-but-silent stall). Wire key "stalled_since" is additive.
+	StalledSince string `json:"stalled_since,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	CompletedAt  string `json:"completed_at,omitempty"`
 	// System marks a task as a permanent system-owned task that may not
 	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
 	// is the only current system task; it owns the #general channel so all
@@ -316,17 +392,47 @@ type teamTask struct {
 	System bool `json:"system,omitempty"`
 }
 
-// IssueDraftSpec holds the four spec sections the CEO draft writer
-// (Phase 4) produces when a user describes a first issue.
-type IssueDraftSpec struct {
-	Goal       string `json:"goal,omitempty"`
-	Context    string `json:"context,omitempty"`
-	Approach   string `json:"approach,omitempty"`
-	Acceptance string `json:"acceptance,omitempty"`
-	// DraftedAt is an RFC3339 timestamp set when the spec is written.
-	// The CEO draft writer checks DraftedAt != "" to short-circuit
-	// duplicate calls (idempotency sentinel).
-	DraftedAt string `json:"drafted_at,omitempty"`
+// TaskReviewObjection records one request-changes verdict (who, what,
+// when) directly on the task. Two task fields carry it: ChangesRequested
+// (latest verdict from anyone, for packet rendering) and HumanObjection
+// (the open human "no", for the sovereignty gate in MutateTask /
+// recordTaskDecisionInternal). Always assign a fresh struct — never
+// mutate one in place — so mutation-snapshot rollbacks stay correct.
+type TaskReviewObjection struct {
+	// Actor is the reviewer who requested the changes ("human", a
+	// "human:<slug>" session sender, or an agent slug).
+	Actor string `json:"actor"`
+	// Body is the verbatim feedback text supplied with the request.
+	Body string `json:"body,omitempty"`
+	// At is the RFC3339 timestamp the objection was raised.
+	At string `json:"at"`
+	// ArtifactHash is the content hash ("sha256:<hex>") of the task's
+	// delivered artifact at the moment changes were requested. On the next
+	// agent resubmission (submit_for_review/complete) the broker requires
+	// the artifact bytes to have CHANGED — a byte-identical "revision" is
+	// refused (gateTaskResubmissionArtifactDelta; ICP-eval v2 [00:30]:
+	// "revised and back in review" with an untouched file). Empty when the
+	// task had no artifact or the file was unreadable at request time.
+	// Additive wire key "artifact_hash"; rides teamTaskWire through the
+	// shared TaskReviewObjection pointer on changes_requested /
+	// human_objection.
+	ArtifactHash string `json:"artifact_hash,omitempty"`
+}
+
+// TaskHumanNote records one human message posted into a task's channel
+// while the task was running (teamTask.HumanNotePending). Consumed —
+// cleared — by the next packet build for the task's owner.
+type TaskHumanNote struct {
+	// From is the human sender ("human" or "human:<slug>").
+	From string `json:"from"`
+	// Body is the verbatim message text.
+	Body string `json:"body,omitempty"`
+	// At is the RFC3339 timestamp the message was posted.
+	At string `json:"at"`
+	// Halt is true when the message led with a stop token (stop / wait /
+	// hold): submit_for_review and complete by agents are blocked until a
+	// packet build consumes the note.
+	Halt bool `json:"halt,omitempty"`
 }
 
 // Status returns the persisted status string. Read accessor for callers
@@ -368,47 +474,56 @@ func (t *teamTask) Blocked() bool {
 // the on-disk and HTTP wire formats. teamTask.MarshalJSON / UnmarshalJSON
 // route through this shadow type.
 type teamTaskWire struct {
-	ID                   string          `json:"id"`
-	Channel              string          `json:"channel,omitempty"`
-	Title                string          `json:"title"`
-	Details              string          `json:"details,omitempty"`
-	Owner                string          `json:"owner,omitempty"`
-	Status               string          `json:"status"`
-	CreatedBy            string          `json:"created_by"`
-	ThreadID             string          `json:"thread_id,omitempty"`
-	TaskType             string          `json:"task_type,omitempty"`
-	PipelineID           string          `json:"pipeline_id,omitempty"`
-	PipelineStage        string          `json:"pipeline_stage,omitempty"`
-	ExecutionMode        string          `json:"execution_mode,omitempty"`
-	Effort               string          `json:"effort,omitempty"`
-	Provider             string          `json:"provider,omitempty"`
-	Model                string          `json:"model,omitempty"`
-	PlanFirst            bool            `json:"plan_first,omitempty"`
-	ReviewState          string          `json:"review_state,omitempty"`
-	SourceSignalID       string          `json:"source_signal_id,omitempty"`
-	SourceDecisionID     string          `json:"source_decision_id,omitempty"`
-	WorktreePath         string          `json:"worktree_path,omitempty"`
-	WorktreeBranch       string          `json:"worktree_branch,omitempty"`
-	DependsOn            []string        `json:"depends_on,omitempty"`
-	BlockedOn            []string        `json:"blocked_on,omitempty"`
-	ParentIssueID        string          `json:"parent_issue_id,omitempty"`
-	Blocked              bool            `json:"blocked,omitempty"`
-	LifecycleState       LifecycleState  `json:"lifecycle_state,omitempty"`
-	Reviewers            []string        `json:"reviewers,omitempty"`
-	Tags                 []string        `json:"tags,omitempty"`
-	ReviewStartedAt      string          `json:"review_started_at,omitempty"`
-	ReviewTimeoutSeconds int             `json:"review_timeout_seconds,omitempty"`
-	AckedAt              string          `json:"acked_at,omitempty"`
-	DueAt                string          `json:"due_at,omitempty"`
-	FollowUpAt           string          `json:"follow_up_at,omitempty"`
-	ReminderAt           string          `json:"reminder_at,omitempty"`
-	RecheckAt            string          `json:"recheck_at,omitempty"`
-	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	IssueDraftSpec       *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
-	CreatedAt            string          `json:"created_at"`
-	UpdatedAt            string          `json:"updated_at"`
-	CompletedAt          string          `json:"completed_at,omitempty"`
-	System               bool            `json:"system,omitempty"`
+	ID                   string                  `json:"id"`
+	Channel              string                  `json:"channel,omitempty"`
+	Title                string                  `json:"title"`
+	Details              string                  `json:"details,omitempty"`
+	Owner                string                  `json:"owner,omitempty"`
+	Status               string                  `json:"status"`
+	CreatedBy            string                  `json:"created_by"`
+	ThreadID             string                  `json:"thread_id,omitempty"`
+	TaskType             string                  `json:"task_type,omitempty"`
+	PipelineID           string                  `json:"pipeline_id,omitempty"`
+	PipelineStage        string                  `json:"pipeline_stage,omitempty"`
+	ExecutionMode        string                  `json:"execution_mode,omitempty"`
+	Effort               string                  `json:"effort,omitempty"`
+	Provider             string                  `json:"provider,omitempty"`
+	Model                string                  `json:"model,omitempty"`
+	ReviewState          string                  `json:"review_state,omitempty"`
+	SourceSignalID       string                  `json:"source_signal_id,omitempty"`
+	SourceDecisionID     string                  `json:"source_decision_id,omitempty"`
+	WorktreePath         string                  `json:"worktree_path,omitempty"`
+	WorktreeBranch       string                  `json:"worktree_branch,omitempty"`
+	DependsOn            []string                `json:"depends_on,omitempty"`
+	BlockedOn            []string                `json:"blocked_on,omitempty"`
+	ParentIssueID        string                  `json:"parent_issue_id,omitempty"`
+	Blocked              bool                    `json:"blocked,omitempty"`
+	LifecycleState       LifecycleState          `json:"lifecycle_state,omitempty"`
+	Reviewers            []string                `json:"reviewers,omitempty"`
+	Tags                 []string                `json:"tags,omitempty"`
+	WikiRefs             []string                `json:"wiki_refs,omitempty"`
+	ReviewStartedAt      string                  `json:"review_started_at,omitempty"`
+	ReviewTimeoutSeconds int                     `json:"review_timeout_seconds,omitempty"`
+	AckedAt              string                  `json:"acked_at,omitempty"`
+	DueAt                string                  `json:"due_at,omitempty"`
+	FollowUpAt           string                  `json:"follow_up_at,omitempty"`
+	ReminderAt           string                  `json:"reminder_at,omitempty"`
+	RecheckAt            string                  `json:"recheck_at,omitempty"`
+	MemoryWorkflow       *MemoryWorkflow         `json:"memory_workflow,omitempty"`
+	Verification         *TaskVerification       `json:"verification,omitempty"`
+	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
+	Definition           *TaskDefinition         `json:"definition,omitempty"`
+	Artifact             string                  `json:"artifact,omitempty"`
+	ChangesRequested     *TaskReviewObjection    `json:"changes_requested,omitempty"`
+	HumanObjection       *TaskReviewObjection    `json:"human_objection,omitempty"`
+	HumanNotePending     *TaskHumanNote          `json:"human_note_pending,omitempty"`
+	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
+	DonePostedFor        string                  `json:"done_posted_for,omitempty"`
+	StalledSince         string                  `json:"stalled_since,omitempty"`
+	CreatedAt            string                  `json:"created_at"`
+	UpdatedAt            string                  `json:"updated_at"`
+	CompletedAt          string                  `json:"completed_at,omitempty"`
+	System               bool                    `json:"system,omitempty"`
 }
 
 // MarshalJSON preserves the pre-Lane-A wire format (status/review_state/
@@ -431,7 +546,6 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		Effort:               t.Effort,
 		Provider:             t.Provider,
 		Model:                t.Model,
-		PlanFirst:            t.PlanFirst,
 		ReviewState:          t.reviewState,
 		SourceSignalID:       t.SourceSignalID,
 		SourceDecisionID:     t.SourceDecisionID,
@@ -444,6 +558,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		LifecycleState:       t.LifecycleState,
 		Reviewers:            t.Reviewers,
 		Tags:                 t.Tags,
+		WikiRefs:             t.WikiRefs,
 		ReviewStartedAt:      t.ReviewStartedAt,
 		ReviewTimeoutSeconds: t.ReviewTimeoutSeconds,
 		AckedAt:              t.AckedAt,
@@ -452,7 +567,16 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		ReminderAt:           t.ReminderAt,
 		RecheckAt:            t.RecheckAt,
 		MemoryWorkflow:       t.MemoryWorkflow,
-		IssueDraftSpec:       t.IssueDraftSpec,
+		Verification:         t.Verification,
+		VerificationResult:   t.VerificationResult,
+		Definition:           t.Definition,
+		Artifact:             t.Artifact,
+		ChangesRequested:     t.ChangesRequested,
+		HumanObjection:       t.HumanObjection,
+		HumanNotePending:     t.HumanNotePending,
+		Ledger:               t.Ledger,
+		DonePostedFor:        t.DonePostedFor,
+		StalledSince:         t.StalledSince,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
@@ -481,7 +605,6 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.Effort = w.Effort
 	t.Provider = w.Provider
 	t.Model = w.Model
-	t.PlanFirst = w.PlanFirst
 	t.reviewState = w.ReviewState
 	t.SourceSignalID = w.SourceSignalID
 	t.SourceDecisionID = w.SourceDecisionID
@@ -494,6 +617,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.blocked = w.Blocked
 	t.LifecycleState = normalizeLegacyLifecycleStateName(w.LifecycleState)
 	t.Tags = w.Tags
+	t.WikiRefs = w.WikiRefs
 	t.ReviewStartedAt = w.ReviewStartedAt
 	t.ReviewTimeoutSeconds = w.ReviewTimeoutSeconds
 	t.AckedAt = w.AckedAt
@@ -502,7 +626,16 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.ReminderAt = w.ReminderAt
 	t.RecheckAt = w.RecheckAt
 	t.MemoryWorkflow = w.MemoryWorkflow
-	t.IssueDraftSpec = w.IssueDraftSpec
+	t.Verification = w.Verification
+	t.VerificationResult = w.VerificationResult
+	t.Definition = w.Definition
+	t.Artifact = w.Artifact
+	t.ChangesRequested = w.ChangesRequested
+	t.HumanObjection = w.HumanObjection
+	t.HumanNotePending = w.HumanNotePending
+	t.Ledger = w.Ledger
+	t.DonePostedFor = w.DonePostedFor
+	t.StalledSince = w.StalledSince
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt
@@ -538,17 +671,16 @@ type teamChannel struct {
 }
 
 type officeMember struct {
-	Slug           string                   `json:"slug"`
-	Name           string                   `json:"name"`
-	Role           string                   `json:"role,omitempty"`
-	Expertise      []string                 `json:"expertise,omitempty"`
-	Personality    string                   `json:"personality,omitempty"`
-	PermissionMode string                   `json:"permission_mode,omitempty"`
-	AllowedTools   []string                 `json:"allowed_tools,omitempty"`
-	CreatedBy      string                   `json:"created_by,omitempty"`
-	CreatedAt      string                   `json:"created_at,omitempty"`
-	BuiltIn        bool                     `json:"built_in,omitempty"`
-	Provider       provider.ProviderBinding `json:"provider,omitempty"`
+	Slug         string                   `json:"slug"`
+	Name         string                   `json:"name"`
+	Role         string                   `json:"role,omitempty"`
+	Expertise    []string                 `json:"expertise,omitempty"`
+	Personality  string                   `json:"personality,omitempty"`
+	AllowedTools []string                 `json:"allowed_tools,omitempty"`
+	CreatedBy    string                   `json:"created_by,omitempty"`
+	CreatedAt    string                   `json:"created_at,omitempty"`
+	BuiltIn      bool                     `json:"built_in,omitempty"`
+	Provider     provider.ProviderBinding `json:"provider,omitempty"`
 	// Watching declares the file-glob, wiki-glob, tool-name, and task-tag
 	// categories this agent should be auto-assigned as a reviewer for when
 	// a task enters review. See broker_reviewer_routing.go (Lane D) for
@@ -696,15 +828,14 @@ type teamSkill struct {
 	// RelatedSkills lists slugs of other skills this skill overlaps with.
 	// Populated by the semantic dedup gate and the consolidation endpoint.
 	RelatedSkills []string `json:"related_skills,omitempty"`
-	// OwnerAgents is the set of agent slugs for which this skill is
-	// "enabled" — only enabled skills surface in the agent's AVAILABLE
-	// SKILLS prompt block and can be invoked via team_skill_run. All other
-	// active skills appear in DISCOVERABLE SKILLS; the agent must call
-	// request_skill_enable to ask the human to enable one before using it.
+	// OwnerAgents is the set of agent slugs this skill is assigned to —
+	// only assigned skills surface in an agent's AVAILABLE SKILLS prompt
+	// block and can be invoked via team_skill_run. Unassigned skills are
+	// invisible to that agent (core-loop step 8).
 	//
-	// Defaults: agent-proposed skills get OwnerAgents=[CreatedBy] so the
-	// creator can use it immediately on approval. Human-created skills get
-	// OwnerAgents=[] (must be enabled per agent via the agent Skills tab).
+	// Defaults: compilation and seeding auto-assign the whole office
+	// roster; the human or CEO narrows the set via the agent Skills tab
+	// (/skills/{name}/enable-for and /disable-for).
 	OwnerAgents []string `json:"owner_agents,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
@@ -736,6 +867,8 @@ type brokerState struct {
 	SchedulerActivity  map[string][]schedulerActivity     `json:"scheduler_activity,omitempty"`
 	SchedulerRevisions map[string][]schedulerRevision     `json:"scheduler_revisions,omitempty"`
 	Skills             []teamSkill                        `json:"skills,omitempty"`
+	SlackTaskCards     map[string]slackTaskCardRecord     `json:"slack_task_cards,omitempty"`
+	SlackSpawns        map[string]slackSpawnRecord        `json:"slack_spawns,omitempty"`
 	HumanInvites       []humanInvite                      `json:"human_invites,omitempty"`
 	HumanSessions      []humanSession                     `json:"human_sessions,omitempty"`
 	SharedMemory       map[string]map[string]string       `json:"shared_memory,omitempty"`

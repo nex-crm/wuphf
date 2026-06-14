@@ -27,10 +27,15 @@ func (l *Launcher) notifyAgentsLoop() {
 	msgs, unsubscribe := l.broker.SubscribeMessages(128)
 	defer unsubscribe()
 
+	// Note: there is intentionally NO office-wide pending-interview gate
+	// here. The old HasPendingInterview() skip silently dropped EVERY
+	// message wake while any one agent waited on a human interview —
+	// ICP-eval v3 [19:23:59]: one buried interview wedged the whole
+	// office (a librarian dead to a direct @-mention for 7+ minutes).
+	// The gate is now scoped per-target in sendChannelUpdate /
+	// sendTaskUpdate: only the ASKING agent's new turns are suppressed
+	// while its own interview is pending.
 	for msg := range msgs {
-		if l.broker.HasPendingInterview() {
-			continue
-		}
 		if msg.From == "system" {
 			continue
 		}
@@ -103,11 +108,11 @@ func (l *Launcher) notifyTaskActionsLoop() {
 	actions, unsubscribe := l.broker.SubscribeActions(128)
 	defer unsubscribe()
 
+	// Same scoping as notifyAgentsLoop: no office-wide pending-interview
+	// drop — the per-target gate lives in sendTaskUpdate.
 	for action := range actions {
-		if l.broker.HasPendingInterview() {
-			continue
-		}
-		if action.Kind != "task_created" && action.Kind != "task_updated" && action.Kind != "task_unblocked" {
+		if action.Kind != "task_created" && action.Kind != "task_updated" &&
+			action.Kind != "task_unblocked" && action.Kind != taskFollowUpActionKind {
 			continue
 		}
 		task, ok := l.taskForAction(action)
@@ -117,8 +122,11 @@ func (l *Launcher) notifyTaskActionsLoop() {
 		// Skip "done" tasks for task_created / task_updated — the agent that completed
 		// the task should send a follow-up broadcast which wakes CEO via the message
 		// loop. But for task_unblocked the task status is still "in_progress" (it was
-		// just unblocked), so we must never skip it regardless of status.
-		if action.Kind != "task_unblocked" && strings.EqualFold(strings.TrimSpace(task.status), "done") {
+		// just unblocked), so we must never skip it regardless of status. task_followup
+		// exists PRECISELY for done tasks (a human posted after delivery), so it also
+		// passes the done-skip.
+		if action.Kind != "task_unblocked" && action.Kind != taskFollowUpActionKind &&
+			strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		func() {
@@ -167,9 +175,8 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 			if evt.Kind == "member_updated" {
 				l.reconcileMemberRuntime(evt.Slug)
 			}
-			if l.broker.HasPendingInterview() {
-				return
-			}
+			// No office-wide pending-interview drop (see notifyAgentsLoop);
+			// the per-target gate lives in sendTaskUpdate.
 			l.deliverOfficeChangeNotification(evt)
 		}(evt)
 	}

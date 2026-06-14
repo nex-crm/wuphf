@@ -28,5 +28,9 @@ func TestMain(m *testing.M) {
 // needs the path string itself.
 func newTestBroker(t *testing.T) *team.Broker {
 	t.Helper()
+	// Tests in this package exercise CEO-scope tool paths with my_slug
+	// "ceo"; since the R6 hardening, claiming a privileged slug requires
+	// the trusted env identity to match — launch the fixtures AS the CEO.
+	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
 	return team.NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 }

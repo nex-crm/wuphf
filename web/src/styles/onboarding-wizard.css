@@ -410,6 +410,36 @@
   color: var(--text-secondary);
 }
 
+/* Analytics-consent block on the final step: two honest, independent toggles
+   (anonymous events, fully-masked recordings), both checked by default. Reuses
+   the keep-in-touch row primitives for the checkboxes. */
+.onboarding-analytics-consent {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  max-width: 420px;
+}
+
+.onboarding-analytics-consent-heading {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.onboarding-analytics-consent .onboarding-keep-in-touch {
+  margin-top: var(--space-3);
+}
+
+.onboarding-analytics-consent-note {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+  margin: var(--space-3) 0 0;
+}
+
 /* The first-issue right rail: a mock CEO DM that mirrors the text the user is
    writing, so they see the handoff destination before Finish. */
 .office-tour-slide-stage--first-issue {

@@ -141,3 +141,32 @@ export async function getIntegrationAudit(
   );
   return resp.events ?? [];
 }
+
+// ─── "Sign in with Composio" (broker-driven CLI flow) ───
+// The broker shells out to the official composio CLI so the user never
+// copy/pastes an API key. State machine mirrors
+// internal/team/broker_composio_signin.go.
+
+export type ComposioSigninStatus =
+  | "idle"
+  | "cli_missing"
+  | "installing"
+  | "awaiting_login"
+  | "provisioning"
+  | "done"
+  | "error";
+
+export interface ComposioSigninState {
+  status: ComposioSigninStatus;
+  auth_url?: string;
+  install_command?: string;
+  reason?: string;
+}
+
+export async function startComposioSignin(): Promise<ComposioSigninState> {
+  return post<ComposioSigninState>("/integrations/composio/signin/start", {});
+}
+
+export async function getComposioSigninStatus(): Promise<ComposioSigninState> {
+  return get<ComposioSigninState>("/integrations/composio/signin/status");
+}

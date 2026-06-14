@@ -372,9 +372,20 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
         <input
           type="search"
           className="search wk-tree2-search"
-          placeholder="Search files…"
+          placeholder="Search pages…"
+          aria-label="Search pages"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter opens the first matching page so search is a navigation
+            // surface (docmost behavior), not just a filter.
+            if (e.key !== "Enter" || query.trim().length === 0) return;
+            const firstLeaf = rows.find((row) => row.node.type !== "dir");
+            if (firstLeaf) {
+              e.preventDefault();
+              openLeaf(firstLeaf.node);
+            }
+          }}
         />
         <button
           type="button"

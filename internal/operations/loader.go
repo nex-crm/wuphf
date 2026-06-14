@@ -250,8 +250,8 @@ func validateBlueprint(repoRoot string, blueprint Blueprint) error {
 	}
 	refs := append([]string(nil), blueprint.EmployeeBlueprints...)
 	for _, agent := range blueprint.Starter.Agents {
-		if strings.TrimSpace(agent.EmployeeBlueprint) == "" && strings.TrimSpace(agent.PermissionMode) == "" {
-			return fmt.Errorf("operation blueprint %q starter agent %q requires employee_blueprint or permission_mode", blueprint.ID, agent.Slug)
+		if strings.TrimSpace(agent.EmployeeBlueprint) == "" && strings.TrimSpace(agent.Name) == "" {
+			return fmt.Errorf("operation blueprint %q starter agent %q requires employee_blueprint or name", blueprint.ID, agent.Slug)
 		}
 		if strings.TrimSpace(agent.EmployeeBlueprint) != "" {
 			refs = append(refs, agent.EmployeeBlueprint)

@@ -16,7 +16,6 @@
 /** Lifecycle position of a task. Source of truth on the broker (`teamTask.LifecycleState`). */
 export type LifecycleState =
   | "drafting"
-  | "planning"
   | "intake"
   | "ready"
   | "running"
@@ -39,7 +38,6 @@ export type LifecycleState =
  */
 const ALL_LIFECYCLE_STATES: Record<LifecycleState, true> = {
   drafting: true,
-  planning: true,
   intake: true,
   ready: true,
   running: true,
@@ -111,7 +109,6 @@ export function stageForState(s: LifecycleState): LifecycleStage {
     case "intake":
     case "ready":
       return "backlog";
-    case "planning":
     case "running":
     case "review":
     case "changes_requested":
@@ -364,26 +361,16 @@ export const STATE_PILL_TOKENS: Record<
   { bg: string; text: string; label: string }
 > = {
   /**
-   * drafting: pre-Intake mode where agents can comment but not dispatch.
-   * Uses brand-accent tokens (--accent-bg / --accent) to signal
-   * "needs human attention" — distinct from intake/ready (--bg-row-active)
-   * which use a neutral palette.
-   * Design review decision 2026-05-17: locked.
+   * drafting: explicitly PARKED (composer Backlog/park, or a legacy
+   * persisted draft) — agents can comment but not dispatch; the human
+   * starts it from the task page. Uses brand-accent tokens (--accent-bg /
+   * --accent) to signal "yours to start" — distinct from intake/ready
+   * (--bg-row-active) which use a neutral palette.
    */
   drafting: {
     bg: "var(--accent-bg)",
     text: "var(--accent)",
-    label: "drafting",
-  },
-  /**
-   * planning: Plan mode (Phase 5) — the owner is writing a plan for human
-   * approval before executing. Uses the accent tokens like drafting because it
-   * is also pre-execution and awaits a human Approve & Start.
-   */
-  planning: {
-    bg: "var(--accent-bg)",
-    text: "var(--accent)",
-    label: "planning",
+    label: "parked",
   },
   intake: {
     bg: "var(--bg-row-active)",
@@ -541,7 +528,7 @@ export const FILTER_TO_STATES: Record<
   decision_required: ["decision"],
   // drafting is surfaced in the issues route, not the inbox; include it in
   // running so inbox rows with this state still land somewhere readable.
-  running: ["drafting", "planning", "intake", "ready", "running", "review"],
+  running: ["drafting", "intake", "ready", "running", "review"],
   blocked: [
     "blocked_on_pr_merge",
     "queued_behind_owner",

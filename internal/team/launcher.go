@@ -125,6 +125,13 @@ type Launcher struct {
 	// just as fast as a string lookup.
 	notifyLastDelivered map[notifyDedupKey]time.Time
 
+	// notebookBookend* dedupe the per-(agent, task) pre-task notebook
+	// bookend (task_notebook_bookends.go) so only the FIRST headless-turn
+	// enqueue for a pair queues the research-note write. Lazily allocated
+	// under the mutex; nil-safe for &Launcher{} test fixtures.
+	notebookBookendMu   sync.Mutex
+	notebookBookendSeen map[string]struct{}
+
 	// targets owns the office-membership-shape and routing-decision logic
 	// (PLAN.md §C2). Lazily constructed via targeter() so tests that build
 	// &Launcher{} directly stay nil-safe. The launcher field stays the

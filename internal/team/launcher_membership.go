@@ -57,14 +57,13 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 				continue
 			}
 			member := officeMember{
-				Slug:           cfg.Slug,
-				Name:           cfg.Name,
-				Role:           cfg.Name,
-				Expertise:      append([]string(nil), cfg.Expertise...),
-				Personality:    cfg.Personality,
-				PermissionMode: cfg.PermissionMode,
-				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-				BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
+				Slug:         cfg.Slug,
+				Name:         cfg.Name,
+				Role:         cfg.Name,
+				Expertise:    append([]string(nil), cfg.Expertise...),
+				Personality:  cfg.Personality,
+				AllowedTools: append([]string(nil), cfg.AllowedTools...),
+				BuiltIn:      cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
 			}
 			applyOfficeMemberDefaults(&member)
 			members = append(members, member)
@@ -91,14 +90,13 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 		members := make([]officeMember, 0, len(l.pack.Agents))
 		for _, cfg := range l.pack.Agents {
 			member := officeMember{
-				Slug:           cfg.Slug,
-				Name:           cfg.Name,
-				Role:           cfg.Name,
-				Expertise:      append([]string(nil), cfg.Expertise...),
-				Personality:    cfg.Personality,
-				PermissionMode: cfg.PermissionMode,
-				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-				BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
+				Slug:         cfg.Slug,
+				Name:         cfg.Name,
+				Role:         cfg.Name,
+				Expertise:    append([]string(nil), cfg.Expertise...),
+				Personality:  cfg.Personality,
+				AllowedTools: append([]string(nil), cfg.AllowedTools...),
+				BuiltIn:      cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
 			}
 			applyOfficeMemberDefaults(&member)
 			members = append(members, member)
@@ -109,14 +107,13 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 		members := make([]officeMember, 0, len(manifest.Members))
 		for _, cfg := range manifest.Members {
 			member := officeMember{
-				Slug:           cfg.Slug,
-				Name:           cfg.Name,
-				Role:           cfg.Role,
-				Expertise:      append([]string(nil), cfg.Expertise...),
-				Personality:    cfg.Personality,
-				PermissionMode: cfg.PermissionMode,
-				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-				BuiltIn:        cfg.System,
+				Slug:         cfg.Slug,
+				Name:         cfg.Name,
+				Role:         cfg.Role,
+				Expertise:    append([]string(nil), cfg.Expertise...),
+				Personality:  cfg.Personality,
+				AllowedTools: append([]string(nil), cfg.AllowedTools...),
+				BuiltIn:      cfg.System,
 			}
 			applyOfficeMemberDefaults(&member)
 			members = append(members, member)
@@ -145,12 +142,11 @@ func (l *Launcher) officeMemberBySlug(slug string) officeMember {
 
 func agentConfigFromMember(member officeMember) agent.AgentConfig {
 	cfg := agent.AgentConfig{
-		Slug:           member.Slug,
-		Name:           member.Name,
-		Expertise:      append([]string(nil), member.Expertise...),
-		Personality:    member.Personality,
-		PermissionMode: member.PermissionMode,
-		AllowedTools:   append([]string(nil), member.AllowedTools...),
+		Slug:         member.Slug,
+		Name:         member.Name,
+		Expertise:    append([]string(nil), member.Expertise...),
+		Personality:  member.Personality,
+		AllowedTools: append([]string(nil), member.AllowedTools...),
 	}
 	if cfg.Name == "" {
 		cfg.Name = humanizeSlug(member.Slug)

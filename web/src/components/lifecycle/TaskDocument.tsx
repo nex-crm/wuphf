@@ -1,76 +1,45 @@
 /**
  * TaskDocument — Task detail surface.
  *
- * Extends Phase 3 read-only surface with:
- *  - Approve & Start button (visible only when lifecycleState === "drafting")
- *    Maps to the existing approve lifecycle action (postDecision "approve").
- *    Optimistic "Starting…" state → awaits query invalidation → "running".
- *  - Streaming draft rendering via SSE "issue_draft_section" events.
- *    Sections stream in-order: goal → context → approach → acceptance.
- *    Typing-dot prefix on unwritten sections; removed when all finish.
- *    aria-live="polite" on the spec region for a11y.
- *  - Comment helper line in Drafting state:
- *    "Anyone can comment — execution starts after Approve & Start."
- *  - Action row slot is no longer aria-hidden so the button is reachable
- *    by screen readers.
+ * Chat-primary layout: the task's channel conversation owns the main
+ * column; the secondary context (participants, description, activity,
+ * sub-tasks) lives in the right rail (TaskContextRail).
  *
- * Phase 3 behaviour is fully preserved for non-Drafting states.
+ * The header carries title + lifecycle pill + verification badge and the
+ * lifecycle action toolbar (a Start affordance while parked/drafting, the
+ * PR-style loop otherwise). The task's understanding lives in its title +
+ * description (Details) — there is no spec document (core-loop R2).
  */
 
-import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { get } from "../../api/client";
-import { openSharedEventStream } from "../../api/eventStream";
 import { postDecision, postTaskReject } from "../../api/lifecycle";
 import {
   getOfficeTasks,
   type Task,
+  type TaskDefinition as TaskDefinitionShape,
+  type TaskDeliverable,
+  type TaskVerification,
+  type TaskVerificationResult,
   taskToLifecycleState,
 } from "../../api/tasks";
-import {
-  messageMarkdownComponents,
-  messageRemarkPlugins,
-} from "../../lib/messageMarkdown";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
-import { LifecycleStatePill } from "./LifecycleStatePill";
+import {
+  isAwaitingStaffing,
+  LifecycleStatePill,
+  StaffingStatePill,
+} from "./LifecycleStatePill";
 import { OwnerPicker } from "./OwnerPicker";
 import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
 import { TaskActionToolbar } from "./TaskActionToolbar";
 import { TaskChannelChat } from "./TaskChannelChat";
 import { TaskContextRail } from "./TaskContextRail";
-
-// ── Phase 4 constants ──────────────────────────────────────────────────
-
-/**
- * Section keys for streaming draft events.
- * The broker emits SSE "issue_draft_section" events with this shape:
- *   { taskId: string; section: DraftSectionKey; text: string }
- */
-export type DraftSectionKey = "goal" | "context" | "approach" | "acceptance";
-
-const DRAFT_SECTION_KEYS: ReadonlyArray<DraftSectionKey> = [
-  "goal",
-  "context",
-  "approach",
-  "acceptance",
-];
+import { VerificationBadge } from "./VerificationBadge";
 
 // ── Types ──────────────────────────────────────────────────────────────
-
-/**
- * Spec sections for the Issue document.
- * Each section is plain markdown text (may be empty / undefined when the
- * issue was just created).
- */
-export interface TaskSpec {
-  goal?: string;
-  context?: string;
-  approach?: string;
-  acceptance?: string;
-}
 
 /**
  * Full Issue document payload.
@@ -81,51 +50,23 @@ export interface TaskDocument {
   taskId: string;
   title: string;
   /** Plain-markdown description (task.details from the broker).
-   * Linear-style: just the body, no Goal/Context/Approach/Acceptance
-   * sections to fill out. */
+   * Linear-style: just the body — the whole brief is title + description. */
   description: string;
   lifecycleState: LifecycleState;
-  /** Retained for back-compat with stream-handler code; unused by
-   * the Linear-style body. New work should write to `description`. */
-  spec: TaskSpec;
   channel: string;
   ownerSlug?: string;
   parentTaskId?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Machine-checkable definition of done (U1). Absent on legacy tasks. */
+  verification?: TaskVerification;
+  /** Outcome of the most recent verification run. Absent until first run. */
+  verificationResult?: TaskVerificationResult;
+  /** Structured intake contract (R4). Absent until the CEO/human defines. */
+  definition?: TaskDefinitionShape;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
-
-const COLLAPSED_STATES: ReadonlySet<LifecycleState> = new Set([
-  "approved",
-  "running",
-  "review",
-  "decision",
-]);
-
-function sessionStorageKey(taskId: string): string {
-  return `wuphf:issue-spec-expanded:${taskId}`;
-}
-
-function readSpecExpanded(taskId: string, defaultValue: boolean): boolean {
-  try {
-    const v = sessionStorage.getItem(sessionStorageKey(taskId));
-    if (v === "true") return true;
-    if (v === "false") return false;
-    return defaultValue;
-  } catch {
-    return defaultValue;
-  }
-}
-
-function writeSpecExpanded(taskId: string, expanded: boolean): void {
-  try {
-    sessionStorage.setItem(sessionStorageKey(taskId), String(expanded));
-  } catch {
-    // private-mode tabs — in-memory state only.
-  }
-}
 
 /** Read a string from an object field or its snake_case alias. */
 function strField(
@@ -142,43 +83,98 @@ function strField(
   return undefined;
 }
 
-/** Normalize spec sub-object from raw broker response. */
+/** Narrow an unknown value to a record. */
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
     : undefined;
 }
 
-function normalizeAcceptanceCriteria(value: unknown): string | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const lines = value
-    .map((item) => {
-      if (typeof item === "string") return item.trim();
-      const row = recordValue(item);
-      const statement = row ? strField(row, "statement") : undefined;
-      return statement?.trim() ?? "";
-    })
-    .filter(Boolean)
-    .map((statement) => `- ${statement}`);
-  return lines.length > 0 ? lines.join("\n") : undefined;
+/**
+ * Narrow an unknown wire value into a TaskVerification. The broker emits
+ * `{kind, spec?, required?}`; anything without a string `kind` is treated
+ * as absent so a malformed payload degrades to "Unverified" rather than
+ * crashing the document.
+ */
+function normalizeVerification(value: unknown): TaskVerification | undefined {
+  const rec = recordValue(value);
+  if (!rec || typeof rec.kind !== "string" || rec.kind === "") {
+    return undefined;
+  }
+  return {
+    kind: rec.kind,
+    spec: typeof rec.spec === "string" ? rec.spec : undefined,
+    required: typeof rec.required === "boolean" ? rec.required : undefined,
+  };
 }
 
-function normalizeSpec(
-  rawSpec: Record<string, unknown>,
-  taskHint?: Task,
-): TaskSpec {
+/**
+ * Narrow an unknown wire value into a TaskVerificationResult. `pass` is
+ * the load-bearing field; a payload without a boolean `pass` is treated
+ * as "no result yet".
+ */
+function normalizeVerificationResult(
+  value: unknown,
+): TaskVerificationResult | undefined {
+  const rec = recordValue(value);
+  if (!rec || typeof rec.pass !== "boolean") return undefined;
   return {
-    goal:
-      strField(rawSpec, "goal") ??
-      strField(rawSpec, "targetOutcome") ??
-      taskHint?.details ??
-      taskHint?.description ??
-      strField(rawSpec, "problem"),
-    context: strField(rawSpec, "context") ?? strField(rawSpec, "problem"),
-    approach: strField(rawSpec, "approach") ?? strField(rawSpec, "assignment"),
-    acceptance:
-      strField(rawSpec, "acceptance") ??
-      normalizeAcceptanceCriteria(rawSpec.acceptanceCriteria),
+    pass: rec.pass,
+    kind: typeof rec.kind === "string" ? rec.kind : "",
+    detail: typeof rec.detail === "string" ? rec.detail : undefined,
+    checked_at: typeof rec.checked_at === "string" ? rec.checked_at : "",
+  };
+}
+
+/** Keep only non-empty strings from an unknown wire array. */
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is string => typeof item === "string" && item !== "",
+  );
+}
+
+/** Narrow an unknown value to a non-empty string, else undefined. */
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** Narrow an unknown wire array into well-formed deliverables. Entries
+ *  without a non-empty string `name` are dropped. */
+function normalizeDeliverables(value: unknown): TaskDeliverable[] {
+  if (!Array.isArray(value)) return [];
+  const out: TaskDeliverable[] = [];
+  for (const item of value) {
+    const d = recordValue(item);
+    const name = d ? nonEmptyString(d.name) : undefined;
+    if (!(d && name)) continue;
+    out.push({ name, format: nonEmptyString(d.format) });
+  }
+  return out;
+}
+
+/**
+ * Narrow an unknown wire value into a TaskDefinition (R4). `goal` is the
+ * load-bearing field; a payload without a non-empty string goal is treated
+ * as absent so a malformed definition degrades to the plain description.
+ */
+function normalizeTaskDefinition(
+  value: unknown,
+): TaskDefinitionShape | undefined {
+  const rec = recordValue(value);
+  const goal = rec ? nonEmptyString(rec.goal) : undefined;
+  if (!(rec && goal)) {
+    return undefined;
+  }
+  const deliverables = normalizeDeliverables(rec.deliverables);
+  const criteria = stringArray(rec.success_criteria);
+  const access = stringArray(rec.access_needed);
+  return {
+    goal,
+    deliverables: deliverables.length > 0 ? deliverables : undefined,
+    success_criteria: criteria.length > 0 ? criteria : undefined,
+    access_needed: access.length > 0 ? access : undefined,
+    defined_at: nonEmptyString(rec.defined_at),
   };
 }
 
@@ -198,7 +194,6 @@ function resolveTaskId(
 function resolveTaskTitle(
   packet: Record<string, unknown>,
   taskRecord: Record<string, unknown> | undefined,
-  spec: Record<string, unknown>,
   taskHint: Task | undefined,
   taskId: string,
 ): string {
@@ -207,7 +202,6 @@ function resolveTaskTitle(
     strField(packet, "title") ??
     (taskRecord ? strField(taskRecord, "title") : undefined) ??
     taskHint?.title ??
-    strField(spec, "assignment") ??
     fallbackTitle
   );
 }
@@ -258,25 +252,23 @@ export function normalizeTaskDocument(
   }
   const r = raw as Record<string, unknown>;
   const taskRecord = recordValue(r.task);
-  const rawSpec = recordValue(r.spec) ?? {};
 
   // The broker returns tasks with snake_case keys at the top level;
   // /tasks/<id> returns the decision-packet shape. Normalise both
   // forms at the boundary so the document route can render direct
   // links and list-to-detail navigations consistently.
   const taskId = resolveTaskId(r, taskRecord, taskHint);
-  const title = resolveTaskTitle(r, taskRecord, rawSpec, taskHint, taskId);
+  const title = resolveTaskTitle(r, taskRecord, taskHint, taskId);
   const lifecycleState = resolveTaskLifecycleState(r, taskHint);
-  const spec = normalizeSpec(rawSpec, taskHint);
 
   // Linear-style description: the broker writes `details` on the task
-  // record; legacy clients may still write `description`. Fall back to
-  // the spec's `assignment` block when neither is set so existing
-  // packet-driven Issues still render something.
+  // record; legacy clients may still write `description`. The office-tasks
+  // taskHint carries the same pair as a fallback for packet shapes that
+  // don't wrap a task record.
   const description =
     (taskRecord ? strField(taskRecord, "details", "description") : undefined) ??
+    taskHint?.details ??
     taskHint?.description ??
-    strField(rawSpec, "assignment") ??
     "";
 
   // parent_issue_id can arrive on the wrapped task record, at the
@@ -287,12 +279,27 @@ export function normalizeTaskDocument(
     resolveAliasedField(r, taskRecord, "parentIssueId", "parent_issue_id") ??
     taskHint?.parent_issue_id;
 
+  // Verification fields (U1) live on the task record (snake_case wire) or
+  // at the packet top level; the office-tasks taskHint is the fallback.
+  const verification =
+    normalizeVerification(taskRecord?.verification ?? r.verification) ??
+    taskHint?.verification;
+  const verificationResult =
+    normalizeVerificationResult(
+      taskRecord?.verification_result ?? r.verification_result,
+    ) ?? taskHint?.verification_result;
+
+  // The structured intake contract (R4) rides the same paths as
+  // verification: wrapped task record, packet top level, taskHint fallback.
+  const definition =
+    normalizeTaskDefinition(taskRecord?.definition ?? r.definition) ??
+    taskHint?.definition;
+
   return {
     taskId,
     title,
     description,
     lifecycleState,
-    spec,
     channel: resolveTaskChannel(r, taskRecord, taskHint),
     ownerSlug:
       resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
@@ -304,6 +311,9 @@ export function normalizeTaskDocument(
     updatedAt:
       resolveAliasedField(r, taskRecord, "updatedAt", "updated_at") ??
       taskHint?.updated_at,
+    verification,
+    verificationResult,
+    definition,
   };
 }
 
@@ -318,96 +328,6 @@ async function fetchTaskDocument(taskId: string): Promise<TaskDocument> {
   ]);
   const taskHint = tasksResponse?.tasks.find((task) => task.id === taskId);
   return normalizeTaskDocument(raw, taskHint);
-}
-
-// ── Sub-components ─────────────────────────────────────────────────────
-
-interface SpecSectionProps {
-  heading: string;
-  content: string | undefined;
-  /**
-   * When true, the section has not started streaming yet.
-   * Renders a typing-dot prefix to signal "CEO is writing this".
-   * Respects prefers-reduced-motion: dots hidden when reduced-motion active.
-   */
-  isStreaming?: boolean;
-}
-
-function SpecSection({ heading, content, isStreaming }: SpecSectionProps) {
-  const body = content?.trim() || "—";
-  const isEmpty = !content?.trim();
-  return (
-    <section className="issue-spec-section" aria-labelledby={`spec-${heading}`}>
-      <h3 id={`spec-${heading}`} className="issue-spec-heading">
-        {heading}
-        {isStreaming ? (
-          <span
-            className="typing-dots"
-            aria-label="CEO is writing this section"
-            role="status"
-          >
-            <span aria-hidden="true">…</span>
-          </span>
-        ) : null}
-      </h3>
-      {isEmpty ? (
-        <p className="issue-spec-empty">—</p>
-      ) : (
-        <div className="issue-spec-body">
-          <ReactMarkdown
-            remarkPlugins={messageRemarkPlugins}
-            components={messageMarkdownComponents}
-          >
-            {body}
-          </ReactMarkdown>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function SpecSummaryCard({
-  spec,
-  onExpand,
-}: {
-  spec: TaskSpec;
-  onExpand: () => void;
-}) {
-  // Produce a 3-line plaintext summary from the spec sections.
-  const lines = [spec.goal, spec.context, spec.approach, spec.acceptance]
-    .filter((s): s is string => Boolean(s))
-    .slice(0, 3)
-    .map((s) => s.trim().split("\n")[0] ?? "");
-
-  return (
-    <section
-      className="issue-spec-summary"
-      aria-label="Spec summary (collapsed)"
-    >
-      <div className="issue-spec-summary-lines" aria-hidden="true">
-        {lines.length > 0 ? (
-          lines.map((line, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: static slice, index is stable here.
-            <p key={i} className="issue-spec-summary-line">
-              {line}
-            </p>
-          ))
-        ) : (
-          <p className="issue-spec-summary-line issue-spec-empty">
-            No spec content yet.
-          </p>
-        )}
-      </div>
-      <button
-        type="button"
-        className="issue-spec-expand-btn"
-        onClick={onExpand}
-        aria-label="Expand spec sections"
-      >
-        Expand spec
-      </button>
-    </section>
-  );
 }
 
 // ── Loading + error states ─────────────────────────────────────────────
@@ -461,31 +381,34 @@ function TaskDocumentError({
   );
 }
 
-// ── Phase 4 sub-components ─────────────────────────────────────────────
+// ── Lifecycle action buttons ───────────────────────────────────────────
 
 /**
- * Approve & Start button. Visible only during `drafting` state.
+ * Start button for a PARKED task — the ONE place a start affordance
+ * remains. Visible only during `drafting` (now: explicitly parked) state;
+ * every other creation path lands tasks running, so there is nothing to
+ * start anywhere else (the Approve & Start ceremony is retired).
  *
- * On click: POSTs to existing approve endpoint (postDecision "approve"),
+ * On click: POSTs to the existing approve endpoint (postDecision
+ * "approve" — the broker maps pre-execution approve to Drafting→Running),
  * transitions optimistically to "Starting…", then refetches the task.
  * On error: inline error banner appears, button re-enables.
  *
  * A11y: aria-label, focus-visible outline, Enter/Space activatable via
  * the native <button> element.
  */
-interface ApproveAndStartButtonProps {
+interface StartParkedTaskButtonProps {
   taskId: string;
   onApproved: () => void;
-  /** Button label. Defaults to "Approve & Start"; Plan mode passes
-   *  "Approve plan & Start" so the human knows they are accepting the plan. */
+  /** Button label. Defaults to "Start". */
   label?: string;
 }
 
-export function ApproveAndStartButton({
+export function StartParkedTaskButton({
   taskId,
   onApproved,
-  label = "Approve & Start",
-}: ApproveAndStartButtonProps) {
+  label = "Start",
+}: StartParkedTaskButtonProps) {
   const [approveError, setApproveError] = useState<string | null>(null);
 
   const approveMutation = useMutation({
@@ -504,15 +427,12 @@ export function ApproveAndStartButton({
   const { isPending } = approveMutation;
 
   return (
-    <div
-      className="issue-approve-and-start"
-      data-testid="approve-and-start-wrapper"
-    >
+    <div className="issue-approve-and-start" data-testid="start-parked-wrapper">
       {approveError ? (
         <div
           className="issue-approve-error"
           role="alert"
-          data-testid="approve-and-start-error"
+          data-testid="start-parked-error"
         >
           {approveError}
         </div>
@@ -522,8 +442,8 @@ export function ApproveAndStartButton({
         className="btn btn-primary issue-approve-btn"
         disabled={isPending}
         onClick={() => approveMutation.mutate()}
-        aria-label="Approve and start execution"
-        data-testid="approve-and-start"
+        aria-label="Start this parked task"
+        data-testid="start-parked"
       >
         {isPending ? "Starting…" : label}
       </button>
@@ -644,219 +564,25 @@ export function CloseTaskButton({ taskId, onClosed }: CloseTaskButtonProps) {
   );
 }
 
-// ── Streaming draft hook ────────────────────────────────────────────────
-
-/**
- * Accumulated draft text per section, updated via SSE.
- * null means the section hasn't started streaming yet.
- */
-type DraftAccumulator = Record<DraftSectionKey, string | null>;
-
-function emptyAccumulator(): DraftAccumulator {
-  return { goal: null, context: null, approach: null, acceptance: null };
-}
-
-/**
- * Parse a raw SSE event data string into a typed draft section update.
- * Returns null if the event is malformed or not for the given taskId.
- */
-function parseDraftSectionEvent(
-  raw: string,
-  taskId: string,
-): { section: DraftSectionKey; text: string } | null {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!payload || typeof payload !== "object") return null;
-  const p = payload as Record<string, unknown>;
-  if (
-    typeof p.taskId !== "string" ||
-    p.taskId !== taskId ||
-    typeof p.section !== "string" ||
-    typeof p.text !== "string"
-  ) {
-    return null;
-  }
-  const key = p.section as DraftSectionKey;
-  if (!DRAFT_SECTION_KEYS.includes(key)) return null;
-  return { section: key, text: p.text };
-}
-
-/**
- * Subscribes to the broker SSE stream and listens for
- * "issue_draft_section" events for this taskId.
- *
- * Event payload expected: { taskId: string; section: DraftSectionKey; text: string }
- *
- * On unmount, the SSE connection is closed.
- */
-function useDraftStream(taskId: string, enabled: boolean): DraftAccumulator {
-  const [draft, setDraft] = useState<DraftAccumulator>(emptyAccumulator);
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const source = openSharedEventStream();
-    if (!source) return;
-
-    source.addEventListener("issue_draft_section", (event) => {
-      if (!("data" in event) || typeof event.data !== "string") return;
-      const parsed = parseDraftSectionEvent(event.data, taskId);
-      if (!parsed) return;
-      const { section, text } = parsed;
-      setDraft((prev) => ({
-        ...prev,
-        [section]: (prev[section] ?? "") + text,
-      }));
-    });
-
-    return () => {
-      source.close();
-    };
-  }, [taskId, enabled]);
-
-  return draft;
-}
-
-// ── Spec body sub-component ───────────────────────────────────────────
-
-interface SpecBodyProps {
-  spec: TaskSpec;
-  mergedSpec: TaskSpec;
-  shouldAutoCollapse: boolean;
-  specExpanded: boolean;
-  isDrafting: boolean;
-  isSectionStreaming: (key: DraftSectionKey) => boolean;
-  onExpand: () => void;
-  onCollapse: () => void;
-}
-
-function SpecBody({
-  spec,
-  mergedSpec,
-  shouldAutoCollapse,
-  specExpanded,
-  isDrafting,
-  isSectionStreaming,
-  onExpand,
-  onCollapse,
-}: SpecBodyProps) {
-  if (shouldAutoCollapse && !specExpanded) {
-    return <SpecSummaryCard spec={spec} onExpand={onExpand} />;
-  }
-  return (
-    <section
-      className="issue-doc-spec"
-      aria-label="Task specification"
-      aria-live={isDrafting ? "polite" : undefined}
-    >
-      {shouldAutoCollapse ? (
-        <button
-          type="button"
-          className="issue-spec-collapse-btn"
-          onClick={onCollapse}
-          aria-label="Collapse spec sections"
-        >
-          Collapse spec
-        </button>
-      ) : null}
-      <SpecSection
-        heading="Goal"
-        content={mergedSpec.goal}
-        isStreaming={isSectionStreaming("goal")}
-      />
-      <SpecSection
-        heading="Context"
-        content={mergedSpec.context}
-        isStreaming={isSectionStreaming("context")}
-      />
-      <SpecSection
-        heading="Approach"
-        content={mergedSpec.approach}
-        isStreaming={isSectionStreaming("approach")}
-      />
-      <SpecSection
-        heading="Acceptance"
-        content={mergedSpec.acceptance}
-        isStreaming={isSectionStreaming("acceptance")}
-      />
-    </section>
-  );
-}
-
-// ── Spec streaming helpers ─────────────────────────────────────────────
-
-/**
- * Merge streamed draft sections over the server-fetched spec.
- * A non-null streamed value replaces the server-fetched value for that
- * section so the UI shows live text before the full fetch returns.
- */
-function mergeSpec(
-  isDrafting: boolean,
-  accumulated: DraftAccumulator,
-  serverSpec: TaskSpec,
-): TaskSpec {
-  if (!isDrafting) return serverSpec;
-  return {
-    goal: accumulated.goal ?? serverSpec.goal,
-    context: accumulated.context ?? serverSpec.context,
-    approach: accumulated.approach ?? serverSpec.approach,
-    acceptance: accumulated.acceptance ?? serverSpec.acceptance,
-  };
-}
-
-/**
- * Return a predicate that answers "should this section show a typing-dot?".
- *
- * A section shows the dot when:
- * 1. The issue is in Drafting state.
- * 2. Streaming has started (at least one section has received text).
- * 3. The section itself has NOT yet received any streamed text.
- */
-function buildSectionStreamingCheck(
-  isDrafting: boolean,
-  streamingStarted: boolean,
-  accumulated: DraftAccumulator,
-): (key: DraftSectionKey) => boolean {
-  return (key: DraftSectionKey) =>
-    isDrafting && streamingStarted && accumulated[key] === null;
-}
-
 // ── Main component ─────────────────────────────────────────────────────
 
 interface TaskDocumentProps {
   taskId: string;
   /** Skip fetch and render with these data directly. Used by tests + screenshots. */
   initialDocument?: TaskDocument;
-  /**
-   * Inject a mock draft accumulator for tests (streaming draft section).
-   * In production this is driven by useDraftStream.
-   */
-  testDraftAccumulator?: DraftAccumulator;
 }
 
 /**
- * TaskDocument renders a single Issue, extended in Phase 4 with:
- *  - Approve & Start button (Drafting state only)
- *  - Streaming draft section rendering via SSE
- *  - Comment helper line in Drafting state
+ * TaskDocument renders a single task: header (pill + verification badge +
+ * title + owner + lifecycle actions), the task channel chat as the main
+ * column, and the context rail (participants, details, activity,
+ * sub-tasks).
  *
  * Props:
  *   taskId — the task ID to fetch. Drives the query key.
  *   initialDocument — if provided, skips fetch; used in tests.
- *   testDraftAccumulator — inject mock draft state for streaming tests.
- *
- * The component manages spec-collapsed state in sessionStorage so
- * returning to an already-approved issue restores the user's choice.
  */
-export function TaskDocument({
-  taskId,
-  initialDocument,
-  testDraftAccumulator,
-}: TaskDocumentProps) {
+export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
   const queryClient = useQueryClient();
 
   const query = useQuery<TaskDocument>({
@@ -867,52 +593,9 @@ export function TaskDocument({
     enabled: !initialDocument,
   });
 
-  // Determine whether spec sections should auto-collapse.
   const doc = query.data;
   const isDrafting = doc?.lifecycleState === "drafting";
-  const shouldAutoCollapse = doc
-    ? COLLAPSED_STATES.has(doc.lifecycleState)
-    : false;
-  const defaultExpanded = !shouldAutoCollapse;
-  const hasDoc = Boolean(doc);
-
-  const [specExpanded, setSpecExpanded] = useState<boolean>(() =>
-    readSpecExpanded(taskId, defaultExpanded),
-  );
-
-  // When the document loads for the first time and auto-collapse is
-  // active, apply the stored preference or default to collapsed.
-  useEffect(() => {
-    if (!hasDoc) return;
-    const stored = readSpecExpanded(taskId, defaultExpanded);
-    setSpecExpanded(stored);
-  }, [taskId, defaultExpanded, hasDoc]);
-
-  // Persist spec expand/collapse on change.
-  function toggleSpec() {
-    setSpecExpanded((prev) => {
-      const next = !prev;
-      writeSpecExpanded(taskId, next);
-      return next;
-    });
-  }
-
-  // ── Streaming draft: subscribe when in Drafting state ─────────────────
-  // testDraftAccumulator overrides the SSE-driven state for unit tests.
-  const sseAccumulator = useDraftStream(
-    taskId,
-    isDrafting && !testDraftAccumulator,
-  );
-  const draftAccumulator = testDraftAccumulator ?? sseAccumulator;
-  const mergedSpec = mergeSpec(isDrafting, draftAccumulator, doc?.spec ?? {});
-  const streamingStarted = DRAFT_SECTION_KEYS.some(
-    (k) => draftAccumulator[k] !== null,
-  );
-  const isSectionStreaming = buildSectionStreamingCheck(
-    isDrafting,
-    streamingStarted,
-    draftAccumulator,
-  );
+  const awaitingStaffing = isAwaitingStaffing(doc);
 
   if (query.isPending && !initialDocument) {
     return <TaskDocumentSkeleton />;
@@ -950,12 +633,28 @@ export function TaskDocument({
           <ParentTaskBreadcrumb parentTaskId={doc.parentTaskId} />
         ) : null}
         <div className="issue-doc-header-row">
-          <LifecycleStatePill state={doc.lifecycleState} />
+          {awaitingStaffing ? (
+            <StaffingStatePill />
+          ) : (
+            <LifecycleStatePill state={doc.lifecycleState} />
+          )}
+          <VerificationBadge
+            verification={doc.verification}
+            result={doc.verificationResult}
+          />
           <h2 className="issue-doc-title">
             {formatTaskTitleForDisplay(doc.title)}
           </h2>
         </div>
         <div className="issue-doc-meta-row" data-testid="issue-doc-button-row">
+          {awaitingStaffing ? (
+            <span
+              className="issue-doc-staffing-note"
+              data-testid="issue-staffing-note"
+            >
+              Staffing — CEO is picking the owner
+            </span>
+          ) : null}
           <OwnerPicker
             taskId={taskId}
             channel={doc.channel}
@@ -970,7 +669,7 @@ export function TaskDocument({
               });
             }}
           />
-          {/* Lifecycle actions (Approve & Start when Drafting/Planning, the
+          {/* Lifecycle actions (Start when parked/drafting, the
            *  PR-style loop otherwise). Right-aligned on the same row as the
            *  owner so the header stays two tight rows instead of four. */}
           <TaskActionToolbar
@@ -995,7 +694,7 @@ export function TaskDocument({
 
       {/* Body: chat-primary. The task's channel (the conversation where the
        *  owner, CEO, and Librarian collaborate) owns the main column at full
-       *  scale; the secondary context — participants, spec, activity,
+       *  scale; the secondary context — participants, description, activity,
        *  sub-tasks — lives in the right rail a glance away. */}
       <div className="issue-doc-body issue-doc-body--split">
         <main className="issue-doc-chat" aria-label="Chat">
@@ -1009,6 +708,8 @@ export function TaskDocument({
           description={doc.description}
           isDrafting={isDrafting}
           showSubTasks={!doc.parentTaskId}
+          verification={doc.verification}
+          definition={doc.definition}
         />
       </div>
     </div>

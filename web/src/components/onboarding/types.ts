@@ -25,11 +25,11 @@ export interface OnboardingFormAnswers {
 }
 
 /**
- * One row of the post-onboarding "Settle into your office" checklist.
- * Mirrors `internal/onboarding/state.go` ChecklistItem. The server only
- * carries `id` + `done`; the human-readable label is overlaid by the
- * frontend (GettingStartedChecklist) with WUPHF copy, so `label` is
- * optional here for forward-compat if the wire shape ever adds one.
+ * One row of the legacy post-onboarding checklist. Mirrors
+ * `internal/onboarding/state.go` ChecklistItem (`id` + `done` on the
+ * wire). The "Settle into your office" overlay that rendered these was
+ * removed (core-loop R6); the fields stay typed so the /onboarding/state
+ * wire mirror remains complete for persisted workspaces.
  */
 export interface OnboardingChecklistItem {
   id: string;

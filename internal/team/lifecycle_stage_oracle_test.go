@@ -10,7 +10,7 @@ import (
 // lifecycle_stage_oracle_test.go pins the lifecycle_state -> board stage mapping
 // to a single shared source of truth: web/src/lib/types/lifecycleStageMap.json.
 // The Go board grouping (lifecycleStageFor) and the web board grouping
-// (stageForState in lifecycle.ts) are independent copies of the same 13->7
+// (stageForState in lifecycle.ts) are independent copies of the same 12->7
 // table; the JSON + this test + the TS lifecycle.stagemap.test.ts make any
 // drift between the two languages a red test on at least one side.
 
@@ -23,7 +23,6 @@ var wireLifecycleStates = []LifecycleState{
 	LifecycleStateDrafting,
 	LifecycleStateIntake,
 	LifecycleStateReady,
-	LifecycleStatePlanning,
 	LifecycleStateRunning,
 	LifecycleStateReview,
 	LifecycleStateChangesRequested,

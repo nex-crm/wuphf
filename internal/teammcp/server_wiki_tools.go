@@ -85,7 +85,11 @@ func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamW
 func verifyHumanWikiWriteDelegation(ctx context.Context, slug, humanRequestID string) error {
 	humanRequestID = strings.TrimSpace(humanRequestID)
 	if humanRequestID == "" {
-		return fmt.Errorf("team_wiki_write requires human_request with the broker message ID of the human's direct wiki request; otherwise use notebook_write first, then notebook_promote for review")
+		// Human-boundary copy (ten-out-of-ten E1b): agents relay tool errors
+		// verbatim, and "the broker requires a direct human message ID" read
+		// as raw jargon to a real operator (ICP-eval v3 [18:07]). Lead with
+		// words safe to repeat to the human; keep the mechanics for the agent.
+		return fmt.Errorf("this wiki update needs the human's direct go-ahead. Ask them in plain words (e.g. \"want me to update the wiki with this?\") — never mention broker internals or message IDs to them. When they reply asking for the write, retry with human_request set to that human message's id. For agent-authored knowledge, use notebook_write then notebook_promote for review instead")
 	}
 
 	channels := fetchAccessibleChannels(ctx, slug)
@@ -107,7 +111,7 @@ func verifyHumanWikiWriteDelegation(ctx context.Context, slug, humanRequestID st
 			return validateHumanWikiWriteDelegation(msg)
 		}
 	}
-	return fmt.Errorf("team_wiki_write human_request %q was not found in recent accessible human messages; pass the broker message ID for the human's wiki request", humanRequestID)
+	return fmt.Errorf("team_wiki_write human_request %q was not found in recent accessible human messages; pass the id of the human's recent message that asked for this wiki write (do not relay this error to the human — ask them plainly for the go-ahead instead)", humanRequestID)
 }
 
 func validateHumanWikiWriteDelegation(msg brokerMessage) error {
@@ -205,16 +209,24 @@ func handleTeamWikiRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamWi
 	return textResult(string(bytes)), nil, nil
 }
 
-// handleTeamWikiSearch runs a literal substring search.
+// handleTeamWikiSearch runs a literal substring search across the team
+// wiki AND the calling agent's own notebook shelf (B4: one retrieval call
+// spans wiki + private notes). The reader identity comes from the trusted
+// launcher-set WUPHF_AGENT_SLUG env — never from a model-supplied arg — so
+// an agent can only widen the search into its OWN notebooks.
 func handleTeamWikiSearch(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiSearchArgs) (*mcp.CallToolResult, any, error) {
 	pattern := strings.TrimSpace(args.Pattern)
 	if pattern == "" {
 		return toolError(fmt.Errorf("pattern is required")), nil, nil
 	}
+	path := "/wiki/search?pattern=" + url.QueryEscape(pattern)
+	if slug := strings.TrimSpace(trustedEnvAgentSlug()); slug != "" {
+		path += "&reader=" + url.QueryEscape(slug)
+	}
 	var result struct {
 		Hits []map[string]any `json:"hits"`
 	}
-	if err := brokerGetJSON(ctx, "/wiki/search?pattern="+url.QueryEscape(pattern), &result); err != nil {
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	payload, _ := json.Marshal(result.Hits)

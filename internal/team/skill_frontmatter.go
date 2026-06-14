@@ -69,10 +69,10 @@ type SkillWuphfMeta struct {
 	// skill is renamed to a broader slug. Acts as a redirect for humans and
 	// agents that resolve the old slug. Always paired with status=archived.
 	RenamedTo string `yaml:"renamed_to,omitempty"`
-	// OwnerAgents lists the agent slugs the skill is currently enabled
-	// for. Mirrors teamSkill.OwnerAgents in broker state so the on-disk
-	// SKILL.md stays in sync with per-agent enablement. Empty means the
-	// skill sits in DISCOVERABLE for every agent until explicitly enabled.
+	// OwnerAgents lists the agent slugs the skill is assigned to.
+	// Mirrors teamSkill.OwnerAgents in broker state so the on-disk
+	// SKILL.md stays in sync with per-agent assignment. Empty means the
+	// skill is loaded into no agent's prompt until explicitly assigned.
 	OwnerAgents []string `yaml:"owner_agents,omitempty"`
 	// WorkflowProvider is the provider for workflow-backed skills.
 	WorkflowProvider string `yaml:"workflow_provider,omitempty"`

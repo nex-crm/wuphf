@@ -26,6 +26,7 @@
 
 import { type ComponentType, useCallback, useEffect } from "react";
 
+import { track } from "../../../lib/analytics";
 import { MOD_KEY } from "../../ui/Kbd";
 import { BtnLabel, EnterHint } from "./components";
 import { StepFirstIssue } from "./steps/StepFirstIssue";
@@ -169,9 +170,15 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     total,
   ).padStart(2, "0")}`;
 
+  // Fire onboarding_started once when the wizard mounts. No-op when dormant.
+  useEffect(() => {
+    track("onboarding_started");
+  }, []);
+
   const goNext = useCallback(() => {
+    track("onboarding_step_completed", { step_id: stepId, step_index: index });
     runWithTransition(next);
-  }, [next]);
+  }, [next, stepId, index]);
 
   const goBack = useCallback(() => {
     runWithTransition(back);
@@ -182,9 +189,10 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   // blueprint or a named agent, and it deliberately does NOT skip the rest of
   // onboarding — the user still writes a first issue.
   const skipTeam = useCallback(() => {
+    track("onboarding_step_completed", { step_id: "team", step_index: index });
     setAnswers({ blueprintId: "", pickedAgents: [], agentName: "" });
     runWithTransition(next);
-  }, [setAnswers, next]);
+  }, [setAnswers, next, index]);
 
   // The primary footer button advances on every step except the last, where it
   // becomes the Finish CTA that seeds the office and hands off into a composer.

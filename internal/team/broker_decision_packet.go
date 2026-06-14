@@ -836,6 +836,29 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 		actorSlug = "system"
 	}
 	trimmedComment := strings.TrimSpace(comment)
+	// U1.1 verification gate on the DECISION path: a terminal approve on a
+	// task with a required definition-of-done check must pass that check
+	// first — the live FE Approve button posts here, not to /tasks, so the
+	// gate previously never bound on a human's click (ICP-eval v3: the DoD
+	// was "checked" only by the agent's narration, three runs in a row).
+	// Runs BEFORE the locked section because checks execute external
+	// commands (lock discipline in task_verification.go). Activation
+	// approves (pre-execution states) are exempt inside the gate itself.
+	if action == RecordDecisionApprove {
+		if err := b.gateTaskCompletionVerification(TaskPostRequest{Action: "approve", ID: taskID}); err != nil {
+			return err
+		}
+	}
+	// B5 done-artifact existence pre-phase (mirrors MutateTask): stat the
+	// artifact a terminal approve would land done with OUTSIDE the lock.
+	// The locked gate below compares the checked reference against the
+	// task's artifact at gate time so a concurrent rewrite cannot bind a
+	// stale verdict.
+	var decisionArtifactRef string
+	decisionArtifactExists := true
+	if action == RecordDecisionApprove {
+		decisionArtifactRef, decisionArtifactExists = b.peekTaskDoneArtifact(TaskPostRequest{Action: "approve", ID: taskID})
+	}
 	// TODO(v1.1): auto-merge evaluator — once a safe-class definition
 	// (e.g. wiki-only edits with all green checks and zero
 	// critical/major grades) lands, route merge actions through the
@@ -849,46 +872,96 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 	// never observe the decided packet without its comment.
 	// Wrap the locked section in an inner function so we can defer the
 	// unlock and stay panic-safe across the Locked helpers below.
-	// wasApprovingFromDrafting is set inside the lock and used after unlock
-	// to decide whether to emit the execution lineup card. Declaring it here
-	// (outside the closure) avoids a variable-capture hazard.
-	var wasApprovingFromDrafting bool
 	var target LifecycleState
 	var reason string
 	if err := func() error {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		// Resolve target inside the lock so currentState reflects the
-		// task's true state at transition time. Drafting+approve maps
+		// task's true state at transition time. Pre-execution+approve maps
 		// to Running (start work) instead of Approved (terminal); see
 		// lifecycleStateForDecisionAction for the rationale.
 		var currentState LifecycleState
-		var planFirst bool
 		if task := b.findTaskByIDLocked(taskID); task != nil {
 			currentState = task.LifecycleState
-			planFirst = task.PlanFirst
+			// Human-sovereignty gate (mirrors MutateTask): an open human
+			// request-changes objection blocks approve for every
+			// non-human actor — agents that share the broker token land
+			// here via /tasks/{id}/decision. Humans pass and the clear
+			// happens after the successful transition below.
+			if action == RecordDecisionApprove && !actor.isHuman {
+				if obj := task.HumanObjection; obj != nil {
+					return fmt.Errorf("%w: %s", ErrHumanObjectionOpen, humanObjectionOpenMessage(taskID, "approve", obj))
+				}
+			}
+			if action == RecordDecisionApprove {
+				// Truthful-approve gates (ICP-eval v3 fix family #1):
+				//
+				// (1) Approve on a RUNNING task is meaningless — work is in
+				// flight and nothing has been submitted for review. Refuse
+				// loudly instead of silently terminalizing: the J2 zero-work
+				// terminal approvals happened exactly here, when a stale
+				// page rendered "drafting" over a broker task that legacy
+				// mutations had drifted to Running ([19:04], shot 28).
+				if currentState == LifecycleStateRunning {
+					return taskMutationError(
+						TaskMutationConflict,
+						fmt.Sprintf("task %s is mid-execution; nothing has been submitted for review yet. Wait for the owner to submit_for_review (or complete with the artifact), then approve.", taskID),
+						nil,
+					)
+				}
+				// (2) An approve that WOULD terminalize a defined task with
+				// no delivered artifact is rejected — the B1 artifact gate
+				// must bind on the decision path too, not only on MutateTask
+				// ("Canonical output" posts fired for tasks where nobody
+				// ever wrote anything, v3 [19:04]).
+				if !isPreExecutionLifecycleState(currentState) &&
+					currentState != LifecycleStateApproved &&
+					task.Definition != nil && strings.TrimSpace(task.Artifact) == "" {
+					return taskMutationError(
+						TaskMutationArtifactRequired,
+						fmt.Sprintf("task %s has a Definition, so it cannot be approved into done without a delivered artifact. Have the owner publish the deliverable to the wiki and complete with artifact_path set, then approve.", taskID),
+						nil,
+					)
+				}
+				// (3) B5 knowledge-integrity: the recorded artifact must
+				// EXIST — a phantom path is the same chat-only-deliverable
+				// leak as no artifact at all (V3-N10). Existence was
+				// computed outside the lock in the pre-phase above.
+				if !isPreExecutionLifecycleState(currentState) &&
+					currentState != LifecycleStateApproved &&
+					task.Definition != nil &&
+					strings.TrimSpace(task.Artifact) != "" &&
+					strings.TrimSpace(task.Artifact) == decisionArtifactRef &&
+					!decisionArtifactExists {
+					return taskMutationError(
+						TaskMutationArtifactRequired,
+						fmt.Sprintf("task %s cannot be approved into done: artifact %q does not exist in the wiki (or the task worktree). Have the owner publish the real deliverable first, then approve.", taskID, decisionArtifactRef),
+						nil,
+					)
+				}
+			}
 		}
-		// Plan-mode (Phase 5) human-only gate — single-sourced here so it
-		// covers EVERY approval path into recordTaskDecisionInternal: the
-		// /tasks/{id}/decision HTTP endpoint (the "Approve plan & Start"
-		// button, but also any broker-token caller), the team_task MCP path,
-		// and internal callers like RecordTaskDecision(id, "approve", "ceo").
-		// A plan awaiting approval may only be started by the human; an agent
-		// or the CEO approving on the human's behalf defeats the gate.
-		if action == RecordDecisionApprove && currentState == LifecycleStatePlanning &&
-			!actor.isHuman {
-			return fmt.Errorf("record decision: task %s is in Plan mode — only the human can approve the plan and start work (actor %q)", taskID, actorSlug)
-		}
-		target, reason = lifecycleStateForDecisionAction(action, currentState, planFirst)
-		if action == RecordDecisionApprove && currentState == LifecycleStateDrafting {
-			wasApprovingFromDrafting = true
-		}
-		// Approving from Drafting (activate) or Planning (plan approved) starts
-		// the owner working — on a plan turn or an execution turn respectively.
-		startingWork := action == RecordDecisionApprove &&
-			(currentState == LifecycleStateDrafting || currentState == LifecycleStatePlanning)
+		target, reason = lifecycleStateForDecisionAction(action, currentState)
+		// Approving from any pre-execution state (activate) starts the owner
+		// working.
+		startingWork := action == RecordDecisionApprove && isPreExecutionLifecycleState(currentState)
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
+		}
+		// Mirror the MutateTask clear: a HUMAN approve retires their open
+		// objection, and any successful approve retires the latest
+		// request-changes stamp so the next packet drops the banner.
+		// Non-human approves only reach here when no objection was open
+		// (the gate above returned otherwise). Persisted by the
+		// saveLocked in OnDecisionRecorded after this section unlocks.
+		if action == RecordDecisionApprove {
+			if task := b.findTaskByIDLocked(taskID); task != nil {
+				if actor.isHuman {
+					task.HumanObjection = nil
+				}
+				task.ChangesRequested = nil
+			}
 		}
 		// Wake the owner so work actually STARTS on approval. The
 		// transition above only posts a From=system lifecycle card, which
@@ -904,8 +977,7 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 				if isAutoOwner(task.Owner) {
 					// Activating an "auto"-assigned backlog task: there is no
 					// real owner to wake yet, so ask the CEO to assign a
-					// specialist (which reassigns → dispatches, honoring Plan
-					// mode via the reassign path).
+					// specialist (which reassigns → dispatches).
 					b.requestAutoAssignmentLocked(task, actorSlug)
 				} else {
 					b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
@@ -953,6 +1025,23 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 			// task lookup happens via findTaskByIDLocked so we can
 			// pull the current owner inside the lock.
 			if task := b.findTaskByIDLocked(taskID); task != nil {
+				// Stamp the feedback TEXT on the task itself — same
+				// contract as MutateTask's request_changes — so the
+				// "What needs to change?" box from the Inbox reaches
+				// the owner's next execution packet verbatim instead
+				// of dying in the Decision Packet feedback log
+				// (ICP-eval v2 J2). A human reviewer's request also
+				// arms (or refreshes) the sovereignty gate. Fresh
+				// struct each time: rollback safety.
+				objection := &TaskReviewObjection{
+					Actor: taskObjectionActor(actorSlug),
+					Body:  trimmedComment,
+					At:    time.Now().UTC().Format(time.RFC3339),
+				}
+				task.ChangesRequested = objection
+				if actor.isHuman {
+					task.HumanObjection = objection
+				}
 				b.postTaskRequestChangesNotificationsLocked(actorSlug, task, trimmedComment)
 			}
 		}
@@ -963,44 +1052,39 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 	// OnDecisionRecorded acquires b.mu itself; call it after Unlock
 	// to avoid a self-deadlock through the unblock cascade.
 	b.OnDecisionRecorded(taskID)
-	// Phase 4: after Approve & Start on a Drafting issue, emit the
-	// execution lineup card to the CEO DM channel. Runs post-unlock in a
-	// goroutine so the approve HTTP handler returns without waiting on
-	// the optional LLM call (scratch path agent inference).
-	if wasApprovingFromDrafting {
-		lineupCtx := b.wikiPromotionContext()
-		go func() {
-			b.mu.Lock()
-			b.emitExecutionLineupCardLocked(lineupCtx, taskID)
-			b.mu.Unlock()
-		}()
+	// B1 knowledge-integrity: a terminal approve on the DECISION path is a
+	// done transition, so it must queue the same distillation hook MutateTask
+	// queues on reachedDone. The v3 live run terminalized every one of its
+	// six done tasks through this path (Inbox "Approve" → /tasks/{id}/decision
+	// → LifecycleStateApproved) and the hook never fired — entity facts,
+	// graph edges, and entity articles all stayed empty after two full
+	// journeys ([20:14] "4 nodes · 0 edges"). distillCompletedTask is
+	// single-flight + idempotent, so overlap with the MutateTask trigger
+	// (approve-after-complete) is safe.
+	if action == RecordDecisionApprove && target == LifecycleStateApproved {
+		b.queueTaskDistillation(taskID)
 	}
 	return nil
 }
 
 // lifecycleStateForDecisionAction maps a human resolution to the target
 // lifecycle state plus a transition reason string. The currentState
-// argument disambiguates "approve the draft so the owner starts work"
-// (Drafting -> Running, NOT a decision) from "approve completed work"
-// (Review/Decision -> Approved, the terminal decision). Without this
-// disambiguation, clicking "Approve & Start" on a Drafting issue would
-// land in the terminal Approved state and write a misleading wiki
-// "decision" with no execution.
-func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState, planFirst bool) (LifecycleState, string) {
+// argument disambiguates "start a parked/pre-execution task" (Drafting ->
+// Running, NOT a decision — the FE's "Parked — start" affordance rides
+// this) from "approve completed work" (Review/Decision -> Approved, the
+// terminal decision). Without this disambiguation, starting a parked
+// issue would land in the terminal Approved state and write a misleading
+// wiki "decision" with no execution.
+func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState) (LifecycleState, string) {
 	switch action {
 	case RecordDecisionApprove:
-		switch currentState {
-		case LifecycleStateDrafting:
-			// Activating a parked/backlog task. Plan-first tasks plan first
-			// (owner writes a plan, then a second Approve & Start runs it);
-			// non-plan-first tasks go straight to execution.
-			if planFirst {
-				return LifecycleStatePlanning, "human activated task into planning"
-			}
-			return LifecycleStateRunning, "human approved drafting issue and started work"
-		case LifecycleStatePlanning:
-			// The owner's plan was approved — start executing it.
-			return LifecycleStateRunning, "human approved plan and started work"
+		if isPreExecutionLifecycleState(currentState) {
+			// Starting a parked/backlog/pre-execution task goes straight to
+			// execution. The set is wider than Drafting alone: a task whose
+			// typed state drifted to Intake/Ready/QueuedBehindOwner is
+			// still zero-work, and approving it must START it, never
+			// terminalize it (ICP-eval v3 J2 [19:04]).
+			return LifecycleStateRunning, "human started pre-execution issue"
 		}
 		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:

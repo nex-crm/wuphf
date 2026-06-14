@@ -112,7 +112,13 @@ type LearningSearchFilters struct {
 	Trusted      *bool
 	PlaybookSlug string
 	File         string
-	Limit        int
+	// TaskID, when set, restricts results to learnings recorded against that
+	// exact task. Unlike Scope/File/Query (which are fuzzy), this is an exact
+	// match on LearningRecord.TaskID. The egress path (the Slack context-packer)
+	// requires it: "task-scoped learnings" handed to a foreign bot must AND-scope
+	// to the task, never leak unrelated durable brain content via a fuzzy match.
+	TaskID string
+	Limit  int
 }
 
 type LearningSearchResult struct {
@@ -181,6 +187,20 @@ func ValidateLearningInput(rec LearningRecord) error {
 }
 
 func (l *LearningLog) Append(ctx context.Context, rec LearningRecord) (LearningRecord, error) {
+	return l.append(ctx, rec, rec.Source == LearningSourceUserStated)
+}
+
+// AppendVerified appends a learning whose trust derives from a broker-run
+// machine verification (task_distill.go, U4.1) rather than from the
+// author's claim. In-package callers only: no MCP or HTTP surface reaches
+// this path, so agents cannot mint trusted records by asserting
+// source=execution — Append's source-based trust reset still governs every
+// externally reachable write.
+func (l *LearningLog) AppendVerified(ctx context.Context, rec LearningRecord) (LearningRecord, error) {
+	return l.append(ctx, rec, true)
+}
+
+func (l *LearningLog) append(ctx context.Context, rec LearningRecord, trusted bool) (LearningRecord, error) {
 	if l == nil || l.worker == nil {
 		return LearningRecord{}, ErrLearningLogNotRunning
 	}
@@ -199,11 +219,7 @@ func (l *LearningLog) Append(ctx context.Context, rec LearningRecord) (LearningR
 	rec.Supersedes = strings.TrimSpace(rec.Supersedes)
 	rec.Files = cleanStringList(rec.Files)
 	rec.Entities = cleanStringList(rec.Entities)
-	if rec.Source == LearningSourceUserStated {
-		rec.Trusted = true
-	} else {
-		rec.Trusted = false
-	}
+	rec.Trusted = trusted
 	if err := ValidateLearningInput(rec); err != nil {
 		return LearningRecord{}, fmt.Errorf("%w: %w", ErrInvalidLearning, err)
 	}
@@ -263,6 +279,7 @@ func (l *LearningLog) Search(filters LearningSearchFilters) ([]LearningSearchRes
 	scope := strings.TrimSpace(filters.Scope)
 	playbookSlug := strings.TrimSpace(filters.PlaybookSlug)
 	file := strings.TrimSpace(filters.File)
+	taskID := strings.TrimSpace(filters.TaskID)
 	results := make([]LearningSearchResult, 0, len(deduped))
 	for _, rec := range deduped {
 		if filters.Type != "" && rec.Type != filters.Type {
@@ -281,6 +298,9 @@ func (l *LearningLog) Search(filters LearningSearchFilters) ([]LearningSearchRes
 			continue
 		}
 		if file != "" && !stringSliceContains(rec.Files, file) {
+			continue
+		}
+		if taskID != "" && rec.TaskID != taskID {
 			continue
 		}
 		if query != "" && !learningMatchesQuery(rec, query) {

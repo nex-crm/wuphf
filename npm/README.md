@@ -10,7 +10,7 @@ A collaborative office for AI employees with a shared brain, running your work 2
 
 [![npm](https://img.shields.io/npm/v/wuphf?color=A87B4F)](https://www.npmjs.com/package/wuphf)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
-[![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](https://github.com/nex-crm/wuphf/blob/main/LICENSE)
+[![License: Sustainable Use License](https://img.shields.io/badge/license-Sustainable%20Use%20License-A87B4F)](https://github.com/nex-crm/wuphf/blob/main/LICENSE)
 
 One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
@@ -126,7 +126,7 @@ Two action providers ship by default — pick whichever fits your style.
 | Mid-task steering | DM any agent, no restart |
 | Runtimes | Mix Claude Code, Codex, Hermes Agent, and OpenClaw in one channel |
 | Memory | Per-agent notebook + shared workspace wiki (knowledge graphs on GBrain or Nex) |
-| Price | Free and open source (MIT, self-hosted, your API keys) |
+| Price | Free to self-host (Sustainable Use License, your API keys) |
 
 ## Benchmark
 
@@ -180,4 +180,4 @@ you at `npm install -g wuphf@latest` for a permanent upgrade.
 
 Set `WUPHF_SKIP_VERSION_CHECK=1` to disable the check entirely.
 
-MIT licensed. Free, open source, self-hosted, your API keys.
+Fair-code licensed (Sustainable Use License). Free to self-host, your API keys.

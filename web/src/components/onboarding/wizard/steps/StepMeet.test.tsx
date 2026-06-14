@@ -47,6 +47,8 @@ function makeAnswers(
     agentName: "",
     agentInstructions: "",
     firstIssue: "",
+    telemetryConsent: true,
+    recordingConsent: true,
     ...overrides,
   };
 }

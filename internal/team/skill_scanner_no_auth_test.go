@@ -65,7 +65,12 @@ func TestSkillScanner_NoLLMConfigured_BailsAfterFirstCall(t *testing.T) {
 		}
 	}
 
-	var logBuf bytes.Buffer
+	// syncLogBuffer, not a bare bytes.Buffer: this becomes the GLOBAL slog
+	// sink, and goroutines leaked by other tests (e.g. an ObsidianWatcher
+	// debounce timer firing late) may write to it while we read it below.
+	// ab4aeddb added the type but the body never switched — the -race
+	// flake it was meant to kill stayed alive.
+	var logBuf syncLogBuffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
@@ -152,4 +157,23 @@ func TestSkillScannerOnlyWrapsAuthErrors(t *testing.T) {
 				sample, probe.Provider, probe.SignInCommand)
 		}
 	}
+}
+
+// syncLogBuffer is a mutex-guarded buffer safe to install as the global
+// slog sink while unrelated goroutines may still be logging.
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

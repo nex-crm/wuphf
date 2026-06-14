@@ -17,13 +17,13 @@ func TestChannelMemberDraftCurrentStepClampsBounds(t *testing.T) {
 		t.Fatalf("negative Step should clamp to first step, got %q", got)
 	}
 	d = channelMemberDraft{Step: 99}
-	if got := d.currentStep(); got != "permission" {
+	if got := d.currentStep(); got != "personality" {
 		t.Fatalf("out-of-range Step should clamp to last step, got %q", got)
 	}
 }
 
 func TestChannelMemberDraftCurrentStepProgresses(t *testing.T) {
-	want := []string{"slug", "name", "role", "expertise", "personality", "permission"}
+	want := []string{"slug", "name", "role", "expertise", "personality"}
 	for i, expected := range want {
 		got := channelMemberDraft{Step: i}.currentStep()
 		if got != expected {
@@ -75,7 +75,6 @@ func TestMemberDraftComposerLabelByStep(t *testing.T) {
 		"role":        "Teammate role/title",
 		"expertise":   "Expertise list",
 		"personality": "Personality",
-		"permission":  "Permission mode",
 	}
 	for step, want := range cases {
 		idx := 0
@@ -175,13 +174,12 @@ func TestMutateOfficeMemberSpecCreateSendsExpectedPayload(t *testing.T) {
 	t.Setenv("WUPHF_BROKER_BASE_URL", srv.URL)
 
 	draft := channelMemberDraft{
-		Mode:           "create",
-		Slug:           "data-eng",
-		Name:           "Data Eng",
-		Role:           "Engineer",
-		Expertise:      "Go, SQL,Go",
-		Personality:    "calm",
-		PermissionMode: "auto",
+		Mode:        "create",
+		Slug:        "data-eng",
+		Name:        "Data Eng",
+		Role:        "Engineer",
+		Expertise:   "Go, SQL,Go",
+		Personality: "calm",
 	}
 	mutateOfficeMemberSpec(draft, "office")()
 
@@ -197,9 +195,6 @@ func TestMutateOfficeMemberSpecCreateSendsExpectedPayload(t *testing.T) {
 	}
 	if len(expertise) != 2 || expertise[0] != "Go" || expertise[1] != "SQL" {
 		t.Errorf("expected dedup'd expertise [Go, SQL], got %v", expertise)
-	}
-	if posted["permission_mode"] != "auto" {
-		t.Errorf("expected permission_mode=auto, got %v", posted["permission_mode"])
 	}
 }
 

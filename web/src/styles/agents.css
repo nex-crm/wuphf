@@ -1379,3 +1379,720 @@
   color: var(--accent);
   text-decoration: underline;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Agent instruction file maturity enhancements — purpose hints + raw editor
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.agent-file-purpose-hint {
+  margin: 0 0 10px;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border-left: 2px solid var(--accent);
+  padding: 5px 10px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.agent-file-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.agent-file-mode-note {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+/* Structured block editor — one labelled block per file section. */
+.agent-file-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-file-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-file-block-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.agent-file-block-tag {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.agent-file-block-hint {
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+.agent-file-block-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--motion-fast, 120ms) ease;
+}
+
+.agent-file-block-input:focus {
+  border-color: var(--accent);
+}
+
+.agent-file-block-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.agent-file-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  padding: 2px;
+  gap: 2px;
+}
+
+.agent-file-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast, 120ms) ease,
+    color var(--motion-fast, 120ms) ease;
+}
+
+.agent-file-mode-btn.is-active {
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.agent-file-raw-editor {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.agent-file-raw-editor:focus {
+  border-color: var(--accent);
+}
+
+.agent-file-raw-editor:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Agent Subspace — tabbed per-agent HQ
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.agent-subspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── Shell header ── */
+.agent-subspace-header {
+  padding: 20px 28px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-card);
+}
+
+.agent-subspace-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.agent-subspace-header-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.agent-subspace-header-avatar .pixel-avatar {
+  width: 100%;
+  height: 100%;
+}
+
+.agent-subspace-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-subspace-header-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* The agent name inside the shell header is larger than the panel version */
+.agent-subspace-header-name-row .agent-panel-name {
+  font-size: var(--text-xl, 20px);
+  font-weight: 700;
+}
+
+/* EditableName input */
+.agent-subspace-header-name-row input.input {
+  font-size: var(--text-xl, 20px);
+  font-weight: 700;
+}
+
+.agent-subspace-header-role {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-subspace-header-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 1px;
+}
+
+.agent-subspace-status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  text-transform: lowercase;
+}
+
+.agent-subspace-status-badge--active {
+  background: color-mix(in srgb, var(--green, #22c55e) 12%, transparent);
+  color: var(--green, #22c55e);
+}
+
+.agent-subspace-status-badge--idle {
+  background: var(--bg);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+}
+
+/* Current-task chip */
+.agent-subspace-task-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 280px;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--accent-bg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Tab bar ── */
+.agent-subspace-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.agent-subspace-tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+.agent-subspace-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 14px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--motion-fast, 120ms) ease,
+    opacity var(--motion-fast, 120ms) ease;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.agent-subspace-tab:hover {
+  color: var(--text-secondary);
+}
+
+.agent-subspace-tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.agent-subspace-tab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: 4px;
+}
+
+/* ── Tab panel content ── */
+.agent-subspace-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chat tab — DMView fills the panel */
+.agent-subspace-tab-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Config tab — headless AgentProfilePanel inside */
+.agent-config-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Config tab: the panel sits inline (not fixed-position) */
+.agent-config-tab .agent-panel {
+  position: static;
+  width: 100%;
+  height: auto;
+  box-shadow: none;
+  border-left: 0;
+  animation: none;
+  flex: 1;
+}
+
+/* ── Tasks tab ── */
+.agent-tasks-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+  background: var(--bg);
+}
+
+.agent-tasks-tab--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-tasks-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.agent-tasks-board {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.agent-tasks-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-tasks-column-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.agent-tasks-column-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.agent-tasks-column-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.agent-tasks-column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Policies tab ── */
+.agent-policies-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: var(--bg);
+}
+
+.agent-policies-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-policies-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.agent-policies-subtitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 640px;
+}
+
+.agent-policies-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.agent-policies-add-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+}
+
+.agent-policies-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-policies-input {
+  flex: 1;
+}
+
+.agent-policies-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--error-400, var(--red, #ef4444));
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--red, #ef4444) 8%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.agent-policies-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  font-style: italic;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.agent-policy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-policy-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s;
+}
+
+.agent-policy-row:hover {
+  border-color: var(--border-dark, var(--border));
+}
+
+.agent-policy-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-policy-rule {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.agent-policy-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-policy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-policy-badge--source-human {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+
+.agent-policy-badge--source-auto {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+}
+
+.agent-policy-badge--scope {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+}
+
+.agent-policy-badge--scoped {
+  background: color-mix(in srgb, var(--yellow, #f59e0b) 12%, transparent);
+  color: var(--yellow, #f59e0b);
+  border-color: transparent;
+}
+
+.agent-policy-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.agent-policy-deactivate {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.agent-policy-deactivate:hover:not(:disabled) {
+  color: var(--error-400, var(--red, #ef4444));
+}
+
+/* ── Live Stream tab ── */
+.agent-stream-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  background: var(--bg);
+}
+
+.agent-stream-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-stream-section-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Full-height log inside the tab (overrides the 300px cap from the panel) */
+.agent-stream-log--full {
+  max-height: 420px;
+}
+
+.agent-stream-runs-empty {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.agent-stream-runs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-stream-run-item {
+  display: flex;
+}
+
+.agent-stream-run-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.agent-stream-run-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.agent-stream-run-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.agent-stream-run-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .agent-subspace-header {
+    padding: 16px 20px 12px;
+  }
+
+  .agent-subspace-tabbar {
+    padding: 0 16px;
+  }
+
+  .agent-tasks-tab,
+  .agent-policies-tab,
+  .agent-stream-tab {
+    padding: 16px 20px 32px;
+  }
+}

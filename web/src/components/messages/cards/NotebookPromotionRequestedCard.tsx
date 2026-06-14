@@ -2,12 +2,28 @@
  * NotebookPromotionRequestedCard — chat card emitted by the broker in
  * #general when an agent submits a notebook→wiki promotion request.
  *
- * Click → navigates to /reviews (the Reviews app). The promotion id is
- * surfaced as a data attribute so future iterations can deep-link to the
- * specific review without changing the wire shape.
+ * Click → opens the notebook item itself (the entry view carries the
+ * in-place Approve / Request-changes bar), derived from `source_path`
+ * ("agents/<slug>/notebook/<entry>.md"). Falls back to /reviews when the
+ * path is missing or unparseable. The promotion id is surfaced as a data
+ * attribute so future iterations can deep-link the specific review without
+ * changing the wire shape.
  */
 
 import { router } from "../../../lib/router";
+
+/** Extracts {agentSlug, entrySlug} from "agents/<slug>/notebook/<entry>.md". */
+export function notebookEntryFromSourcePath(
+  sourcePath: string,
+): { agentSlug: string; entrySlug: string } | null {
+  const match = /^agents\/([^/]+)\/notebook\/([^/]+)\.md$/.exec(
+    sourcePath.trim(),
+  );
+  if (!match) return null;
+  const [, agentSlug, entrySlug] = match;
+  if (!(agentSlug && entrySlug)) return null;
+  return { agentSlug, entrySlug };
+}
 
 export interface NotebookPromotionRequestedPayload {
   promotion_id?: string;
@@ -49,6 +65,14 @@ export function NotebookPromotionRequestedCard({
   const title = targetPath || "Promotion requested";
 
   function openReviews() {
+    const entry = notebookEntryFromSourcePath(sourcePath);
+    if (entry) {
+      void router.navigate({
+        to: "/notebooks/$agentSlug/$entrySlug",
+        params: { agentSlug: entry.agentSlug, entrySlug: entry.entrySlug },
+      });
+      return;
+    }
     void router.navigate({ to: "/reviews" });
   }
 

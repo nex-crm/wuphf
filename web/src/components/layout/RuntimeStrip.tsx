@@ -1,40 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { getOfficeTasks } from "../../api/tasks";
-import { useOfficeMembers } from "../../hooks/useMembers";
-import { useRequests } from "../../hooks/useRequests";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 
 /**
  * Thin strip under the channel header with pills for "N active",
  * "M blocked", "K need you". Mirrors the legacy runtime-strip.
  *
- * Uses a separate cache key ("office-tasks-active") from TasksApp
- * ("office-tasks") because this component fetches with includeDone:false
- * while TasksApp fetches with includeDone:true. Sharing the same key
- * caused the two queries to overwrite each other's cached results.
+ * Counts come from the shared /office/stats hook — the same payload the
+ * board lane headers, dashboard tiles, and inbox badge consume — so the
+ * strip can never disagree with the board (the v1 "1 blocked vs Blocked
+ * lane 0" drift came from this strip deriving `blocked` from a raw
+ * status string while the board projected lifecycle stages).
  */
 export function RuntimeStrip() {
-  const { data: members = [] } = useOfficeMembers();
-  const { data: tasksData } = useQuery({
-    queryKey: ["office-tasks-active"],
-    queryFn: () => getOfficeTasks({ includeDone: false }),
-    refetchInterval: 15_000,
-  });
-  const { pending } = useRequests();
+  const { data: stats } = useOfficeStats();
 
-  const tasks = tasksData?.tasks ?? [];
+  // No stats yet (first load or broker unreachable): render nothing
+  // rather than claiming "all quiet" about a state we don't know.
+  if (!stats) {
+    return <div className="runtime-strip" />;
+  }
 
-  const active = members.filter((m) => {
-    if (!m.slug || m.slug === "human" || m.slug === "you") return false;
-    return (m.status || "").toLowerCase() === "active";
-  }).length;
-
-  const blocked = tasks.filter((t) => {
-    const s = (t.status ?? "").toLowerCase();
-    return s === "blocked" || t.blocked === true;
-  }).length;
-
-  const needYou = pending.filter((r) => r.blocking || r.required).length;
+  // "N active" counts working agents (as before); "M blocked" counts
+  // board-blocked tasks; "K need you" counts pending blocking requests
+  // (decision-lane tasks surface via the board's Needs-human lane and
+  // the inbox badge — counting them here too would double-bill tasks
+  // that also raised a request).
+  const active = stats.agents_active;
+  const blocked = stats.tasks.blocked;
+  const needYou = stats.requests.blocking;
 
   if (active === 0 && blocked === 0 && needYou === 0) {
     return (

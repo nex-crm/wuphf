@@ -105,7 +105,9 @@ describe("<TypingIndicator>", () => {
     render(<TypingIndicator />);
 
     expect(screen.getByText("PM is typing...")).toBeInTheDocument();
-    expect(screen.getByText("drafting figure")).toBeInTheDocument();
+    // Header detail AND the bubble now both lead with the honest progress
+    // string (jokes only fill unknown waits) — assert the doubled presence.
+    expect(screen.getAllByText("drafting figure")).toHaveLength(2);
   });
 
   it("falls back to lower-priority progress fields when liveActivity is absent", () => {
@@ -124,7 +126,39 @@ describe("<TypingIndicator>", () => {
 
     render(<TypingIndicator />);
 
-    expect(screen.getByText("scoping issue")).toBeInTheDocument();
+    expect(screen.getAllByText("scoping issue")).toHaveLength(2);
+  });
+
+  it("never renders raw tool-call JSON in the typing strip", () => {
+    // Render-boundary regression guard (ten-out-of-ten E1; ICP-eval v3
+    // [18:43:37]): the broker's liveActivity carried raw tool_reference
+    // JSON and it rendered verbatim in the "CEO is typing" preview.
+    const rawToolJSON =
+      '[{"tool_name":"mcp__wuphf-office__team_task","type":"tool_reference"}]';
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "channel",
+      channelSlug: "general",
+    });
+    mockUseOfficeMembers.mockReturnValue({
+      data: [
+        {
+          slug: "ceo",
+          name: "CEO",
+          status: "active",
+          liveActivity: rawToolJSON,
+        },
+      ],
+    } as unknown as ReturnType<typeof useOfficeMembers>);
+    mockUseChannelMembers.mockReturnValue({
+      data: [{ slug: "ceo", name: "CEO" }],
+    } as unknown as ReturnType<typeof useChannelMembers>);
+
+    render(<TypingIndicator />);
+
+    expect(screen.queryByText(/tool_reference/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/mcp__/)).not.toBeInTheDocument();
+    // Machine-shaped activity collapses to the honest fallback instead.
+    expect(screen.getAllByText("Working…").length).toBeGreaterThan(0);
   });
 
   it("suppresses the detail when several agents are active to avoid implying shared progress", () => {

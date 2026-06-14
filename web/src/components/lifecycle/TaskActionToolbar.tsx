@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { type TaskStatusAction, updateTaskStatus } from "../../api/tasks";
 import type { LifecycleState } from "../../lib/types/lifecycle";
 import { ReopenTaskButton } from "./ReopenTaskButton";
-import { ApproveAndStartButton } from "./TaskDocument";
+import { StartParkedTaskButton } from "./TaskDocument";
 
 // ── State-aware Issue action toolbar ─────────────────────────────────
 
@@ -36,11 +36,9 @@ interface ActionDef {
 function actionsForState(state: LifecycleState): ActionDef[] {
   switch (state) {
     case "drafting":
-    case "planning":
-      // Approve & Start has its own button (special verb postDecision).
-      // From drafting/planning we offer Cancel as the close path. (Planning =
-      // Plan mode: the owner is writing/has written a plan; Approve & Start
-      // accepts it and starts the work.)
+      // Drafting now means explicitly PARKED. The Start affordance has its
+      // own button (special verb postDecision — the one remaining start
+      // button). From parked we offer Cancel as the close path.
       return [
         {
           action: "cancel",
@@ -172,7 +170,6 @@ export function TaskActionToolbar({
   }, [pendingActionId]);
 
   const isDrafting = lifecycleState === "drafting";
-  const isPlanning = lifecycleState === "planning";
   const isTerminal =
     lifecycleState === "approved" || lifecycleState === "rejected";
   // Archive is a filing affordance available on every task that is not
@@ -222,15 +219,14 @@ export function TaskActionToolbar({
 
   return (
     <div className="issue-action-toolbar">
-      {/* Approve & Start — uses postDecision via the existing button so the
-       * special drafting→running and planning→running transitions keep their
-       * server-side behavior. In Planning (Plan mode) the label reflects that
-       * the human is approving the owner's plan. */}
-      {isDrafting || isPlanning ? (
-        <ApproveAndStartButton
+      {/* Parked — start. Uses postDecision via the existing button so the
+       * drafting→running un-park keeps its server-side behavior. This is
+       * the ONE start button left; every other path starts at creation. */}
+      {isDrafting ? (
+        <StartParkedTaskButton
           taskId={taskId}
           onApproved={onAfterAction}
-          label={isPlanning ? "Approve plan & Start" : "Approve & Start"}
+          label="Parked — start"
         />
       ) : null}
 

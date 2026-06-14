@@ -40,6 +40,11 @@ var allowedFiles = map[string]string{
 	// gbrain — user-global MCP subprocess, real HOME for subprocess auth.
 	"internal/team/memory_backend.go": "gbrainMCPEnv + gbrainMCPEnvVars — gbrain is user-global",
 
+	// Composio sign-in — the composio CLI writes its login session to the
+	// real user HOME (~/.composio/user_data.json); the broker only READS it
+	// to detect login state. Same user-global-auth class as codex/opencode.
+	"internal/team/broker_composio_signin.go": "composio CLI login session lives in the real user HOME",
+
 	// npm install detection — walks up from user real HOME, not WUPHF state.
 	// broker_upgrade.go is the refactored split of broker.go; same rationale.
 	"internal/team/broker.go":         "detectLocalInstall — npm dependency walk from user HOME",

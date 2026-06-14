@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
 
@@ -287,6 +288,70 @@ func TestHandleCompletePostIdempotent(t *testing.T) {
 		}
 		if resp["redirect"] != "/" {
 			t.Errorf("expected redirect=/, got: %v", resp["redirect"])
+		}
+	})
+}
+
+// TestHandleCompletePersistsAnalyticsConsent verifies the wizard's two consent
+// toggles ride the complete body and persist to config — an explicit opt-out is
+// stored, and the resolver honors it. Default ON (nil) resolves at read time.
+func TestHandleCompletePersistsAnalyticsConsent(t *testing.T) {
+	withTempHome(t, func(home string) {
+		// Isolate config writes from any process-leaked WUPHF_RUNTIME_HOME.
+		t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(home, ".wuphf", "config.json"))
+
+		body := map[string]any{
+			"task":                                "ship the thing",
+			"skip_task":                           false,
+			"analytics_telemetry_enabled":         false,
+			"analytics_session_recording_enabled": true,
+		}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200\nbody: %s", w.Code, w.Body.String())
+		}
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("config.Load: %v", err)
+		}
+		if cfg.AnalyticsTelemetryEnabled == nil || *cfg.AnalyticsTelemetryEnabled {
+			t.Fatalf("telemetry opt-out not persisted: %+v", cfg.AnalyticsTelemetryEnabled)
+		}
+		if cfg.AnalyticsSessionRecordingEnabled == nil || !*cfg.AnalyticsSessionRecordingEnabled {
+			t.Fatalf("recording consent not persisted: %+v", cfg.AnalyticsSessionRecordingEnabled)
+		}
+		if cfg.IsAnalyticsTelemetryEnabled() {
+			t.Error("telemetry should resolve OFF after opt-out")
+		}
+	})
+}
+
+// TestHandleCompleteOmittingAnalyticsLeavesDefaults verifies a legacy client
+// that omits the consent fields does not write them (default ON resolves later).
+func TestHandleCompleteOmittingAnalyticsLeavesDefaults(t *testing.T) {
+	withTempHome(t, func(home string) {
+		t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(home, ".wuphf", "config.json"))
+		body := map[string]any{"task": "", "skip_task": true}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200\nbody: %s", w.Code, w.Body.String())
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("config.Load: %v", err)
+		}
+		if cfg.AnalyticsTelemetryEnabled != nil {
+			t.Errorf("expected telemetry unset, got %+v", cfg.AnalyticsTelemetryEnabled)
+		}
+		if !cfg.IsAnalyticsTelemetryEnabled() {
+			t.Error("unset telemetry should resolve ON")
 		}
 	})
 }

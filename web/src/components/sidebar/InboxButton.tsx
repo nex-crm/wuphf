@@ -1,59 +1,29 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Badge mirrors AppList — aria-label on the span surfaces the pending count to assistive tech.
-import { useEffect, useMemo, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { Mail } from "iconoir-react";
 
-import { getInboxItems } from "../../api/lifecycle";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { playInboxDing } from "../../lib/notificationSound";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
-import type { InboxItem } from "../../lib/types/inbox";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
-
-/**
- * Lifecycle states a human can act on. A task in any of these surfaces in
- * the unread badge because the agent has handed off (or wants a call).
- * Drives `count` below so the sidebar badge actually reflects the real
- * attention queue, not just the narrower `decisionRequired` slice the
- * old /tasks/inbox payload exposed.
- */
-const ATTENTION_TASK_STATES = new Set([
-  "decision",
-  "review",
-  "changes_requested",
-  "blocked_on_pr_merge",
-]);
-
-function isAttentionItem(item: InboxItem): boolean {
-  if (item.kind === "request" || item.kind === "review") return true;
-  if (item.kind === "task") {
-    const state = item.task?.state ?? "";
-    return ATTENTION_TASK_STATES.has(state);
-  }
-  return false;
-}
 
 /**
  * Top-of-sidebar Inbox entry. Renders the same DOM/class set as every
  * other sidebar app (AppList) so it visually belongs in the rail; the
  * surrounding `.sidebar-primary` wrapper handles the separator that
  * elevates it above the Agents / Channels / Tools sections.
+ *
+ * The badge count is the broker-computed `inbox_attention` from the
+ * shared /office/stats payload — requests + reviews + tasks in a
+ * human-attention lifecycle state, the same fan-out /inbox/items
+ * serves. Reading the shared stats hook (instead of re-deriving from a
+ * private /inbox/items poll) keeps this badge consistent with the
+ * board's Needs-human lane and the header strip by construction.
  */
 export function InboxButton() {
   const currentApp = useCurrentApp();
-  const { data } = useQuery({
-    queryKey: ["inbox-badge"],
-    queryFn: () => getInboxItems("all"),
-    refetchInterval: 5_000,
-  });
-
-  const count = useMemo(() => {
-    const items = data?.items ?? [];
-    let total = 0;
-    for (const item of items) {
-      if (isAttentionItem(item)) total += 1;
-    }
-    return total;
-  }, [data]);
+  const { data: stats } = useOfficeStats();
+  const count = stats?.inbox_attention ?? 0;
 
   const lastCountRef = useRef<number | null>(null);
   useEffect(() => {

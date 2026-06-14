@@ -1,7 +1,9 @@
 import { useMatches } from "@tanstack/react-router";
 
+import { useOfficeTasks } from "../hooks/useOfficeTasks";
 import {
   agentDetailRoute,
+  agentDetailTabRoute,
   agentsRoute,
   appRoute,
   appTaskDetailRoute,
@@ -56,7 +58,7 @@ export type CurrentRoute =
   | { kind: "task-decision"; taskId: string }
   // Agents tool — roster grid + per-agent config/detail page.
   | { kind: "agents" }
-  | { kind: "agent-detail"; agentSlug: string }
+  | { kind: "agent-detail"; agentSlug: string; tab?: string }
   // Full-screen skill detail editor + viewer.
   | { kind: "skill-detail"; skillName: string }
   | { kind: "routine-detail"; routineSlug: string }
@@ -101,6 +103,7 @@ type CurrentRouteId =
   | typeof taskDecisionRoute.id
   | typeof agentsRoute.id
   | typeof agentDetailRoute.id
+  | typeof agentDetailTabRoute.id
   | typeof skillDetailRoute.id
   | typeof routineDetailRoute.id
   | typeof routineNewRoute.id;
@@ -125,6 +128,7 @@ const CURRENT_ROUTE_IDS = [
   taskDecisionRoute.id,
   agentsRoute.id,
   agentDetailRoute.id,
+  agentDetailTabRoute.id,
   skillDetailRoute.id,
   routineDetailRoute.id,
   routineNewRoute.id,
@@ -188,11 +192,18 @@ const ROUTE_DERIVERS = {
     kind: "task-decision",
     taskId: params.taskId ?? "",
   }),
-  // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
+  // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug)
+  // + tabbed subspace (/agents/$slug/$tab).
   [agentsRoute.id]: () => ({ kind: "agents" }),
   [agentDetailRoute.id]: (params) => ({
     kind: "agent-detail",
     agentSlug: params.agentSlug ?? "",
+    tab: undefined,
+  }),
+  [agentDetailTabRoute.id]: (params) => ({
+    kind: "agent-detail",
+    agentSlug: params.agentSlug ?? "",
+    tab: params.tab,
   }),
   [skillDetailRoute.id]: (params) => ({
     kind: "skill-detail",
@@ -249,6 +260,36 @@ export function useChannelSlug(): string | null {
 export function useCurrentTaskId(): string | null {
   const route = useCurrentRoute();
   if (route.kind === "task-detail" && route.taskId) return route.taskId;
+  return null;
+}
+
+/**
+ * Resolve the channel slug of the chat the human is *currently looking at*:
+ * the channel for a channel route, the owning task's channel for a
+ * task-detail route, and "general" for the home composer (which posts to
+ * #general). Returns null on non-chat surfaces (wiki, agents, apps,
+ * settings, inbox, …) where there is no single conversation to anchor to.
+ *
+ * The interview bar uses this to surface an agent's question only in the
+ * chat it was asked in, instead of mirroring the office-wide request queue
+ * onto every surface. Cross-channel triage still lives in the Inbox, so a
+ * request is never stranded by this narrowing.
+ *
+ * task-detail resolution leans on the already-cached office task list
+ * (useOfficeTasks shares its query key), so this adds no extra polling.
+ * While that list is still loading the slug is null and the bar simply
+ * stays quiet for a beat rather than flashing another channel's request.
+ */
+export function useActiveChannelSlug(): string | null {
+  const route = useCurrentRoute();
+  const { data: tasks } = useOfficeTasks();
+  if (route.kind === "channel") return route.channelSlug;
+  if (route.kind === "home") return "general";
+  if (route.kind === "task-detail") {
+    const owner = (tasks ?? []).find((task) => task.id === route.taskId);
+    const channel = owner?.channel?.trim();
+    return channel ? channel : null;
+  }
   return null;
 }
 

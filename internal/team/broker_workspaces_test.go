@@ -1026,6 +1026,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		// office members + channels
 		"/office-members",
 		"/office-members/generate",
+		// derived stats (single source for surface counts)
+		"/office/stats",
 		"/channels",
 		"/channels/dm",
 		"/channels/generate",
@@ -1104,6 +1106,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/integrations/audit",
 		"/integrations/resolve",
 		"/integrations/grants",
+		"/integrations/composio/signin/start",
+		"/integrations/composio/signin/status",
 		// reset/usage/policies/signals/decisions/watchdogs/actions/scheduler
 		"/reset",
 		"/reset-dm",

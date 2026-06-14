@@ -196,6 +196,13 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
 			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
 			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
+			// Product analytics consent (PostHog). The two channels are
+			// independently toggleable; analytics_configured reports whether
+			// the backend injects a key (the frontend ORs this with its own
+			// build-time key to decide whether the toggles are meaningful).
+			"analytics_telemetry_enabled":         cfg.IsAnalyticsTelemetryEnabled(),
+			"analytics_session_recording_enabled": cfg.IsAnalyticsSessionRecordingEnabled(),
+			"analytics_configured":                config.ResolvePostHogKey() != "",
 			// Config file path (informational)
 			"config_path": config.ConfigPath(),
 		})
@@ -236,6 +243,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TelegramToken   *string `json:"telegram_bot_token,omitempty"`
 			OpenclawToken   *string `json:"openclaw_token,omitempty"`
 			OpenclawGateway *string `json:"openclaw_gateway_url,omitempty"`
+			// Product analytics consent toggles. Pointer => nil means "not
+			// sent, leave alone"; an explicit true/false round-trips.
+			AnalyticsTelemetry        *bool `json:"analytics_telemetry_enabled,omitempty"`
+			AnalyticsSessionRecording *bool `json:"analytics_session_recording_enabled,omitempty"`
 			// ProviderEndpoints is a partial-update map: keys present in
 			// the payload replace the corresponding entry; absent keys are
 			// preserved. Pass an empty value (`{"base_url":"","model":""}`)
@@ -469,6 +480,18 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.OpenclawGateway != nil {
 			cfg.OpenclawGatewayURL = strings.TrimSpace(*body.OpenclawGateway)
+			changed = true
+		}
+		// Analytics consent toggles. Copy into a fresh local so the stored
+		// pointer doesn't alias the decoded request body.
+		if body.AnalyticsTelemetry != nil {
+			v := *body.AnalyticsTelemetry
+			cfg.AnalyticsTelemetryEnabled = &v
+			changed = true
+		}
+		if body.AnalyticsSessionRecording != nil {
+			v := *body.AnalyticsSessionRecording
+			cfg.AnalyticsSessionRecordingEnabled = &v
 			changed = true
 		}
 		if body.ProviderEndpoints != nil {
@@ -1305,7 +1328,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	for _, msg := range lastMessages {
-		msg = sanitizeChannelMessageSecrets(msg)
+		// redaction removed (core-loop R1)
 		content := msg.Content
 		if len(content) > 80 {
 			content = content[:80]

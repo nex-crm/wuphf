@@ -196,6 +196,7 @@ func TestHandleTeamActionExecuteReadOnlyBypassesGate(t *testing.T) {
 // fail-open hole where an empty/garbled/novel decision fell through the switch.
 func TestHandleTeamActionExecuteFailsClosedOnUnknownDecision(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/integrations/resolve" {
@@ -240,6 +241,7 @@ func TestHandleTeamActionExecuteFailsClosedOnUnknownDecision(t *testing.T) {
 // approval request blocks the run. This is the scoped-grant fast path.
 func TestHandleTeamActionExecuteGrantProceedSkipsModalAndExecutes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
 	approvalPosted := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

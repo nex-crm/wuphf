@@ -146,14 +146,13 @@ func (o *officeTargeter) ActiveSessionMembers() []officeMember {
 			continue
 		}
 		member := officeMember{
-			Slug:           cfg.Slug,
-			Name:           cfg.Name,
-			Role:           cfg.Name,
-			Expertise:      append([]string(nil), cfg.Expertise...),
-			Personality:    cfg.Personality,
-			PermissionMode: cfg.PermissionMode,
-			AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-			BuiltIn:        cfg.Slug == o.pack.LeadSlug || cfg.Slug == "ceo",
+			Slug:         cfg.Slug,
+			Name:         cfg.Name,
+			Role:         cfg.Name,
+			Expertise:    append([]string(nil), cfg.Expertise...),
+			Personality:  cfg.Personality,
+			AllowedTools: append([]string(nil), cfg.AllowedTools...),
+			BuiltIn:      cfg.Slug == o.pack.LeadSlug || cfg.Slug == "ceo",
 		}
 		applyOfficeMemberDefaults(&member)
 		filtered = append(filtered, member)

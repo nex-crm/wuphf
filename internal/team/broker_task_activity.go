@@ -9,6 +9,7 @@ package team
 // page, modeled on Paperclip's activity log.
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -24,6 +25,10 @@ const (
 	IssueActivityKindAction    IssueActivityEventKind = "action"
 	IssueActivityKindRequest   IssueActivityEventKind = "request"
 	IssueActivityKindSubIssue  IssueActivityEventKind = "sub_issue"
+	// IssueActivityKindTurn surfaces the task ledger (task_ledger.go): one
+	// event per settled headless turn, carrying the context manifest the
+	// turn's work packet injected (B4 "context I used" transparency).
+	IssueActivityKindTurn IssueActivityEventKind = "turn"
 )
 
 // IssueActivityRequestStatus mirrors the human_interview lifecycle so
@@ -48,6 +53,10 @@ type IssueActivityEvent struct {
 	Lifecycle *IssueActivityLifecycle `json:"lifecycle,omitempty"`
 	Request   *IssueActivityRequest   `json:"request,omitempty"`
 	SubIssue  *IssueActivitySubIssue  `json:"sub_issue,omitempty"`
+	// ContextUsed is populated on kind="turn": the knowledge-item ids the
+	// turn's work packet injected ("learning:<id>", "wiki:<ref>", ...).
+	// Additive wire field.
+	ContextUsed []string `json:"context_used,omitempty"`
 }
 
 type IssueActivityLifecycle struct {
@@ -204,7 +213,24 @@ func (b *Broker) collectIssueActivityLocked(taskID string) []IssueActivityEvent 
 		out = append(out, ev)
 	}
 
-	// 4. Sub-issue creations. Pick up any task with ParentIssueID==this.
+	// 4. Settled headless turns from the task ledger (task_ledger.go),
+	//    carrying the deterministic context manifest each turn's packet
+	//    injected (B4 transparency: "context: learning:X, wiki:Y").
+	if t := b.findTaskByIDLocked(taskID); t != nil {
+		for i, e := range t.Ledger {
+			out = append(out, IssueActivityEvent{
+				ID:          fmt.Sprintf("turn-%s-%d", taskID, i),
+				Kind:        IssueActivityKindTurn,
+				Timestamp:   e.At,
+				Actor:       e.Agent,
+				Summary:     e.Outcome,
+				Detail:      e.Said,
+				ContextUsed: append([]string(nil), e.ContextUsed...),
+			})
+		}
+	}
+
+	// 5. Sub-issue creations. Pick up any task with ParentIssueID==this.
 	for _, t := range b.tasks {
 		if strings.TrimSpace(t.ParentIssueID) != taskID {
 			continue

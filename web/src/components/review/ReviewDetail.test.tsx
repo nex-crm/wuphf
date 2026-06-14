@@ -66,7 +66,31 @@ describe("<ReviewDetail>", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(onApprove).toHaveBeenCalledWith("r1");
+    // Request changes requires a rationale (the broker 400s without one):
+    // the click reveals the textarea; confirm passes (id, rationale).
     await user.click(screen.getByRole("button", { name: "Request changes" }));
-    expect(onRequestChanges).toHaveBeenCalledWith("r1");
+    expect(onRequestChanges).not.toHaveBeenCalled();
+    await user.type(
+      screen.getByTestId("nb-review-rationale-input"),
+      "Wrong champion — use Dana Whitfield.",
+    );
+    await user.click(screen.getByTestId("nb-review-rationale-submit"));
+    expect(onRequestChanges).toHaveBeenCalledWith(
+      "r1",
+      "Wrong champion — use Dana Whitfield.",
+    );
+  });
+
+  it("renders the last action error inside the drawer", () => {
+    render(
+      <ReviewDetail
+        review={REVIEW}
+        onClose={() => {}}
+        actionError="rationale is required"
+      />,
+    );
+    expect(screen.getByTestId("nb-review-action-error")).toHaveTextContent(
+      "rationale is required",
+    );
   });
 });

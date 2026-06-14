@@ -230,11 +230,11 @@ func scratchFoundingTeamBlueprint(companyName, description, directive string) op
 		displayName = "Your company"
 	}
 	agents := []operations.StarterAgent{
-		{Slug: "ceo", Name: "CEO", Role: "lead", PermissionMode: "plan", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
-		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
-		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", PermissionMode: "auto", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
-		{Slug: "pm", Name: "Product Manager", Role: "product", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
-		{Slug: "designer", Name: "Designer", Role: "design", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
+		{Slug: "ceo", Name: "CEO", Role: "lead", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
+		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
+		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
+		{Slug: "pm", Name: "Product Manager", Role: "product", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
+		{Slug: "designer", Name: "Designer", Role: "design", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
 	}
 	channels := []operations.StarterChannel{
 		{Slug: "general", Name: "general", Description: "Primary coordination channel.", Members: []string{"ceo", "gtm-lead", "founding-engineer", "pm", "designer"}},
@@ -298,6 +298,31 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
 		return err
 	}
+	// Pack/blueprint seeds follow the same contract as every other create
+	// path: the human choosing the pack IS the authorization, so seeded
+	// starter lanes land as Issues that are immediately executable — owner
+	// set → Running with the owner dispatched through the task_created
+	// action, ownerless → Ready until staffed. Dispatch is gated only by
+	// ownership; there is no start-approval ceremony. The Backup &
+	// Migration system task is exempt.
+	for i := range b.tasks {
+		if b.tasks[i].System || b.tasks[i].LifecycleState != "" {
+			continue
+		}
+		b.tasks[i].TaskType = "issue"
+		target := LifecycleStateReady
+		if owner := strings.TrimSpace(b.tasks[i].Owner); owner != "" && !isAutoOwner(owner) {
+			target = LifecycleStateRunning
+		}
+		if err := b.applyLifecycleStateLocked(&b.tasks[i], target); err != nil {
+			log.Printf("onboarding: land seeded task %s in %s: %v", b.tasks[i].ID, target, err)
+			continue
+		}
+		// Wake the owner through the same notify path a composer create
+		// uses (task_created → notifyTaskActionsLoop → sendTaskUpdate).
+		b.appendActionLocked("task_created", "office", normalizeChannelSlug(b.tasks[i].Channel),
+			b.tasks[i].CreatedBy, truncateSummary(b.tasks[i].Title, 140), b.tasks[i].ID)
+	}
 	// Signal subscribers (the launcher) that the office roster was replaced
 	// wholesale. Individual member_created events aren't emitted by this path
 	// — seedFromBlueprintLocked rewrites b.members directly — so without this
@@ -336,11 +361,10 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	if skipTask {
 		// Without a seeded task, #general would otherwise be empty (or hold
 		// only the lead-only warning) and the office looks broken on first
-		// open. Post a system welcome plus a presence line from the lead so
-		// the channel always has an affordance for what to do next AND feels
-		// staffed rather than abstract. The presence line is marked Kind=
-		// "demo_seed" so the launcher's notification path treats it as inert
-		// — it must not trigger an LLM dispatch.
+		// open. Post a system welcome so the channel always has an
+		// affordance for what to do next. No staged agent presence lines:
+		// the core loop wants a real first paint, not a fake-staffed one
+		// (core-loop R6 removed the demo_seed machinery).
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -350,18 +374,6 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 			Content:   welcomeMessageForMembers(b.members),
 			Timestamp: now,
 		})
-		if leadSlug, leadName := leadSlugAndName(b.members); leadSlug != "" {
-			b.counter++
-			b.appendMessageLocked(channelMessage{
-				ID:        fmt.Sprintf("msg-%d", b.counter),
-				From:      leadSlug,
-				Channel:   "general",
-				Kind:      "demo_seed",
-				Content:   fmt.Sprintf("%s online. Drop a directive in the composer and I'll break it down and dispatch the team.", leadName),
-				Tagged:    []string{},
-				Timestamp: now,
-			})
-		}
 		// seedFromBlueprintLocked mutated b.members/channels/tasks above; we
 		// must persist that even when the user skipped the kickoff task.
 		// Returning early without saveLocked() silently loses the seeded team
@@ -502,10 +514,10 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 	// agents. Keeps the broker from crashing on empty rosters.
 	now := time.Now().UTC().Format(time.RFC3339)
 	return ensureLibrarianMember([]officeMember{
-		{Slug: "founder", Name: "Founder", Role: "Founder", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "auto", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "founder", Name: "Founder", Role: "Founder", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", CreatedBy: "wuphf", CreatedAt: now},
 	})
 }
 
@@ -529,16 +541,15 @@ func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlu
 			role = name
 		}
 		members = append(members, officeMember{
-			Slug:           slug,
-			Name:           name,
-			Role:           role,
-			Expertise:      normalizeStringList(agent.Expertise),
-			Personality:    strings.TrimSpace(agent.Personality),
-			PermissionMode: blankSlatePermissionMode(agent.Type),
-			AllowedTools:   nil,
-			CreatedBy:      "wuphf",
-			CreatedAt:      now,
-			BuiltIn:        agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
+			Slug:         slug,
+			Name:         name,
+			Role:         role,
+			Expertise:    normalizeStringList(agent.Expertise),
+			Personality:  strings.TrimSpace(agent.Personality),
+			AllowedTools: nil,
+			CreatedBy:    "wuphf",
+			CreatedAt:    now,
+			BuiltIn:      agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
 		})
 	}
 	return members
@@ -658,7 +669,13 @@ func blankSlateOfficeTasksFromBlueprint(blueprint operations.Blueprint) []teamTa
 		if channel == "" {
 			channel = "general"
 		}
-		owner := normalizeChannelSlug(starter.Owner)
+		// normalizeChannelSlug("") returns "general" (lobby fallback) —
+		// an ownerless starter task must stay ownerless so it lands READY
+		// and dispatches on assignment, not on a phantom "general" owner.
+		owner := ""
+		if strings.TrimSpace(starter.Owner) != "" {
+			owner = normalizeChannelSlug(starter.Owner)
+		}
 		tasks = append(tasks, teamTask{
 			ID:        fmt.Sprintf("%s-%d", prefix, i+1),
 			Channel:   channel,
@@ -684,15 +701,6 @@ func taskIDPrefix(bp operations.Blueprint) string {
 		return id
 	}
 	return "blank-slate"
-}
-
-func blankSlatePermissionMode(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "lead", "human":
-		return "plan"
-	default:
-		return "auto"
-	}
 }
 
 func memberSlugsFromMembers(members []officeMember) []string {

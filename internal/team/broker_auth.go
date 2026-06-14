@@ -97,6 +97,9 @@ func humanRouteAllowed(r *http.Request) bool {
 		case path == "/messages",
 			path == "/channels" && !strings.EqualFold(r.URL.Query().Get("type"), "dm"),
 			path == "/office-members",
+			// Read-only derived counts for the shell badges; same data the
+			// other allowlisted list GETs already expose.
+			path == "/office/stats",
 			path == "/channel-members",
 			path == "/members",
 			path == "/tasks",

@@ -74,6 +74,15 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}
 
+	// Slack: started in-process by EnsureSlackTransportRunning (broker-owned, so
+	// the same call hot-starts the transport at runtime when a channel is
+	// connected from the web app — no broker re-exec). It is idempotent and
+	// self-gating: it logs and skips when the tokens are missing/partial or no
+	// slack surface channel is connected yet. The cleanup tears it down if it
+	// started, and is a no-op otherwise.
+	b.EnsureSlackTransportRunning()
+	stops = append(stops, b.stopSlackTransport)
+
 	// OpenClaw: opt-in when members exist or a gateway URL is configured.
 	bridge, ocErr := BuildOpenclawBridgeFromConfig(b)
 	if ocErr != nil {

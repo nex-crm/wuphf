@@ -15,6 +15,7 @@ export type SectionId =
   | "integrations"
   | "intervals"
   | "flags"
+  | "privacy"
   | "danger";
 
 export interface Section {

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { post } from "../api/client";
 import type { Task, TaskResponse } from "../api/tasks";
+import { track } from "../lib/analytics";
 
 export interface CreateTaskFormInput {
   title: string;
@@ -20,11 +21,10 @@ export interface CreateTaskResult {
  * (dialog, command palette, CEO inline card).
  *
  * Routes through POST /tasks (action=create, task_type=issue) — the SAME
- * path createSubTask uses — so the broker applies LifecycleStateDrafting
- * by construction. The previous /task-plan route skipped drafting and
- * landed the task straight at status=in_progress, which silently
- * bypassed the CEO scoping interview (issueScopingFrameworkBlock would
- * see a fully-formed task and never ask the office-hours questions).
+ * path createSubTask uses. Creation is the authorization: the broker
+ * lands an owner-set Issue RUNNING (owner dispatched) and an ownerless
+ * Issue READY (dispatches on assignment). Parking is a separate,
+ * deliberate composer action (/task-plan park=true).
  */
 export function useCreateTask() {
   const queryClient = useQueryClient();
@@ -41,7 +41,13 @@ export function useCreateTask() {
       });
       return { task: response.task };
     },
-    onSuccess: () => {
+    onSuccess: (_result, input) => {
+      track("task_created", {
+        source: "inline",
+        owner_agent: input.assignee?.trim() || "",
+        has_details: !!input.details?.trim(),
+        start_mode: "start",
+      });
       void queryClient.invalidateQueries({ queryKey: ["issues"] });
       void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
       void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });

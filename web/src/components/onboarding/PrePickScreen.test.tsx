@@ -387,6 +387,48 @@ describe("PrePickScreen runtime selection", () => {
 
 // ── New tests for Phase 5 ported sections ──────────────────────────────
 
+describe("config sections collapse", () => {
+  const SECTIONS = [
+    {
+      name: "API keys",
+      toggle: "pre-pick-api-keys-toggle",
+      body: "pre-pick-api-keys-body",
+    },
+    {
+      name: "Local model",
+      toggle: "pre-pick-local-toggle",
+      body: "pre-pick-local-body",
+    },
+    {
+      name: "Custom endpoint",
+      toggle: "pre-pick-oai-toggle",
+      body: "pre-pick-oai-body",
+    },
+  ];
+
+  for (const section of SECTIONS) {
+    it(`collapses "${section.name}" by default and toggles open/closed`, async () => {
+      mockPrereqs({});
+      render(<PrePickScreen onComplete={vi.fn()} />);
+      const toggle = await screen.findByTestId(section.toggle);
+      const body = document.getElementById(section.body);
+
+      // Collapsed by default — body kept mounted but hidden.
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(body).not.toBeNull();
+      expect(body).toHaveAttribute("hidden");
+
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(body).not.toHaveAttribute("hidden");
+
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(body).toHaveAttribute("hidden");
+    });
+  }
+});
+
 describe("API key row", () => {
   it("renders API key rows for Anthropic, OpenAI, and Google", async () => {
     mockPrereqs({});

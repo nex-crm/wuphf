@@ -17,8 +17,7 @@ export function navigateToSidebarApp(appId: string): void {
     void router.navigate({ to: "/inbox" });
     return;
   }
-  // `issues` is a back-compat alias for the first-class Tasks surface.
-  if (appId === "tasks" || appId === "issues") {
+  if (appId === "tasks") {
     void router.navigate({ to: "/tasks" });
     return;
   }

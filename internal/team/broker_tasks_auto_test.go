@@ -2,12 +2,15 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
@@ -121,5 +124,109 @@ func TestBrokerTaskPlanParkAndAuto(t *testing.T) {
 	b.mu.Unlock()
 	if !found {
 		t.Fatalf("expected a @ceo triage message in channel %q for auto task %s", st.Channel, st.ID)
+	}
+}
+
+// TestOwnerlessTaskCreate_TriageMessageWakesCEO pins the FULL wake trace for
+// an ownerless ("auto") start-now task, at the live layer:
+//
+//	POST /task-plan (assignee=auto)
+//	  → requestAutoAssignmentLocked posts a human-authored @ceo message
+//	  → the broker publishes it on the message stream notifyAgentsLoop reads
+//	  → deliverMessageNotification dispatches a headless turn to the CEO.
+//
+// Without the dispatch the staffing copy on the task page ("CEO is picking
+// the owner") would be a lie — the task would sit parked forever, which is
+// exactly the approval-wall regression the composer fix removes.
+func TestOwnerlessTaskCreate_TriageMessageWakesCEO(t *testing.T) {
+	withWuphfHomeDir(t)
+	if err := config.Save(config.Config{LLMProvider: "codex"}); err != nil {
+		t.Fatalf("seed provider config: %v", err)
+	}
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+	l.provider = "codex" // headless dispatch for every agent
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
+	l.pack = &agent.PackDefinition{
+		LeadSlug: "ceo",
+		Agents: []agent.AgentConfig{
+			{Slug: "ceo", Name: "CEO"},
+			{Slug: "builder", Name: "Builder"},
+		},
+	}
+
+	processed := make(chan string, 8)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, slug, _ string, _ ...string) error {
+		processed <- slug
+		return nil
+	})
+
+	// Subscribe BEFORE the create so the published triage message is observed
+	// exactly the way notifyAgentsLoop observes it.
+	msgs, unsubscribe := b.SubscribeMessages(32)
+	defer unsubscribe()
+
+	body, _ := json.Marshal(map[string]any{
+		"channel":    "general",
+		"created_by": "human",
+		"tasks": []map[string]any{
+			{"title": "Ownerless start-now task", "assignee": "auto"},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/task-plan", b.Addr()), bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("task plan request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+	}
+
+	// The triage message must arrive on the published stream and must NOT be
+	// authored by "system" — notifyAgentsLoop drops From=system posts, so a
+	// system author would silently never wake the CEO.
+	var triage channelMessage
+	deadline := time.After(2 * time.Second)
+waitTriage:
+	for {
+		select {
+		case m := <-msgs:
+			if containsSlug(m.Tagged, "ceo") {
+				triage = m
+				break waitTriage
+			}
+		case <-deadline:
+			t.Fatalf("no @ceo triage message published for the ownerless task")
+		}
+	}
+	if triage.From == "system" {
+		t.Fatalf("triage message authored by %q — notifyAgentsLoop drops system posts, the CEO would never wake", triage.From)
+	}
+
+	// Run the exact delivery step notifyAgentsLoop performs for this message.
+	l.deliverMessageNotification(triage)
+
+	dispatchDeadline := time.After(2 * time.Second)
+	for {
+		select {
+		case slug := <-processed:
+			if slug == "ceo" {
+				return // CEO woke — full trace verified
+			}
+		case <-dispatchDeadline:
+			t.Fatalf("CEO never received a headless turn for the ownerless-task triage message")
+		}
 	}
 }

@@ -323,9 +323,12 @@ func (b *Broker) postTaskRejectedNotificationsLocked(actor string, task *teamTas
 //
 // Only called when task_type=issue (other types are internal and do not
 // surface to the user). Must be called while b.mu is held for write.
-func (b *Broker) postIssueCreatedCardLocked(actor string, task *teamTask) {
+// postIssueCreatedCardLocked posts the card and returns the posted message's
+// ID (empty on failure). The ID lets callers anchor the task's thread on the
+// card (set task.ThreadID = returned id) so the card is the thread root.
+func (b *Broker) postIssueCreatedCardLocked(actor string, task *teamTask) string {
 	if task == nil {
-		return
+		return ""
 	}
 	taskChannel := normalizeChannelSlug(task.Channel)
 	if taskChannel == "" {
@@ -349,11 +352,12 @@ func (b *Broker) postIssueCreatedCardLocked(actor string, task *teamTask) {
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return ""
 	}
 	b.counter++
+	id := fmt.Sprintf("msg-%d", b.counter)
 	b.appendMessageLocked(channelMessage{
-		ID:        fmt.Sprintf("msg-%d", b.counter),
+		ID:        id,
 		From:      "system",
 		Channel:   taskChannel,
 		Kind:      "issue_created",
@@ -370,6 +374,7 @@ func (b *Broker) postIssueCreatedCardLocked(actor string, task *teamTask) {
 		SourceTaskID: task.ID,
 		Payload:      raw,
 	})
+	return id
 }
 
 // IssueLifecycleTransition is the small enum the FE renders against for
@@ -475,8 +480,8 @@ func (b *Broker) postIssueLifecycleCardLocked(task *teamTask, from, to Lifecycle
 	// Coalesce: if a recent (<10s) issue_lifecycle card for the SAME
 	// task is still in the message log, drop it before appending the
 	// new card. This collapses multi-step flows that a user perceives
-	// as ONE action (e.g. Approve & Start fires Drafting→Approved
-	// AND Approved→Running back-to-back). Without this, the channel
+	// as ONE action (e.g. a create that fires legacy-derive AND the
+	// Running landing back-to-back). Without this, the channel
 	// shows two lifecycle cards for one click. The 10s window is
 	// conservative — typical multi-step flows complete in under 1s.
 	b.coalesceRecentLifecycleCardLocked(task.ID, 10*time.Second)
@@ -500,10 +505,9 @@ func (b *Broker) postIssueLifecycleCardLocked(task *teamTask, from, to Lifecycle
 
 // coalesceRecentLifecycleCardLocked removes any issue_lifecycle card
 // for taskID emitted within the last `window`. Used to collapse a
-// burst of lifecycle transitions (e.g. Drafting→Approved→Running on
-// a single Approve & Start click) into the most recent card, so the
-// channel does not stack redundant cards for what a user reads as one
-// action.
+// burst of lifecycle transitions on a single user action into the most
+// recent card, so the channel does not stack redundant cards for what
+// a user reads as one action.
 //
 // Walks newest-first and stops at the first message older than the
 // window. Returns the number of cards removed.

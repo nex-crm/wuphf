@@ -15,7 +15,13 @@ import {
   type SchedulerJob,
   type Skill,
 } from "../../api/client";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import type { OfficeStats } from "../../api/platform";
+import {
+  getOfficeTasks,
+  type Task,
+  taskToLifecycleState,
+} from "../../api/tasks";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { formatRelativeTime } from "../../lib/format";
 import { isAgentActive, normalizeStatus } from "../../lib/officeStatus";
 import { router } from "../../lib/router";
@@ -23,6 +29,7 @@ import {
   configuredConnectedRuntimeProviders,
   type RuntimeProviderOption,
 } from "../../lib/runtimeProviders";
+import { stageForState } from "../../lib/types/lifecycle";
 import type { PrereqResult } from "../onboarding/runtimes";
 import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
 import { AgentPulsePanel } from "./shared/AgentPulsePanel";
@@ -52,9 +59,11 @@ interface OverviewData {
   recentArtifacts: Task[];
   activeAgents: OfficeMember[];
   pendingRequests: AgentRequest[];
-  proposedSkills: Skill[];
+  recentSkills: Skill[];
   upcomingJobs: SchedulerJob[];
   connectedProviders: RuntimeProviderOption[];
+  /** Shared /office/stats payload — tile counts read this, not the row lists. */
+  stats: OfficeStats | undefined;
   taskIsLoading: boolean;
   membersIsLoading: boolean;
   requestsIsLoading: boolean;
@@ -154,6 +163,11 @@ function useOverviewData(): OverviewData {
     refetchInterval: 30_000,
   });
 
+  // Tile counts come from the shared derived-stats source so the
+  // dashboard headline numbers always agree with the board, header
+  // strip, and inbox badge.
+  const stats = useOfficeStats();
+
   const allTasks: Task[] = tasks.data?.tasks ?? [];
   const allMembers: OfficeMember[] = members.data?.members ?? [];
   const allRequests: AgentRequest[] = requests.data?.requests ?? [];
@@ -166,13 +180,16 @@ function useOverviewData(): OverviewData {
     ? prereqs.data
     : (prereqs.data?.prereqs ?? []);
 
-  const activeTasks = allTasks.filter((t) => {
-    const s = normalizeStatus(t.status);
-    return s === "in_progress" || s === "review";
-  });
+  // Bucket with the same projection the board uses (stageForState ∘
+  // taskToLifecycleState) — the old normalizeStatus(t.status) filter was
+  // one of the count-drift sources ("dashboard says in progress, task
+  // page says waiting on approval").
+  const activeTasks = allTasks.filter(
+    (t) => stageForState(taskToLifecycleState(t)) === "in_progress",
+  );
 
   const blockedTasks = allTasks.filter(
-    (t) => normalizeStatus(t.status) === "blocked",
+    (t) => stageForState(taskToLifecycleState(t)) === "blocked",
   );
 
   const activeAgents = allMembers.filter(isAgentActive);
@@ -181,7 +198,11 @@ function useOverviewData(): OverviewData {
     (r) => !r.status || r.status === "open" || r.status === "pending",
   );
 
-  const proposedSkills = allSkills.filter((s) => s.status === "proposed");
+  const recentSkills = allSkills
+    .filter((s) => s.status === "active")
+    .sort((a, b) =>
+      String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+    );
   const connectedProviders = config.data
     ? configuredConnectedRuntimeProviders(config.data, {
         prereqs: prereqList,
@@ -211,9 +232,10 @@ function useOverviewData(): OverviewData {
     recentArtifacts,
     activeAgents,
     pendingRequests,
-    proposedSkills,
+    recentSkills,
     upcomingJobs,
     connectedProviders,
+    stats: stats.data,
     taskIsLoading: tasks.isLoading,
     membersIsLoading: members.isLoading,
     requestsIsLoading: requests.isLoading,
@@ -229,13 +251,19 @@ function useOverviewData(): OverviewData {
 interface ActiveRunsSectionProps {
   tasks: Task[];
   isLoading: boolean;
+  /** Shared-stats headline count; falls back to the row list length. */
+  count?: number;
 }
 
-function ActiveRunsSection({ tasks, isLoading }: ActiveRunsSectionProps) {
+function ActiveRunsSection({
+  tasks,
+  isLoading,
+  count,
+}: ActiveRunsSectionProps) {
   return (
     <OverviewSection
       title="Active runs"
-      count={tasks.length}
+      count={count ?? tasks.length}
       id="active-runs"
       action={
         tasks.length > 0 ? (
@@ -260,13 +288,19 @@ function ActiveRunsSection({ tasks, isLoading }: ActiveRunsSectionProps) {
 interface BlockedTasksSectionProps {
   tasks: Task[];
   isLoading: boolean;
+  /** Shared-stats headline count; falls back to the row list length. */
+  count?: number;
 }
 
-function BlockedTasksSection({ tasks, isLoading }: BlockedTasksSectionProps) {
+function BlockedTasksSection({
+  tasks,
+  isLoading,
+  count,
+}: BlockedTasksSectionProps) {
   return (
     <OverviewSection
       title="Blocked tasks"
-      count={tasks.length}
+      count={count ?? tasks.length}
       id="blocked-tasks"
       action={
         tasks.length > 0 ? (
@@ -292,16 +326,19 @@ function BlockedTasksSection({ tasks, isLoading }: BlockedTasksSectionProps) {
 interface AgentsWorkingSectionProps {
   agents: OfficeMember[];
   isLoading: boolean;
+  /** Shared-stats headline count; falls back to the row list length. */
+  count?: number;
 }
 
 function AgentsWorkingSection({
   agents,
   isLoading,
+  count,
 }: AgentsWorkingSectionProps) {
   return (
     <OverviewSection
       title="Agents working now"
-      count={agents.length}
+      count={count ?? agents.length}
       id="agents-working"
     >
       {isLoading ? (
@@ -368,23 +405,23 @@ function PendingReviewsSection({
   );
 }
 
-interface WikiProposalsSectionProps {
+interface CompiledSkillsSectionProps {
   skills: Skill[];
   isLoading: boolean;
 }
 
-function WikiProposalsSection({
+function CompiledSkillsSection({
   skills,
   isLoading,
-}: WikiProposalsSectionProps) {
+}: CompiledSkillsSectionProps) {
   return (
     <OverviewSection
-      title="Wiki proposals"
+      title="Compiled skills"
       count={skills.length}
-      id="wiki-proposals"
+      id="compiled-skills"
       action={
         skills.length > 0 ? (
-          <SectionLink onClick={goToSkills}>Review</SectionLink>
+          <SectionLink onClick={goToSkills}>View all</SectionLink>
         ) : null
       }
     >
@@ -392,7 +429,8 @@ function WikiProposalsSection({
         <SkeletonRows count={2} />
       ) : skills.length === 0 ? (
         <EmptyState action={{ label: "Go to skills", onClick: goToSkills }}>
-          No skill proposals awaiting review.
+          No compiled skills yet. Skills are compiled from playbook articles in
+          the wiki.
         </EmptyState>
       ) : (
         skills.slice(0, 4).map((s) => {
@@ -408,8 +446,8 @@ function WikiProposalsSection({
               label={s.title || s.name}
               body={s.description?.slice(0, 100)}
               meta={meta || undefined}
-              badge="proposed"
-              badgeClass="badge badge-yellow"
+              badge="active"
+              badgeClass="badge badge-green"
               onClick={goToSkills}
             />
           );
@@ -581,21 +619,24 @@ export function OfficeOverviewApp() {
         <ActiveRunsSection
           tasks={data.activeTasks}
           isLoading={data.taskIsLoading}
+          count={data.stats?.tasks.active}
         />
         <BlockedTasksSection
           tasks={data.blockedTasks}
           isLoading={data.taskIsLoading}
+          count={data.stats?.tasks.blocked}
         />
         <AgentsWorkingSection
           agents={data.activeAgents}
           isLoading={data.membersIsLoading}
+          count={data.stats?.agents_active}
         />
         <PendingReviewsSection
           requests={data.pendingRequests}
           isLoading={data.requestsIsLoading}
         />
-        <WikiProposalsSection
-          skills={data.proposedSkills}
+        <CompiledSkillsSection
+          skills={data.recentSkills}
           isLoading={data.skillsIsLoading}
         />
         <ScheduledJobsSection

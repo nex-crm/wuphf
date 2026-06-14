@@ -1251,86 +1251,6 @@ func TestResponseInstructionForTargetLiveExternalTaskPromptsCapabilityCreation(t
 	}
 }
 
-// TestResponseInstructionForTargetPreExecutionFoldsChatIntoSpec covers the
-// spec-from-chat behavior: when a human messages in the channel of a task that
-// is still being scoped (drafting/planning) and the recipient owns it, the
-// owner is told to fold the message into the task spec via team_task
-// action=update and to hold execution until the human approves — instead of
-// starting work.
-func TestResponseInstructionForTargetPreExecutionFoldsChatIntoSpec(t *testing.T) {
-	b := &Broker{
-		tasks: []teamTask{{
-			ID:             "task-spec-1",
-			Channel:        "task-spec-1",
-			Title:          "Pricing page revamp",
-			Details:        "Initial scope.",
-			Owner:          "builder",
-			status:         "drafting",
-			LifecycleState: LifecycleStateDrafting,
-		}},
-	}
-	l := &Launcher{
-		broker: b,
-		pack: &agent.PackDefinition{
-			LeadSlug: "ceo",
-			Agents: []agent.AgentConfig{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "builder", Name: "Builder"},
-			},
-		},
-	}
-	got := l.responseInstructionForTarget(
-		channelMessage{ID: "m1", From: "you", Channel: "task-spec-1"},
-		"builder",
-	)
-	if !strings.Contains(got, "team_task action=update") {
-		t.Fatalf("expected a spec-update instruction for the drafting task owner: %q", got)
-	}
-	if !strings.Contains(got, "still being scoped") {
-		t.Fatalf("expected pre-execution framing: %q", got)
-	}
-	if !strings.Contains(got, "Do NOT start building") {
-		t.Fatalf("expected hold-execution-until-approval guidance: %q", got)
-	}
-}
-
-// TestResponseInstructionForTargetFrozenSpecDoesNotFoldChat is the inverse: an
-// already-executing (Running → spec frozen) task does NOT get the spec-fold
-// instruction, so post-approval chat is treated as execution discussion. This
-// also guards against the empty-LifecycleState trap (a legacy in_progress task
-// must not be mistaken for drafting — see TestResponseInstructionForTarget...
-// CapabilityCreation, which exercises the empty-state path).
-func TestResponseInstructionForTargetFrozenSpecDoesNotFoldChat(t *testing.T) {
-	b := &Broker{
-		tasks: []teamTask{{
-			ID:             "task-run-1",
-			Channel:        "task-run-1",
-			Title:          "Ship the importer",
-			Details:        "Approved scope.",
-			Owner:          "builder",
-			status:         "in_progress",
-			LifecycleState: LifecycleStateRunning,
-		}},
-	}
-	l := &Launcher{
-		broker: b,
-		pack: &agent.PackDefinition{
-			LeadSlug: "ceo",
-			Agents: []agent.AgentConfig{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "builder", Name: "Builder"},
-			},
-		},
-	}
-	got := l.responseInstructionForTarget(
-		channelMessage{ID: "m1", From: "you", Channel: "task-run-1"},
-		"builder",
-	)
-	if strings.Contains(got, "team_task action=update") {
-		t.Fatalf("a running (frozen-spec) task must NOT get the spec-fold instruction: %q", got)
-	}
-}
-
 // TestTaskOwnerForMessageResolvesByChannel covers channel-first routing: a short
 // human chat in a task's own channel wakes that task's owner even when the
 // content would not clear the similarity threshold — while #general (owned by
@@ -2105,8 +2025,8 @@ func TestResponseInstructionForTargetDMChannelRespondsHelpfully(t *testing.T) {
 	if strings.Contains(channelInstr, "messaging you directly") {
 		t.Errorf("non-DM should not get DM-direct guidance, got %q", channelInstr)
 	}
-	if !strings.Contains(channelInstr, "in-character") || !strings.Contains(channelInstr, "Skip the turn only if") {
-		t.Errorf("non-DM untagged should get chime-in-with-personality default, got %q", channelInstr)
+	if !strings.Contains(channelInstr, "brushes your domain") || !strings.Contains(channelInstr, "Skip the turn only if") {
+		t.Errorf("non-DM untagged should get the substantive chime-in default, got %q", channelInstr)
 	}
 
 	// DM with agent slug mismatch — wrong agent should not get DM instruction
@@ -2793,8 +2713,8 @@ func TestBuildPromptToolHygieneSection(t *testing.T) {
 		if !strings.Contains(prompt, "registered for this session") {
 			t.Errorf("%s prompt missing 'registered for this session' line", slug)
 		}
-		if !strings.Contains(prompt, "Do not read unrelated files") {
-			t.Errorf("%s prompt missing unrelated-files guidance", slug)
+		if !strings.Contains(prompt, "Gather the context the task needs") {
+			t.Errorf("%s prompt missing gather-context guidance", slug)
 		}
 		if !strings.Contains(prompt, "AT MOST one team_broadcast per turn") {
 			t.Errorf("%s prompt missing broadcast throttle guidance", slug)

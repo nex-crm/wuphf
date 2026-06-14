@@ -1,39 +1,60 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The subset of PostHog init config the suite inspects.
+interface InitCfg {
+  loaded?: (ph: unknown) => void;
+  api_host?: string;
+  autocapture?: boolean;
+  capture_pageview?: boolean;
+  persistence?: string;
+  disable_session_recording?: boolean;
+  session_recording?: { maskAllInputs?: boolean; maskTextSelector?: string };
+  sanitize_properties?: (p: Record<string, unknown>) => Record<string, unknown>;
+}
+
+// Mock posthog-js. init() invokes the `loaded` callback synchronously so the
+// recording-on-load path runs, mirroring the real SDK.
+const mockPosthog = {
+  init: vi.fn((_key: string, cfg?: InitCfg) => {
+    cfg?.loaded?.(mockPosthog);
+  }),
+  capture: vi.fn(),
+  startSessionRecording: vi.fn(),
+  stopSessionRecording: vi.fn(),
+  opt_in_capturing: vi.fn(),
+  opt_out_capturing: vi.fn(),
+  setPersonProperties: vi.fn(),
+  group: vi.fn(),
+};
+
+vi.mock("posthog-js", () => ({ default: mockPosthog }));
+
 import {
+  __resetAnalyticsForTests,
+  configureAnalytics,
   isValidEmail,
   recordOnboardingEmailCaptured,
   recordOnboardingEmailStarted,
   recordOnboardingEmailViewed,
+  setAnalyticsConsent,
+  track,
 } from "./analytics";
 
-const KEY = "VITE_PUBLIC_POSTHOG_KEY";
-const HOST = "VITE_PUBLIC_POSTHOG_HOST";
-const fetchMock = vi.fn();
+/** Let the dynamic-import + .then chain in the module settle. */
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("fetch", fetchMock);
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
-  // Each test starts from a clean session so the visit id is freshly minted.
-  sessionStorage.clear();
+  __resetAnalyticsForTests();
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
-
-/** The parsed JSON body of the Nth fetch call. */
-function bodyOf(call: number): Record<string, unknown> {
-  const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
-  return JSON.parse(init?.body as string) as Record<string, unknown>;
-}
-
-/** The `properties` object of the Nth captured event. */
-function propsOf(call: number): Record<string, unknown> {
-  return bodyOf(call).properties as Record<string, unknown>;
-}
 
 describe("isValidEmail", () => {
   it.each([
@@ -45,85 +66,179 @@ describe("isValidEmail", () => {
     ["spaces in@email.com", false],
     ["", false],
   ])("%s -> %s", (input, expected) => {
-    expect(isValidEmail(input)).toBe(expected);
+    expect(isValidEmail(input as string)).toBe(expected);
   });
 });
 
 describe("dormant by default", () => {
-  it("does not call fetch when the PostHog key is unset", () => {
+  it("never loads or inits posthog when no key resolves", async () => {
+    track("task_created");
     recordOnboardingEmailViewed();
-    recordOnboardingEmailStarted();
     recordOnboardingEmailCaptured("maya@nex.ai");
-    expect(fetchMock).not.toHaveBeenCalled();
+    await flush();
+    expect(mockPosthog.init).not.toHaveBeenCalled();
+    expect(mockPosthog.capture).not.toHaveBeenCalled();
   });
 });
 
-describe("with a PostHog key configured", () => {
-  beforeEach(() => {
-    vi.stubEnv(KEY, "phc_test_key");
-  });
-
-  it("posts funnel events to the default host's /capture/ with no PII", () => {
-    recordOnboardingEmailViewed();
-    recordOnboardingEmailStarted();
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://us.i.posthog.com/capture/",
+describe("build-time key fallback", () => {
+  it("inits from VITE_PUBLIC_POSTHOG_KEY when no runtime config is set", async () => {
+    vi.stubEnv("VITE_PUBLIC_POSTHOG_KEY", "phc_build");
+    track("task_created", { source: "home" });
+    await vi.waitFor(() => expect(mockPosthog.init).toHaveBeenCalledTimes(1));
+    expect(mockPosthog.init.mock.calls[0][0]).toBe("phc_build");
+    await vi.waitFor(() =>
+      expect(mockPosthog.capture).toHaveBeenCalledWith("task_created", {
+        source: "home",
+      }),
     );
-    expect(fetchMock.mock.calls[0][1]?.keepalive).toBe(true);
+  });
+});
 
-    expect(bodyOf(0)).toMatchObject({
-      api_key: "phc_test_key",
-      event: "onboarding_email_viewed",
+describe("configured via runtime injection", () => {
+  it("runtime key wins; cookies disabled, autocapture off, recording opt-in", async () => {
+    configureAnalytics({
+      configured: true,
+      posthog_key: "phc_runtime",
+      posthog_host: "https://eu.i.posthog.com/",
+      telemetry_enabled: true,
+      session_recording_enabled: false,
     });
-    expect(bodyOf(1)).toMatchObject({ event: "onboarding_email_started" });
-    expect(propsOf(0)).toEqual({ source: "onboarding-welcome" });
-    expect(propsOf(0)).not.toHaveProperty("$set");
-    expect(JSON.stringify(bodyOf(0))).not.toContain("@");
+    await vi.waitFor(() => expect(mockPosthog.init).toHaveBeenCalledTimes(1));
+    const [key, cfg] = mockPosthog.init.mock.calls[0];
+    expect(key).toBe("phc_runtime");
+    expect(cfg?.api_host).toBe("https://eu.i.posthog.com");
+    expect(cfg?.autocapture).toBe(false);
+    expect(cfg?.capture_pageview).toBe(false);
+    expect(cfg?.persistence).toBe("localStorage");
+    expect(cfg?.disable_session_recording).toBe(true);
+    // Recording channel off => not started on load.
+    expect(mockPosthog.startSessionRecording).not.toHaveBeenCalled();
   });
 
-  it("attaches the email to the person via $set on capture", () => {
-    recordOnboardingEmailCaptured("  maya@nex.ai  ");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(bodyOf(0)).toMatchObject({ event: "onboarding_email_captured" });
-    expect(propsOf(0).$set).toEqual({ email: "maya@nex.ai" });
+  it("starts recording on load with strict masking when recording is on", async () => {
+    configureAnalytics({
+      configured: true,
+      posthog_key: "phc_runtime",
+      telemetry_enabled: true,
+      session_recording_enabled: true,
+    });
+    await vi.waitFor(() => expect(mockPosthog.init).toHaveBeenCalled());
+    const cfg = mockPosthog.init.mock.calls[0][1];
+    expect(cfg?.session_recording?.maskAllInputs).toBe(true);
+    expect(cfg?.session_recording?.maskTextSelector).toBe("*");
+    await vi.waitFor(() =>
+      expect(mockPosthog.startSessionRecording).toHaveBeenCalledTimes(1),
+    );
   });
 
-  it("ignores a blank email", () => {
-    recordOnboardingEmailCaptured("   ");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("reuses one distinct id across events in a session", () => {
-    recordOnboardingEmailViewed();
-    recordOnboardingEmailStarted();
-    recordOnboardingEmailCaptured("maya@nex.ai");
-
-    const ids = new Set([
-      bodyOf(0).distinct_id,
-      bodyOf(1).distinct_id,
-      bodyOf(2).distinct_id,
-    ]);
-    expect(ids.size).toBe(1);
-  });
-
-  it("swallows a fetch rejection without throwing", () => {
-    fetchMock.mockRejectedValue(new Error("network down"));
-    expect(() => recordOnboardingEmailCaptured("maya@nex.ai")).not.toThrow();
+  it("stays dormant when telemetry is off even with a key", async () => {
+    configureAnalytics({
+      configured: true,
+      posthog_key: "phc_runtime",
+      telemetry_enabled: false,
+      session_recording_enabled: true,
+    });
+    track("task_created");
+    await flush();
+    expect(mockPosthog.init).not.toHaveBeenCalled();
   });
 });
 
-describe("host override", () => {
-  it("honors a custom host and trims a trailing slash", () => {
-    vi.stubEnv(KEY, "phc_test_key");
-    vi.stubEnv(HOST, "https://eu.i.posthog.com/");
+describe("onboarding email (the single PII egress)", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_PUBLIC_POSTHOG_KEY", "phc_test");
+  });
 
+  it("funnel events carry source only, never an address", async () => {
     recordOnboardingEmailViewed();
-
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://eu.i.posthog.com/capture/",
+    recordOnboardingEmailStarted();
+    await vi.waitFor(() =>
+      expect(mockPosthog.capture).toHaveBeenCalledWith(
+        "onboarding_email_viewed",
+        { source: "onboarding-welcome" },
+      ),
     );
+    expect(mockPosthog.capture).toHaveBeenCalledWith(
+      "onboarding_email_started",
+      { source: "onboarding-welcome" },
+    );
+    expect(JSON.stringify(mockPosthog.capture.mock.calls)).not.toContain("@");
+    expect(mockPosthog.setPersonProperties).not.toHaveBeenCalled();
+  });
+
+  it("captured attaches the email via setPersonProperties, not the event", async () => {
+    recordOnboardingEmailCaptured("  maya@nex.ai  ");
+    await vi.waitFor(() =>
+      expect(mockPosthog.setPersonProperties).toHaveBeenCalledWith({
+        email: "maya@nex.ai",
+      }),
+    );
+    expect(mockPosthog.capture).toHaveBeenCalledWith(
+      "onboarding_email_captured",
+      { source: "onboarding-welcome" },
+    );
+    const captureCall = mockPosthog.capture.mock.calls.find(
+      (c) => c[0] === "onboarding_email_captured",
+    );
+    expect(JSON.stringify(captureCall?.[1])).not.toContain("@");
+  });
+
+  it("ignores a blank email", async () => {
+    recordOnboardingEmailCaptured("   ");
+    await flush();
+    expect(mockPosthog.setPersonProperties).not.toHaveBeenCalled();
+    expect(mockPosthog.capture).not.toHaveBeenCalled();
+  });
+
+  it.each(["seed-user-15", "not-an-email", "no@domain", "@nope.com"])(
+    "ignores a non-email value (%s) — never attaches it or emits the event",
+    async (junk) => {
+      recordOnboardingEmailCaptured(junk);
+      await flush();
+      expect(mockPosthog.setPersonProperties).not.toHaveBeenCalled();
+      expect(mockPosthog.capture).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("live consent changes", () => {
+  it("turning recording on starts it; turning telemetry off opts out + stops", async () => {
+    configureAnalytics({
+      configured: true,
+      posthog_key: "phc_runtime",
+      telemetry_enabled: true,
+      session_recording_enabled: false,
+    });
+    await vi.waitFor(() => expect(mockPosthog.init).toHaveBeenCalled());
+    expect(mockPosthog.startSessionRecording).not.toHaveBeenCalled();
+
+    setAnalyticsConsent({ recording: true });
+    await vi.waitFor(() =>
+      expect(mockPosthog.startSessionRecording).toHaveBeenCalled(),
+    );
+
+    setAnalyticsConsent({ telemetry: false });
+    await vi.waitFor(() =>
+      expect(mockPosthog.opt_out_capturing).toHaveBeenCalled(),
+    );
+    expect(mockPosthog.stopSessionRecording).toHaveBeenCalled();
+  });
+});
+
+describe("sanitize_properties", () => {
+  it("enriches events with the active theme from the DOM", async () => {
+    document.documentElement.setAttribute("data-theme", "noir-gold");
+    configureAnalytics({
+      configured: true,
+      posthog_key: "phc_runtime",
+      telemetry_enabled: true,
+      session_recording_enabled: false,
+    });
+    await vi.waitFor(() => expect(mockPosthog.init).toHaveBeenCalled());
+    const cfg = mockPosthog.init.mock.calls[0][1];
+    const enriched = cfg?.sanitize_properties?.({ a: 1 }) ?? {};
+    expect(enriched.theme).toBe("noir-gold");
+    document.documentElement.removeAttribute("data-theme");
   });
 });

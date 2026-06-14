@@ -1,18 +1,19 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IntegrationsApp } from "./IntegrationsApp";
 
+// Mutable per-test config so the same mocked module can exercise both the
+// Composio-configured and unconfigured states.
+const mockState = vi.hoisted(() => ({
+  config: {} as Record<string, unknown>,
+}));
+
 vi.mock("../../api/client", () => ({
-  getConfig: vi.fn(async () => ({
-    gateway_kinds: ["openclaw", "hermes-agent"],
-    action_provider: "composio",
-    // Composio key present → the catalog renders (no key shows the
-    // ComposioOnboarding gate instead, covered in ComposioOnboarding.test.tsx).
-    composio_key_set: true,
-  })),
+  getConfig: vi.fn(async () => mockState.config),
+  updateConfig: vi.fn(async () => ({ status: "ok" })),
   getLocalProvidersStatus: vi.fn(async () => []),
   getActionGrants: vi.fn(async () => ({ grants: [] })),
   revokeActionGrant: vi.fn(async () => ({})),
@@ -51,6 +52,8 @@ vi.mock("../../api/integrations", () => ({
   })),
   startIntegrationConnection: vi.fn(),
   disconnectIntegration: vi.fn(),
+  startComposioSignin: vi.fn(async () => ({ status: "idle" })),
+  getComposioSigninStatus: vi.fn(async () => ({ status: "idle" })),
 }));
 
 function wrap(ui: ReactNode) {
@@ -61,6 +64,16 @@ function wrap(ui: ReactNode) {
 }
 
 describe("IntegrationsApp", () => {
+  beforeEach(() => {
+    // Mirrors the broker's real config shape: GatewayKinds() reports the
+    // gateway-only provider kinds compiled into the build.
+    mockState.config = {
+      gateway_kinds: ["hermes-agent", "openclaw-http"],
+      action_provider: "composio",
+      composio_key_set: true,
+    };
+  });
+
   it("renders provider status and dynamic action toolkits", async () => {
     render(wrap(<IntegrationsApp />));
 
@@ -70,5 +83,33 @@ describe("IntegrationsApp", () => {
     expect(
       screen.getByText("Read and send Gmail messages"),
     ).toBeInTheDocument();
+  });
+
+  it("renders the transports section when Composio is configured", async () => {
+    render(wrap(<IntegrationsApp />));
+
+    expect(await screen.findByText("Telegram")).toBeInTheDocument();
+    expect(screen.getByText("Hermes")).toBeInTheDocument();
+    expect(screen.getByText("OpenClaw")).toBeInTheDocument();
+  });
+
+  it("keeps the transports visible when no Composio key is set", async () => {
+    // Regression: the Composio onboarding gate must not swallow the transport
+    // registry — Telegram/Hermes/OpenClaw do not depend on Composio.
+    mockState.config = {
+      gateway_kinds: ["hermes-agent", "openclaw-http"],
+      action_provider: "composio",
+      composio_key_set: false,
+    };
+    render(wrap(<IntegrationsApp />));
+
+    // The onboarding hero renders…
+    expect(
+      await screen.findByRole("heading", { name: /connect composio/i }),
+    ).toBeInTheDocument();
+    // …and the transports stay alongside it.
+    expect(await screen.findByText("Telegram")).toBeInTheDocument();
+    expect(screen.getByText("Hermes")).toBeInTheDocument();
+    expect(screen.getByText("OpenClaw")).toBeInTheDocument();
   });
 });

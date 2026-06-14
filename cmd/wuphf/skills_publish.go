@@ -590,14 +590,12 @@ func runSkillsInstall(args []string) {
 		os.Exit(1)
 	}
 
-	// Post to the broker's /skills endpoint as `create`. The user invoking
-	// `wuphf skills install` IS the human approval — we don't need the
-	// proposal queue here. (Earlier this code used action=propose with
-	// `created_by="hub:..."`, which always 403'd because the broker
-	// requires created_by to resolve to a registered member for proposals.)
+	// Post to the broker's /skills endpoint. The user invoking
+	// `wuphf skills install` IS the human approval — this is the internal
+	// seeding/install path, not an agent-reachable surface (agents get
+	// skills only through playbook compilation).
 	createdBy := "hub:" + sanitizeHubLabel(hub)
 	payload := map[string]any{
-		"action":      "create",
 		"name":        fm.Name,
 		"title":       fm.Name,
 		"description": fm.Description,
