@@ -735,6 +735,26 @@ func ResolveSlackAppToken() string {
 	return strings.TrimSpace(cfg.SlackAppToken)
 }
 
+// ResolveSlackMCPToken returns a bearer token for Slack's official MCP server
+// (mcp.slack.com), if configured. Distinct from the bot/app tokens: this is the
+// read/search/canvas retrieval surface WUPHF wires into agent runtimes, never
+// the outbound posting path (that stays on the bridge with egress + gate).
+// Env-only (WUPHF_SLACK_MCP_TOKEN); empty means "rely on the MCP client's own
+// OAuth cache" (still wired when ResolveSlackMCPEnabled is true).
+func ResolveSlackMCPToken() string {
+	return strings.TrimSpace(os.Getenv("WUPHF_SLACK_MCP_TOKEN"))
+}
+
+// ResolveSlackMCPEnabled reports whether the Slack MCP server should be wired
+// into agent runtimes. True when WUPHF_SLACK_MCP is truthy OR a token is set.
+func ResolveSlackMCPEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WUPHF_SLACK_MCP"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return ResolveSlackMCPToken() != ""
+}
+
 // SaveSlackTokens persists the Slack bot and app tokens to config.json. Empty
 // values are stored as-is so a caller can clear a token by passing "". Returns
 // an error rather than silently dropping Load/Save failures: a failed Load
