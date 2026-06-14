@@ -74,7 +74,7 @@ describe("<InterviewBar> approval UX", () => {
       created_at: "2026-05-06T00:00:00Z",
     };
     setPending([approval]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="general" />));
 
     expect(screen.getByText("EXTERNAL ACTION")).toBeInTheDocument();
     expect(screen.getByText("BLOCKING")).toBeInTheDocument();
@@ -103,7 +103,7 @@ describe("<InterviewBar> approval UX", () => {
       blocking: true,
     };
     setPending([connect]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="general" />));
     // The card-only "Connect to continue" eyebrow proves ConnectIntegrationCard
     // rendered instead of the generic interview option buttons (the bug: those
     // buttons just answered the request and never opened OAuth).
@@ -128,7 +128,7 @@ describe("<InterviewBar> approval UX", () => {
       created_at: "2026-05-06T00:00:00Z",
     };
     setPending([interview]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="general" />));
 
     expect(screen.queryByText("EXTERNAL ACTION")).not.toBeInTheDocument();
     expect(
@@ -156,12 +156,12 @@ describe("<InterviewBar> approval UX", () => {
     };
 
     setPending([needsText]);
-    const { rerender } = render(wrap(<InterviewBar />));
+    const { rerender } = render(wrap(<InterviewBar channelSlug="general" />));
     fireEvent.click(screen.getByRole("button", { name: /Custom/i }));
     expect(screen.getByRole("textbox")).toBeInTheDocument();
 
     setPending([nextRequest]);
-    rerender(wrap(<InterviewBar />));
+    rerender(wrap(<InterviewBar channelSlug="general" />));
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByText("Approve the new plan?")).toBeInTheDocument();
@@ -183,7 +183,7 @@ describe("<InterviewBar> approval UX", () => {
     answerSpy.mockClear();
 
     setPending([legacyInterview]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="general" />));
 
     fireEvent.click(screen.getByRole("button", { name: /Answer directly/i }));
     const textbox = screen.getByRole("textbox");
@@ -222,7 +222,7 @@ describe("<InterviewBar> notice framing (N8)", () => {
 
   it("labels kind=notice rows NOTICE and never says 'asks'", () => {
     setPending([notice]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="task-office-2" />));
 
     expect(screen.getByText("NOTICE")).toBeInTheDocument();
     expect(screen.queryByText("INTERVIEW")).not.toBeInTheDocument();
@@ -244,7 +244,7 @@ describe("<InterviewBar> notice framing (N8)", () => {
       created_at: "2026-06-10T00:00:00Z",
     };
     setPending([interview]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="task-office-2" />));
 
     expect(screen.getByText("INTERVIEW")).toBeInTheDocument();
     expect(screen.queryByText("NOTICE")).not.toBeInTheDocument();
@@ -253,7 +253,7 @@ describe("<InterviewBar> notice framing (N8)", () => {
 
   it("still lets the human acknowledge a notice", () => {
     setPending([notice]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="task-office-2" />));
     expect(
       screen.getByRole("button", { name: /Acknowledge/i }),
     ).toBeInTheDocument();
@@ -303,7 +303,7 @@ describe("<InterviewBar> pinned ordering (v3 buried-interview fix)", () => {
       created_at: "2026-06-11T00:30:00Z",
     });
     setPending([oldNotice, oldInterview, newBlocking]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="general" />));
 
     expect(screen.getByText("BLOCKING")).toBeInTheDocument();
     expect(
@@ -328,11 +328,74 @@ describe("<InterviewBar> pinned ordering (v3 buried-interview fix)", () => {
       created_at: "2026-06-11T00:10:00Z",
     });
     setPending([oldNotice, newerInterview]);
-    render(wrap(<InterviewBar />));
+    render(wrap(<InterviewBar channelSlug="general" />));
 
     expect(
       screen.getByText("Two things needed before I queue the sends."),
     ).toBeInTheDocument();
     expect(screen.getByText("1/2")).toBeInTheDocument();
+  });
+});
+
+describe("<InterviewBar> channel scoping", () => {
+  const makeInterview = (over: Partial<AgentRequest>): AgentRequest => ({
+    id: "scoped-0",
+    from: "ae",
+    channel: "general",
+    kind: "interview",
+    status: "pending",
+    question: "placeholder",
+    options: [{ id: "answer_directly", label: "Answer directly" }],
+    blocking: false,
+    created_at: "2026-06-12T00:00:00Z",
+    ...over,
+  });
+
+  it("shows only requests that originated in the current channel", () => {
+    // The broker queue is office-wide; an ask raised in a task channel must
+    // not block the composer on #general. Before scoping, both questions
+    // rendered (1/2) on every surface — the bug this guards.
+    const here = makeInterview({
+      id: "here",
+      channel: "task-office-2",
+      question: "Who owns the Acme renewal?",
+    });
+    const elsewhere = makeInterview({
+      id: "elsewhere",
+      channel: "general",
+      question: "Which tone for the general note?",
+    });
+    setPending([here, elsewhere]);
+    render(wrap(<InterviewBar channelSlug="task-office-2" />));
+
+    expect(screen.getByText("Who owns the Acme renewal?")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which tone for the general note?"),
+    ).not.toBeInTheDocument();
+    // 1/1 — the other channel's request is not in this bar's queue.
+    expect(screen.getByText("1/1")).toBeInTheDocument();
+  });
+
+  it("treats a channel-less request as #general (broker default)", () => {
+    const legacy = makeInterview({
+      id: "legacy",
+      channel: undefined,
+      question: "Legacy request without a channel.",
+    });
+    setPending([legacy]);
+    render(wrap(<InterviewBar channelSlug="general" />));
+
+    expect(
+      screen.getByText("Legacy request without a channel."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders nothing on a non-chat surface (null channel)", () => {
+    setPending([makeInterview({ id: "any", channel: "general" })]);
+    render(wrap(<InterviewBar channelSlug={null} />));
+
+    expect(
+      screen.queryByRole("region", { name: "Pending agent request" }),
+    ).not.toBeInTheDocument();
   });
 });
