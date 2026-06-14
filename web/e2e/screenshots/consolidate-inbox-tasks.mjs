@@ -177,7 +177,15 @@ await page.goto(`${DEFAULT_BASE}/#/tasks`, { waitUntil: "load" });
 await page.waitForSelector(".status-bar", { timeout: 45_000 });
 await flipStore(page);
 await page.waitForSelector('[data-testid="issues-list"]', { timeout: 15_000 });
-await page.waitForTimeout(600);
+// Readiness, not a fixed delay: wait until both folded cards have rendered
+// in the Needs-human lane (networkidle is unusable here — the mocked
+// /api/events SSE stream is held open on purpose, so it never settles).
+await page.waitForSelector('[data-testid="attention-request-row"]', {
+  timeout: 10_000,
+});
+await page.waitForSelector('[data-testid="attention-review-row"]', {
+  timeout: 10_000,
+});
 
 // 1. Whole shell: Tasks is the first Work nav item with the attention
 // badge, and the board is the surface it opens.
@@ -196,12 +204,13 @@ await shotElement(
 await page.goto(`${DEFAULT_BASE}/#/inbox`, { waitUntil: "load" });
 await page.waitForSelector(".status-bar", { timeout: 30_000 });
 await page.waitForSelector('[data-testid="issues-list"]', { timeout: 10_000 });
-const url = page.url();
-if (!url.includes("/tasks")) {
-  console.error(`expected /inbox to redirect to /tasks, got ${url}`);
+// Assert the actual routed hash, not a loose substring — `includes("/tasks")`
+// would false-pass on any URL that merely contains the word.
+const hash = new URL(page.url()).hash;
+if (hash !== "#/tasks") {
+  console.error(`expected /inbox to redirect to #/tasks, got ${page.url()}`);
   process.exit(1);
 }
-await page.waitForTimeout(300);
 await shotPage(page, OUT, "03-inbox-redirects-to-tasks");
 
 console.log(`captured 3 screenshots to ${OUT}`);
