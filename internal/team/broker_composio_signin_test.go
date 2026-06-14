@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -110,21 +111,140 @@ func pollComposioSigninUntil(t *testing.T, b *Broker, want string) composioSigni
 	return last
 }
 
-// TestComposioSigninStart_CLIMissing: with no composio binary on PATH, start
-// must return the structured cli_missing state carrying the install command —
-// the UI renders it with a copy button.
-func TestComposioSigninStart_CLIMissing(t *testing.T) {
-	b := newComposioSigninBroker(t, t.TempDir()) // empty PATH dir
+// TestComposioSigninStart_AutoInstallFailsFallsBackToCLIMissing: with no
+// composio binary on PATH, start kicks off the auto-install and returns
+// `installing`. When the install fails, the flow falls back to cli_missing
+// carrying the manual install command (the UI renders it with a copy button).
+func TestComposioSigninStart_AutoInstallFailsFallsBackToCLIMissing(t *testing.T) {
+	dir := t.TempDir() // empty PATH dir — no composio
+	b := newComposioSigninBroker(t, dir)
+
+	orig := composioInstaller
+	composioInstaller = func(_ context.Context) error {
+		return errors.New("install blocked in test")
+	}
+	t.Cleanup(func() { composioInstaller = orig })
 
 	code, state, raw := composioSigninRequest(t, b, http.MethodPost, "/integrations/composio/signin/start")
 	if code != http.StatusOK {
 		t.Fatalf("start status=%d body=%s", code, raw)
 	}
-	if state.Status != composioSigninStatusCLIMissing {
-		t.Fatalf("expected cli_missing, got %+v", state)
+	if state.Status != composioSigninStatusInstalling {
+		t.Fatalf("expected installing on start, got %+v", state)
 	}
-	if state.InstallCommand != composioInstallCommand {
-		t.Fatalf("expected install command %q, got %q", composioInstallCommand, state.InstallCommand)
+
+	missing := pollComposioSigninUntil(t, b, composioSigninStatusCLIMissing)
+	if missing.Status != composioSigninStatusCLIMissing {
+		t.Fatalf("expected cli_missing after failed install, got %+v", missing)
+	}
+	if missing.InstallCommand != composioInstallCommand {
+		t.Fatalf("expected install command %q, got %q", composioInstallCommand, missing.InstallCommand)
+	}
+}
+
+// TestComposioSigninStart_InstallDeadlineExcludesLoginWindow: the "installing"
+// backstop must be bounded by the install budget (+ a small grace), NOT
+// stretched by the login window — otherwise a wedged install lingers in
+// "installing" for the whole install+login span before timing out.
+func TestComposioSigninStart_InstallDeadlineExcludesLoginWindow(t *testing.T) {
+	dir := t.TempDir() // empty PATH dir — no composio
+	b := newComposioSigninBroker(t, dir)
+
+	// Block the installer so the flow stays in "installing" while we inspect
+	// the deadline the start handler set. `entered` lets cleanup confirm the
+	// background goroutine actually read the stub before restoring the global —
+	// otherwise an unlucky schedule could let the goroutine run the REAL
+	// installer after restore.
+	entered := make(chan struct{})
+	block := make(chan struct{})
+	orig := composioInstaller
+	composioInstaller = func(_ context.Context) error {
+		close(entered)
+		<-block
+		return errors.New("unblocked in cleanup")
+	}
+	t.Cleanup(func() {
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+		}
+		close(block)
+		composioInstaller = orig
+	})
+
+	start := time.Now()
+	code, state, raw := composioSigninRequest(t, b, http.MethodPost, "/integrations/composio/signin/start")
+	if code != http.StatusOK {
+		t.Fatalf("start status=%d body=%s", code, raw)
+	}
+	if state.Status != composioSigninStatusInstalling {
+		t.Fatalf("expected installing on start, got %+v", state)
+	}
+
+	b.composioSignin.mu.Lock()
+	deadline := b.composioSignin.deadline
+	b.composioSignin.mu.Unlock()
+
+	maxAllowed := start.Add(composioInstallTimeout + composioInstallDeadlineGrace + time.Second)
+	if deadline.After(maxAllowed) {
+		t.Fatalf("install deadline %v exceeds install budget+grace (max %v) — login window leaked into the install backstop", deadline, maxAllowed)
+	}
+	if !deadline.After(start.Add(composioInstallTimeout)) {
+		t.Fatalf("install deadline %v should sit past the install timeout from start", deadline)
+	}
+}
+
+// TestComposioSigninStart_AutoInstallSucceedsThenSignsIn: the CLI is absent, so
+// start auto-installs (the stub drops a fake composio + a logged-in session),
+// then the flow continues straight through provisioning to done — one user
+// gesture, no manual install step.
+func TestComposioSigninStart_AutoInstallSucceedsThenSignsIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell script requires a POSIX shell")
+	}
+	dir := t.TempDir() // empty PATH dir initially
+	b := newComposioSigninBroker(t, dir)
+	home := os.Getenv("HOME")
+
+	orig := composioInstaller
+	composioInstaller = func(_ context.Context) error {
+		// Drop a fake composio onto PATH (handles `dev init`) and a logged-in
+		// session, mirroring what the real installer + a prior login leave.
+		body := "case \"$1 $2\" in\n  \"dev init\")\n    printf 'COMPOSIO_API_KEY=\"" +
+			testComposioProjectKey + "\"\\n' > .env.local\n    ;;\n  *) exit 1 ;;\nesac"
+		script := "#!/bin/sh\nPATH=\"/bin:/usr/bin:$PATH\"\n" + body + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "composio"), []byte(script), 0o755); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(home, ".composio"), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(
+			filepath.Join(home, ".composio", "user_data.json"),
+			[]byte(`{"api_key":"uak_cli_only_session_key"}`),
+			0o600,
+		)
+	}
+	t.Cleanup(func() { composioInstaller = orig })
+
+	code, state, raw := composioSigninRequest(t, b, http.MethodPost, "/integrations/composio/signin/start")
+	if code != http.StatusOK {
+		t.Fatalf("start status=%d body=%s", code, raw)
+	}
+	if state.Status != composioSigninStatusInstalling {
+		t.Fatalf("expected installing on start, got %+v", state)
+	}
+
+	done := pollComposioSigninUntil(t, b, composioSigninStatusDone)
+	if done.Status != composioSigninStatusDone {
+		t.Fatalf("expected done after auto-install, got %+v", done)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config load: %v", err)
+	}
+	if cfg.ComposioAPIKey != testComposioProjectKey {
+		t.Fatalf("expected stored composio key %q, got %q", testComposioProjectKey, cfg.ComposioAPIKey)
 	}
 }
 
