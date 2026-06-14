@@ -100,7 +100,7 @@ lens_preamble() {
       printf '%s\n' "Does this comply with CLAUDE.md, AGENTS.md, INSTRUCTIONS.md, and any package-level AGENTS.md? Any explicit \`any\`, ignore comments (\`@ts-ignore\`, \`biome-ignore\`), ASCII diagrams in PR body, secrets, or convention drift?"
       ;;
     ipc)
-      printf '%s\n' "The desktop contextBridge boundary now lives in the nex-crm/nex-local repo; in THIS repo the equivalent trust boundary is the broker's loopback HTTP/SSE/WebSocket surface. Did it gain new routes? Is the bind still loopback-only? Is bearer auth enforced on \`/api/*\`? Does any app data leave without auth, or any non-loopback origin get trusted? Read \`packages/broker/src\` and \`packages/protocol\`."
+      printf '%s\n' "The desktop contextBridge boundary now lives in the nex-crm/nex-local repo; in THIS repo the equivalent trust boundary is the broker's loopback HTTP/SSE/WebSocket surface. Did it gain new routes? Is the bind still loopback-only? Is bearer auth enforced on \`/api/*\`? Does any app data leave without auth, or any non-loopback origin get trusted? Read \`internal/team\` and \`packages/protocol\`."
       ;;
     coverage)
       printf '%s\n' "Do the tests still cover what they should? Are versions consistent — does vitest resolve the same vite as the build? Any silently-weakened assertion (e.g., a cast that disables a real type check)? Run the actual test command and read its output."

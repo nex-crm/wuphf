@@ -3,7 +3,7 @@
 // The wire shape that lets a host configure "agent X, runner kind Y →
 // credential scope Z, provider kind W". When a RunnerSpawnRequest arrives
 // without an inline `providerRoute`, the broker consults this config and
-// fills it in before reaching @wuphf/agent-runners.
+// fills it in before reaching the runner host.
 //
 // The single-entry shape `RunnerProviderRoute` lives in runner.ts and is
 // reused verbatim; this module adds the persistence + IPC surface that lets

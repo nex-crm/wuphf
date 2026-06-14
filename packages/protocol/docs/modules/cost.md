@@ -14,9 +14,8 @@ agree on byte-identical payloads before the ledger ever holds a row.
 
 Broker-side concerns — `cost_by_agent`, `cost_by_task`, `cost_budgets`,
 `cost_threshold_crossings`, the threshold-crossing reactor, idempotency-key
-storage, route handlers — are deliberately deferred to
-`packages/broker/src/cost-ledger/*`. The protocol package never executes I/O;
-it only locks the shape.
+storage, route handlers — are deliberately host-owned. The protocol package
+never executes I/O; it only locks the shape.
 
 ## 2. Public API surface
 

@@ -1,7 +1,7 @@
 {
   "name": "wuphf-dev-tooling",
   "private": true,
-  "description": "Root-level dev tooling (secretlint, commitlint). The Go v0 app lives at the repo root; web UI lives in ./web with its own package.json; v1 protocol package lives in ./packages/protocol; v1 broker package lives in ./packages/broker. The v1 desktop shell + installer pipeline moved to the nex-crm/nex-local repo.",
+  "description": "Root-level dev tooling (secretlint, commitlint). The Go v0 app lives at the repo root; web UI lives in ./web with its own package.json; v1 protocol package lives in ./packages/protocol. The v1 desktop shell + installer pipeline moved to the nex-crm/nex-local repo.",
   "workspaces": [
     "packages/*"
   ],
@@ -10,12 +10,6 @@
   },
   "overrides": {
     "fast-uri": "3.1.2"
-  },
-  "scripts": {
-    "broker:test": "bun run --cwd packages/broker test",
-    "broker:typecheck": "bun run --cwd packages/broker typecheck",
-    "broker:check": "bun run --cwd packages/broker check",
-    "broker:check:invariants": "bun run --cwd packages/broker check:invariants"
   },
   "devDependencies": {
     "@commitlint/cli": "21.0.1",

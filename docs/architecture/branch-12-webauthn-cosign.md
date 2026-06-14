@@ -184,7 +184,5 @@ stateDiagram-v2
   Ed25519 envelope to the WebAuthn token.
 - `packages/protocol/testdata/*` and `verifier-reference.go`: add canonical
   token vectors before the WebAuthn bytes become public.
-- `packages/broker/*`: implement registration, challenge storage, assertion
-  verification, threshold policy, and replay consumption.
-- desktop renderer (now in the `nex-crm/nex-local` repo): implement credential
-  registration and cosign prompts.
+- `web/src/components/cosign/*`: implement credential registration and cosign
+  prompts against the protocol shapes.

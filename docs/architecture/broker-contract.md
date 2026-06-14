@@ -7,7 +7,7 @@ React bundle, a same-origin reverse proxy for HTTP and SSE API calls, and the
 loopback WebSocket transport used by the agent terminal. The contract is the
 same no matter which host starts it: today's `cmd/wuphf` binary used by
 `npx wuphf`, and any external desktop host (the Electron shell lives in the
-`nex-crm/nex-local` repo, which vendors `packages/@wuphf/broker`), must both
+`nex-crm/nex-local` repo, which now owns the desktop broker package), must both
 rely on the broker listener rather than inventing a second app-data IPC
 surface.
 

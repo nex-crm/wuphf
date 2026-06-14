@@ -4,8 +4,7 @@
 // appends one `cost_event` with `amountMicroUsd` (integer-only, no float drift),
 // and `budget_set` / `budget_threshold_crossed` events drive enforcement. These
 // types are the wire shape; broker projections (`cost_by_agent`, `cost_by_task`,
-// `cost_budgets`) and the threshold-crossing reactor live in
-// `packages/broker/src/cost-ledger/*`.
+// `cost_budgets`) and the threshold-crossing reactor are host-owned.
 //
 // Three audit kinds:
 //   cost_event                — emitted by the gateway after each provider call.

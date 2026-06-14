@@ -293,8 +293,8 @@ describe("IPC brand constructors", () => {
       // Trailing slash form is REJECTED: BrokerUrl is the bare canonical
       // origin. Consumers do `${brokerUrl}/api/health` — a trailing slash
       // would produce `http://h:p//api/health` (double slash). The broker
-      // emits the bare form (packages/broker/src/listener.ts); a single
-      // canonical form makes the contract unambiguous.
+      // emits the bare form; a single canonical form makes the contract
+      // unambiguous.
       expect(isBrokerUrl("http://127.0.0.1:54321/")).toBe(false);
     });
 

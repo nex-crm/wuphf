@@ -296,9 +296,8 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
   // Brand invariant: BrokerUrl IS the broker origin in bare canonical form
   // (no trailing slash). Downstream code does `${brokerUrl}/api/health` —
   // accepting a trailing-slash form would produce `http://h:p//api/health`
-  // (double slash) at every concat site. The broker emits the bare form
-  // (`packages/broker/src/listener.ts` synthesizes
-  // `http://<loopback>:<port>`), so a single canonical form has zero
+  // (double slash) at every concat site. The broker emits the bare
+  // `http://<loopback>:<port>` form, so a single canonical form has zero
   // compatibility cost.
   //
   // Raw-vs-origin equality also closes the percent-encoded dot-segment

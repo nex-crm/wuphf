@@ -14,9 +14,9 @@ guidance for mixed codex + Claude fleets, and the round-2 rhythm.
 
 - **Always**: major dependency bumps that touch the build chain (Vite,
   TypeScript, vitest, Node types).
-- **Always**: changes to a wire shape, the broker's HTTP/SSE surface, or
+- **Always**: changes to a wire shape, the Go broker's HTTP/SSE surface, or
   any rule under a v1 package's `AGENTS.md` hard-rules list
-  (e.g. `packages/broker`, `packages/protocol`).
+  (e.g. `packages/protocol`).
 - **Usually**: schema migrations, broker process changes, anything
   affecting the release pipeline.
 - **Skip**: trivial refactors, doc-only changes, copy fixes, tests-only
@@ -48,15 +48,15 @@ the finders missed*. Round 2 is centered on lens 9.
 
 `scripts/dispatch-triangulation.sh` accepts every lens name above (plus the
 design-time lenses `security`, `perf`, `api`, `sre`, `architecture`,
-`distsys`). Round-1 example for a `packages/broker`
+`distsys`). Round-1 example for a `packages/protocol`
 dependency-bump PR:
 
 ```bash
 # 1. Capture the PR scope + diff highlights in a problem file
 cat > /tmp/pr-785.md <<'EOF'
-PR #785 bumps packages/broker dev-deps: typescript 6.0.3, vite 8.0.11,
+PR #785 bumps packages/protocol dev-deps: typescript 6.0.3, vite 8.0.11,
 @types/node 25.6.2, vitest 4.1.5. Diff at
-`git diff origin/main...HEAD -- packages/broker bun.lock` in this worktree.
+`git diff origin/main...HEAD -- packages/protocol bun.lock` in this worktree.
 EOF
 
 # 2. Dispatch the codex-side lenses in parallel; each writes <lens>-report.md.

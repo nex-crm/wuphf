@@ -46,9 +46,8 @@ jobs:
   # required jobs into a green merge. The only path that skips a
   # required check is a deliberate `non_docs == 'false'` classification.
   #
-  # Jobs protocol/broker/llm-router deliberately do NOT gate on
-  # this job — they self-classify per-package at step granularity and
-  # cheaply no-op on docs-only PRs. shellcheck/npm-tests run
+  # The protocol job deliberately does NOT gate on this job — it protects
+  # wire invariants on every PR. shellcheck/npm-tests run
   # unconditionally (cheap, and shellcheck must see any *.sh change).
   changes:
     runs-on: ubuntu-latest
@@ -184,133 +183,6 @@ jobs:
         # part of the main Go build; only `go run` against the file runs it.
         working-directory: packages/protocol/testdata
         run: go run verifier-reference.go
-
-  broker:
-    # @wuphf/broker is the loopback HTTP/SSE/WebSocket boundary between
-    # the renderer and the broker process — DNS-rebinding guard, bearer
-    # auth, durable receipt store, cursor-paginated thread list. Local
-    # lefthook covers typecheck/test/invariants but a PR can still bypass
-    # them; this job is the CI floor. Path-gated to keep PRs that don't
-    # touch the broker fast. `packages/protocol` is in the gate because
-    # broker depends on it — a protocol type/wire change can break the
-    # broker compile while the broker tree looks "unchanged."
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version: "1.3.13"
-      # Broker tests run under Vitest, which spawns workers on the system Node
-      # binary (not bun). The broker storage layer uses `node:sqlite` (stable
-      # in Node 22.13+, experimental from 22.5+), so we explicitly pin a Node
-      # that ships it — setup-bun's bundled Node is older and lacks the module.
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
-        with:
-          node-version: "22.x"
-      - name: Detect broker changes
-        id: broker-changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
-            changed="$(git ls-files packages/broker packages/protocol package.json bun.lock)"
-          else
-            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/broker packages/protocol package.json bun.lock || true)"
-          fi
-
-          if [[ -n "${changed}" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Skip broker job when broker inputs are unchanged
-        if: ${{ steps.broker-changes.outputs.changed != 'true' }}
-        run: echo "No packages/broker, packages/protocol, root package.json, or bun.lock changes detected."
-      - name: Install workspace deps
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        run: bun install --frozen-lockfile
-      - name: Typecheck
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run typecheck
-      - name: Biome (lint + format check)
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run check
-      - name: Vitest
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run test
-      - name: Thread replay-check drift detector
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run ci:thread-replay-check
-      - name: Vitest coverage gate
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run test:coverage
-      - name: Broker invariant checks
-        # No non-loopback bind constants, no electron imports, all
-        # @wuphf/protocol imports go through the package root, etc.
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run check:invariants
-
-  llm-router:
-    # @wuphf/llm-router is the cost chokepoint for provider calls. It
-    # depends on broker cost-ledger internals and the protocol cost receipt
-    # shapes, so path-gate those inputs together with the package itself.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version: "1.3.13"
-      # llm-router imports broker types; transitively touches `node:sqlite`.
-      # See broker job for the runtime explanation.
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
-        with:
-          node-version: "22.x"
-      - name: Detect llm-router changes
-        id: llm-router-changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
-            changed="$(git ls-files packages/llm-router packages/broker/src/cost-ledger packages/protocol/src/cost.ts packages/protocol/src/receipt-types.ts package.json bun.lock)"
-          else
-            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/llm-router packages/broker/src/cost-ledger packages/protocol/src/cost.ts packages/protocol/src/receipt-types.ts package.json bun.lock || true)"
-          fi
-
-          if [[ -n "${changed}" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Skip llm-router job when llm-router inputs are unchanged
-        if: ${{ steps.llm-router-changes.outputs.changed != 'true' }}
-        run: echo "No packages/llm-router, cost-ledger, cost protocol, root package.json, or bun.lock changes detected."
-      - name: Install workspace deps
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        run: bun install --frozen-lockfile
-      - name: Typecheck
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        working-directory: packages/llm-router
-        run: bun run typecheck
-      - name: Biome (lint + format check)
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        working-directory: packages/llm-router
-        run: bun run check
-      - name: Vitest
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        working-directory: packages/llm-router
-        run: bun run test
 
   web:
     # Skipped on docs-only PRs (see the `changes` job). `web` produces the
