@@ -7,10 +7,11 @@ import {
 } from "./_helpers";
 
 const APP_CASES = [
-  // Tasks were consolidated into Issues (#1002): no "Tasks" sidebar slot
-  // remains. /tasks redirects are covered in route-matrix.spec.ts.
-  // Phase 2b retired the standalone RequestsApp surface; /apps/requests
-  // now redirects to /inbox. Coverage moved to the unified-inbox E2E.
+  // The Tasks board is a first-class surface reached from the Work nav.
+  // /tasks redirects are covered in route-matrix.spec.ts.
+  // The standalone RequestsApp surface was retired and the Inbox folded
+  // into the Task board; /apps/requests now redirects to /tasks (covered
+  // in route-matrix.spec.ts / route-regressions.spec.ts).
   {
     app: "graph",
     label: "Graph",

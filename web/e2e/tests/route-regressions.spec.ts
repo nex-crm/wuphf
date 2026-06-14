@@ -70,20 +70,20 @@ test.describe("PR #634 review pins", () => {
     await expectNoReactErrors(page, getErrors, "console app removal");
   });
 
-  test("Legacy /#/apps/requests redirects to the unified Inbox", async ({
+  test("Legacy /#/apps/requests redirects to the Tasks board", async ({
     page,
   }) => {
-    // Phase 2b retired the standalone RequestsApp; /apps/requests now
-    // renders InboxRedirect which navigates to /inbox. The
-    // last-visited-channel regression that the prior test guarded
-    // (RequestsApp re-fetching general's queue) is gone with the
-    // surface — the unified Inbox doesn't fetch by channel.
+    // The standalone RequestsApp was retired and the Inbox consolidated
+    // into the Task board; /apps/requests now renders TasksRedirect which
+    // navigates to /tasks. The last-visited-channel regression that the
+    // prior test guarded (RequestsApp re-fetching general's queue) is gone
+    // with the surface — the board doesn't fetch by channel.
     const getErrors = collectReactErrors(page);
     await page.goto(`/#/apps/requests`);
-    // The InboxRedirect testid mounts then unmounts as soon as the
+    // The TasksRedirect testid mounts then unmounts as soon as the
     // useEffect fires, so racing toBeVisible against the redirect is
     // flaky. URL change is the stable assertion.
-    await expect(page).toHaveURL(/#\/inbox$/, { timeout: 5_000 });
+    await expect(page).toHaveURL(/#\/tasks$/, { timeout: 5_000 });
     await expectNoReactErrors(
       page,
       getErrors,

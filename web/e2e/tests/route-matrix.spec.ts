@@ -54,12 +54,13 @@ test.describe("canonical route matrix", () => {
 
   test("every registered app panel route mounts", async ({ page }) => {
     for (const appId of APP_PANEL_IDS) {
-      // Phase 2b: /#/apps/requests redirects to /inbox instead of
-      // rendering a dedicated panel. Verify the redirect by URL,
-      // not by panel testid.
+      // /#/apps/requests redirects to /tasks (the Inbox was consolidated
+      // into the Task board; requests fold into its Needs-human lane)
+      // instead of rendering a dedicated panel. Verify the redirect by
+      // URL, not by panel testid.
       if (appId === "requests") {
         await page.goto(`/#/apps/${appId}`);
-        await expect(page).toHaveURL(/#\/inbox$/, { timeout: 10_000 });
+        await expect(page).toHaveURL(/#\/tasks$/, { timeout: 10_000 });
         continue;
       }
       await expectCanonicalRoute(page, `/#/apps/${appId}`, async (p) => {
