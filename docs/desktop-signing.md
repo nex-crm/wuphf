@@ -42,6 +42,7 @@ Signing account + certificate profile, then add: `AZURE_TENANT_ID`,
 `AZURE_TS_PROFILE`. The release job signs only when these exist.
 
 ## Cut a release
+
 ```bash
 git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
 # → desktop-release.yml builds, signs, notarizes, and drafts a GitHub Release.
@@ -51,6 +52,7 @@ Switch the release trigger from `desktop-v*` to `v*` once the desktop ships on
 the main product cadence (so every `wuphf` release also cuts a dmg).
 
 ## Manual macOS build (local, validated 2026-06-14)
+
 ```bash
 cd web && bun run build && cd ..
 cd desktop/oswails && wails build -s -skipbindings -tags desktop && cd ../..
@@ -58,6 +60,7 @@ APP=desktop/oswails/build/bin/WUPHF.app
 codesign --deep --force --options runtime --timestamp \
   --entitlements desktop/oswails/build/darwin/entitlements.plist \
   --sign "Developer ID Application: GarageSpace, Inc. (GXAA6X232R)" "$APP"
+mkdir -p dist
 stage=$(mktemp -d); cp -R "$APP" "$stage/"; ln -s /Applications "$stage/Applications"
 hdiutil create -volname WUPHF -srcfolder "$stage" -ov -format UDZO dist/WUPHF.dmg
 codesign --sign "Developer ID Application: GarageSpace, Inc. (GXAA6X232R)" --timestamp dist/WUPHF.dmg

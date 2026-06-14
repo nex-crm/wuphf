@@ -38,6 +38,13 @@ var assets embed.FS
 // freePort reserves an ephemeral loopback port. ServeWebUI binds a literal
 // 127.0.0.1:<port> (it does not accept :0), so the shell picks the port itself
 // and templates it into the bootstrap page.
+//
+// There is a benign TOCTOU window: the port is released here and re-bound by
+// ServeWebUI a moment later, so another process could theoretically claim it in
+// between. Closing it cleanly would require ServeWebUI to adopt a pre-bound
+// net.Listener (a broker API change, out of scope for the shell). On a
+// single-user desktop binding loopback ephemeral ports the collision risk is
+// negligible; the eventual fix is the listener-handoff, tracked as a follow-up.
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
