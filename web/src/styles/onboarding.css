@@ -2011,9 +2011,11 @@
 .pre-pick-screen {
   min-height: 100vh;
   display: flex;
-  align-items: center;
+  /* Top-anchored (not vertically centered) so the page reads top-down and
+     avoids a dead band above the hero on tall viewports. */
+  align-items: flex-start;
   justify-content: center;
-  padding: 40px 24px;
+  padding: clamp(48px, 9vh, 112px) 24px 64px;
   /* Token-based accent wash mirroring the wizard host (.onboarding-wizard):
      a faint accent radial over the theme base so it reads on light, dark, and
      noir without hardcoding a light gradient. */
@@ -2028,48 +2030,97 @@
 
 .pre-pick-body {
   width: 100%;
-  max-width: 640px;
+  max-width: 1000px;
   display: flex;
   flex-direction: column;
-  gap: 32px;
-  align-items: center;
+}
+
+/* Two-column band: the provider cards + every collapsible config section
+   share the left column (so they line up on one left edge); the verify clip
+   sits in the right column. Collapses to a single column on narrow viewports,
+   where the clip falls back under the left column. */
+.pre-pick-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 48px;
+  width: 100%;
+  align-items: start;
+}
+
+/* The shared left column: provider cards on top, then the config sections,
+   all stretched to the same width and aligned to the same left edge. */
+.pre-pick-left {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.pre-pick-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* The clip is centered vertically against the (taller) left column so the
+   right side reads as a balanced exhibit rather than top-aligned with empty
+   space beneath it. */
+.pre-pick-aside {
+  align-self: center;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+@media (max-width: 880px) {
+  .pre-pick-split {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .pre-pick-aside {
+    align-self: stretch;
+  }
 }
 
 .pre-pick-hero {
-  text-align: center;
+  text-align: left;
+  margin-bottom: 4px;
 }
 
 .pre-pick-eyebrow {
   font-size: 11px;
-  letter-spacing: 0.16em;
+  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--text-secondary);
-  margin-bottom: 10px;
+  color: var(--accent);
+  margin-bottom: 12px;
 }
 
 .pre-pick-headline {
   font-family: var(--font-logo);
-  font-size: 36px;
+  font-size: 40px;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  margin: 0 0 12px 0;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  margin: 0 0 14px 0;
 }
 
 .pre-pick-subhead {
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-secondary);
-  max-width: 480px;
-  margin: 0 auto;
-  text-wrap: balance;
+  max-width: 460px;
+  margin: 0;
+  text-wrap: pretty;
 }
 
 /* Rendered Remotion clip illustrating the verify pass (install / sign-in /
-   model-reachable checks resolving to Connected). It sits BELOW the runtime
-   cards so the providers stay the first actionable block. The clip is a
-   self-contained product window on its own soft backdrop, so it reads on any
-   theme. */
+   model-reachable checks resolving to Connected). It sits to the RIGHT of the
+   runtime cards (and under them on narrow viewports) so the providers stay the
+   first actionable block. The clip is a self-contained product window on its
+   own soft backdrop, so it reads on any theme. */
 .pre-pick-clip-figure {
   width: 100%;
   margin: 0;
@@ -2082,7 +2133,7 @@
 .pre-pick-clip {
   display: block;
   width: 100%;
-  max-width: 480px;
+  max-width: 440px;
   height: auto;
   border-radius: var(--radius-lg);
 }
@@ -2620,6 +2671,144 @@
   text-transform: uppercase;
   color: var(--text-secondary);
   margin: 0;
+}
+
+/* Disclosure header for a collapsible pre-pick section (e.g. API keys).
+   Borderless so it reads as a section label, not a button, while still
+   exposing the full keyboard/AT affordances of a real <button>. */
+.pre-pick-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.pre-pick-section-toggle-chevron {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-secondary);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pre-pick-section-toggle-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-secondary);
+}
+
+.pre-pick-section-collapse {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Ordered after the base selectors above so specificity ascends and biome's
+   noDescendingSpecificity stays satisfied. */
+.pre-pick-section-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.pre-pick-section-toggle:hover .pre-pick-section-heading,
+.pre-pick-section-toggle:hover .pre-pick-section-toggle-chevron {
+  color: var(--text);
+}
+
+.pre-pick-section-toggle.open .pre-pick-section-toggle-chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+/* Grouped "options" card — the three secondary config sections (API keys,
+   local model, custom endpoint) read as one settings group with hairline
+   dividers instead of three loose rows floating under the cards. */
+.pre-pick-config-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.pre-pick-config-group .pre-pick-section {
+  gap: 0;
+}
+
+.pre-pick-config-group .pre-pick-section + .pre-pick-section {
+  border-top: 1px solid var(--border);
+}
+
+.pre-pick-config-group .pre-pick-section-toggle {
+  padding: 13px 16px;
+}
+
+.pre-pick-config-group .pre-pick-section-collapse {
+  padding: 2px 16px 16px;
+}
+
+.pre-pick-config-group .pre-pick-section-toggle:hover {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+/* One-shot staggered entrance for the pick screen — a single directed load
+   sequence rather than scattered hover effects. Reduced-motion users get the
+   final state instantly (guarded by the no-preference query). */
+@media (prefers-reduced-motion: no-preference) {
+  .pre-pick-left > *,
+  .pre-pick-aside {
+    animation: pre-pick-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .pre-pick-left > *:nth-child(1) {
+    animation-delay: 40ms;
+  }
+
+  .pre-pick-left > *:nth-child(2) {
+    animation-delay: 110ms;
+  }
+
+  .pre-pick-left > *:nth-child(3) {
+    animation-delay: 180ms;
+  }
+
+  .pre-pick-left > *:nth-child(n + 4) {
+    animation-delay: 240ms;
+  }
+
+  .pre-pick-aside {
+    animation-delay: 180ms;
+  }
+}
+
+@keyframes pre-pick-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pre-pick-section-toggle-chevron {
+    transition: none;
+  }
 }
 
 .pre-pick-section-hint {
