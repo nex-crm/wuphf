@@ -194,6 +194,8 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"one_key_set":          config.ResolveOneSecret() != "",
 			"composio_key_set":     config.IsComposioConfigured(),
 			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
+			"slack_bot_token_set":  config.ResolveSlackBotToken() != "",
+			"slack_app_token_set":  config.ResolveSlackAppToken() != "",
 			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
 			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
 			// Product analytics consent (PostHog). The two channels are
