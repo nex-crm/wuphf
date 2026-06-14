@@ -119,7 +119,7 @@ export function OnboardingChat() {
 
         <footer className="onboarding-chat-footer">
           <div className="onboarding-chat-footer-inner">
-            <InterviewBar />
+            <InterviewBar channelSlug={CEO_ONBOARDING_CHANNEL} />
             {/* When there's no pending suggestion AND no agent interview
                 request, InterviewBar renders nothing. Surface a hint so the
                 user knows the wizard is mid-transition rather than stuck. */}

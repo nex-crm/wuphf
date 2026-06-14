@@ -59,9 +59,31 @@ export function requestPinRank(request: AgentRequest): number {
   return 2;
 }
 
+/**
+ * Normalize a channel slug for request↔surface comparison. Mirrors the
+ * broker rule that an empty channel means #general (normalizeChannelSlug in
+ * broker_defaults.go), so a channel-less legacy request scopes to #general
+ * instead of silently disappearing.
+ */
+export function interviewChannelSlug(value: string | null | undefined): string {
+  const slug = (value ?? "").trim().toLowerCase();
+  return slug === "" ? "general" : slug;
+}
+
+interface InterviewBarProps {
+  /**
+   * Channel slug of the chat this bar belongs to. The request queue is
+   * scoped to requests that originated in this channel, so an agent's
+   * question only appears in the chat it was asked in — not mirrored onto
+   * every surface. `null` (a non-chat surface) shows nothing; cross-channel
+   * triage lives in the Inbox.
+   */
+  channelSlug: string | null;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
-export function InterviewBar() {
+export function InterviewBar({ channelSlug }: InterviewBarProps) {
   const { pending } = useRequests();
   const queryClient = useQueryClient();
   // OnboardingDMContext.phase is non-empty exactly when the broker CEO
@@ -80,14 +102,26 @@ export function InterviewBar() {
     onboardingPhase !== "" &&
     onboardingPhase !== "complete";
 
+  // The chat this bar is anchored to. `null` means a non-chat surface
+  // (wiki, agents, settings, …) where no request should surface inline.
+  const activeChannel =
+    channelSlug === null ? null : interviewChannelSlug(channelSlug);
+
   const queue = useMemo(() => {
-    if (isOnboarding) return [];
+    if (isOnboarding || activeChannel === null) return [];
+    // Only show requests that originated in the chat the human is looking
+    // at. The broker queue is office-wide (useRequests fetches every
+    // channel for the Inbox), so without this scope an agent's question in
+    // one task channel would block the composer on every other surface.
+    const scoped = pending.filter(
+      (r) => interviewChannelSlug(r.channel) === activeChannel,
+    );
     // Pin order: blocking/required asks first, then real interviews, then
     // notices/FYIs; oldest-first within each class. The old pure
     // created_at sort buried a blocking interview behind a pile of stale
     // delivery notices — the live v3 run never surfaced one for 44
     // minutes while the office stalled behind it.
-    const sorted = [...pending].sort((a, b) => {
+    const sorted = [...scoped].sort((a, b) => {
       const ra = requestPinRank(a);
       const rb = requestPinRank(b);
       if (ra !== rb) return ra - rb;
@@ -96,7 +130,7 @@ export function InterviewBar() {
       return ta.localeCompare(tb);
     });
     return sorted;
-  }, [pending, isOnboarding]);
+  }, [pending, isOnboarding, activeChannel]);
 
   const [cursor, setCursor] = useState(0);
   const [textMode, setTextMode] = useState<{ option: InterviewOption } | null>(

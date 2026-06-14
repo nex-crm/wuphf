@@ -104,7 +104,7 @@ export function DMView({ agentSlug, channelSlug }: DMViewProps) {
               <TypingIndicator />
             </>
           )}
-          <InterviewBar />
+          <InterviewBar channelSlug={channelSlug} />
           <Composer />
         </div>
       </div>
