@@ -141,7 +141,7 @@ func slackSpawnManifest(name, role string) slackAppManifest {
 			BotUser: slackManifestBotUser{DisplayName: display, AlwaysOnline: true},
 		},
 		OauthConfig: slackManifestOauth{
-			Scopes: slackManifestScopes{Bot: []string{"chat:write", "users:read"}},
+			Scopes: slackManifestScopes{Bot: []string{"assistant:write", "chat:write", "users:read"}},
 		},
 	}
 }

@@ -100,6 +100,15 @@ type fakeSlackAPI struct {
 	unpinErr error
 
 	permalinkErr error
+
+	statuses  []fakeStatus
+	statusErr error
+}
+
+type fakeStatus struct {
+	ChannelID string
+	ThreadTS  string
+	Status    string
 }
 
 type fakePin struct {
@@ -159,6 +168,16 @@ func (f *fakeSlackAPI) GetPermalinkContext(_ context.Context, params *slack.Perm
 		return "", f.permalinkErr
 	}
 	return "https://slack.example/archives/" + params.Channel + "/p" + strings.ReplaceAll(params.Ts, ".", ""), nil
+}
+
+func (f *fakeSlackAPI) SetAssistantThreadsStatusContext(_ context.Context, params slack.AssistantThreadsSetStatusParameters) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.statusErr != nil {
+		return f.statusErr
+	}
+	f.statuses = append(f.statuses, fakeStatus{ChannelID: params.ChannelID, ThreadTS: params.ThreadTS, Status: params.Status})
+	return nil
 }
 
 func (f *fakeSlackAPI) PublishViewContext(_ context.Context, userID string, view slack.HomeTabViewRequest) error {

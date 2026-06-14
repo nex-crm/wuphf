@@ -67,6 +67,10 @@ type slackAPI interface {
 	// getPermalink), used to link a task's new thread back into the conversation
 	// where WUPHF was tagged.
 	GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error)
+	// SetAssistantThreadsStatusContext sets the native AI "is thinking…" status
+	// on a thread (assistant.threads.setStatus); an empty Status clears it. This
+	// is how WUPHF shows it is working before it replies. Requires assistant:write.
+	SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -124,6 +128,10 @@ func (c *slackClient) RemovePinContext(ctx context.Context, channelID string, it
 
 func (c *slackClient) GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error) {
 	return c.api.GetPermalinkContext(ctx, params)
+}
+
+func (c *slackClient) SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error {
+	return c.api.SetAssistantThreadsStatusContext(ctx, params)
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and

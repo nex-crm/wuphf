@@ -87,6 +87,7 @@ func officeSlackAppManifest(appName string) officeSlackManifest {
 		OauthConfig: slackManifestOauth{
 			Scopes: slackManifestScopes{Bot: []string{
 				"app_mentions:read",
+				"assistant:write",
 				"channels:history",
 				"channels:read",
 				"chat:write",

@@ -59,6 +59,7 @@ func (b *Broker) EnsureSlackTransportRunning() {
 	dispatchDone := make(chan struct{})
 	cardsDone := make(chan struct{})
 	entitiesDone := make(chan struct{})
+	thinkingDone := make(chan struct{})
 
 	go func() {
 		defer close(done)
@@ -87,6 +88,12 @@ func (b *Broker) EnsureSlackTransportRunning() {
 			log.Printf("[transport] slack: entity fact sync exited: %v", err)
 		}
 	}()
+	go func() {
+		defer close(thinkingDone)
+		if err := st.runAgentThinkingStatus(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[transport] slack: thinking-status loop exited: %v", err)
+		}
+	}()
 
 	b.slackTransport = st
 	b.slackTransportStop = func() {
@@ -95,6 +102,7 @@ func (b *Broker) EnsureSlackTransportRunning() {
 		<-dispatchDone // outbound dispatcher
 		<-cardsDone    // task-card sync loop
 		<-entitiesDone // entity fact sync loop
+		<-thinkingDone // native thinking-status loop
 	}
 	log.Printf("[transport] slack: started (%d channel(s))", len(st.ChannelMap))
 }
