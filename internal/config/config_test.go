@@ -345,8 +345,16 @@ func TestIsComposioConfigured(t *testing.T) {
 }
 
 func TestResolveComposioUserID(t *testing.T) {
+	// Clear both env overrides so an env-contaminated runner can't leak into
+	// the config/default-fallback subtests.
+	clearEnv := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("WUPHF_COMPOSIO_USER_ID", "")
+		t.Setenv("COMPOSIO_USER_ID", "")
+	}
 	t.Run("prefers email", func(t *testing.T) {
 		withTempConfig(t, func(_ string) {
+			clearEnv(t)
 			_ = Save(Config{Email: "owner@example.com", WorkspaceSlug: "acme"})
 			if got := ResolveComposioUserID(); got != "owner@example.com" {
 				t.Fatalf("got %q", got)
@@ -355,25 +363,47 @@ func TestResolveComposioUserID(t *testing.T) {
 	})
 	t.Run("falls back to workspace slug", func(t *testing.T) {
 		withTempConfig(t, func(_ string) {
+			clearEnv(t)
 			_ = Save(Config{WorkspaceSlug: "acme"})
 			if got := ResolveComposioUserID(); got != "acme" {
 				t.Fatalf("got %q", got)
 			}
 		})
 	})
+	t.Run("falls back to workspace id", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{WorkspaceID: "ws_123"})
+			if got := ResolveComposioUserID(); got != "ws_123" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
 	t.Run("never empty so a signed-in office can browse", func(t *testing.T) {
 		withTempConfig(t, func(_ string) {
+			clearEnv(t)
 			_ = Save(Config{})
 			if got := ResolveComposioUserID(); got != "default" {
 				t.Fatalf("expected the default identity, got %q", got)
 			}
 		})
 	})
-	t.Run("env override wins", func(t *testing.T) {
+	t.Run("WUPHF env override wins", func(t *testing.T) {
 		withTempConfig(t, func(_ string) {
+			clearEnv(t)
 			t.Setenv("WUPHF_COMPOSIO_USER_ID", "u_env")
 			_ = Save(Config{Email: "owner@example.com"})
 			if got := ResolveComposioUserID(); got != "u_env" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("COMPOSIO_USER_ID env override wins over config", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			t.Setenv("COMPOSIO_USER_ID", "u_compat")
+			_ = Save(Config{Email: "owner@example.com"})
+			if got := ResolveComposioUserID(); got != "u_compat" {
 				t.Fatalf("got %q", got)
 			}
 		})

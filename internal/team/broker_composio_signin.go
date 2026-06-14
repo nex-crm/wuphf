@@ -105,8 +105,13 @@ func composioBinary() (string, bool) {
 		name = "composio.exe"
 	}
 	candidate := filepath.Join(dir, name)
-	if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-		return candidate, true
+	// On Windows the 0o111 exec bits are not meaningful (executability is
+	// determined by extension/PATHEXT), so only require a regular file there;
+	// on Unix require the exec bit.
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		if runtime.GOOS == "windows" || info.Mode()&0o111 != 0 {
+			return candidate, true
+		}
 	}
 	return "", false
 }
@@ -470,7 +475,7 @@ func composioProvisionCreds() (composioProvisionedCreds, error) {
 	uak := strings.TrimSpace(ud.APIKey)
 	org := strings.TrimSpace(ud.OrgID)
 	if uak == "" || org == "" {
-		return composioProvisionedCreds{}, errors.New("Composio sign-in did not return the org context — sign in again, or paste a project API key from https://dashboard.composio.dev")
+		return composioProvisionedCreds{}, errors.New("the Composio sign-in returned no org context — sign in again, or paste a project API key from https://dashboard.composio.dev")
 	}
 	creds := composioProvisionedCreds{UserAPIKey: uak, OrgID: org}
 	// Best-effort project scoping; a resolve failure is not fatal (the SDK

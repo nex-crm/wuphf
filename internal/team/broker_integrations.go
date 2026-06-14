@@ -86,7 +86,7 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 		if composio.Configured() {
 			catalog, err := composio.ListIntegrationCatalog(r.Context(), opts)
 			if err != nil {
-				setIntegrationProviderDetail(resp.Providers, "composio", "Composio unavailable: "+err.Error())
+				setIntegrationProviderDetail(resp.Providers, "composio", "Integrations unavailable: "+err.Error())
 				resp.Items = append(resp.Items, curatedComposioCatalog(opts, true)...)
 			} else {
 				resp.Items = append(resp.Items, catalog.Items...)
