@@ -55,7 +55,7 @@ export const INTEGRATIONS: readonly IntegrationDescriptor[] = [
     category: "channels",
     title: "Slack",
     summary:
-      "Bring your office into Slack as channels — guided setup, a thread per task.",
+      "Bring WUPHF agents into Slack and make your other AI agents work together.",
     logo: SlackLogo,
     // Slack is always offered — the wizard validates tokens live and the
     // backend reports reachability; there's no compile flag that strips it.

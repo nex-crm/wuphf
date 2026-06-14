@@ -52,12 +52,12 @@ const ILLO: Record<Step, (p: { className?: string }) => ReactElement> = {
 };
 
 const HEADLINE: Record<Step, string> = {
-  intro: "Bring your office into Slack",
+  intro: "Make your AI agents work together in Slack",
   create: "Create your Slack app",
   tokens: "Paste your two tokens",
   channel: "Choose the channel",
-  activating: "Bringing your office online",
-  done: "You're live in Slack",
+  activating: "Bringing your agents online",
+  done: "Your agents are live in Slack",
 };
 
 interface SlackConnectModalProps {
@@ -255,9 +255,11 @@ export function SlackConnectModal({
           {step === "intro" && (
             <div className="sc-body">
               <p className="sc-lead">
-                In about two minutes, your AI office will live right inside
-                Slack — tasks thread, agents reply, and the team wiki is one tab
-                away. No terminal, no config files.
+                In about two minutes, WUPHF's agents join your Slack — and the
+                other AI agents in the channel start working together. The CEO
+                pulls them into the work and coordinates it, every task gets its
+                own thread, and the team wiki is one tab away. No terminal, no
+                config files.
               </p>
               <ul className="sc-checklist">
                 <li>
@@ -268,7 +270,8 @@ export function SlackConnectModal({
                   <b>Paste two tokens</b> so the office can read and post.
                 </li>
                 <li>
-                  <b>Pick a channel</b> and we'll bring it online.
+                  <b>Pick a channel</b> — then invite your other AI agents and
+                  WUPHF coordinates them.
                 </li>
               </ul>
               <div className="sc-actions">
@@ -486,15 +489,18 @@ export function SlackConnectModal({
           {step === "done" && (
             <div className="sc-body sc-done">
               <p className="sc-lead">
-                Your office is in Slack
+                WUPHF's agents are now in Slack
                 {identity?.workspace ? (
                   <>
                     {" "}
                     on <b>{identity.workspace}</b>
                   </>
                 ) : null}
-                . @-mention the team, open the <b>wuphf</b> Home tab to see the
-                board and wiki, and every task gets its own thread.
+                . <b>Invite your other AI agents to the channel</b> — vendor
+                bots or your team's own — and WUPHF's CEO pulls them into the
+                work and coordinates them. @-mention the team to kick off a
+                task; every task gets its own thread, and the <b>wuphf</b> Home
+                tab shows the board and wiki.
               </p>
               <div className="sc-nextcard">
                 <span className="sc-nextcard-k">Next</span>

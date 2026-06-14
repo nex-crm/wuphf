@@ -255,7 +255,7 @@ export function TelegramConnectModal({
                 >
                   Slack{" "}
                   <span style={{ opacity: 0.6 }}>
-                    — bring your whole office into a channel
+                    — bring WUPHF agents in and coordinate your other AI agents
                   </span>
                 </button>
               </li>

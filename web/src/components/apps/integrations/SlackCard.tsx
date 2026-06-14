@@ -28,9 +28,10 @@ export function SlackDetail({ cfg }: { cfg: ConfigSnapshot }) {
   return (
     <div>
       <p className="op-card-blurb">
-        Bring your office into Slack as channels. A guided wizard walks you
-        through creating the app, pasting two tokens, and picking a channel —
-        then your team is live in Slack, with every task in its own thread.
+        Bring WUPHF's agents into Slack and make your other AI agents — vendor
+        bots, your team's own — work together in a channel. WUPHF's CEO pulls
+        them into the work and coordinates them, with every task in its own
+        thread. A guided wizard handles setup.
       </p>
       <div className="op-card-actions">
         <button
