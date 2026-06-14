@@ -910,6 +910,13 @@ function validateExternalWrite(
           "must be at or after approvalToken.notBefore",
         );
       }
+      if (
+        approvedAt instanceof Date &&
+        !Number.isNaN(approvedAt.getTime()) &&
+        approvedAt.getTime() >= token.expiresAt
+      ) {
+        addError(errors, pointer(path, "approvedAt"), "must be before approvalToken.expiresAt");
+      }
     }
   }
 }

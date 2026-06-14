@@ -1078,6 +1078,44 @@ describe("receipt schema", () => {
     expect(validateReceipt(tampered)).toEqual({ ok: true });
   });
 
+  it("rejects external writes approved at token expiry", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          approvedAt: new Date(approvalToken.expiresAt),
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/writes/0/approvedAt",
+      /before approvalToken\.expiresAt/,
+    );
+  });
+
+  it("allows external writes approved just before token expiry", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          approvedAt: new Date(approvalToken.expiresAt - 1),
+        },
+      ],
+    };
+
+    expect(validateReceipt(tampered)).toEqual({ ok: true });
+  });
+
   it("rejects unknown top-level keys", () => {
     const fixture = validReceiptFixture();
     const tampered = { ...fixture, shadow: { unsanitized: "...‮evil..." } };
