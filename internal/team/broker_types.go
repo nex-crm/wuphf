@@ -286,6 +286,18 @@ type teamTask struct {
 	// for v1 the task carries its own copy so the routing logic does not
 	// need a Lane-B dependency.
 	Tags []string `json:"tags,omitempty"`
+	// Participants are the human teammates looped into this task as
+	// support/participants — NOT owners and NOT agents. The CEO assigns a
+	// human here (via team_task action=create/update) for the steps that are
+	// genuinely a human's: an approval, a judgment call, information only the
+	// human has, or a relationship-owned step. Entries are human session slugs
+	// (the same people/<slug> identity their wiki article lives under). The
+	// sibling Slack slice @-pings these humans through the agent-mention path;
+	// this field is the broker-side record of "this human is on this task".
+	// Distinct from Owner (the agent that runs the task), Reviewers (who must
+	// grade a submitted task), and DependsOn (blocking task deps). Wire key
+	// "participants" is additive + stable.
+	Participants []string `json:"participants,omitempty"`
 	// WikiRefs are wiki-relative article paths explicitly linked to this task.
 	// The Slack context-packer treats them as the ONLY wiki content a first-party
 	// foreign bot may receive ("explicitly task-linked wiki refs"), never free
@@ -501,6 +513,7 @@ type teamTaskWire struct {
 	LifecycleState       LifecycleState          `json:"lifecycle_state,omitempty"`
 	Reviewers            []string                `json:"reviewers,omitempty"`
 	Tags                 []string                `json:"tags,omitempty"`
+	Participants         []string                `json:"participants,omitempty"`
 	WikiRefs             []string                `json:"wiki_refs,omitempty"`
 	ReviewStartedAt      string                  `json:"review_started_at,omitempty"`
 	ReviewTimeoutSeconds int                     `json:"review_timeout_seconds,omitempty"`
@@ -558,6 +571,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		LifecycleState:       t.LifecycleState,
 		Reviewers:            t.Reviewers,
 		Tags:                 t.Tags,
+		Participants:         t.Participants,
 		WikiRefs:             t.WikiRefs,
 		ReviewStartedAt:      t.ReviewStartedAt,
 		ReviewTimeoutSeconds: t.ReviewTimeoutSeconds,
@@ -617,6 +631,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.blocked = w.Blocked
 	t.LifecycleState = normalizeLegacyLifecycleStateName(w.LifecycleState)
 	t.Tags = w.Tags
+	t.Participants = w.Participants
 	t.WikiRefs = w.WikiRefs
 	t.ReviewStartedAt = w.ReviewStartedAt
 	t.ReviewTimeoutSeconds = w.ReviewTimeoutSeconds

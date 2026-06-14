@@ -466,6 +466,37 @@ func trimTaskDependencies(deps []string) []string {
 	return trimmedDeps
 }
 
+// normalizeTaskParticipants cleans the human participant slugs the CEO loops
+// into a task: trims whitespace, strips a leading "@" or "human:" prefix the
+// prompt language might carry through, drops empties, and dedupes while
+// preserving first-seen order. Returns nil for an empty input so the wire key
+// stays omitted on tasks without participants.
+func normalizeTaskParticipants(participants []string) []string {
+	if len(participants) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(participants))
+	out := make([]string, 0, len(participants))
+	for _, p := range participants {
+		slug := strings.TrimSpace(p)
+		slug = strings.TrimPrefix(slug, "@")
+		slug = strings.TrimPrefix(slug, "human:")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			continue
+		}
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		seen[slug] = struct{}{}
+		out = append(out, slug)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func markTaskDone(task *teamTask, timestamp string) {
 	if task == nil {
 		return
@@ -756,6 +787,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
 			DependsOn:        trimTaskDependencies(body.DependsOn),
 			WikiRefs:         dedupePaths(body.WikiRefs),
+			Participants:     normalizeTaskParticipants(body.Participants),
 			ParentIssueID:    strings.TrimSpace(body.ParentIssueID),
 			Verification:     verification,
 			CreatedAt:        now,

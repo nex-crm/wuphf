@@ -37,7 +37,13 @@ type TaskPostRequest struct {
 	// WikiRefs links wiki articles to the task (additive wire key
 	// "wiki_refs"); the Slack context-packer's FirstParty tier exports
 	// task-LINKED wiki only, so this is the packer's wiki allowlist.
-	WikiRefs      []string `json:"wiki_refs"`
+	WikiRefs []string `json:"wiki_refs"`
+	// Participants are the human teammates the CEO loops into this task as
+	// support (approvals, judgment, information, relationships). Entries are
+	// human session slugs; they are NOT owners and NOT agents. The broker
+	// stores them on the task and the sibling Slack slice @-pings them.
+	// Additive wire key "participants".
+	Participants  []string `json:"participants"`
 	ParentIssueID string   `json:"parent_issue_id"`
 	// VerificationKind/Spec/Required set the machine-checkable definition
 	// of done on create (U1.1, task_verification.go). Kind is one of
