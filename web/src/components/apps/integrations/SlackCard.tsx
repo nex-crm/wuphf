@@ -5,15 +5,20 @@ import type { IntegrationStatus } from "./types";
 // SlackCard wraps the guided Slack onboarding wizard so the Integrations app is
 // the discoverable entry point — the same role TelegramCard plays. The wizard is
 // also reachable from the `/connect` provider picker; both paths open the same
-// `openSlackConnect` store action. "Connected" requires BOTH tokens: the bot
-// token (xoxb-, Web API) and the app-level token (xapp-, Socket Mode), since the
-// transport needs both to come up.
+// `openSlackConnect` store action.
+//
+// Status reflects how far setup got: "Connected" needs both tokens (xoxb- Web
+// API + xapp- Socket Mode) AND at least one bridged channel. Tokens-without-a-
+// channel is a half-finished setup ("Finish setup"), and the button + label key
+// off the CHANNEL, not the tokens — so it never says "Connect another channel"
+// before a single channel is connected.
 
 export function slackStatus(cfg: ConfigSnapshot): IntegrationStatus {
   const botSet = Boolean(cfg.slack_bot_token_set);
   const appSet = Boolean(cfg.slack_app_token_set);
-  if (botSet && appSet) {
-    return { tone: "connected", label: "Bot connected" };
+  const channelConnected = Boolean(cfg.slack_channel_connected);
+  if (botSet && appSet && channelConnected) {
+    return { tone: "connected", label: "Connected" };
   }
   if (botSet || appSet) {
     return { tone: "unconfigured", label: "Finish setup" };
@@ -23,8 +28,7 @@ export function slackStatus(cfg: ConfigSnapshot): IntegrationStatus {
 
 export function SlackDetail({ cfg }: { cfg: ConfigSnapshot }) {
   const openSlackConnect = useAppStore((s) => s.openSlackConnect);
-  const connected =
-    Boolean(cfg.slack_bot_token_set) && Boolean(cfg.slack_app_token_set);
+  const channelConnected = Boolean(cfg.slack_channel_connected);
   return (
     <div>
       <p className="op-card-blurb">
@@ -39,7 +43,7 @@ export function SlackDetail({ cfg }: { cfg: ConfigSnapshot }) {
           className="btn btn-primary btn-sm"
           onClick={() => openSlackConnect()}
         >
-          {connected ? "Connect another channel" : "Connect Slack"}
+          {channelConnected ? "Connect another channel" : "Connect Slack"}
         </button>
       </div>
     </div>

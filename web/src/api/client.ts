@@ -1080,6 +1080,7 @@ export interface ConfigSnapshot {
   telegram_token_set?: boolean;
   slack_bot_token_set?: boolean;
   slack_app_token_set?: boolean;
+  slack_channel_connected?: boolean;
   openclaw_token_set?: boolean;
   openclaw_gateway_url?: string;
   // Product-analytics consent (PostHog). Both default true. `analytics_configured`
