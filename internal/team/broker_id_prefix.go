@@ -1,8 +1,10 @@
 package team
 
 // broker_id_prefix.go derives the Linear-style ID prefix used for new
-// Issue IDs (e.g. "NEX" → NEX-1, NEX-2). The prefix comes from the
-// workspace's company name; if absent, falls back to a neutral default.
+// Issue IDs (e.g. "NEX" → NEX-1, NEX-2). The prefix is personal to each
+// workspace: it comes from the workspace's company name, falling back to
+// the workspace's own name, and only then to a neutral default. This keeps
+// every workspace's task ids distinct instead of all reading "OFFICE-N".
 
 import (
 	"fmt"
@@ -49,33 +51,52 @@ func deriveIDPrefix(companyName string) string {
 	return out
 }
 
-// refreshIDPrefixFromWorkspaceLocked re-reads the workspace registry and
-// updates b.idPrefix based on the current company name for this broker's
-// runtime home. Called on init and after onboarding company-name writes.
-// Failures are non-fatal — keeps the existing prefix (which falls back to
-// defaultIDPrefix on first miss).
-func (b *Broker) refreshIDPrefixFromWorkspaceLocked() {
-	runtimeHome := config.RuntimeHomeDir()
-	reg, err := workspaces.Read()
-	if err != nil || reg == nil {
-		if b.idPrefix == "" {
-			b.idPrefix = defaultIDPrefix
-		}
-		return
-	}
-	for _, ws := range reg.Workspaces {
-		if ws == nil {
+// workspaceIDPrefix picks a Linear-style prefix for a workspace, preferring
+// the explicit company name (the brand the human picks during onboarding,
+// e.g. "Nex" → NEX) and falling back to the workspace's own name so each
+// workspace still gets a personal, scannable prefix. Candidates that carry
+// no letters (and would only resolve to defaultIDPrefix) are skipped so a
+// blank or symbol-only company name doesn't mask a usable workspace name.
+// Returns "" when neither yields a real prefix, letting callers fall through.
+func workspaceIDPrefix(companyName, workspaceName string) string {
+	for _, candidate := range []string{companyName, workspaceName} {
+		if strings.TrimSpace(candidate) == "" {
 			continue
 		}
-		if ws.RuntimeHome == runtimeHome {
-			name := strings.TrimSpace(ws.CompanyName)
-			if name == "" {
-				if b.idPrefix == "" {
-					b.idPrefix = defaultIDPrefix
-				}
+		if p := deriveIDPrefix(candidate); p != defaultIDPrefix {
+			return p
+		}
+	}
+	return ""
+}
+
+// refreshIDPrefixFromWorkspaceLocked re-reads the workspace registry and
+// updates b.idPrefix for this broker's runtime home. The prefix is derived
+// from the workspace's company name, then its workspace name, then the local
+// config's company name — only falling back to defaultIDPrefix when none is
+// usable. Called on init and after onboarding company-name writes. Failures
+// are non-fatal: a registry read error keeps the existing prefix (which falls
+// back to defaultIDPrefix on first miss).
+func (b *Broker) refreshIDPrefixFromWorkspaceLocked() {
+	runtimeHome := config.RuntimeHomeDir()
+	if reg, err := workspaces.Read(); err == nil && reg != nil {
+		for _, ws := range reg.Workspaces {
+			if ws == nil || ws.RuntimeHome != runtimeHome {
+				continue
+			}
+			if p := workspaceIDPrefix(ws.CompanyName, ws.Name); p != "" {
+				b.idPrefix = p
 				return
 			}
-			b.idPrefix = deriveIDPrefix(name)
+			break
+		}
+	}
+	// No registry match (e.g. a single default instance not created through
+	// the spaces orchestrator): derive from the local config's company name
+	// before giving up on the neutral default.
+	if cfg, err := config.Load(); err == nil {
+		if p := workspaceIDPrefix(cfg.CompanyName, ""); p != "" {
+			b.idPrefix = p
 			return
 		}
 	}
