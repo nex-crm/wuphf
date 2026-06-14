@@ -1,5 +1,6 @@
 import {
   type AuthenticationResponseJSON,
+  browserSupportsWebAuthn,
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
   type RegistrationResponseJSON,
@@ -115,6 +116,18 @@ export function isWebAuthnApprovalPendingResponse(
 
 export function isApprovalRole(value: string): value is ApprovalRole {
   return APPROVAL_ROLE_SET.has(value);
+}
+
+/**
+ * isWebAuthnSupported reports whether this environment exposes the WebAuthn /
+ * Credentials Management API. It is false on webviews that ship no
+ * `navigator.credentials` — notably Linux WebKitGTK, which backs the desktop
+ * shell there — so cosign surfaces can degrade gracefully instead of offering a
+ * ceremony that can only throw. This module is the single owner of the WebAuthn
+ * API surface (see components/cosign/README.md).
+ */
+export function isWebAuthnSupported(): boolean {
+  return browserSupportsWebAuthn();
 }
 
 export function approvalClaimToJsonValue(

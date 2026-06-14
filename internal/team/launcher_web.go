@@ -117,6 +117,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		stopTransports()
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
+		_ = clearOfficeInfo()
 		return fmt.Errorf("write office pid: %w", err)
 	}
 
@@ -132,7 +133,22 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		stopTransports()
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
+		_ = clearOfficeInfo()
 		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
+	}
+
+	// Record the running broker's URLs the moment the listener is accepting, so
+	// a concurrent front-end (desktop shell, CLI, browser) can ATTACH to this
+	// office instead of booting a second broker on the same workspace. Writing
+	// it here — before the slower resume/goroutine setup below — shrinks the
+	// window where the listener is up but the attach signal isn't yet visible.
+	// 127.0.0.1 (not localhost) matches ServeWebUI's bind. Best-effort: a write
+	// failure must not stop the office from serving (RunningOfficeURL then falls
+	// back to "no peer").
+	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
+	webURL := fmt.Sprintf("http://%s", webAddr)
+	if err := writeOfficeInfo(webURL, l.BrokerBaseURL()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: write office info: %v\n", err)
 	}
 
 	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
@@ -162,13 +178,10 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		go l.primeVisibleAgents()
 	}
 
-	// Use 127.0.0.1 in both the printed URL and the readiness probe so the
-	// dial target matches what the browser will request. localhost can
-	// resolve to ::1 first on IPv6-preferring setups, while ServeWebUI binds
-	// only to 127.0.0.1 — that mismatch reproduces ERR_CONNECTION_REFUSED
-	// even after the probe succeeds.
-	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
-	webURL := fmt.Sprintf("http://%s", webAddr)
+	// webAddr/webURL were computed above (right after ServeWebUI) so office.json
+	// is written as early as possible. 127.0.0.1 (not localhost) matches
+	// ServeWebUI's bind and the readiness probe below — localhost can resolve to
+	// ::1 first on IPv6-preferring setups, reproducing ERR_CONNECTION_REFUSED.
 	if l.broker != nil {
 		// Surfaces that link back to the web app (e.g. the Slack App Home
 		// tab) read this; before LaunchWeb runs they render without links.

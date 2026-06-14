@@ -1,0 +1,114 @@
+# Desktop shell cross-platform webview de-risk.
+#
+# Builds the Wails desktop shell (desktop/oswails) and launches it on
+# ubuntu/macos/windows, capturing a screenshot of the native window so we can
+# confirm WUPHF's SPA renders on each OS webview (WebKitGTK / WKWebView /
+# WebView2). This is the CI home for Windows coverage that scripts/win-vm/
+# documents but can't provide (it needs macOS-host UTM tooling).
+#
+# macOS + Linux were validated by hand in the desktop spike (2026-06-14);
+# Windows/WebView2 is Chromium-based and expected all-green incl. WebAuthn
+# (the one surface that fails on Linux WebKitGTK). This job makes that real.
+#
+# Manual trigger only for now (workflow_dispatch) — flip to pull_request once
+# the desktop shell lands on a branch with paths-filter.
+name: desktop-webview-probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  webview-render:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            tags: "desktop webkit2_41"
+          - os: macos-latest
+            tags: "desktop"
+          - os: windows-latest
+            tags: "desktop"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build web bundle (embedded UI)
+        run: |
+          cd web
+          npm ci || npm install
+          npm run build
+        shell: bash
+
+      - name: Linux webview deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
+            xvfb x11-apps imagemagick dbus-x11
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+        shell: bash
+
+      - name: Build desktop shell
+        run: |
+          cd desktop/oswails
+          wails build -s -skipbindings -tags "${{ matrix.tags }}"
+        shell: bash
+
+      # --- launch + screenshot per OS ---------------------------------------
+      - name: Run + screenshot (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1
+          xvfb-run -a -s "-screen 0 1440x900x24" dbus-run-session -- bash -c '
+            export DISPLAY=:99
+            ./desktop/oswails/build/bin/WUPHF >app.log 2>&1 &
+            sleep 18
+            ss -tnp 2>/dev/null | grep 127.0.0.1:7973 || true
+            import -window root webview-linux.png || true
+          '
+        shell: bash
+
+      - name: Run + screenshot (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          open desktop/oswails/build/bin/WUPHF.app
+          sleep 18
+          /usr/sbin/screencapture -x webview-macos.png || true
+        shell: bash
+
+      - name: Run + screenshot (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse desktop/oswails/build/bin -Filter *.exe | Select-Object -First 1
+          Start-Process -FilePath $exe.FullName
+          Start-Sleep -Seconds 20
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\webview-windows.png")
+          # Prove the in-process broker bound + (best-effort) the webview connected.
+          Get-NetTCPConnection -LocalPort 7973 -ErrorAction SilentlyContinue | Format-Table -Auto
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webview-${{ matrix.os }}
+          path: |
+            webview-*.png
+            app.log
+          if-no-files-found: ignore

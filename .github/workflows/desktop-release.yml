@@ -1,0 +1,238 @@
+# Desktop release: build → sign → notarize → package → attach to a GitHub Release.
+#
+# macOS is fully wired (Developer ID + notarization, proven by hand 2026-06-14).
+# Windows builds and signs via Azure Trusted Signing IF its secrets exist; without
+# them it still produces an (unsigned) installer so the pipeline isn't blocked.
+#
+# Trigger: a `desktop-v*` tag (e.g. desktop-v0.1.0) or manual dispatch. Switch the
+# tag filter to `v*` once the desktop ships on the main release cadence (every
+# product release needs a new dmg — the app is a fat self-contained binary).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   macOS:
+#     APPLE_CERT_P12_BASE64      Developer ID Application cert + key, exported as
+#                                .p12, then `base64 -i cert.p12`.
+#     APPLE_CERT_PASSWORD        the .p12 export password.
+#     APPLE_SIGN_IDENTITY        e.g. "Developer ID Application: GarageSpace, Inc. (GXAA6X232R)"
+#     APPLE_TEAM_ID              e.g. GXAA6X232R
+#     APPLE_NOTARY_KEY_P8_BASE64 App Store Connect API .p8, base64 (Developer role):
+#                                base64 -i AuthKey_*.p8 | gh secret set APPLE_NOTARY_KEY_P8_BASE64
+#     APPLE_NOTARY_KEY_ID        the Key ID (the XXX in the AuthKey_XXX.p8 filename).
+#     APPLE_NOTARY_ISSUER_ID     the Issuer ID.
+#     KEYCHAIN_PASSWORD          any random string (ephemeral CI keychain).
+#   Windows (optional — Azure Trusted Signing):
+#     AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+#     AZURE_TS_ENDPOINT, AZURE_TS_ACCOUNT, AZURE_TS_PROFILE
+name: desktop-release
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: write # create/upload to the Release
+
+env:
+  WAILS_VERSION: v2.12.0
+
+jobs:
+  # ---------------------------------------------------------------- macOS ----
+  macos:
+    runs-on: macos-14 # Apple Silicon
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; fi
+          # Reject anything that isn't a clean version so a crafted tag can't
+          # smuggle shell metacharacters into later filename/volname uses.
+          if ! printf '%s' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
+            echo "::error::invalid version '$V' (expected semver-like, e.g. 0.1.0)"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build embedded web bundle
+        run: cd web && bun install && bun run build
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Stamp version into wails.json
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          cd desktop/oswails
+          VERSION="$VERSION" node -e '
+            const fs=require("fs"); const j=JSON.parse(fs.readFileSync("wails.json","utf8"));
+            j.info=j.info||{}; j.info.productVersion=process.env.VERSION;
+            fs.writeFileSync("wails.json", JSON.stringify(j,null,2));
+          '
+
+      - name: Build universal .app
+        run: |
+          GOBIN_DIR="$(go env GOPATH)/bin"
+          export PATH="$PATH:$GOBIN_DIR"
+          cd desktop/oswails
+          wails build -platform darwin/universal -s -skipbindings -tags desktop
+
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT="$RUNNER_TEMP/cert.p12"
+          KC="$RUNNER_TEMP/build.keychain-db"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$CERT"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security import "$CERT" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KC" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KC"
+
+      - name: Codesign (Developer ID + hardened runtime)
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: |
+          codesign --deep --force --options runtime --timestamp \
+            --entitlements desktop/oswails/build/darwin/entitlements.plist \
+            --sign "$SIGN_IDENTITY" \
+            desktop/oswails/build/bin/WUPHF.app
+          codesign --verify --deep --strict --verbose=2 desktop/oswails/build/bin/WUPHF.app
+
+      - name: Package + sign .dmg
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          stage="$RUNNER_TEMP/dmg"; mkdir -p "$stage"
+          cp -R desktop/oswails/build/bin/WUPHF.app "$stage/"
+          ln -s /Applications "$stage/Applications"
+          mkdir -p dist
+          hdiutil create -volname "WUPHF" -srcfolder "$stage" -ov -format UDZO "dist/WUPHF-$VERSION.dmg"
+          codesign --sign "$SIGN_IDENTITY" --timestamp "dist/WUPHF-$VERSION.dmg"
+
+      - name: Notarize + staple
+        env:
+          NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          KEY="$RUNNER_TEMP/notary.p8"
+          echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$KEY"
+          xcrun notarytool submit "dist/WUPHF-$VERSION.dmg" \
+            --key "$KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple "dist/WUPHF-$VERSION.dmg"
+          spctl -a -t open --context context:primary-signature -v "dist/WUPHF-$VERSION.dmg"
+          # Version-less alias so the website can link the stable
+          # releases/latest/download/WUPHF-mac.dmg URL (same signed+stapled bytes).
+          cp "dist/WUPHF-$VERSION.dmg" "dist/WUPHF-mac.dmg"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/WUPHF-*.dmg
+          draft: true # review before publishing
+
+  # -------------------------------------------------------------- Windows ----
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; fi
+          # Reject anything that isn't a clean version so a crafted tag can't
+          # smuggle shell metacharacters into later filename/volname uses.
+          if ! printf '%s' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
+            echo "::error::invalid version '$V' (expected semver-like, e.g. 0.1.0)"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build embedded web bundle
+        shell: bash
+        run: cd web && bun install && bun run build
+
+      - name: Install Wails CLI
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build .exe + NSIS installer (WebView2)
+        shell: bash
+        run: |
+          GOBIN_DIR="$(go env GOPATH)/bin"
+          export PATH="$PATH:$GOBIN_DIR"
+          cd desktop/oswails
+          wails build -platform windows/amd64 -s -skipbindings -tags desktop -nsis -ldflags "-H windowsgui"
+
+      # `secrets` can't be used in `if:`, so detect it in a step output first.
+      - name: Detect Azure signing secrets
+        id: azure
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "enabled=false" >> "$GITHUB_OUTPUT"; fi
+
+      # Azure Trusted Signing — only runs when the AZURE_* secrets are present.
+      - name: Sign (Azure Trusted Signing)
+        if: steps.azure.outputs.enabled == 'true'
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: desktop/oswails/build/bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Rename artifact with version
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p dist
+          exe=$(find desktop/oswails/build/bin -maxdepth 1 -name '*.exe' | head -1)
+          cp "$exe" "dist/WUPHF-$VERSION-setup.exe"
+          # Version-less alias for the stable releases/latest/download URL.
+          cp "$exe" "dist/WUPHF-windows-setup.exe"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/WUPHF-*-setup.exe
+          draft: true

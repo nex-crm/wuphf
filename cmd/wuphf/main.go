@@ -690,6 +690,21 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 }
 
 func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bool, collabMode bool, noOpen bool) {
+	// If a broker is already serving this workspace (a running desktop shell or
+	// another CLI), attach to it instead of booting a second broker — which
+	// killStaleBroker would otherwise kill on the shared port. Open it and exit.
+	if url, ok := team.RunningOfficeURL(); ok {
+		fmt.Printf("\n  Office already running at %s — opening it.\n\n", url)
+		if !noOpen {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := openBrowser(ctx, url); err != nil {
+				fmt.Fprintf(os.Stderr, "  (couldn't open a browser automatically: %v)\n", err)
+			}
+		}
+		return
+	}
+
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
