@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  NavArrowRight,
   OpenNewWindow,
   Refresh,
   Search,
@@ -64,22 +63,27 @@ function ListSection({
 }) {
   if (descriptors.length === 0) return null;
   return (
-    <section className="op-category">
-      <header className="op-category-head">
-        <h3 className="op-category-title">{meta.title}</h3>
-        <p className="op-category-blurb">{meta.description}</p>
+    <section className="op-panel">
+      <header className="op-panel-head">
+        <div className="op-panel-heading">
+          <h3 className="op-panel-title">{meta.title}</h3>
+          <p className="op-panel-sub">{meta.description}</p>
+        </div>
+        <span className="op-panel-count">{descriptors.length}</span>
       </header>
-      <div className="op-list">
-        {descriptors.map((descriptor) => (
-          <IntegrationListRow
-            key={descriptor.id}
-            logo={descriptor.logo()}
-            title={descriptor.title}
-            summary={descriptor.summary}
-            status={descriptor.status(ctx)}
-            onOpen={() => onOpen(descriptor.id)}
-          />
-        ))}
+      <div className="op-panel-body">
+        <div className="op-list">
+          {descriptors.map((descriptor) => (
+            <IntegrationListRow
+              key={descriptor.id}
+              logo={descriptor.logo()}
+              title={descriptor.title}
+              summary={descriptor.summary}
+              status={descriptor.status(ctx)}
+              onOpen={() => onOpen(descriptor.id)}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -207,63 +211,114 @@ function toolkitToneClass(status: IntegrationStatus) {
   }
 }
 
-function ProviderStrip({
+function ConnectionStatus({
   providers,
 }: {
   providers: IntegrationProviderStatus[];
 }) {
   if (providers.length === 0) return null;
+  const connected = providers.some((provider) => provider.configured);
   return (
-    <div className="op-provider-strip">
-      {providers.map((provider) => (
-        <div className="op-provider-chip" key={provider.provider}>
-          <span
-            className={`op-led ${provider.configured ? "is-on" : "is-off"}`}
-            aria-hidden="true"
-          />
-          <span className="op-provider-name">{provider.label}</span>
-          <span className="op-provider-detail">
-            {provider.detail || (provider.configured ? "ready" : "missing")}
-          </span>
-        </div>
-      ))}
+    <div className={`op-conn ${connected ? "is-on" : "is-off"}`}>
+      <span className="op-conn-dot" aria-hidden="true" />
+      <span className="op-conn-text">
+        <span className="op-conn-title">
+          {connected ? "Integrations connected" : "Integrations not connected"}
+        </span>
+        <span className="op-conn-sub">
+          {connected
+            ? "Your agents can connect and act in the tools below."
+            : "Connect to add tools your agents can act in."}
+        </span>
+      </span>
     </div>
   );
 }
 
-function ActionToolkitsSection({
+function CatalogPanel({
   items,
+  search,
+  connected,
+  isLoading,
+  isError,
+  error,
+  isFetching,
+  onSearch,
+  onConnected,
   onOpen,
+  onRetry,
 }: {
   items: IntegrationCatalogItem[];
+  search: string;
+  connected: string;
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  isFetching: boolean;
+  onSearch: (value: string) => void;
+  onConnected: (value: string) => void;
   onOpen: (item: IntegrationCatalogItem) => void;
+  onRetry: () => void;
 }) {
   return (
-    <section className="op-category">
-      <header className="op-category-head">
-        <div>
-          <h3 className="op-category-title">Action Accounts</h3>
-          <p className="op-category-blurb">
-            OAuth accounts agents can request through approval.
+    <section className="op-panel">
+      <header className="op-panel-head">
+        <div className="op-panel-heading">
+          <h3 className="op-panel-title">Available integrations</h3>
+          <p className="op-panel-sub">
+            Connect the tools your agents can act in.
           </p>
         </div>
-        <span className="op-section-count">{items.length} accounts</span>
+        <span className="op-panel-count">{items.length}</span>
       </header>
-      <div className="op-toolkit-ledger">
-        <div className="op-toolkit-ledger-head" aria-hidden="true">
-          <span>Integration</span>
-          <span>Scope</span>
-          <span>Account</span>
-          <span>Status</span>
-        </div>
-        {items.map((item) => (
-          <ToolkitRow
-            key={`${item.provider}:${item.platform}:${item.connection_key ?? "catalog"}`}
-            item={item}
-            onOpen={() => onOpen(item)}
+      <div className="op-panel-toolbar">
+        <label className="op-search">
+          <Search width={14} height={14} aria-hidden="true" />
+          <input
+            type="search"
+            placeholder="Search integrations"
+            value={search}
+            onChange={(event) => onSearch(event.target.value)}
           />
-        ))}
+        </label>
+        <select
+          className="input op-filter-select"
+          value={connected}
+          onChange={(event) => onConnected(event.target.value)}
+          aria-label="Filter integrations"
+        >
+          <option value="">All</option>
+          <option value="connected">Connected</option>
+          <option value="available">Available</option>
+        </select>
       </div>
+      {isLoading ? (
+        <p className="op-panel-empty">Loading integrations…</p>
+      ) : isError ? (
+        <div className="op-panel-body">
+          <IntegrationErrorState
+            error={error}
+            isFetching={isFetching}
+            onRetry={onRetry}
+          />
+        </div>
+      ) : items.length > 0 ? (
+        <div className="op-panel-body">
+          <div className="op-catalog-grid">
+            {items.map((item) => (
+              <CatalogTile
+                key={`${item.provider}:${item.platform}:${item.connection_key ?? "catalog"}`}
+                item={item}
+                onOpen={() => onOpen(item)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="op-panel-empty">
+          No integrations match this view. Clear the filter to see all.
+        </p>
+      )}
     </section>
   );
 }
@@ -290,7 +345,7 @@ function toolkitIdentity(item: IntegrationCatalogItem) {
   return `${item.provider}:${item.platform}`;
 }
 
-function ToolkitRow({
+function CatalogTile({
   item,
   onOpen,
 }: {
@@ -299,36 +354,28 @@ function ToolkitRow({
 }) {
   const status = toolkitStatus(item);
   const tone = toolkitToneClass(status);
-  const connectionName = toolkitConnectionName(item);
-  const summary =
-    item.last_action_summary ??
-    item.description ??
-    `${item.provider} account actions for ${item.platform}`;
-  const category = formatToolkitCategory(item.category);
+  const isConnected = item.state === "connected";
+  const meta = isConnected
+    ? toolkitConnectionName(item) || "Connected"
+    : formatToolkitCategory(item.category);
   return (
     <button
       type="button"
-      className={`op-toolkit-row is-${tone}`}
+      className={`op-catalog-tile ${isConnected ? "is-on" : ""}`}
       onClick={onOpen}
-      aria-label={`Open ${item.name} integration settings`}
+      aria-label={`Open ${item.name} integration — ${status.label}`}
     >
-      <span className="op-toolkit-row-logo" aria-hidden="true">
-        <ToolkitLogo item={item} />
+      <ToolkitLogo item={item} />
+      <span className="op-catalog-tile-body">
+        <span className="op-catalog-tile-name">{item.name}</span>
+        <span className="op-catalog-tile-meta">{meta}</span>
       </span>
-      <span className="op-toolkit-row-body">
-        <span className="op-toolkit-row-title">{item.name}</span>
-        <span className="op-toolkit-row-summary">{summary}</span>
-      </span>
-      <span className="op-toolkit-row-cell">{category}</span>
-      <span className="op-toolkit-row-cell">
-        {connectionName || "No account"}
-      </span>
-      <span className="op-toolkit-row-state">
-        <span className={`op-status is-${tone}`}>
-          <span className={`op-led is-${tone}`} />
-          {status.label}
-        </span>
-        <NavArrowRight width={18} height={18} aria-hidden="true" />
+      <span className="op-catalog-tile-status">
+        {isConnected ? (
+          <span className="op-catalog-tile-pill">Connected</span>
+        ) : (
+          <span className={`op-led is-${tone}`} aria-hidden="true" />
+        )}
       </span>
     </button>
   );
@@ -644,43 +691,20 @@ function IntegrationsHome({
 }) {
   return (
     <>
-      <ProviderStrip providers={providers} />
-      <div className="op-toolbar">
-        <label className="op-search">
-          <Search width={14} height={14} aria-hidden="true" />
-          <input
-            type="search"
-            placeholder="Search accounts"
-            value={search}
-            onChange={(event) => onSearch(event.target.value)}
-          />
-        </label>
-        <select
-          className="input op-filter-select"
-          value={connected}
-          onChange={(event) => onConnected(event.target.value)}
-          aria-label="Filter integrations"
-        >
-          <option value="">All</option>
-          <option value="connected">Connected</option>
-          <option value="available">Available</option>
-        </select>
-      </div>
-      {isLoading ? (
-        <div className="app-panel-loading">Loading accounts…</div>
-      ) : isError ? (
-        <IntegrationErrorState
-          error={error}
-          isFetching={isFetching}
-          onRetry={onRetry}
-        />
-      ) : toolkitItems.length > 0 ? (
-        <ActionToolkitsSection items={toolkitItems} onOpen={onOpenToolkit} />
-      ) : (
-        <p className="op-runtime-note op-empty-state">
-          No accounts match this view. Configure Composio or clear the filter.
-        </p>
-      )}
+      <ConnectionStatus providers={providers} />
+      <CatalogPanel
+        items={toolkitItems}
+        search={search}
+        connected={connected}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        isFetching={isFetching}
+        onSearch={onSearch}
+        onConnected={onConnected}
+        onOpen={onOpenToolkit}
+        onRetry={onRetry}
+      />
       <RegistryListView
         ctx={ctx}
         available={available}

@@ -74,14 +74,21 @@ describe("IntegrationsApp", () => {
     };
   });
 
-  it("renders provider status and dynamic action toolkits", async () => {
+  it("renders the connection status and the integration catalog", async () => {
     render(wrap(<IntegrationsApp />));
 
-    expect(await screen.findByText("Action Accounts")).toBeInTheDocument();
-    expect(screen.getByText("Composio")).toBeInTheDocument();
-    expect(screen.getByText("Gmail")).toBeInTheDocument();
     expect(
-      screen.getByText("Read and send Gmail messages"),
+      await screen.findByText("Available integrations"),
+    ).toBeInTheDocument();
+    // White-labeled: the connection banner says "Integrations", never "Composio".
+    expect(screen.getByText("Integrations connected")).toBeInTheDocument();
+    expect(screen.queryByText("Composio")).not.toBeInTheDocument();
+    expect(screen.getByText("Gmail")).toBeInTheDocument();
+    // The Gmail tile is connected → reflected in its accessible name + pill.
+    expect(
+      screen.getByRole("button", {
+        name: /open gmail integration — connected/i,
+      }),
     ).toBeInTheDocument();
   });
 
@@ -105,7 +112,7 @@ describe("IntegrationsApp", () => {
 
     // The onboarding hero renders…
     expect(
-      await screen.findByRole("heading", { name: /connect composio/i }),
+      await screen.findByRole("heading", { name: /add integrations/i }),
     ).toBeInTheDocument();
     // …and the transports stay alongside it.
     expect(await screen.findByText("Telegram")).toBeInTheDocument();

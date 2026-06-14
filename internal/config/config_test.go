@@ -303,6 +303,113 @@ func TestResolveComposioAPIKeyFallsBackToConfig(t *testing.T) {
 	})
 }
 
+func TestIsComposioConfigured(t *testing.T) {
+	t.Run("project ak_ key", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioAPIKey: "ak_proj"})
+			if !IsComposioConfigured() {
+				t.Fatal("expected configured with a project key")
+			}
+		})
+	})
+	t.Run("user key + org", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioUserAPIKey: "uak_x", ComposioOrgID: "ok_1"})
+			if !IsComposioConfigured() {
+				t.Fatal("expected configured with the user-key pair")
+			}
+			if got := ResolveComposioUserAPIKey(); got != "uak_x" {
+				t.Fatalf("user key = %q", got)
+			}
+			if got := ResolveComposioOrgID(); got != "ok_1" {
+				t.Fatalf("org id = %q", got)
+			}
+		})
+	})
+	t.Run("user key without org is not enough", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioUserAPIKey: "uak_x"})
+			if IsComposioConfigured() {
+				t.Fatal("user key without org must not count as configured")
+			}
+		})
+	})
+	t.Run("nothing", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{})
+			if IsComposioConfigured() {
+				t.Fatal("empty config must not be configured")
+			}
+		})
+	})
+}
+
+func TestResolveComposioUserID(t *testing.T) {
+	// Clear both env overrides so an env-contaminated runner can't leak into
+	// the config/default-fallback subtests.
+	clearEnv := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("WUPHF_COMPOSIO_USER_ID", "")
+		t.Setenv("COMPOSIO_USER_ID", "")
+	}
+	t.Run("prefers email", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{Email: "owner@example.com", WorkspaceSlug: "acme"})
+			if got := ResolveComposioUserID(); got != "owner@example.com" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("falls back to workspace slug", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{WorkspaceSlug: "acme"})
+			if got := ResolveComposioUserID(); got != "acme" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("falls back to workspace id", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{WorkspaceID: "ws_123"})
+			if got := ResolveComposioUserID(); got != "ws_123" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("never empty so a signed-in office can browse", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{})
+			if got := ResolveComposioUserID(); got != "default" {
+				t.Fatalf("expected the default identity, got %q", got)
+			}
+		})
+	})
+	t.Run("WUPHF env override wins", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			t.Setenv("WUPHF_COMPOSIO_USER_ID", "u_env")
+			_ = Save(Config{Email: "owner@example.com"})
+			if got := ResolveComposioUserID(); got != "u_env" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("COMPOSIO_USER_ID env override wins over config", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			t.Setenv("COMPOSIO_USER_ID", "u_compat")
+			_ = Save(Config{Email: "owner@example.com"})
+			if got := ResolveComposioUserID(); got != "u_compat" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+}
+
 func TestResolveGeminiAPIKeyEnvOverride(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_GEMINI_API_KEY", "wuphf-gemini")

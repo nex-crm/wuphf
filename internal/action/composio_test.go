@@ -781,3 +781,153 @@ func TestWorkflowStepsExposeGenericResult(t *testing.T) {
 		t.Fatalf("expected compact insight summary, got %#v", recentInsights["result"])
 	}
 }
+
+func TestComposioApplyAuthHeaders(t *testing.T) {
+	t.Run("project key wins and suppresses user-key headers", func(t *testing.T) {
+		c := &ComposioREST{APIKey: "ak_proj", UserAPIKey: "uak_x", OrgID: "ok_1", ProjectID: "pr_1"}
+		h := http.Header{}
+		c.applyAuthHeaders(h)
+		if got := h.Get("x-api-key"); got != "ak_proj" {
+			t.Fatalf("x-api-key = %q, want ak_proj", got)
+		}
+		if h.Get("x-user-api-key") != "" || h.Get("x-org-id") != "" || h.Get("x-project-id") != "" {
+			t.Fatalf("user-key headers must not be set in ak_ mode: %v", h)
+		}
+	})
+
+	t.Run("user-key mode sets the trio", func(t *testing.T) {
+		c := &ComposioREST{UserAPIKey: "uak_x", OrgID: "ok_1", ProjectID: "pr_1"}
+		h := http.Header{}
+		c.applyAuthHeaders(h)
+		if h.Get("x-api-key") != "" {
+			t.Fatalf("x-api-key must be empty in user-key mode, got %q", h.Get("x-api-key"))
+		}
+		if h.Get("x-user-api-key") != "uak_x" || h.Get("x-org-id") != "ok_1" || h.Get("x-project-id") != "pr_1" {
+			t.Fatalf("unexpected user-key headers: %v", h)
+		}
+	})
+
+	t.Run("user-key without project omits x-project-id", func(t *testing.T) {
+		c := &ComposioREST{UserAPIKey: "uak_x", OrgID: "ok_1"}
+		h := http.Header{}
+		c.applyAuthHeaders(h)
+		if _, ok := h["X-Project-Id"]; ok {
+			t.Fatalf("x-project-id must be absent when project id is empty: %v", h)
+		}
+		if h.Get("x-user-api-key") != "uak_x" || h.Get("x-org-id") != "ok_1" {
+			t.Fatalf("unexpected headers: %v", h)
+		}
+	})
+}
+
+func TestComposioHasAuth(t *testing.T) {
+	cases := []struct {
+		name string
+		c    ComposioREST
+		want bool
+	}{
+		{"project key", ComposioREST{APIKey: "ak_x"}, true},
+		{"user key + org", ComposioREST{UserAPIKey: "uak_x", OrgID: "ok_1"}, true},
+		{"user key without org", ComposioREST{UserAPIKey: "uak_x"}, false},
+		{"org without user key", ComposioREST{OrgID: "ok_1"}, false},
+		{"nothing", ComposioREST{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.c.hasAuth(); got != tc.want {
+				t.Fatalf("hasAuth() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComposioRESTCatalogHidesComposioToolkits(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+	})
+	mux.HandleFunc("/toolkits", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"slug": "composio", "name": "Composio"},
+				{"slug": "composio_search", "name": "Composio Search"},
+				{"slug": "gmail", "name": "Gmail"},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := &ComposioREST{
+		APIKey:  "cmp_test",
+		UserID:  "ceo@example.com",
+		BaseURL: server.URL,
+		Client:  server.Client(),
+	}
+	catalog, err := client.ListIntegrationCatalog(context.Background(), IntegrationCatalogOptions{Limit: 50})
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	// White-labeled: Composio's own toolkits must never reach the catalog.
+	for _, item := range catalog.Items {
+		if strings.HasPrefix(strings.ToLower(item.Name), "composio") ||
+			strings.HasPrefix(strings.ToLower(item.Platform), "composio") {
+			t.Fatalf("composio toolkit leaked into the catalog: %+v", item)
+		}
+	}
+	if len(catalog.Items) != 1 || catalog.Items[0].Name != "Gmail" {
+		t.Fatalf("expected only Gmail to remain, got %+v", catalog.Items)
+	}
+}
+
+// TestComposioRESTCreatesV3AuthConfig: the v3 /auth_configs schema needs nested
+// toolkit + auth_config objects (the old flat toolkit_slug shape 400s with
+// "payload.toolkit: Required"), and returns the id nested under auth_config.
+func TestComposioRESTCreatesV3AuthConfig(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+		case http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"toolkit":     map[string]any{"slug": "gmail"},
+				"auth_config": map[string]any{"id": "ac_123"},
+			})
+		}
+	})
+	mux.HandleFunc("/connected_accounts/link", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"connected_account_id": "ca_1",
+			"redirect_url":         "https://connect.composio.dev/x",
+			"status":               "INITIATED",
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	res, err := client.StartIntegrationConnection(context.Background(), IntegrationConnectRequest{Platform: "gmail"})
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if res.AuthURL == "" {
+		t.Fatalf("expected an auth url (auth_config.id parsed), got %+v", res)
+	}
+	if gotBody["toolkit_slug"] != nil {
+		t.Fatalf("must not send the flat toolkit_slug, body=%v", gotBody)
+	}
+	tk, _ := gotBody["toolkit"].(map[string]any)
+	if tk["slug"] != "gmail" {
+		t.Fatalf("expected nested toolkit.slug=gmail, body=%v", gotBody)
+	}
+	ac, _ := gotBody["auth_config"].(map[string]any)
+	if ac["type"] != "use_composio_managed_auth" {
+		t.Fatalf("expected nested auth_config.type, body=%v", gotBody)
+	}
+}

@@ -37,11 +37,20 @@ type Config struct {
 	MemoryBackend  string `json:"memory_backend,omitempty"`
 	OneAPIKey      string `json:"one_api_key,omitempty"`
 	ComposioAPIKey string `json:"composio_api_key,omitempty"`
-	ActionProvider string `json:"action_provider,omitempty"`
-	Email          string `json:"email,omitempty"`
-	WorkspaceID    string `json:"workspace_id,omitempty"`
-	WorkspaceSlug  string `json:"workspace_slug,omitempty"`
-	LLMProvider    string `json:"llm_provider,omitempty"`
+	// Composio user-key auth (fallback when the CLI can't mint a project ak_
+	// key — the current composio CLI no longer writes one via `dev init`). The
+	// SDK accepts EITHER a project `ak_` key (sent as x-api-key) OR the
+	// user-scoped `uak_` session key paired with org + project ids (sent as
+	// x-user-api-key / x-org-id / x-project-id). These hold the latter;
+	// ComposioAPIKey, when set, takes precedence.
+	ComposioUserAPIKey string `json:"composio_user_api_key,omitempty"`
+	ComposioOrgID      string `json:"composio_org_id,omitempty"`
+	ComposioProjectID  string `json:"composio_project_id,omitempty"`
+	ActionProvider     string `json:"action_provider,omitempty"`
+	Email              string `json:"email,omitempty"`
+	WorkspaceID        string `json:"workspace_id,omitempty"`
+	WorkspaceSlug      string `json:"workspace_slug,omitempty"`
+	LLMProvider        string `json:"llm_provider,omitempty"`
 	// LLMProviderPriority is an ordered list of provider identifiers (same
 	// vocabulary as LLMProvider — "claude-code", "codex", "opencode", etc.) that agents
 	// should try in order when picking a runtime. LLMProvider remains the
@@ -600,6 +609,55 @@ func ResolveComposioAPIKey() string {
 	return strings.TrimSpace(cfg.ComposioAPIKey)
 }
 
+// ResolveComposioUserAPIKey resolves the user-scoped Composio session key
+// (`uak_…`). Resolution: WUPHF_COMPOSIO_USER_API_KEY env > config file.
+func ResolveComposioUserAPIKey() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_USER_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioUserAPIKey)
+}
+
+// ResolveComposioOrgID resolves the Composio org id used with the user key.
+func ResolveComposioOrgID() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_ORG_ID")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioOrgID)
+}
+
+// ResolveComposioProjectID resolves the Composio project id used with the user
+// key. Optional: the SDK falls back to the org's default project when absent.
+func ResolveComposioProjectID() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_PROJECT_ID")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioProjectID)
+}
+
+// IsComposioConfigured reports whether Composio has usable credentials: either
+// a project `ak_` key, or the user-key pair (`uak_` + org id). Project id is
+// optional. Used to drive the `composio_key_set` flag the onboarding UI gates
+// on, so user-key sign-ins flip the office out of the first-run state too.
+func IsComposioConfigured() bool {
+	if ResolveComposioAPIKey() != "" {
+		return true
+	}
+	return ResolveComposioUserAPIKey() != "" && ResolveComposioOrgID() != ""
+}
+
 // IsAnalyticsTelemetryEnabled reports whether anonymous product-analytics
 // events may be sent. Default ON when the operator has not explicitly opted
 // out (nil flag). The analytics layer is still dormant unless a PostHog key is
@@ -785,7 +843,14 @@ func ResolveMinimaxAPIKey() string {
 }
 
 // ResolveComposioUserID resolves the Composio user identity WUPHF should use.
-// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email.
+// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email >
+// workspace identifier > "default".
+//
+// The user_id only namespaces this office's connected accounts on Composio's
+// side — any stable string works. It must never be empty once Composio is
+// signed in, or the catalog (which gates on a non-empty identity) stays blank
+// even though available integrations don't need a per-user identity. So a
+// signed-in office with no recorded email still falls back to a stable id.
 func ResolveComposioUserID() string {
 	if ResolveNoNex() {
 		return ""
@@ -797,7 +862,12 @@ func ResolveComposioUserID() string {
 		return v
 	}
 	cfg, _ := Load()
-	return strings.TrimSpace(cfg.Email)
+	for _, candidate := range []string{cfg.Email, cfg.WorkspaceSlug, cfg.WorkspaceID} {
+		if v := strings.TrimSpace(candidate); v != "" {
+			return v
+		}
+	}
+	return "default"
 }
 
 // ResolveActionProvider resolves the preferred external action provider.

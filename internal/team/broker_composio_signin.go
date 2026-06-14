@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +70,90 @@ const (
 // "Sign in with Composio".
 var composioInstaller = defaultComposioInstaller
 
+// composioInstallDir is the directory the official installer drops the
+// `composio` binary into: $COMPOSIO_INSTALL_DIR, else ~/.composio — the same
+// default install.sh uses (COMPOSIO_INSTALL_DIR:-$HOME/.composio).
+func composioInstallDir() string {
+	if dir := strings.TrimSpace(os.Getenv("COMPOSIO_INSTALL_DIR")); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".composio")
+}
+
+// composioBinary resolves the `composio` CLI path. It checks PATH first, then
+// falls back to the installer's known location. That fallback is the whole
+// point of the auto-install fix: the official installer appends its dir to PATH
+// only in the user's shell profile (~/.zshrc, ~/.bashrc, …), which the
+// already-running broker process never re-reads — so a CLI installed *after*
+// the broker started is invisible to exec.LookPath, and the flow would wrongly
+// report cli_missing immediately after a successful install. Returns
+// ("", false) when no usable binary is found.
+func composioBinary() (string, bool) {
+	if path, err := exec.LookPath("composio"); err == nil {
+		return path, true
+	}
+	dir := composioInstallDir()
+	if dir == "" {
+		return "", false
+	}
+	name := "composio"
+	if runtime.GOOS == "windows" {
+		name = "composio.exe"
+	}
+	candidate := filepath.Join(dir, name)
+	// On Windows the 0o111 exec bits are not meaningful (executability is
+	// determined by extension/PATHEXT), so only require a regular file there;
+	// on Unix require the exec bit.
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		if runtime.GOOS == "windows" || info.Mode()&0o111 != 0 {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// composioCommand builds an exec.Cmd for the composio CLI using the resolved
+// binary path, prepending its directory to the subprocess PATH so the CLI can
+// find any sibling helpers it shells out to (the broker's inherited PATH may
+// not include the installer's dir). Returns an error when the CLI cannot be
+// located.
+func composioCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	bin, ok := composioBinary()
+	if !ok {
+		return nil, errors.New("composio CLI not found on PATH or in the install directory")
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = composioCommandEnv(filepath.Dir(bin))
+	return cmd, nil
+}
+
+// composioCommandEnv returns the process environment with binDir prepended to
+// PATH (replacing the existing entry rather than duplicating it), so the
+// resolved CLI's own dir is searchable by any child it spawns.
+func composioCommandEnv(binDir string) []string {
+	env := os.Environ()
+	if binDir == "" {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	pathVal := binDir
+	for _, kv := range env {
+		if name, val, ok := strings.Cut(kv, "="); ok && strings.EqualFold(name, "PATH") {
+			if val != "" {
+				pathVal = binDir + string(os.PathListSeparator) + val
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, "PATH="+pathVal)
+	return out
+}
+
 var (
 	// composioProjectKeyPattern accepts only project-scoped SDK keys.
 	composioProjectKeyPattern = regexp.MustCompile(`^ak_[A-Za-z0-9_-]{10,}$`)
@@ -84,6 +170,9 @@ var (
 	// polls the pending browser session for up to ~10 minutes.
 	composioLoginPollTimeout = 12 * time.Minute
 	composioDevInitTimeout   = 3 * time.Minute
+	// composioResolveTimeout bounds the project-resolve API call in the
+	// user-key provisioning fallback.
+	composioResolveTimeout = 20 * time.Second
 	// composioLoginWindow is how long a started flow stays in awaiting_login
 	// before the status endpoint reports a timeout.
 	composioLoginWindow = 15 * time.Minute
@@ -130,7 +219,7 @@ func (b *Broker) handleComposioSigninStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	actor := integrationRequestActor(r)
-	if _, err := exec.LookPath("composio"); err != nil {
+	if _, ok := composioBinary(); !ok {
 		// Auto-install on demand: the CLI is needed for one-click sign-in, so
 		// rather than dead-ending on cli_missing we run the official installer
 		// once in the background and continue the flow. The manual install
@@ -244,21 +333,23 @@ func (b *Broker) handleComposioSigninStatus(w http.ResponseWriter, r *http.Reque
 }
 
 // composioSigninAutoInstall runs the official installer once, then continues
-// the sign-in if the CLI landed on PATH. On failure it falls back to
-// cli_missing with the manual install command. PATH (not the exit code) is the
-// source of truth — installers can warn-and-exit nonzero while still placing
-// the binary.
+// the sign-in if the CLI landed. On failure it falls back to cli_missing with
+// the manual install command. The binary's presence (via composioBinary, which
+// also checks the installer's ~/.composio location — not just the broker's
+// inherited PATH), not the exit code, is the source of truth: installers can
+// warn-and-exit nonzero while still placing the binary, and the installer adds
+// its dir to PATH only in shell profiles the running broker never re-reads.
 func (b *Broker) composioSigninAutoInstall() {
 	ctx, cancel := context.WithTimeout(context.Background(), composioInstallTimeout)
 	defer cancel()
 	runErr := composioInstaller(ctx)
-	if _, err := exec.LookPath("composio"); err != nil {
+	if _, ok := composioBinary(); !ok {
 		flow := &b.composioSignin
 		flow.mu.Lock()
 		if flow.state.Status == composioSigninStatusInstalling {
 			reason := "could not install the Composio CLI automatically — run the install command shown, then try again"
 			if runErr == nil {
-				reason = "the Composio installer finished but the CLI is still not on PATH — run the install command shown, then try again"
+				reason = "the Composio installer finished but the CLI could not be located — run the install command shown, then try again"
 			}
 			flow.state = composioSigninState{
 				Status:         composioSigninStatusCLIMissing,
@@ -320,10 +411,19 @@ func (b *Broker) composioSigninBeginLogin() {
 func (b *Broker) composioSigninAwaitLogin() {
 	ctx, cancel := context.WithTimeout(context.Background(), composioLoginPollTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "composio", "login", "--poll")
-	// Output deliberately discarded: never echo CLI output that may carry
-	// credentials into broker logs.
-	_ = cmd.Run()
+	// --no-skill-install mirrors trustclaw's `composio login`: without it the CLI
+	// installs a Claude Code "composio-cli" skill and flips on developer mode,
+	// which makes `composio dev init` scaffold .composio/ instead of writing the
+	// .env.local + ak_ key that provisioning parses.
+	cmd, err := composioCommand(ctx, "login", "--poll", "--no-skill-install")
+	if err == nil {
+		// Output deliberately discarded: never echo CLI output that may carry
+		// credentials into broker logs.
+		_ = cmd.Run()
+	}
+	// Advance regardless: even if the poll could not run, the user may have
+	// finished `composio login` in their own terminal (user_data.json), and
+	// the status endpoint also calls this — the file is the source of truth.
 	b.composioSigninAdvanceIfLoggedIn()
 }
 
@@ -346,15 +446,58 @@ func (b *Broker) composioSigninAdvanceIfLoggedIn() bool {
 	return true
 }
 
-// composioSigninProvision mints the project-scoped ak_ key via
-// `composio dev init` in a throwaway directory and stores it through the same
-// config path as the manual paste flow.
+// composioProvisionedCreds is the outcome of a successful provision: EITHER a
+// project ak_ key (preferred — sent as x-api-key), OR the user-key trio (the
+// uak_ session key + org id, and an optional project id — sent as
+// x-user-api-key / x-org-id / x-project-id).
+type composioProvisionedCreds struct {
+	APIKey     string
+	UserAPIKey string
+	OrgID      string
+	ProjectID  string
+}
+
+// composioProvisionCreds resolves usable Composio SDK credentials after login.
+//
+// Preferred path: `composio dev init` writes a project ak_ key to .env.local
+// (older CLIs, and the same path trustclaw uses). The current composio CLI no
+// longer mints an ak_ key this way, so we fall back to the user-key mode: the
+// uak_ session key + org id the CLI already wrote to user_data.json, scoped to
+// the org's default project (resolved best-effort; the SDK works without it).
+func composioProvisionCreds() (composioProvisionedCreds, error) {
+	if key, err := composioProvisionProjectKey(); err == nil {
+		return composioProvisionedCreds{APIKey: key}, nil
+	}
+	ud, err := readComposioUserData()
+	if err != nil {
+		return composioProvisionedCreds{}, errors.New("could not read the Composio CLI session — sign in again, or paste a project API key from https://dashboard.composio.dev")
+	}
+	uak := strings.TrimSpace(ud.APIKey)
+	org := strings.TrimSpace(ud.OrgID)
+	if uak == "" || org == "" {
+		return composioProvisionedCreds{}, errors.New("the Composio sign-in returned no org context — sign in again, or paste a project API key from https://dashboard.composio.dev")
+	}
+	creds := composioProvisionedCreds{UserAPIKey: uak, OrgID: org}
+	// Best-effort project scoping; a resolve failure is not fatal (the SDK
+	// falls back to the org's default project when no project id is sent).
+	creds.ProjectID = composioResolveProjectID(ud.BaseURL, uak, org)
+	return creds, nil
+}
+
+// composioSigninProvision resolves Composio credentials (project ak_ key or
+// user-key trio) and stores them through the same config path as the manual
+// paste flow. Credentials never touch logs.
 func (b *Broker) composioSigninProvision() {
 	flow := &b.composioSignin
-	key, err := composioProvisionProjectKey()
+	creds, err := composioProvisionCreds()
 	var storeFailed bool
 	if err == nil {
-		if err = b.storeComposioAPIKey(key); err != nil {
+		if strings.TrimSpace(creds.APIKey) != "" {
+			err = b.storeComposioAPIKey(creds.APIKey)
+		} else {
+			err = b.storeComposioUserKeyCreds(creds.UserAPIKey, creds.OrgID, creds.ProjectID)
+		}
+		if err != nil {
 			storeFailed = true
 		}
 	}
@@ -367,7 +510,7 @@ func (b *Broker) composioSigninProvision() {
 			// path — keep filesystem details out of the browser-facing
 			// Reason (review finding); the full error goes to the log.
 			log.Printf("composio signin: %v", err)
-			reason = "could not save the Composio API key to config — check the broker logs"
+			reason = "could not save the Composio credentials to config — check the broker logs"
 		}
 		flow.state = composioSigninState{Status: composioSigninStatusError, Reason: reason}
 		flow.mu.Unlock()
@@ -376,7 +519,7 @@ func (b *Broker) composioSigninProvision() {
 	flow.mu.Unlock()
 	// Record the audit entry BEFORE flipping to done: a client that observes
 	// done must also observe the audit trail entry.
-	b.recordComposioSigninEvent("integration_signin_completed", actor, "Signed in with Composio and stored the project API key")
+	b.recordComposioSigninEvent("integration_signin_completed", actor, "Signed in with Composio and stored credentials")
 	flow.mu.Lock()
 	flow.state = composioSigninState{Status: composioSigninStatusDone}
 	flow.mu.Unlock()
@@ -388,7 +531,13 @@ func (b *Broker) composioSigninProvision() {
 func composioMintLoginURL() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), composioLoginStartTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "composio", "login", "--no-wait").CombinedOutput()
+	// --no-skill-install: don't install the Claude Code skill / enable developer
+	// mode as a side effect of signing in (see composioSigninAwaitLogin).
+	cmd, err := composioCommand(ctx, "login", "--no-wait", "--no-skill-install")
+	if err != nil {
+		return "", err
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Don't echo raw CLI output into the error: it is user-visible.
 		return "", fmt.Errorf("composio login --no-wait: %w", err)
@@ -422,7 +571,10 @@ func composioProvisionProjectKey() (string, error) {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	cmd := exec.CommandContext(ctx, "composio", "dev", "init", "-y", "--no-browser")
+	cmd, err := composioCommand(ctx, "dev", "init", "-y", "--no-browser")
+	if err != nil {
+		return "", err
+	}
 	cmd.Dir = dir
 	// Output discarded on purpose: dev init may echo project metadata and the
 	// key it writes; nothing from it belongs in broker logs or errors.
@@ -462,6 +614,79 @@ func (b *Broker) storeComposioAPIKey(key string) error {
 	return nil
 }
 
+// storeComposioUserKeyCreds persists the user-key trio (uak_ session key + org
+// + optional project) via the same load-modify-save path as storeComposioAPIKey.
+func (b *Broker) storeComposioUserKeyCreds(userAPIKey, orgID, projectID string) error {
+	b.configMu.Lock()
+	defer b.configMu.Unlock()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config load failed: %w", err)
+	}
+	cfg.ComposioUserAPIKey = strings.TrimSpace(userAPIKey)
+	cfg.ComposioOrgID = strings.TrimSpace(orgID)
+	cfg.ComposioProjectID = strings.TrimSpace(projectID)
+	if err := config.Save(cfg); err != nil {
+		return fmt.Errorf("config save failed: %w", err)
+	}
+	return nil
+}
+
+// composioResolveProjectID returns the org's default project id via the CLI's
+// resolve endpoint (POST {base}/api/v3/org/consumer/project/resolve with the
+// user key + org id). It's a package var so tests can stub the network call.
+// Returns "" on any failure — the project id is optional for the SDK.
+var composioResolveProjectID = defaultComposioResolveProjectID
+
+func defaultComposioResolveProjectID(baseURL, userAPIKey, orgID string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		base = "https://backend.composio.dev"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), composioResolveTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v3/org/consumer/project/resolve", strings.NewReader("{}"))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("x-user-api-key", userAPIKey)
+	req.Header.Set("x-org-id", orgID)
+	req.Header.Set("User-Agent", "wuphf")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		// The resolve endpoint returns the pr_-prefixed id as project_nano_id;
+		// project_id is a bare UUID that the API REJECTS (401) as x-project-id.
+		// So we want the nano id — verified live.
+		ProjectNanoID string `json:"project_nano_id"`
+		ProjectID     string `json:"project_id"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	if id := strings.TrimSpace(doc.ProjectNanoID); id != "" {
+		return id
+	}
+	// Only fall back to project_id when it's already the pr_ form (some
+	// endpoints name the pr_ id "project_id"); never return the UUID.
+	if id := strings.TrimSpace(doc.ProjectID); strings.HasPrefix(id, "pr_") {
+		return id
+	}
+	return ""
+}
+
 // composioUserDataPath mirrors the CLI's credential cache location:
 // $COMPOSIO_CACHE_DIR/user_data.json, defaulting to ~/.composio/user_data.json.
 func composioUserDataPath() string {
@@ -475,24 +700,39 @@ func composioUserDataPath() string {
 	return filepath.Join(home, ".composio", "user_data.json")
 }
 
-// composioCLILoggedIn reports whether the CLI has a stored session — the same
-// check trustclaw uses: user_data.json exists and carries a non-empty api_key.
-func composioCLILoggedIn() bool {
+// composioUserData is the subset of ~/.composio/user_data.json the sign-in flow
+// reads: the uak_ session key, the org id, and the backend base URL.
+type composioUserData struct {
+	APIKey  string `json:"api_key"`
+	OrgID   string `json:"org_id"`
+	BaseURL string `json:"base_url"`
+}
+
+// readComposioUserData loads the CLI's session file written by `composio login`.
+func readComposioUserData() (composioUserData, error) {
 	path := composioUserDataPath()
 	if path == "" {
-		return false
+		return composioUserData{}, errors.New("composio user_data path unavailable")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return composioUserData{}, err
+	}
+	var ud composioUserData
+	if err := json.Unmarshal(data, &ud); err != nil {
+		return composioUserData{}, err
+	}
+	return ud, nil
+}
+
+// composioCLILoggedIn reports whether the CLI has a stored session — the same
+// check trustclaw uses: user_data.json exists and carries a non-empty api_key.
+func composioCLILoggedIn() bool {
+	ud, err := readComposioUserData()
+	if err != nil {
 		return false
 	}
-	var doc struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return false
-	}
-	return strings.TrimSpace(doc.APIKey) != ""
+	return strings.TrimSpace(ud.APIKey) != ""
 }
 
 // parseEnvFileValue extracts KEY=VALUE from dotenv content, skipping comments

@@ -18,10 +18,19 @@ import (
 const defaultComposioBaseURL = "https://backend.composio.dev/api/v3"
 
 type ComposioREST struct {
-	APIKey  string
-	UserID  string
-	BaseURL string
-	Client  *http.Client
+	// APIKey is a project-scoped `ak_` key (sent as x-api-key). When set it
+	// takes precedence over the user-key fields below.
+	APIKey string
+	// UserAPIKey/OrgID/ProjectID are the user-key auth mode: the `uak_` session
+	// key plus org (required) and project (optional) ids, sent as
+	// x-user-api-key / x-org-id / x-project-id. Used when no project ak_ key is
+	// available (the current composio CLI can't mint one via `dev init`).
+	UserAPIKey string
+	OrgID      string
+	ProjectID  string
+	UserID     string
+	BaseURL    string
+	Client     *http.Client
 }
 
 type ComposioAPIError struct {
@@ -50,17 +59,50 @@ func NewComposioFromEnv() *ComposioREST {
 		baseURL = defaultComposioBaseURL
 	}
 	return &ComposioREST{
-		APIKey:  strings.TrimSpace(config.ResolveComposioAPIKey()),
-		UserID:  strings.TrimSpace(config.ResolveComposioUserID()),
-		BaseURL: baseURL,
-		Client:  &http.Client{Timeout: 30 * time.Second},
+		APIKey:     strings.TrimSpace(config.ResolveComposioAPIKey()),
+		UserAPIKey: strings.TrimSpace(config.ResolveComposioUserAPIKey()),
+		OrgID:      strings.TrimSpace(config.ResolveComposioOrgID()),
+		ProjectID:  strings.TrimSpace(config.ResolveComposioProjectID()),
+		UserID:     strings.TrimSpace(config.ResolveComposioUserID()),
+		BaseURL:    baseURL,
+		Client:     &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// hasAuth reports whether the client carries usable Composio credentials:
+// either a project `ak_` key, or the user-key pair (`uak_` + org id).
+func (c *ComposioREST) hasAuth() bool {
+	if strings.TrimSpace(c.APIKey) != "" {
+		return true
+	}
+	return strings.TrimSpace(c.UserAPIKey) != "" && strings.TrimSpace(c.OrgID) != ""
+}
+
+// applyAuthHeaders sets the auth headers for the active mode: x-api-key for a
+// project key, else x-user-api-key + x-org-id (+ x-project-id when known).
+//
+// x-api-key (project ak_ key) is Composio's DOCUMENTED public-API auth and is
+// preferred whenever a key is present (manual paste). The x-user-api-key trio
+// is the auth the official `composio` CLI uses internally; it is not in the
+// public REST docs but is stable in practice (the CLI relies on it) and is the
+// only path available to the one-click sign-in, since the current CLI can't
+// mint a project ak_ key. Verified working on both /api/v3 and /api/v3.1.
+func (c *ComposioREST) applyAuthHeaders(h http.Header) {
+	if key := strings.TrimSpace(c.APIKey); key != "" {
+		h.Set("x-api-key", key)
+		return
+	}
+	h.Set("x-user-api-key", strings.TrimSpace(c.UserAPIKey))
+	h.Set("x-org-id", strings.TrimSpace(c.OrgID))
+	if proj := strings.TrimSpace(c.ProjectID); proj != "" {
+		h.Set("x-project-id", proj)
 	}
 }
 
 func (c *ComposioREST) Name() string { return "composio" }
 
 func (c *ComposioREST) Configured() bool {
-	return !config.ResolveNoNex() && strings.TrimSpace(c.APIKey) != "" && strings.TrimSpace(c.UserID) != ""
+	return !config.ResolveNoNex() && c.hasAuth() && strings.TrimSpace(c.UserID) != ""
 }
 
 func (c *ComposioREST) Supports(cap Capability) bool {
@@ -139,6 +181,12 @@ func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts Integrat
 		if platform == "" {
 			continue
 		}
+		// Hide Composio's own meta-toolkits (e.g. "Composio", "Composio
+		// Search"): the product is white-labeled as "Integrations".
+		if strings.HasPrefix(strings.ToLower(platform), "composio") ||
+			strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.Name)), "composio") {
+			continue
+		}
 		conns := byPlatform[platform]
 		hasConnection := len(conns) > 0
 		switch connectedFilter {
@@ -200,6 +248,11 @@ func (c *ComposioREST) StartIntegrationConnection(ctx context.Context, req Integ
 		"auth_config_id": authConfigID,
 		"user_id":        strings.TrimSpace(c.UserID),
 	}
+	// Use link() (hosted auth), NOT initiate(): Composio is deprecating
+	// initiate() for Composio-managed OAuth (new orgs 2026-05-08, all orgs
+	// 2026-07-03). link() is the recommended, unaffected path and allows
+	// multiple accounts per toolkit. Do not switch this back to
+	// /connected_accounts initiate.
 	raw, err := c.post(ctx, "/connected_accounts/link", body)
 	if err != nil {
 		return IntegrationConnectResult{}, err
@@ -648,7 +701,7 @@ func (c *ComposioREST) delete(ctx context.Context, path string) ([]byte, error) 
 
 func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Values, body any) ([]byte, error) {
 	if !c.Configured() {
-		return nil, fmt.Errorf("composio is not configured; set COMPOSIO_API_KEY and a user identity")
+		return nil, fmt.Errorf("composio is not configured; set COMPOSIO_API_KEY (or sign in with Composio) and a user identity")
 	}
 	u := strings.TrimRight(c.BaseURL, "/") + path
 	if encoded := query.Encode(); encoded != "" {
@@ -666,7 +719,7 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("x-api-key", c.APIKey)
+	c.applyAuthHeaders(req.Header)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -759,31 +812,33 @@ func (c *ComposioREST) listAuthConfigs(ctx context.Context, platform string) ([]
 }
 
 func (c *ComposioREST) createComposioManagedAuthConfig(ctx context.Context, platform string) (string, error) {
+	// v3 schema: the toolkit and auth config are nested objects. The older flat
+	// shape (toolkit_slug/type/is_composio_managed) now 400s with
+	// "payload.toolkit: Required".
 	body := map[string]any{
-		"toolkit_slug":        platform,
-		"type":                "use_composio_managed_auth",
-		"name":                "WUPHF " + DisplayPlatformName(platform),
-		"is_composio_managed": true,
+		"toolkit": map[string]any{"slug": platform},
+		"auth_config": map[string]any{
+			"type": "use_composio_managed_auth",
+			"name": "WUPHF " + DisplayPlatformName(platform),
+		},
 	}
 	raw, err := c.post(ctx, "/auth_configs", body)
 	if err != nil {
 		return "", err
 	}
-	var result composioAuthConfig
+	// v3 returns the created config nested under auth_config; older shapes put
+	// the id at the top level or under item/data.
+	var result struct {
+		ID         string             `json:"id"`
+		AuthConfig composioAuthConfig `json:"auth_config"`
+		Item       composioAuthConfig `json:"item"`
+		Data       composioAuthConfig `json:"data"`
+	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return "", fmt.Errorf("parse composio auth config create: %w", err)
 	}
-	if id := strings.TrimSpace(result.ID); id != "" {
+	if id := strings.TrimSpace(firstNonEmpty(result.ID, result.AuthConfig.ID, result.Item.ID, result.Data.ID)); id != "" {
 		return id, nil
-	}
-	var wrapped struct {
-		Item composioAuthConfig `json:"item"`
-		Data composioAuthConfig `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &wrapped); err == nil {
-		if id := strings.TrimSpace(firstNonEmpty(wrapped.Item.ID, wrapped.Data.ID)); id != "" {
-			return id, nil
-		}
 	}
 	return "", fmt.Errorf("composio auth config response did not include id")
 }

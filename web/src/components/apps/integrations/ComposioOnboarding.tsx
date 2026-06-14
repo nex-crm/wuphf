@@ -26,6 +26,7 @@ const COMPOSIO_KEYS_URL = "https://dashboard.composio.dev";
 
 type SigninPhase =
   | "idle"
+  | "installing"
   | "cli_missing"
   | "awaiting_login"
   | "provisioning"
@@ -49,7 +50,7 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
   const openedRef = useRef(false);
 
   const finishConnected = useCallback(async () => {
-    showNotice("Composio connected. Loading your integrations…", "success");
+    showNotice("Integrations connected. Loading…", "success");
     await queryClient.invalidateQueries({ queryKey: ["config"] });
     await queryClient.invalidateQueries({ queryKey: ["integrations"] });
     onConnected();
@@ -58,6 +59,13 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
   const applySigninState = useCallback(
     (state: ComposioSigninState) => {
       switch (state.status) {
+        case "installing":
+          // The broker is auto-installing the Composio CLI before it can mint
+          // a login URL. We must enter (and keep polling) this phase — without
+          // it the page would stall on "idle" and never open the sign-in tab.
+          setPhase("installing");
+          setInstallCommand(state.install_command ?? "");
+          break;
         case "cli_missing":
           setPhase("cli_missing");
           setInstallCommand(state.install_command ?? "");
@@ -94,7 +102,7 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
     onError: (err: unknown) => {
       setPhase("error");
       setSigninError(
-        err instanceof Error ? err.message : "Could not start Composio sign-in",
+        err instanceof Error ? err.message : "Could not start sign-in",
       );
     },
   });
@@ -105,7 +113,10 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
     signinMutation.mutate();
   };
 
-  const polling = phase === "awaiting_login" || phase === "provisioning";
+  const polling =
+    phase === "installing" ||
+    phase === "awaiting_login" ||
+    phase === "provisioning";
   const statusQuery = useQuery({
     queryKey: ["composio-signin-status"],
     queryFn: getComposioSigninStatus,
@@ -122,23 +133,21 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
     onSuccess: finishConnected,
     onError: (err: unknown) => {
       showNotice(
-        err instanceof Error ? err.message : "Could not save the Composio key",
+        err instanceof Error ? err.message : "Could not save the API key",
         "error",
       );
     },
   });
 
   return (
-    <section className="composio-onb" aria-label="Connect Composio">
+    <section className="composio-onb" aria-label="Connect integrations">
       <div className="composio-onb-card">
         <span className="composio-onb-eyebrow">Integrations</span>
-        <h2 className="composio-onb-title">
-          Connect Composio to add integrations
-        </h2>
+        <h2 className="composio-onb-title">Add integrations to your office</h2>
         <p className="composio-onb-lead">
-          Composio is the gateway your team uses to act in Gmail, Slack, GitHub,
-          and 250+ other tools — securely, with OAuth and a full audit trail.
-          Sign in once and we set up the rest.
+          Connect once to let your agents act in Gmail, Slack, GitHub, and 250+
+          other tools — securely, with OAuth and a full audit trail. We set up
+          the rest.
         </p>
 
         <div className="composio-onb-logos" aria-hidden="true">
@@ -185,8 +194,8 @@ export function ComposioOnboarding({ onConnected }: ComposioOnboardingProps) {
         ) : null}
 
         <p className="composio-onb-foot">
-          Your key is stored locally on this workspace and never leaves it. The
-          Composio account it identifies is resolved from your workspace email.
+          Your credentials are stored locally on this workspace and never leave
+          it.
         </p>
       </div>
     </section>
@@ -209,15 +218,24 @@ function SigninPanel({
   starting,
   onStart,
 }: SigninPanelProps) {
+  if (phase === "installing") {
+    return (
+      <div className="composio-onb-panel" role="status">
+        <p className="composio-onb-panel-title">Setting up integrations…</p>
+        <p className="composio-onb-panel-note">
+          One-time setup. We’ll open the sign-in page automatically as soon as
+          it’s ready.
+        </p>
+        <p className="composio-onb-wait">Working on it…</p>
+      </div>
+    );
+  }
   if (phase === "cli_missing") {
     return (
       <div className="composio-onb-panel" role="status">
-        <p className="composio-onb-panel-title">
-          Install the Composio CLI first
-        </p>
+        <p className="composio-onb-panel-title">One quick terminal step</p>
         <p className="composio-onb-panel-note">
-          Sign-in runs through the official Composio CLI, which isn’t installed
-          yet. Run this in a terminal, then try again:
+          Automatic setup didn’t finish. Run this in a terminal, then try again:
         </p>
         <CommandRow command={installCommand} />
         <div className="composio-onb-actions">
@@ -241,8 +259,7 @@ function SigninPanel({
         </p>
         {authUrl ? (
           <p className="composio-onb-panel-note">
-            We opened the Composio sign-in page in a new tab. If it didn’t
-            appear,{" "}
+            We opened the sign-in page in a new tab. If it didn’t appear,{" "}
             <a
               className="composio-onb-getkey"
               href={authUrl}
@@ -267,11 +284,9 @@ function SigninPanel({
   if (phase === "provisioning" || phase === "done") {
     return (
       <div className="composio-onb-panel" role="status">
-        <p className="composio-onb-panel-title">
-          Connecting your Composio project…
-        </p>
+        <p className="composio-onb-panel-title">Connecting your account…</p>
         <p className="composio-onb-panel-note">
-          Fetching a project API key and saving it to this workspace.
+          Saving your credentials to this workspace.
         </p>
       </div>
     );
@@ -284,7 +299,7 @@ function SigninPanel({
         onClick={onStart}
         disabled={starting}
       >
-        {starting ? "Starting sign-in…" : "Sign in with Composio"}
+        {starting ? "Connecting…" : "Connect integrations"}
       </button>
     </div>
   );
@@ -311,7 +326,7 @@ function ManualKeyForm({ pending, onSubmit }: ManualKeyFormProps) {
       }}
     >
       <label className="composio-onb-label" htmlFor="composio-api-key">
-        Composio API key
+        API key
       </label>
       <div className="composio-onb-field">
         <input
@@ -341,7 +356,7 @@ function ManualKeyForm({ pending, onSubmit }: ManualKeyFormProps) {
           className="btn composio-onb-submit"
           disabled={!canSubmit}
         >
-          {pending ? "Connecting…" : "Connect Composio"}
+          {pending ? "Connecting…" : "Save key"}
         </button>
         <a
           className="composio-onb-getkey"
