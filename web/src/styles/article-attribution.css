@@ -1,0 +1,43 @@
+/* "Produced for <task>" provenance chip shown on an article. Token-only so it
+   holds under every theme; used by both the visual-artifact viewer and the
+   wiki markdown read view. */
+
+.article-attribution {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: none;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.article-attribution:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.article-attribution-label {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.article-attribution-task {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article-attribution-owner {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-family: var(--font-mono, monospace);
+}
