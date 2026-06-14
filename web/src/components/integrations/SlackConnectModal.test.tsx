@@ -6,7 +6,6 @@ vi.mock("../../api/slackOnboarding", () => ({
   saveSlackTokens: vi.fn(),
   connectSlackChannel: vi.fn(),
   getSlackOnboardingStatus: vi.fn(),
-  restartBroker: vi.fn(),
 }));
 vi.mock("../ui/Toast", () => ({ showNotice: vi.fn() }));
 
@@ -14,7 +13,6 @@ import {
   connectSlackChannel,
   getSlackAppManifest,
   getSlackOnboardingStatus,
-  restartBroker,
   saveSlackTokens,
 } from "../../api/slackOnboarding";
 import { SlackConnectModal } from "./SlackConnectModal";
@@ -39,12 +37,12 @@ describe("SlackConnectModal", () => {
       channel_slug: "slack-team",
       name: "team",
     });
-    (restartBroker as ReturnType<typeof vi.fn>).mockResolvedValue({});
     (getSlackOnboardingStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       bot_token_set: true,
       app_token_set: true,
       channel_connected: true,
       channel_slug: "slack-team",
+      transport_connected: true,
       ready: true,
     });
   });
@@ -100,7 +98,7 @@ describe("SlackConnectModal", () => {
     expect(screen.getByTestId("sc-step-tokens")).toBeInTheDocument();
   });
 
-  it("activates: connects the channel and restarts the bridge", async () => {
+  it("activates: connects the channel and hot-starts the bridge (no restart)", async () => {
     render(<SlackConnectModal open onClose={() => {}} />);
     fireEvent.click(screen.getByTestId("sc-start"));
     fireEvent.click(screen.getByTestId("sc-created"));
@@ -117,7 +115,43 @@ describe("SlackConnectModal", () => {
     fireEvent.click(activate);
     expect(screen.getByTestId("sc-step-activating")).toBeInTheDocument();
     await waitFor(() => expect(connectSlackChannel).toHaveBeenCalledWith("C0ABCDE123", undefined));
-    await waitFor(() => expect(restartBroker).toHaveBeenCalled());
+    // The wizard polls /slack/status for a live transport instead of restarting.
+    await waitFor(() => expect(getSlackOnboardingStatus).toHaveBeenCalled());
     await screen.findByTestId("sc-step-done", undefined, { timeout: 5000 });
+  });
+
+  it("waits for the transport to connect before going live", async () => {
+    // First probe: tokens + channel saved but the Socket Mode link isn't up yet.
+    // Second probe: transport connected → ready.
+    (getSlackOnboardingStatus as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        bot_token_set: true,
+        app_token_set: true,
+        channel_connected: true,
+        channel_slug: "slack-team",
+        transport_connected: false,
+        ready: false,
+      })
+      .mockResolvedValue({
+        bot_token_set: true,
+        app_token_set: true,
+        channel_connected: true,
+        channel_slug: "slack-team",
+        transport_connected: true,
+        ready: true,
+      });
+
+    render(<SlackConnectModal open onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId("sc-start"));
+    fireEvent.click(screen.getByTestId("sc-created"));
+    fireEvent.change(screen.getByTestId("sc-bot-token"), { target: { value: "xoxb-real" } });
+    fireEvent.change(screen.getByTestId("sc-app-token"), { target: { value: "xapp-real" } });
+    fireEvent.click(screen.getByTestId("sc-verify"));
+    await screen.findByTestId("sc-step-channel");
+    fireEvent.change(screen.getByTestId("sc-channel-id"), { target: { value: "C0ABCDE123" } });
+    fireEvent.click(screen.getByTestId("sc-activate"));
+
+    await screen.findByTestId("sc-step-done", undefined, { timeout: 5000 });
+    expect(getSlackOnboardingStatus).toHaveBeenCalledTimes(2);
   });
 });

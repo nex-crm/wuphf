@@ -1,8 +1,10 @@
-// Typed client for the guided Slack-onboarding wizard. Wraps the four
-// broker endpoints the wizard drives (manifest, tokens, connect, status) plus
-// the shared restartBroker used to activate the Socket Mode transport.
+// Typed client for the guided Slack-onboarding wizard. Wraps the four broker
+// endpoints the wizard drives (manifest, tokens, connect, status). /slack/connect
+// hot-starts the Socket Mode transport in-process, so the wizard no longer
+// restarts the broker — it just polls /slack/status until the transport reports
+// a live connection.
 
-import { get, post, restartBroker } from "./client";
+import { get, post } from "./client";
 
 export interface SlackAppManifest {
   manifest_json: string;
@@ -22,6 +24,9 @@ export interface SlackOnboardingStatus {
   app_token_set: boolean;
   channel_connected: boolean;
   channel_slug: string;
+  /** The in-process Socket Mode transport is connected and healthy. */
+  transport_connected: boolean;
+  /** tokens + channel + a live transport — i.e. the office is live in Slack. */
   ready: boolean;
 }
 
@@ -57,9 +62,7 @@ export function connectSlackChannel(
   });
 }
 
-/** Tokens + channel + readiness state — polled to bring the office back. */
+/** Tokens + channel + live-transport state — polled until the office is live. */
 export function getSlackOnboardingStatus(): Promise<SlackOnboardingStatus> {
   return get<SlackOnboardingStatus>("/slack/status");
 }
-
-export { restartBroker };

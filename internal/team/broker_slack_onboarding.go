@@ -189,7 +189,10 @@ func (b *Broker) handleSlackTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config.SaveSlackTokens(botToken, appToken)
+	if err := config.SaveSlackTokens(botToken, appToken); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "couldn't save the tokens to config — " + err.Error()})
+		return
+	}
 	if botName == "" {
 		botName = "wuphf"
 	}
@@ -202,9 +205,11 @@ func (b *Broker) handleSlackTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSlackStatus reports the onboarding state so the wizard can render the
-// right step on open and poll the office back online after the activation
-// restart. "ready" means tokens + a connected channel both exist — i.e. the
-// next boot will start the Socket Mode transport.
+// right step on open and poll the Socket Mode connection live after
+// /slack/connect hot-starts the transport (no broker restart). "ready" now means
+// the transport is actually connected — tokens + a connected channel + a healthy
+// Socket Mode link — so the wizard's "you're live" reflects a real connection
+// rather than just persisted config.
 func (b *Broker) handleSlackStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -219,12 +224,14 @@ func (b *Broker) handleSlackStatus(w http.ResponseWriter, r *http.Request) {
 		break
 	}
 	channelConnected := channelSlug != ""
+	transportConnected := b.slackTransportConnected()
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bot_token_set":     botSet,
-		"app_token_set":     appSet,
-		"channel_connected": channelConnected,
-		"channel_slug":      channelSlug,
-		"ready":             botSet && appSet && channelConnected,
+		"bot_token_set":       botSet,
+		"app_token_set":       appSet,
+		"channel_connected":   channelConnected,
+		"channel_slug":        channelSlug,
+		"transport_connected": transportConnected,
+		"ready":               botSet && appSet && channelConnected && transportConnected,
 	})
 }

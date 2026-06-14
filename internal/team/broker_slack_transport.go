@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 // broker_slack_transport.go owns the in-process lifecycle of the Slack transport
@@ -115,10 +116,27 @@ func (b *Broker) stopSlackTransport() {
 	}
 }
 
-// slackTransportRunning reports whether the in-process Slack transport is live.
-// Used by /slack/status to distinguish "configured" from "actually connected".
+// slackTransportRunning reports whether the in-process Slack transport has been
+// started (its goroutines are spawned). It does NOT mean the Socket Mode
+// connection is up — use slackTransportConnected for that.
 func (b *Broker) slackTransportRunning() bool {
 	b.slackTransportMu.Lock()
 	defer b.slackTransportMu.Unlock()
 	return b.slackTransport != nil
+}
+
+// slackTransportConnected reports whether the live Slack transport's Socket Mode
+// connection is healthy. This is the signal the onboarding wizard polls after
+// /slack/connect hot-starts the transport, so the "you're live" confirmation
+// reflects a real connection rather than just a spawned goroutine. The transport
+// ref is captured under slackTransportMu, then Health() is read on the transport's
+// own mutex (no nested lock).
+func (b *Broker) slackTransportConnected() bool {
+	b.slackTransportMu.Lock()
+	st := b.slackTransport
+	b.slackTransportMu.Unlock()
+	if st == nil {
+		return false
+	}
+	return st.Health().State == transport.HealthConnected
 }

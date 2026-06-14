@@ -10,7 +10,6 @@ import {
   connectSlackChannel,
   getSlackAppManifest,
   getSlackOnboardingStatus,
-  restartBroker,
   type SlackAppManifest,
   saveSlackTokens,
 } from "../../api/slackOnboarding";
@@ -146,10 +145,10 @@ export function SlackConnectModal({
     }
   }, [botToken, appToken]);
 
-  // The activation sequence: connect the channel, restart so the Socket Mode
-  // transport binds, then poll the office back to "ready". The broker (and the
-  // web server it hosts) goes down briefly on restart, so the poll tolerates
-  // network errors and keeps trying until ready or it times out.
+  // The activation sequence: connect the channel — which hot-starts the Socket
+  // Mode transport in-process, no broker restart — then poll /slack/status until
+  // the transport reports a live connection. The office stays up the whole time,
+  // so this is fast; the poll just waits for the WebSocket to come up.
   const activate = useCallback(async () => {
     setError(null);
     setStep("activating");
@@ -160,33 +159,30 @@ export function SlackConnectModal({
         channelName.trim() || undefined,
       );
       if (aborted.current) return;
+      // Channel bound + the broker has hot-started the bridge; now we wait for
+      // the Socket Mode connection to report healthy.
       setActivatePhase(1);
 
-      await restartBroker();
-      if (aborted.current) return;
-      setActivatePhase(2);
-
-      // Poll up to ~40s for the office to come back online.
-      const deadline = Date.now() + 40_000;
-      // Give the restart a head start before the first probe.
-      await new Promise((r) => setTimeout(r, 1500));
+      // Poll up to ~20s for the Socket Mode connection to come up. The office
+      // never goes down, so a failed probe is a genuine transient, not a reboot.
+      const deadline = Date.now() + 20_000;
       while (!aborted.current && Date.now() < deadline) {
         try {
           const st = await getSlackOnboardingStatus();
           if (st.ready) {
-            setActivatePhase(3);
+            setActivatePhase(2);
             await new Promise((r) => setTimeout(r, 600));
             if (!aborted.current) setStep("done");
             return;
           }
         } catch {
-          // broker still restarting — keep polling
+          // transient — keep polling
         }
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 1000));
       }
       if (!aborted.current) {
         setError(
-          "Your office is taking longer than usual to come online. It may still be starting — close this and check the channel in a moment.",
+          "Your office is taking longer than usual to connect to Slack. It may still be coming up — close this and check the channel in a moment.",
         );
         setStep("channel");
       }
@@ -466,7 +462,6 @@ export function SlackConnectModal({
             <div className="sc-body sc-activating">
               <ol className="sc-phases">
                 {[
-                  "Saving your tokens",
                   "Connecting the channel",
                   "Starting the Slack bridge",
                   "Confirming you're live",
@@ -483,7 +478,7 @@ export function SlackConnectModal({
                 ))}
               </ol>
               <p className="sc-muted">
-                This takes a few seconds while the office reboots into Slack.
+                This takes a few seconds while your office connects to Slack.
               </p>
             </div>
           )}

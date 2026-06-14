@@ -115,6 +115,11 @@ func TestSlackTokensValidatesAndPersists(t *testing.T) {
 	if st["channel_connected"] != false || st["ready"] != false {
 		t.Fatalf("status should not be ready without a channel: %v", st)
 	}
+	// The hot-start health signal: no transport is running in this unit test, so
+	// the Socket Mode link reports disconnected and gates "ready".
+	if st["transport_connected"] != false {
+		t.Fatalf("status transport_connected should be false with no running transport: %v", st)
+	}
 }
 
 func TestSlackTokensSurfacesSlackRejection(t *testing.T) {
