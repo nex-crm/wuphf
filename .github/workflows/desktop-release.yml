@@ -4,9 +4,13 @@
 # Windows builds and signs via Azure Trusted Signing IF its secrets exist; without
 # them it still produces an (unsigned) installer so the pipeline isn't blocked.
 #
-# Trigger: a `desktop-v*` tag (e.g. desktop-v0.1.0) or manual dispatch. Switch the
-# tag filter to `v*` once the desktop ships on the main release cadence (every
-# product release needs a new dmg — the app is a fat self-contained binary).
+# Trigger: every product release tag `v*` (e.g. v0.226.0) — the desktop app rides
+# the main release cadence, so each release also cuts a signed dmg + Windows
+# installer (the app is a fat self-contained binary, so every release needs a new
+# one). `desktop-v*` and manual dispatch remain for desktop-only / out-of-band
+# builds. On a `v*` tag the signed artifacts are APPENDED to the published GitHub
+# Release that `release.yml`/goreleaser creates for the same tag; on a standalone
+# `desktop-v*` tag (or manual dispatch) they go to a DRAFT for review first.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   macOS:
@@ -27,7 +31,7 @@ name: desktop-release
 
 on:
   push:
-    tags: ["desktop-v*"]
+    tags: ["v*", "desktop-v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -54,7 +58,9 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; fi
+          # Accept both the main-cadence `v*` tag and a standalone `desktop-v*`
+          # tag: strip whichever prefix is present (desktop-v first, then v).
+          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; V="${V#v}"; fi
           # Reject anything that isn't a clean version so a crafted tag can't
           # smuggle shell metacharacters into later filename/volname uses.
           if ! printf '%s' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
@@ -150,7 +156,10 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # ratchet:softprops/action-gh-release@v2
         with:
           files: dist/WUPHF-*.dmg
-          draft: true # review before publishing
+          # On a `v*` tag, append to the published release goreleaser made for the
+          # same tag (draft:false keeps it published). On a standalone `desktop-v*`
+          # tag or manual dispatch, ship a draft to review first.
+          draft: ${{ !startsWith(github.ref_name, 'v') }}
 
   # -------------------------------------------------------------- Windows ----
   windows:
@@ -171,7 +180,9 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; fi
+          # Accept both the main-cadence `v*` tag and a standalone `desktop-v*`
+          # tag: strip whichever prefix is present (desktop-v first, then v).
+          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; V="${V#v}"; fi
           # Reject anything that isn't a clean version so a crafted tag can't
           # smuggle shell metacharacters into later filename/volname uses.
           if ! printf '%s' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
@@ -237,4 +248,5 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # ratchet:softprops/action-gh-release@v2
         with:
           files: dist/WUPHF-*-setup.exe
-          draft: true
+          # Same draft logic as macOS: append on `v*`, draft on `desktop-v*`/dispatch.
+          draft: ${{ !startsWith(github.ref_name, 'v') }}

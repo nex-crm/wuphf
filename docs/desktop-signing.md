@@ -6,10 +6,14 @@ needs a new build**: a change to `web/`, `internal/`, `desktop/oswails/`, or the
 Go deps ships only when a fresh signed artifact is cut. Docs/website/test/CI
 changes do not.
 
-Automated by `.github/workflows/desktop-release.yml` (tag `desktop-v*` or manual
-dispatch → build → sign → notarize → draft GitHub Release). The
-`desktop-build-check.yml` PR gate builds it unsigned on any PR touching those
-paths, so a desktop-breaking change fails the PR, not the release.
+Automated by `.github/workflows/desktop-release.yml`. It fires on every product
+release tag `v*` (the desktop app rides the main release cadence) and on a
+standalone `desktop-v*` tag or manual dispatch → build → sign → notarize. On a
+`v*` tag the signed dmg + Windows installer are APPENDED to the published GitHub
+Release goreleaser creates for that tag; on a `desktop-v*` tag / dispatch they go
+to a DRAFT to review first. The `desktop-build-check.yml` PR gate builds it
+unsigned on any PR touching those paths, so a desktop-breaking change fails the
+PR, not the release.
 
 ## One-time setup
 
@@ -43,13 +47,15 @@ Signing account + certificate profile, then add: `AZURE_TENANT_ID`,
 
 ## Cut a release
 
+The desktop app rides the main `v*` cadence, so every product release already
+cuts a signed dmg + Windows installer and appends them to that tag's GitHub
+Release — no separate step. For an out-of-band desktop-only build:
+
 ```bash
-git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+git tag desktop-v0.1.1 && git push origin desktop-v0.1.1
 # → desktop-release.yml builds, signs, notarizes, and drafts a GitHub Release.
 # Review the draft, then publish. Link the .dmg / .exe on the website.
 ```
-Switch the release trigger from `desktop-v*` to `v*` once the desktop ships on
-the main product cadence (so every `wuphf` release also cuts a dmg).
 
 ## Manual macOS build (local, validated 2026-06-14)
 
