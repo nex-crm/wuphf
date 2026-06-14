@@ -800,31 +800,33 @@ func (c *ComposioREST) listAuthConfigs(ctx context.Context, platform string) ([]
 }
 
 func (c *ComposioREST) createComposioManagedAuthConfig(ctx context.Context, platform string) (string, error) {
+	// v3 schema: the toolkit and auth config are nested objects. The older flat
+	// shape (toolkit_slug/type/is_composio_managed) now 400s with
+	// "payload.toolkit: Required".
 	body := map[string]any{
-		"toolkit_slug":        platform,
-		"type":                "use_composio_managed_auth",
-		"name":                "WUPHF " + DisplayPlatformName(platform),
-		"is_composio_managed": true,
+		"toolkit": map[string]any{"slug": platform},
+		"auth_config": map[string]any{
+			"type": "use_composio_managed_auth",
+			"name": "WUPHF " + DisplayPlatformName(platform),
+		},
 	}
 	raw, err := c.post(ctx, "/auth_configs", body)
 	if err != nil {
 		return "", err
 	}
-	var result composioAuthConfig
+	// v3 returns the created config nested under auth_config; older shapes put
+	// the id at the top level or under item/data.
+	var result struct {
+		ID         string             `json:"id"`
+		AuthConfig composioAuthConfig `json:"auth_config"`
+		Item       composioAuthConfig `json:"item"`
+		Data       composioAuthConfig `json:"data"`
+	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return "", fmt.Errorf("parse composio auth config create: %w", err)
 	}
-	if id := strings.TrimSpace(result.ID); id != "" {
+	if id := strings.TrimSpace(firstNonEmpty(result.ID, result.AuthConfig.ID, result.Item.ID, result.Data.ID)); id != "" {
 		return id, nil
-	}
-	var wrapped struct {
-		Item composioAuthConfig `json:"item"`
-		Data composioAuthConfig `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &wrapped); err == nil {
-		if id := strings.TrimSpace(firstNonEmpty(wrapped.Item.ID, wrapped.Data.ID)); id != "" {
-			return id, nil
-		}
 	}
 	return "", fmt.Errorf("composio auth config response did not include id")
 }

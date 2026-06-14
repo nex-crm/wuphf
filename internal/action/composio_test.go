@@ -879,3 +879,55 @@ func TestComposioRESTCatalogHidesComposioToolkits(t *testing.T) {
 		t.Fatalf("expected only Gmail to remain, got %+v", catalog.Items)
 	}
 }
+
+// TestComposioRESTCreatesV3AuthConfig: the v3 /auth_configs schema needs nested
+// toolkit + auth_config objects (the old flat toolkit_slug shape 400s with
+// "payload.toolkit: Required"), and returns the id nested under auth_config.
+func TestComposioRESTCreatesV3AuthConfig(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+		case http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"toolkit":     map[string]any{"slug": "gmail"},
+				"auth_config": map[string]any{"id": "ac_123"},
+			})
+		}
+	})
+	mux.HandleFunc("/connected_accounts/link", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"connected_account_id": "ca_1",
+			"redirect_url":         "https://connect.composio.dev/x",
+			"status":               "INITIATED",
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	res, err := client.StartIntegrationConnection(context.Background(), IntegrationConnectRequest{Platform: "gmail"})
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if res.AuthURL == "" {
+		t.Fatalf("expected an auth url (auth_config.id parsed), got %+v", res)
+	}
+	if gotBody["toolkit_slug"] != nil {
+		t.Fatalf("must not send the flat toolkit_slug, body=%v", gotBody)
+	}
+	tk, _ := gotBody["toolkit"].(map[string]any)
+	if tk["slug"] != "gmail" {
+		t.Fatalf("expected nested toolkit.slug=gmail, body=%v", gotBody)
+	}
+	ac, _ := gotBody["auth_config"].(map[string]any)
+	if ac["type"] != "use_composio_managed_auth" {
+		t.Fatalf("expected nested auth_config.type, body=%v", gotBody)
+	}
+}
