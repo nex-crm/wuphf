@@ -49,11 +49,11 @@
     "@biomejs/biome": "2.4.15",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^25.9.1",
-    "@vitest/coverage-v8": "4.1.7",
+    "@vitest/coverage-v8": "2.1.9",
     "ollama": "0.6.3",
     "openai": "6.39.0",
     "tsx": "^4.19.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "2.1.9"
   }
 }
