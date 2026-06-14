@@ -781,3 +781,62 @@ func TestWorkflowStepsExposeGenericResult(t *testing.T) {
 		t.Fatalf("expected compact insight summary, got %#v", recentInsights["result"])
 	}
 }
+
+func TestComposioApplyAuthHeaders(t *testing.T) {
+	t.Run("project key wins and suppresses user-key headers", func(t *testing.T) {
+		c := &ComposioREST{APIKey: "ak_proj", UserAPIKey: "uak_x", OrgID: "ok_1", ProjectID: "pr_1"}
+		h := http.Header{}
+		c.applyAuthHeaders(h)
+		if got := h.Get("x-api-key"); got != "ak_proj" {
+			t.Fatalf("x-api-key = %q, want ak_proj", got)
+		}
+		if h.Get("x-user-api-key") != "" || h.Get("x-org-id") != "" || h.Get("x-project-id") != "" {
+			t.Fatalf("user-key headers must not be set in ak_ mode: %v", h)
+		}
+	})
+
+	t.Run("user-key mode sets the trio", func(t *testing.T) {
+		c := &ComposioREST{UserAPIKey: "uak_x", OrgID: "ok_1", ProjectID: "pr_1"}
+		h := http.Header{}
+		c.applyAuthHeaders(h)
+		if h.Get("x-api-key") != "" {
+			t.Fatalf("x-api-key must be empty in user-key mode, got %q", h.Get("x-api-key"))
+		}
+		if h.Get("x-user-api-key") != "uak_x" || h.Get("x-org-id") != "ok_1" || h.Get("x-project-id") != "pr_1" {
+			t.Fatalf("unexpected user-key headers: %v", h)
+		}
+	})
+
+	t.Run("user-key without project omits x-project-id", func(t *testing.T) {
+		c := &ComposioREST{UserAPIKey: "uak_x", OrgID: "ok_1"}
+		h := http.Header{}
+		c.applyAuthHeaders(h)
+		if _, ok := h["X-Project-Id"]; ok {
+			t.Fatalf("x-project-id must be absent when project id is empty: %v", h)
+		}
+		if h.Get("x-user-api-key") != "uak_x" || h.Get("x-org-id") != "ok_1" {
+			t.Fatalf("unexpected headers: %v", h)
+		}
+	})
+}
+
+func TestComposioHasAuth(t *testing.T) {
+	cases := []struct {
+		name string
+		c    ComposioREST
+		want bool
+	}{
+		{"project key", ComposioREST{APIKey: "ak_x"}, true},
+		{"user key + org", ComposioREST{UserAPIKey: "uak_x", OrgID: "ok_1"}, true},
+		{"user key without org", ComposioREST{UserAPIKey: "uak_x"}, false},
+		{"org without user key", ComposioREST{OrgID: "ok_1"}, false},
+		{"nothing", ComposioREST{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.c.hasAuth(); got != tc.want {
+				t.Fatalf("hasAuth() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

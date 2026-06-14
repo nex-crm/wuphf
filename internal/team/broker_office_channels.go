@@ -192,7 +192,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gemini_key_set":       config.ResolveGeminiAPIKey() != "",
 			"minimax_key_set":      config.ResolveMinimaxAPIKey() != "",
 			"one_key_set":          config.ResolveOneSecret() != "",
-			"composio_key_set":     config.ResolveComposioAPIKey() != "",
+			"composio_key_set":     config.IsComposioConfigured(),
 			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
 			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
 			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),

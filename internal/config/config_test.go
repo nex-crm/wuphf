@@ -303,6 +303,47 @@ func TestResolveComposioAPIKeyFallsBackToConfig(t *testing.T) {
 	})
 }
 
+func TestIsComposioConfigured(t *testing.T) {
+	t.Run("project ak_ key", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioAPIKey: "ak_proj"})
+			if !IsComposioConfigured() {
+				t.Fatal("expected configured with a project key")
+			}
+		})
+	})
+	t.Run("user key + org", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioUserAPIKey: "uak_x", ComposioOrgID: "ok_1"})
+			if !IsComposioConfigured() {
+				t.Fatal("expected configured with the user-key pair")
+			}
+			if got := ResolveComposioUserAPIKey(); got != "uak_x" {
+				t.Fatalf("user key = %q", got)
+			}
+			if got := ResolveComposioOrgID(); got != "ok_1" {
+				t.Fatalf("org id = %q", got)
+			}
+		})
+	})
+	t.Run("user key without org is not enough", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioUserAPIKey: "uak_x"})
+			if IsComposioConfigured() {
+				t.Fatal("user key without org must not count as configured")
+			}
+		})
+	})
+	t.Run("nothing", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{})
+			if IsComposioConfigured() {
+				t.Fatal("empty config must not be configured")
+			}
+		})
+	})
+}
+
 func TestResolveGeminiAPIKeyEnvOverride(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_GEMINI_API_KEY", "wuphf-gemini")

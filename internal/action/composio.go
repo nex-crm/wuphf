@@ -18,10 +18,19 @@ import (
 const defaultComposioBaseURL = "https://backend.composio.dev/api/v3"
 
 type ComposioREST struct {
-	APIKey  string
-	UserID  string
-	BaseURL string
-	Client  *http.Client
+	// APIKey is a project-scoped `ak_` key (sent as x-api-key). When set it
+	// takes precedence over the user-key fields below.
+	APIKey string
+	// UserAPIKey/OrgID/ProjectID are the user-key auth mode: the `uak_` session
+	// key plus org (required) and project (optional) ids, sent as
+	// x-user-api-key / x-org-id / x-project-id. Used when no project ak_ key is
+	// available (the current composio CLI can't mint one via `dev init`).
+	UserAPIKey string
+	OrgID      string
+	ProjectID  string
+	UserID     string
+	BaseURL    string
+	Client     *http.Client
 }
 
 type ComposioAPIError struct {
@@ -50,17 +59,43 @@ func NewComposioFromEnv() *ComposioREST {
 		baseURL = defaultComposioBaseURL
 	}
 	return &ComposioREST{
-		APIKey:  strings.TrimSpace(config.ResolveComposioAPIKey()),
-		UserID:  strings.TrimSpace(config.ResolveComposioUserID()),
-		BaseURL: baseURL,
-		Client:  &http.Client{Timeout: 30 * time.Second},
+		APIKey:     strings.TrimSpace(config.ResolveComposioAPIKey()),
+		UserAPIKey: strings.TrimSpace(config.ResolveComposioUserAPIKey()),
+		OrgID:      strings.TrimSpace(config.ResolveComposioOrgID()),
+		ProjectID:  strings.TrimSpace(config.ResolveComposioProjectID()),
+		UserID:     strings.TrimSpace(config.ResolveComposioUserID()),
+		BaseURL:    baseURL,
+		Client:     &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// hasAuth reports whether the client carries usable Composio credentials:
+// either a project `ak_` key, or the user-key pair (`uak_` + org id).
+func (c *ComposioREST) hasAuth() bool {
+	if strings.TrimSpace(c.APIKey) != "" {
+		return true
+	}
+	return strings.TrimSpace(c.UserAPIKey) != "" && strings.TrimSpace(c.OrgID) != ""
+}
+
+// applyAuthHeaders sets the auth headers for the active mode: x-api-key for a
+// project key, else x-user-api-key + x-org-id (+ x-project-id when known).
+func (c *ComposioREST) applyAuthHeaders(h http.Header) {
+	if key := strings.TrimSpace(c.APIKey); key != "" {
+		h.Set("x-api-key", key)
+		return
+	}
+	h.Set("x-user-api-key", strings.TrimSpace(c.UserAPIKey))
+	h.Set("x-org-id", strings.TrimSpace(c.OrgID))
+	if proj := strings.TrimSpace(c.ProjectID); proj != "" {
+		h.Set("x-project-id", proj)
 	}
 }
 
 func (c *ComposioREST) Name() string { return "composio" }
 
 func (c *ComposioREST) Configured() bool {
-	return !config.ResolveNoNex() && strings.TrimSpace(c.APIKey) != "" && strings.TrimSpace(c.UserID) != ""
+	return !config.ResolveNoNex() && c.hasAuth() && strings.TrimSpace(c.UserID) != ""
 }
 
 func (c *ComposioREST) Supports(cap Capability) bool {
@@ -648,7 +683,7 @@ func (c *ComposioREST) delete(ctx context.Context, path string) ([]byte, error) 
 
 func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Values, body any) ([]byte, error) {
 	if !c.Configured() {
-		return nil, fmt.Errorf("composio is not configured; set COMPOSIO_API_KEY and a user identity")
+		return nil, fmt.Errorf("composio is not configured; set COMPOSIO_API_KEY (or sign in with Composio) and a user identity")
 	}
 	u := strings.TrimRight(c.BaseURL, "/") + path
 	if encoded := query.Encode(); encoded != "" {
@@ -666,7 +701,7 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("x-api-key", c.APIKey)
+	c.applyAuthHeaders(req.Header)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

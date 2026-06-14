@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -412,8 +413,10 @@ esac`)
 	}
 }
 
-// TestComposioSigninProvision_RejectsUserScopedKey: a uak_ key from dev init
-// must be rejected (it 401s against the SDK) and must NOT be stored.
+// TestComposioSigninProvision_RejectsUserScopedKey: a uak_ key from dev init's
+// .env.local must NOT be stored as a project ak_ key (it 401s against the SDK
+// as x-api-key). Here user_data.json carries no org id, so the user-key
+// fallback can't complete either — the flow errors and stores nothing.
 func TestComposioSigninProvision_RejectsUserScopedKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake shell script requires a POSIX shell")
@@ -438,15 +441,129 @@ esac`)
 	if errState.Status != composioSigninStatusError {
 		t.Fatalf("expected error for uak_ key, got %+v", errState)
 	}
-	if !strings.Contains(errState.Reason, "uak_") {
-		t.Fatalf("expected the reason to explain the uak_ rejection, got %q", errState.Reason)
+	// No org context (markComposioLoggedIn writes only api_key): the fallback
+	// can't proceed and the flow points the user at the manual paste path.
+	if !strings.Contains(errState.Reason, "dashboard.composio.dev") {
+		t.Fatalf("expected the reason to offer the manual paste fallback, got %q", errState.Reason)
 	}
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("config load: %v", err)
 	}
 	if cfg.ComposioAPIKey != "" {
-		t.Fatalf("uak_ key must not be stored, got %q", cfg.ComposioAPIKey)
+		t.Fatalf("uak_ key must not be stored as a project key, got %q", cfg.ComposioAPIKey)
+	}
+	if cfg.ComposioUserAPIKey != "" {
+		t.Fatalf("user key must not be stored without an org id, got %q", cfg.ComposioUserAPIKey)
+	}
+}
+
+// TestComposioSigninProvision_UserKeyFallback is the regression for the current
+// composio CLI: `dev init` no longer writes an ak_ key to .env.local, so the
+// flow falls back to the user-key trio — the uak_ + org id from user_data.json,
+// scoped to the project the resolve endpoint returns — and stores it so the
+// SDK can authenticate with x-user-api-key/x-org-id/x-project-id.
+func TestComposioSigninProvision_UserKeyFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell script requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	// dev init exits cleanly but writes NO .env.local (current CLI behavior),
+	// so the ak_ path fails and the user-key fallback takes over.
+	writeFakeComposioCLI(t, dir, `
+case "$1 $2" in
+  "dev init") exit 0 ;;
+  *) exit 1 ;;
+esac`)
+
+	b := newComposioSigninBroker(t, dir)
+	// Logged-in session WITH an org id (what `composio login` writes).
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".composio"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(home, ".composio", "user_data.json"),
+		[]byte(`{"api_key":"uak_session_xyz","org_id":"ok_test123","base_url":"https://backend.composio.dev"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Stub the project-resolve network call.
+	origResolve := composioResolveProjectID
+	composioResolveProjectID = func(baseURL, userAPIKey, orgID string) string {
+		if userAPIKey != "uak_session_xyz" || orgID != "ok_test123" {
+			t.Errorf("resolve got unexpected creds: key=%q org=%q", userAPIKey, orgID)
+		}
+		return "pr_resolved789"
+	}
+	t.Cleanup(func() { composioResolveProjectID = origResolve })
+
+	_, state, _ := composioSigninRequest(t, b, http.MethodPost, "/integrations/composio/signin/start")
+	if state.Status != composioSigninStatusProvisioning {
+		t.Fatalf("expected provisioning on the logged-in fast path, got %+v", state)
+	}
+	done := pollComposioSigninUntil(t, b, composioSigninStatusDone)
+	if done.Status != composioSigninStatusDone {
+		t.Fatalf("expected done via user-key fallback, got %+v", done)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config load: %v", err)
+	}
+	if cfg.ComposioAPIKey != "" {
+		t.Fatalf("no project ak_ key should be stored, got %q", cfg.ComposioAPIKey)
+	}
+	if cfg.ComposioUserAPIKey != "uak_session_xyz" {
+		t.Fatalf("expected stored user key, got %q", cfg.ComposioUserAPIKey)
+	}
+	if cfg.ComposioOrgID != "ok_test123" {
+		t.Fatalf("expected stored org id, got %q", cfg.ComposioOrgID)
+	}
+	if cfg.ComposioProjectID != "pr_resolved789" {
+		t.Fatalf("expected stored project id, got %q", cfg.ComposioProjectID)
+	}
+	if !config.IsComposioConfigured() {
+		t.Fatal("IsComposioConfigured should be true after a user-key sign-in")
+	}
+}
+
+// TestDefaultComposioResolveProjectID verifies the resolve call sends the user
+// key + org and returns the pr_-prefixed nano id (the form x-project-id
+// accepts), NEVER the bare project_id UUID (which the API 401s on).
+func TestDefaultComposioResolveProjectID(t *testing.T) {
+	var gotKey, gotOrg, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("x-user-api-key")
+		gotOrg = r.Header.Get("x-org-id")
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"project_id":"e3485bdf-5441-4c03-9d28-61bc1c7a2df4","project_nano_id":"pr_nano123"}`))
+	}))
+	defer srv.Close()
+
+	got := defaultComposioResolveProjectID(srv.URL, "uak_test", "ok_test")
+	if got != "pr_nano123" {
+		t.Fatalf("expected the pr_ nano id, got %q", got)
+	}
+	if gotKey != "uak_test" || gotOrg != "ok_test" {
+		t.Fatalf("resolve sent wrong auth headers: key=%q org=%q", gotKey, gotOrg)
+	}
+	if gotPath != "/api/v3/org/consumer/project/resolve" {
+		t.Fatalf("resolve hit wrong path: %q", gotPath)
+	}
+}
+
+// TestDefaultComposioResolveProjectID_RejectsUUIDOnly: when only the UUID
+// project_id is returned (no nano id), resolve yields "" rather than a value
+// the SDK would 401 on. The SDK then runs against the org's default project.
+func TestDefaultComposioResolveProjectID_RejectsUUIDOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"project_id":"e3485bdf-5441-4c03-9d28-61bc1c7a2df4"}`))
+	}))
+	defer srv.Close()
+	if got := defaultComposioResolveProjectID(srv.URL, "uak_test", "ok_test"); got != "" {
+		t.Fatalf("expected empty (UUID is not a valid x-project-id), got %q", got)
 	}
 }
 

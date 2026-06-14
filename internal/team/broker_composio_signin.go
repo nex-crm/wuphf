@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -164,6 +165,9 @@ var (
 	// polls the pending browser session for up to ~10 minutes.
 	composioLoginPollTimeout = 12 * time.Minute
 	composioDevInitTimeout   = 3 * time.Minute
+	// composioResolveTimeout bounds the project-resolve API call in the
+	// user-key provisioning fallback.
+	composioResolveTimeout = 20 * time.Second
 	// composioLoginWindow is how long a started flow stays in awaiting_login
 	// before the status endpoint reports a timeout.
 	composioLoginWindow = 15 * time.Minute
@@ -402,7 +406,11 @@ func (b *Broker) composioSigninBeginLogin() {
 func (b *Broker) composioSigninAwaitLogin() {
 	ctx, cancel := context.WithTimeout(context.Background(), composioLoginPollTimeout)
 	defer cancel()
-	cmd, err := composioCommand(ctx, "login", "--poll")
+	// --no-skill-install mirrors trustclaw's `composio login`: without it the CLI
+	// installs a Claude Code "composio-cli" skill and flips on developer mode,
+	// which makes `composio dev init` scaffold .composio/ instead of writing the
+	// .env.local + ak_ key that provisioning parses.
+	cmd, err := composioCommand(ctx, "login", "--poll", "--no-skill-install")
 	if err == nil {
 		// Output deliberately discarded: never echo CLI output that may carry
 		// credentials into broker logs.
@@ -433,15 +441,58 @@ func (b *Broker) composioSigninAdvanceIfLoggedIn() bool {
 	return true
 }
 
-// composioSigninProvision mints the project-scoped ak_ key via
-// `composio dev init` in a throwaway directory and stores it through the same
-// config path as the manual paste flow.
+// composioProvisionedCreds is the outcome of a successful provision: EITHER a
+// project ak_ key (preferred — sent as x-api-key), OR the user-key trio (the
+// uak_ session key + org id, and an optional project id — sent as
+// x-user-api-key / x-org-id / x-project-id).
+type composioProvisionedCreds struct {
+	APIKey     string
+	UserAPIKey string
+	OrgID      string
+	ProjectID  string
+}
+
+// composioProvisionCreds resolves usable Composio SDK credentials after login.
+//
+// Preferred path: `composio dev init` writes a project ak_ key to .env.local
+// (older CLIs, and the same path trustclaw uses). The current composio CLI no
+// longer mints an ak_ key this way, so we fall back to the user-key mode: the
+// uak_ session key + org id the CLI already wrote to user_data.json, scoped to
+// the org's default project (resolved best-effort; the SDK works without it).
+func composioProvisionCreds() (composioProvisionedCreds, error) {
+	if key, err := composioProvisionProjectKey(); err == nil {
+		return composioProvisionedCreds{APIKey: key}, nil
+	}
+	ud, err := readComposioUserData()
+	if err != nil {
+		return composioProvisionedCreds{}, errors.New("could not read the Composio CLI session — sign in again, or paste a project API key from https://dashboard.composio.dev")
+	}
+	uak := strings.TrimSpace(ud.APIKey)
+	org := strings.TrimSpace(ud.OrgID)
+	if uak == "" || org == "" {
+		return composioProvisionedCreds{}, errors.New("Composio sign-in did not return the org context — sign in again, or paste a project API key from https://dashboard.composio.dev")
+	}
+	creds := composioProvisionedCreds{UserAPIKey: uak, OrgID: org}
+	// Best-effort project scoping; a resolve failure is not fatal (the SDK
+	// falls back to the org's default project when no project id is sent).
+	creds.ProjectID = composioResolveProjectID(ud.BaseURL, uak, org)
+	return creds, nil
+}
+
+// composioSigninProvision resolves Composio credentials (project ak_ key or
+// user-key trio) and stores them through the same config path as the manual
+// paste flow. Credentials never touch logs.
 func (b *Broker) composioSigninProvision() {
 	flow := &b.composioSignin
-	key, err := composioProvisionProjectKey()
+	creds, err := composioProvisionCreds()
 	var storeFailed bool
 	if err == nil {
-		if err = b.storeComposioAPIKey(key); err != nil {
+		if strings.TrimSpace(creds.APIKey) != "" {
+			err = b.storeComposioAPIKey(creds.APIKey)
+		} else {
+			err = b.storeComposioUserKeyCreds(creds.UserAPIKey, creds.OrgID, creds.ProjectID)
+		}
+		if err != nil {
 			storeFailed = true
 		}
 	}
@@ -454,7 +505,7 @@ func (b *Broker) composioSigninProvision() {
 			// path — keep filesystem details out of the browser-facing
 			// Reason (review finding); the full error goes to the log.
 			log.Printf("composio signin: %v", err)
-			reason = "could not save the Composio API key to config — check the broker logs"
+			reason = "could not save the Composio credentials to config — check the broker logs"
 		}
 		flow.state = composioSigninState{Status: composioSigninStatusError, Reason: reason}
 		flow.mu.Unlock()
@@ -463,7 +514,7 @@ func (b *Broker) composioSigninProvision() {
 	flow.mu.Unlock()
 	// Record the audit entry BEFORE flipping to done: a client that observes
 	// done must also observe the audit trail entry.
-	b.recordComposioSigninEvent("integration_signin_completed", actor, "Signed in with Composio and stored the project API key")
+	b.recordComposioSigninEvent("integration_signin_completed", actor, "Signed in with Composio and stored credentials")
 	flow.mu.Lock()
 	flow.state = composioSigninState{Status: composioSigninStatusDone}
 	flow.mu.Unlock()
@@ -475,7 +526,9 @@ func (b *Broker) composioSigninProvision() {
 func composioMintLoginURL() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), composioLoginStartTimeout)
 	defer cancel()
-	cmd, err := composioCommand(ctx, "login", "--no-wait")
+	// --no-skill-install: don't install the Claude Code skill / enable developer
+	// mode as a side effect of signing in (see composioSigninAwaitLogin).
+	cmd, err := composioCommand(ctx, "login", "--no-wait", "--no-skill-install")
 	if err != nil {
 		return "", err
 	}
@@ -556,6 +609,79 @@ func (b *Broker) storeComposioAPIKey(key string) error {
 	return nil
 }
 
+// storeComposioUserKeyCreds persists the user-key trio (uak_ session key + org
+// + optional project) via the same load-modify-save path as storeComposioAPIKey.
+func (b *Broker) storeComposioUserKeyCreds(userAPIKey, orgID, projectID string) error {
+	b.configMu.Lock()
+	defer b.configMu.Unlock()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config load failed: %w", err)
+	}
+	cfg.ComposioUserAPIKey = strings.TrimSpace(userAPIKey)
+	cfg.ComposioOrgID = strings.TrimSpace(orgID)
+	cfg.ComposioProjectID = strings.TrimSpace(projectID)
+	if err := config.Save(cfg); err != nil {
+		return fmt.Errorf("config save failed: %w", err)
+	}
+	return nil
+}
+
+// composioResolveProjectID returns the org's default project id via the CLI's
+// resolve endpoint (POST {base}/api/v3/org/consumer/project/resolve with the
+// user key + org id). It's a package var so tests can stub the network call.
+// Returns "" on any failure — the project id is optional for the SDK.
+var composioResolveProjectID = defaultComposioResolveProjectID
+
+func defaultComposioResolveProjectID(baseURL, userAPIKey, orgID string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		base = "https://backend.composio.dev"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), composioResolveTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v3/org/consumer/project/resolve", strings.NewReader("{}"))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("x-user-api-key", userAPIKey)
+	req.Header.Set("x-org-id", orgID)
+	req.Header.Set("User-Agent", "wuphf")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		// The resolve endpoint returns the pr_-prefixed id as project_nano_id;
+		// project_id is a bare UUID that the API REJECTS (401) as x-project-id.
+		// So we want the nano id — verified live.
+		ProjectNanoID string `json:"project_nano_id"`
+		ProjectID     string `json:"project_id"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	if id := strings.TrimSpace(doc.ProjectNanoID); id != "" {
+		return id
+	}
+	// Only fall back to project_id when it's already the pr_ form (some
+	// endpoints name the pr_ id "project_id"); never return the UUID.
+	if id := strings.TrimSpace(doc.ProjectID); strings.HasPrefix(id, "pr_") {
+		return id
+	}
+	return ""
+}
+
 // composioUserDataPath mirrors the CLI's credential cache location:
 // $COMPOSIO_CACHE_DIR/user_data.json, defaulting to ~/.composio/user_data.json.
 func composioUserDataPath() string {
@@ -569,24 +695,39 @@ func composioUserDataPath() string {
 	return filepath.Join(home, ".composio", "user_data.json")
 }
 
-// composioCLILoggedIn reports whether the CLI has a stored session — the same
-// check trustclaw uses: user_data.json exists and carries a non-empty api_key.
-func composioCLILoggedIn() bool {
+// composioUserData is the subset of ~/.composio/user_data.json the sign-in flow
+// reads: the uak_ session key, the org id, and the backend base URL.
+type composioUserData struct {
+	APIKey  string `json:"api_key"`
+	OrgID   string `json:"org_id"`
+	BaseURL string `json:"base_url"`
+}
+
+// readComposioUserData loads the CLI's session file written by `composio login`.
+func readComposioUserData() (composioUserData, error) {
 	path := composioUserDataPath()
 	if path == "" {
-		return false
+		return composioUserData{}, errors.New("composio user_data path unavailable")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return composioUserData{}, err
+	}
+	var ud composioUserData
+	if err := json.Unmarshal(data, &ud); err != nil {
+		return composioUserData{}, err
+	}
+	return ud, nil
+}
+
+// composioCLILoggedIn reports whether the CLI has a stored session — the same
+// check trustclaw uses: user_data.json exists and carries a non-empty api_key.
+func composioCLILoggedIn() bool {
+	ud, err := readComposioUserData()
+	if err != nil {
 		return false
 	}
-	var doc struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return false
-	}
-	return strings.TrimSpace(doc.APIKey) != ""
+	return strings.TrimSpace(ud.APIKey) != ""
 }
 
 // parseEnvFileValue extracts KEY=VALUE from dotenv content, skipping comments
