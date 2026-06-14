@@ -65,7 +65,7 @@ function routeIdentityKey(route: CurrentRoute): string {
     case "agents":
       return "agents";
     case "agent-detail":
-      return `agent-detail:${route.agentSlug}`;
+      return `agent-detail:${route.agentSlug}:${route.tab ?? ""}`;
     case "skill-detail":
       return `skill-detail:${route.skillName}`;
     case "routine-detail":

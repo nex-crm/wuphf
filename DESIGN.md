@@ -1,7 +1,7 @@
 # Design System — WUPHF Pixel Office Website
 
 ## Product Context
-- **What this is:** The marketing/landing website for WUPHF — an open-source AI agent office tool where an AI team (CEO, PM, engineers, designer) works visibly in a shared office, claimable via one terminal command.
+- **What this is:** The marketing/landing website for WUPHF — a source-available AI agent office tool where an AI team (CEO, PM, engineers, designer) works visibly in a shared office, claimable via one terminal command.
 - **Who it's for:** Developers and technical founders who want an AI team that works in the open rather than behind an API.
 - **Space/industry:** AI developer tools / agent frameworks.
 - **Project type:** Isometric pixel-art marketing site. The website IS the product experience — not a description of it.
@@ -166,7 +166,7 @@ Where `TW=60`, `TH=30`, `OX=420`, `OY=100`.
 | Reception drawer (first, flashes) | `"One command. One office. ./wuphf"` |
 | Paper on Pam's desk | `"CEO, PM, engineers — all visible, all working."` |
 | Conference room whiteboard | Architecture diagram — agent routing + broker |
-| Agent monitor screen | `"Open source. MIT license. go build -o wuphf"` |
+| Agent monitor screen | `"Source available. Fair-code license. go build -o wuphf"` |
 | Plant by window | `"Unlike Ryan Howard's WUPHF, this one works."` |
 | Break room fridge | Full install command |
 | Stapler in jello (Dwight area) | Easter egg — Dwight rage quit message |

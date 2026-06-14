@@ -15,6 +15,7 @@ import (
 
 	wuphf "github.com/nex-crm/wuphf"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // Web UI server. Owns:
@@ -92,10 +93,28 @@ func (b *Broker) ServeWebUI(port int) error {
 	// Otherwise this endpoint leaks the broker bearer to any browser page that
 	// can reach the web UI port via DNS rebinding.
 	mux.Handle("/api-token", webUIRebindGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Runtime config injection for the web app. Beyond the broker token,
+		// we hand the frontend the resolved PostHog analytics config so a
+		// self-hosted operator can point at their own project (WUPHF_POSTHOG_*
+		// env) and toggle either channel without rebuilding the bundle. The
+		// project key here is the write-only PROJECT key, safe to expose to a
+		// loopback client by design; this endpoint is already same-origin
+		// loopback-guarded against DNS rebinding. When no backend key is set,
+		// `posthog_key` is empty and the frontend falls back to its build-time
+		// VITE_PUBLIC_POSTHOG_KEY (also empty in a stock OSS build → dormant).
+		cfg, _ := config.Load()
+		posthogKey := config.ResolvePostHogKey()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"token":      b.token,
 			"broker_url": brokerURL,
+			"analytics": map[string]any{
+				"configured":                posthogKey != "",
+				"posthog_key":               posthogKey,
+				"posthog_host":              config.ResolvePostHogHost(),
+				"telemetry_enabled":         cfg.IsAnalyticsTelemetryEnabled(),
+				"session_recording_enabled": cfg.IsAnalyticsSessionRecordingEnabled(),
+			},
 		})
 	})))
 	// Cache policy: index.html must be re-fetched every load so users pick up

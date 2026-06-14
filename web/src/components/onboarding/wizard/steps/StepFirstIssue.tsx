@@ -25,6 +25,7 @@ import { useCallback } from "react";
 
 import { PixelAvatar } from "../../../ui/PixelAvatar";
 import {
+  ONBOARDING_ANALYTICS_CONSENT_COPY,
   ONBOARDING_EMAIL_COPY,
   ONBOARDING_FIRST_ISSUE_EXAMPLE,
   ONBOARDING_WIZARD_COPY,
@@ -106,6 +107,46 @@ export function StepFirstIssue({
             </span>
           </label>
         ) : null}
+
+        <div
+          className="onboarding-analytics-consent"
+          data-testid="onboarding-analytics-consent"
+        >
+          <p className="onboarding-analytics-consent-heading">
+            {ONBOARDING_ANALYTICS_CONSENT_COPY.heading}
+          </p>
+          <label className="onboarding-keep-in-touch">
+            <input
+              type="checkbox"
+              className="onboarding-keep-in-touch-box"
+              checked={answers.telemetryConsent}
+              onChange={(event) =>
+                setAnswers({ telemetryConsent: event.target.checked })
+              }
+              data-testid="onboarding-consent-telemetry"
+            />
+            <span className="onboarding-keep-in-touch-copy">
+              {ONBOARDING_ANALYTICS_CONSENT_COPY.telemetryLabel}
+            </span>
+          </label>
+          <label className="onboarding-keep-in-touch">
+            <input
+              type="checkbox"
+              className="onboarding-keep-in-touch-box"
+              checked={answers.recordingConsent}
+              onChange={(event) =>
+                setAnswers({ recordingConsent: event.target.checked })
+              }
+              data-testid="onboarding-consent-recording"
+            />
+            <span className="onboarding-keep-in-touch-copy">
+              {ONBOARDING_ANALYTICS_CONSENT_COPY.recordingLabel}
+            </span>
+          </label>
+          <p className="onboarding-analytics-consent-note">
+            {ONBOARDING_ANALYTICS_CONSENT_COPY.note}
+          </p>
+        </div>
       </div>
 
       <div className="office-tour-slide-stage office-tour-slide-stage--first-issue">

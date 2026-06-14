@@ -44,15 +44,29 @@ import (
 const (
 	composioSigninStatusIdle          = "idle"
 	composioSigninStatusCLIMissing    = "cli_missing"
+	composioSigninStatusInstalling    = "installing"
 	composioSigninStatusAwaitingLogin = "awaiting_login"
 	composioSigninStatusProvisioning  = "provisioning"
 	composioSigninStatusDone          = "done"
 	composioSigninStatusError         = "error"
 )
 
-// composioInstallCommand is surfaced verbatim by the UI when the CLI is not on
-// PATH, with a copy button next to it.
-const composioInstallCommand = "curl -fsSL https://composio.dev/install | bash"
+// composioInstallCommand is the install command surfaced verbatim by the UI as
+// a copy-able fallback, and (on Unix) run by the auto-install path. It is
+// OS-specific — defined in broker_composio_signin_unix.go (the official
+// `curl | bash` installer) and broker_composio_signin_windows.go (npm, since
+// the `curl | bash` script has no Windows equivalent) — so Windows users are
+// never shown a Unix-only command they can't run.
+
+// composioInstaller runs the official installer. It's a package var so tests
+// substitute a fake install instead of shelling out, and so the real
+// implementation can be platform-specific: the installer is a `curl | bash`
+// pipeline that only exists on Unix, so the default lives in
+// broker_composio_signin_unix.go; Windows gets a stub that reports
+// not-supported (broker_composio_signin_windows.go), which cleanly falls back
+// to the manual install command. It runs ONLY after the human explicitly chose
+// "Sign in with Composio".
+var composioInstaller = defaultComposioInstaller
 
 var (
 	// composioProjectKeyPattern accepts only project-scoped SDK keys.
@@ -73,6 +87,12 @@ var (
 	// composioLoginWindow is how long a started flow stays in awaiting_login
 	// before the status endpoint reports a timeout.
 	composioLoginWindow = 15 * time.Minute
+	// composioInstallTimeout bounds the auto-install of the CLI.
+	composioInstallTimeout = 4 * time.Minute
+	// composioInstallDeadlineGrace is how long past the install context the
+	// status endpoint waits before declaring the install wedged — enough for
+	// the auto-install goroutine to flip state after its context ends.
+	composioInstallDeadlineGrace = 30 * time.Second
 )
 
 // composioSigninState is the wire shape both endpoints return.
@@ -103,7 +123,7 @@ func (b *Broker) handleComposioSigninStart(w http.ResponseWriter, r *http.Reques
 	flow.mu.Lock()
 	// Single-flight: a second start while a flow is pending returns the
 	// current state instead of spawning a second CLI pipeline.
-	if flow.state.Status == composioSigninStatusAwaitingLogin || flow.state.Status == composioSigninStatusProvisioning {
+	if flow.state.Status == composioSigninStatusInstalling || flow.state.Status == composioSigninStatusAwaitingLogin || flow.state.Status == composioSigninStatusProvisioning {
 		state := flow.state
 		flow.mu.Unlock()
 		writeComposioSigninState(w, state)
@@ -111,12 +131,26 @@ func (b *Broker) handleComposioSigninStart(w http.ResponseWriter, r *http.Reques
 	}
 	actor := integrationRequestActor(r)
 	if _, err := exec.LookPath("composio"); err != nil {
+		// Auto-install on demand: the CLI is needed for one-click sign-in, so
+		// rather than dead-ending on cli_missing we run the official installer
+		// once in the background and continue the flow. The manual install
+		// command is still surfaced as a fallback if the install fails.
+		flow.actor = actor
 		flow.state = composioSigninState{
-			Status:         composioSigninStatusCLIMissing,
+			Status:         composioSigninStatusInstalling,
 			InstallCommand: composioInstallCommand,
 		}
+		// Backstop only the INSTALL phase (a small grace past the install
+		// context so the auto-install goroutine can transition state first).
+		// The login window is a separate, later deadline set by
+		// composioSigninBeginLogin once the flow reaches awaiting_login; folding
+		// it in here would leave a wedged install showing "installing" for the
+		// whole install+login span instead of timing out at the install budget.
+		flow.deadline = time.Now().Add(composioInstallTimeout + composioInstallDeadlineGrace)
 		state := flow.state
 		flow.mu.Unlock()
+		b.recordComposioSigninEvent("integration_signin_started", actor, "Installing the Composio CLI, then signing in")
+		go b.composioSigninAutoInstall()
 		writeComposioSigninState(w, state)
 		return
 	}
@@ -177,6 +211,18 @@ func (b *Broker) handleComposioSigninStatus(w http.ResponseWriter, r *http.Reque
 	if state.Status == "" {
 		state.Status = composioSigninStatusIdle
 	}
+	if state.Status == composioSigninStatusInstalling && !deadline.IsZero() && time.Now().After(deadline) {
+		flow.mu.Lock()
+		if flow.state.Status == composioSigninStatusInstalling {
+			flow.state = composioSigninState{
+				Status:         composioSigninStatusCLIMissing,
+				InstallCommand: composioInstallCommand,
+				Reason:         "the Composio install is taking too long — run the install command shown, then try again",
+			}
+		}
+		state = flow.state
+		flow.mu.Unlock()
+	}
 	if state.Status == composioSigninStatusAwaitingLogin {
 		if b.composioSigninAdvanceIfLoggedIn() {
 			flow.mu.Lock()
@@ -195,6 +241,76 @@ func (b *Broker) handleComposioSigninStatus(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	writeComposioSigninState(w, state)
+}
+
+// composioSigninAutoInstall runs the official installer once, then continues
+// the sign-in if the CLI landed on PATH. On failure it falls back to
+// cli_missing with the manual install command. PATH (not the exit code) is the
+// source of truth — installers can warn-and-exit nonzero while still placing
+// the binary.
+func (b *Broker) composioSigninAutoInstall() {
+	ctx, cancel := context.WithTimeout(context.Background(), composioInstallTimeout)
+	defer cancel()
+	runErr := composioInstaller(ctx)
+	if _, err := exec.LookPath("composio"); err != nil {
+		flow := &b.composioSignin
+		flow.mu.Lock()
+		if flow.state.Status == composioSigninStatusInstalling {
+			reason := "could not install the Composio CLI automatically — run the install command shown, then try again"
+			if runErr == nil {
+				reason = "the Composio installer finished but the CLI is still not on PATH — run the install command shown, then try again"
+			}
+			flow.state = composioSigninState{
+				Status:         composioSigninStatusCLIMissing,
+				InstallCommand: composioInstallCommand,
+				Reason:         reason,
+			}
+		}
+		flow.mu.Unlock()
+		return
+	}
+	b.composioSigninBeginLogin()
+}
+
+// composioSigninBeginLogin continues an installing flow once the CLI is
+// available: straight to provisioning if a session already exists, otherwise it
+// mints the login URL and moves to awaiting_login (the status poll surfaces the
+// auth_url and the FE opens it). Mirrors the CLI-present branch of
+// handleComposioSigninStart, but runs in the background since that request
+// already returned `installing`.
+func (b *Broker) composioSigninBeginLogin() {
+	flow := &b.composioSignin
+	flow.mu.Lock()
+	if flow.state.Status != composioSigninStatusInstalling {
+		flow.mu.Unlock()
+		return
+	}
+	if composioCLILoggedIn() {
+		flow.state = composioSigninState{Status: composioSigninStatusProvisioning}
+		flow.mu.Unlock()
+		go b.composioSigninProvision()
+		return
+	}
+	flow.state = composioSigninState{Status: composioSigninStatusAwaitingLogin}
+	flow.deadline = time.Now().Add(composioLoginWindow)
+	flow.mu.Unlock()
+
+	authURL, err := composioMintLoginURL()
+	flow.mu.Lock()
+	if flow.state.Status == composioSigninStatusAwaitingLogin {
+		if err != nil {
+			flow.state = composioSigninState{
+				Status: composioSigninStatusError,
+				Reason: "composio login could not start: " + err.Error(),
+			}
+		} else {
+			flow.state.AuthURL = authURL
+		}
+	}
+	flow.mu.Unlock()
+	if err == nil {
+		go b.composioSigninAwaitLogin()
+	}
 }
 
 // composioSigninAwaitLogin blocks on `composio login --poll`, which completes

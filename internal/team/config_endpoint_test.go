@@ -166,6 +166,104 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 
 }
 
+// TestConfigEndpointAnalyticsToggles verifies the two product-analytics consent
+// channels default ON, round-trip an explicit opt-out independently of each
+// other, and persist to disk as explicit false (not omitted). Regression guard
+// for the consent wire shape the onboarding wizard and Settings both POST.
+func TestConfigEndpointAnalyticsToggles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("WUPHF_RUNTIME_HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".wuphf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	b := newTestBroker(t)
+	b.runtimeProvider = "claude-code"
+	b.token = "test-token"
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer func() {
+		if b.server != nil {
+			_ = b.server.Shutdown(context.Background())
+		}
+	}()
+
+	getConfig := func() map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, "http://"+b.addr+"/config", nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET /config: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("decode /config: %v (body=%s)", err, string(raw))
+		}
+		return out
+	}
+	post := func(payload string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", bytes.NewBufferString(payload))
+		req.Header.Set("Authorization", "Bearer test-token")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST /config %s: %v", payload, err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST /config %s: status=%d body=%s", payload, resp.StatusCode, string(raw))
+		}
+	}
+
+	// Default: both channels ON when nothing has been set.
+	cfg := getConfig()
+	if cfg["analytics_telemetry_enabled"] != true {
+		t.Fatalf("telemetry should default true, got %v", cfg["analytics_telemetry_enabled"])
+	}
+	if cfg["analytics_session_recording_enabled"] != true {
+		t.Fatalf("recording should default true, got %v", cfg["analytics_session_recording_enabled"])
+	}
+
+	// Opt out of telemetry only — recording must stay ON (independent toggles).
+	post(`{"analytics_telemetry_enabled":false}`)
+	cfg = getConfig()
+	if cfg["analytics_telemetry_enabled"] != false {
+		t.Fatalf("telemetry opt-out not reflected, got %v", cfg["analytics_telemetry_enabled"])
+	}
+	if cfg["analytics_session_recording_enabled"] != true {
+		t.Fatalf("recording should remain ON after telemetry opt-out, got %v", cfg["analytics_session_recording_enabled"])
+	}
+
+	// Opt out of recording too, then verify both are persisted to disk as
+	// explicit false (a *bool to false is not omitted by omitempty).
+	post(`{"analytics_session_recording_enabled":false}`)
+	cfg = getConfig()
+	if cfg["analytics_session_recording_enabled"] != false {
+		t.Fatalf("recording opt-out not reflected, got %v", cfg["analytics_session_recording_enabled"])
+	}
+	disk, _ := os.ReadFile(filepath.Join(tmp, ".wuphf", "config.json"))
+	if !strings.Contains(string(disk), `"analytics_telemetry_enabled": false`) {
+		t.Fatalf("config.json missing telemetry opt-out: %s", string(disk))
+	}
+	if !strings.Contains(string(disk), `"analytics_session_recording_enabled": false`) {
+		t.Fatalf("config.json missing recording opt-out: %s", string(disk))
+	}
+
+	// Re-enabling telemetry round-trips back to true.
+	post(`{"analytics_telemetry_enabled":true}`)
+	cfg = getConfig()
+	if cfg["analytics_telemetry_enabled"] != true {
+		t.Fatalf("telemetry re-enable not reflected, got %v", cfg["analytics_telemetry_enabled"])
+	}
+}
+
 // TestConfigEndpointAcceptsActionProviders verifies the web UI POST /config
 // validator accepts every action_provider string the registry supports.
 // Regression test for the case where "one" was rejected with 400 even though

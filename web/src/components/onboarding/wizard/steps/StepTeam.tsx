@@ -28,6 +28,7 @@ import {
   useState,
 } from "react";
 
+import { track } from "../../../../lib/analytics";
 import { PixelAvatar } from "../../../ui/PixelAvatar";
 import type { BlueprintOption } from "../types";
 import {
@@ -227,10 +228,16 @@ export function StepTeam({
         });
         return;
       }
+      const picked = defaultPickedAgents(blueprint);
       setAnswers({
         blueprintId: blueprint.id,
-        pickedAgents: defaultPickedAgents(blueprint),
+        pickedAgents: picked,
         startFromScratch: false,
+      });
+      track("onboarding_blueprint_selected", {
+        blueprint_id: blueprint.id,
+        agent_count: picked.length,
+        start_from_scratch: false,
       });
     },
     [answers.blueprintId, setAnswers],

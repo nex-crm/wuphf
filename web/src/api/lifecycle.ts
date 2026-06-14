@@ -10,6 +10,7 @@
  * exposes the real endpoints. The shape on the wire is identical.
  */
 
+import { trackOn } from "../lib/analytics";
 import {
   getDecisionPacketMock,
   getInboxPayloadMock,
@@ -277,7 +278,11 @@ export async function postDecision(
     { action, created_by: "human" };
   const trimmed = (comment ?? "").trim();
   if (trimmed) body.comment = trimmed;
-  return post(`/tasks/${encodeURIComponent(taskId)}/decision`, body);
+  return trackOn(
+    post(`/tasks/${encodeURIComponent(taskId)}/decision`, body),
+    "decision_submitted",
+    { action, surface: "packet", has_comment: !!trimmed },
+  );
 }
 
 /**
@@ -308,13 +313,17 @@ export async function postTaskReject(
       status: "recorded-mock",
     });
   }
-  return post(`/tasks`, {
-    action: "reject",
-    id: taskId,
-    channel: "general",
-    details: trimmed,
-    created_by: "human",
-  });
+  return trackOn(
+    post(`/tasks`, {
+      action: "reject",
+      id: taskId,
+      channel: "general",
+      details: trimmed,
+      created_by: "human",
+    }),
+    "decision_submitted",
+    { action: "reject", surface: "packet", has_comment: true },
+  );
 }
 
 /**
@@ -338,5 +347,9 @@ export async function postTaskResume(
   const body: { reason?: string } = {};
   const trimmed = (reason ?? "").trim();
   if (trimmed) body.reason = trimmed;
-  return post(`/tasks/${encodeURIComponent(taskId)}/resume`, body);
+  return trackOn(
+    post(`/tasks/${encodeURIComponent(taskId)}/resume`, body),
+    "task_status_changed",
+    { action: "resume" },
+  );
 }

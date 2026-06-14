@@ -92,7 +92,7 @@ Load-bearing details from the diagrams:
 | B2 | **KG → entity wiki articles** with Wikipedia-style linking; kill folder taxonomy (Companies/People/… folders become categories/links) | wiki worker, entity graph (broker_entity*.go), Graph surface |
 | B3 | **Playbook detection → playbook articles → interval compilation into skills + policies** with auto-assignment to relevant agents at creation (and at CEO agent-creation time); CEO can reassign in chat; skill UPDATE-FIRST under a token-size threshold (grow scope before creating new); policies single-threaded (atomic) | skill_compile cron, SkillOpt, policies store |
 | B4 | **Private per-agent knowledge graph → generated notebooks** (agents continuously write structured knowledge to their private KG; notebooks — pre-task research + post-task deliverables/learnings — are generated views of it) + on-demand hybrid retrieval (wire `internal/embedding` dense path into the U2 retrieval spine) + **"context I used" transparency posts in chat** | context_assembler.go, notebook system, entity graph, U2 |
-| B5 | **Wikipedia-parity wiki UX** | Tiptap (already in PR #1018 lineage). **DECISION FLAG:** docmost is AGPL-3.0; WUPHF is MIT — embedding docmost as a library imposes AGPL obligations on every distribution. Recommended: docmost as the UX reference (it's also Tiptap-based), native implementation. If literal docmost embedding is wanted anyway, that's a licensing decision for the founder to make explicitly. |
+| B5 | **Wikipedia-parity wiki UX** | Tiptap (already in PR #1018 lineage). **DECISION FLAG:** docmost is AGPL-3.0; WUPHF is source-available (Sustainable Use License) — embedding docmost as a library imposes AGPL obligations on every distribution. Recommended: docmost as the UX reference (it's also Tiptap-based), native implementation. If literal docmost embedding is wanted anyway, that's a licensing decision for the founder to make explicitly. |
 | B6 | **Update-first knowledge discipline**: retrieval-before-write on every store (notebook/article/policy/skill); prune/extend instead of create; staleness pruning | relevantLearnings seam, wiki lint/archiver |
 
 ## How the ICP-eval grader's top-3 fixes are absorbed
@@ -106,7 +106,7 @@ Load-bearing details from the diagrams:
 | # | Decision | Why |
 |---|---|---|
 | C1 | Redactor removal preserves the PR-#684 approval-card sanitizer if separable | Different threat: confused-deputy via agent-controlled strings in approval payloads, not secret-masking |
-| C2 | docmost = UX reference, not dependency (pending founder override) | AGPL-3.0 vs MIT distribution |
+| C2 | docmost = UX reference, not dependency (pending founder override) | AGPL-3.0 vs SUL distribution |
 | C3 | Transports deferred to sweep 2 of R6 | Opt-in at load time; removing them now risks churn without serving the loop |
 | C4 | Verification gate + eval harness + turn journal + context assembler + auto-distill SURVIVE | They are the loop's enforcement substrate (success criteria, artifacts, notebooks-as-memory, deterministic learning); eval harness checks get rewritten to assert the loop |
 | C5 | Office-hours adoption = its method (forcing questions, narrowest wedge, design-doc discipline), not its gstack plumbing | The preamble/telemetry/config machinery is gstack-specific |

@@ -19,6 +19,9 @@ vi.mock("../../api/client", async () => {
   return {
     ...actual,
     answerRequest: vi.fn().mockResolvedValue({}),
+    // ConnectIntegrationCard (rendered for kind="connect") reads config for the
+    // Composio sign-in gate on mount; keep it off the network in tests.
+    getConfig: vi.fn().mockResolvedValue({ composio_key_set: true }),
   };
 });
 
@@ -80,6 +83,33 @@ describe("<InterviewBar> approval UX", () => {
     expect(screen.getByText("Welcome to Nex")).toBeInTheDocument();
     expect(
       screen.getByText("live::gmail::default::abc123"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the OAuth connect card for kind=connect, not generic options", () => {
+    const connect: AgentRequest = {
+      id: "request-connect",
+      from: "growthops",
+      channel: "general",
+      kind: "connect",
+      status: "pending",
+      title: "Connect Gmail",
+      question: "Connect Gmail so the team can run this action.",
+      platform: "gmail",
+      options: [
+        { id: "connect", label: "Connect" },
+        { id: "skip", label: "Skip" },
+      ],
+      blocking: true,
+    };
+    setPending([connect]);
+    render(wrap(<InterviewBar />));
+    // The card-only "Connect to continue" eyebrow proves ConnectIntegrationCard
+    // rendered instead of the generic interview option buttons (the bug: those
+    // buttons just answered the request and never opened OAuth).
+    expect(screen.getByText("Connect to continue")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Connect Gmail" }),
     ).toBeInTheDocument();
   });
 

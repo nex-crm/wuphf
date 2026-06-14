@@ -77,6 +77,18 @@ type Config struct {
 	CompanyFilePaths    []string `json:"company_file_paths,omitempty"`
 	PendingCompanySeed  bool     `json:"pending_company_seed,omitempty"`
 
+	// Product analytics consent (PostHog). Two independent channels:
+	// anonymous usage events and fully-masked session recordings. Both
+	// default ON when unset (nil) so legacy installs keep the documented
+	// default, but the whole analytics layer is dormant unless a PostHog
+	// project key is configured (build-time VITE_PUBLIC_POSTHOG_KEY or
+	// WUPHF_POSTHOG_KEY env), so an unset flag is moot until analytics is
+	// actually wired up. The pointer type distinguishes "never chosen"
+	// (default ON) from an explicit opt-out (false), which a plain bool
+	// with omitempty could not. See docs/specs/product-analytics.md.
+	AnalyticsTelemetryEnabled        *bool `json:"analytics_telemetry_enabled,omitempty"`
+	AnalyticsSessionRecordingEnabled *bool `json:"analytics_session_recording_enabled,omitempty"`
+
 	OpenclawBridges    []OpenclawBridgeBinding `json:"openclaw_bridges,omitempty"`
 	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`
 	OpenclawToken      string                  `json:"openclaw_token,omitempty"`
@@ -584,6 +596,42 @@ func ResolveComposioAPIKey() string {
 	}
 	cfg, _ := Load()
 	return strings.TrimSpace(cfg.ComposioAPIKey)
+}
+
+// IsAnalyticsTelemetryEnabled reports whether anonymous product-analytics
+// events may be sent. Default ON when the operator has not explicitly opted
+// out (nil flag). The analytics layer is still dormant unless a PostHog key is
+// configured, so this only takes effect once analytics is wired up.
+func (c Config) IsAnalyticsTelemetryEnabled() bool {
+	return c.AnalyticsTelemetryEnabled == nil || *c.AnalyticsTelemetryEnabled
+}
+
+// IsAnalyticsSessionRecordingEnabled reports whether fully-masked session
+// recordings may be captured. Default ON when not explicitly opted out (nil).
+func (c Config) IsAnalyticsSessionRecordingEnabled() bool {
+	return c.AnalyticsSessionRecordingEnabled == nil || *c.AnalyticsSessionRecordingEnabled
+}
+
+// ResolvePostHogKey returns the PostHog project (write-only) API key used for
+// product analytics, from env only. Empty means the backend injects no key, in
+// which case the frontend falls back to the build-time VITE_PUBLIC_POSTHOG_KEY
+// (which is also empty in a stock OSS build, keeping analytics dormant).
+// Resolution: WUPHF_POSTHOG_KEY env > POSTHOG_KEY env.
+func ResolvePostHogKey() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_POSTHOG_KEY")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("POSTHOG_KEY"))
+}
+
+// ResolvePostHogHost returns the PostHog ingestion host from env, or empty to
+// let the frontend use its build-time default (us.i.posthog.com).
+// Resolution: WUPHF_POSTHOG_HOST env > POSTHOG_HOST env.
+func ResolvePostHogHost() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_POSTHOG_HOST")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("POSTHOG_HOST"))
 }
 
 // ResolveTelegramBotToken returns the stored Telegram bot token from config.
