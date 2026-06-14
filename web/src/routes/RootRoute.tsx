@@ -133,11 +133,6 @@ const SkillsApp = lazy(() =>
   })),
 );
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
-const DecisionInbox = lazy(() =>
-  import("../components/lifecycle/DecisionInbox").then((m) => ({
-    default: m.DecisionInbox,
-  })),
-);
 const DecisionPacketRoute = lazy(() =>
   import("../components/lifecycle/DecisionPacketRoute").then((m) => ({
     default: m.DecisionPacketRoute,
@@ -361,7 +356,7 @@ function navigateNotebookEntry(
 }
 
 const APP_PANELS = {
-  requests: InboxRedirect,
+  requests: TasksRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
   routines: RoutinesApp,
@@ -524,15 +519,16 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
 }
 
 /**
- * InboxRedirect navigates the user from the deprecated /apps/requests
- * surface to the unified Inbox. Phase 2 collapsed Requests into the
- * Decision Inbox; this stub keeps existing /apps/requests bookmarks
- * working. (The Reviews tab inside Wiki is its own surface again —
- * see ReviewQueueKanban.)
+ * TasksRedirect navigates the user to the Task board. It backs both the
+ * deprecated `/apps/requests` panel and the retired `/inbox` route: the
+ * standalone Inbox was consolidated into the board (its attention items
+ * live in the "Needs human input" lane), so every old entry point lands
+ * on `/tasks`. Keeps existing `/apps/requests` and `/inbox` bookmarks
+ * working without resurrecting the surface.
  */
-function InboxRedirect() {
+function TasksRedirect() {
   useEffect(() => {
-    void router.navigate({ to: "/inbox", replace: true });
+    void router.navigate({ to: "/tasks", replace: true });
   }, []);
   return (
     <div className="app-panel active" data-testid="legacy-redirect-inbox">
@@ -546,7 +542,7 @@ function InboxRedirect() {
           fontSize: 14,
         }}
       >
-        Redirecting to Inbox…
+        Redirecting to Tasks…
       </div>
     </div>
   );
@@ -563,10 +559,12 @@ function InboxRedirect() {
  */
 const FIRST_CLASS_APP_TARGETS: Record<
   FirstClassAppId,
-  "/wiki" | "/inbox" | "/tasks" | "/agents"
+  "/wiki" | "/tasks" | "/agents"
 > = {
   wiki: "/wiki",
-  inbox: "/inbox",
+  // The Inbox was consolidated into the board — send `/apps/inbox` straight
+  // to /tasks rather than double-hopping through the retired /inbox route.
+  inbox: "/tasks",
   tasks: "/tasks",
   agents: "/agents",
 };
@@ -709,7 +707,9 @@ function MainContent() {
     case "article":
       return <ArticleView articleId={route.articleId} />;
     case "inbox":
-      return <DecisionInbox />;
+      // The standalone Inbox was consolidated into the Task board; `/inbox`
+      // is kept only as a redirect for old bookmarks.
+      return <TasksRedirect />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
     case "agents":

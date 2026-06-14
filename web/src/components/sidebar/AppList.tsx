@@ -25,9 +25,9 @@ import {
   WIKI_SURFACE_APP_IDS,
 } from "../../routes/routeRegistry";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
-import { InboxButton } from "./InboxButton";
 import { SidebarItem } from "./SidebarItem";
 import { SidebarSection } from "./SidebarSection";
+import { TasksNavButton } from "./TasksNavButton";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
@@ -53,9 +53,10 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   integrations: Puzzle,
 };
 
-// The sidebar is three labeled groups. `inbox` is special — it renders via
-// InboxButton (with its own attention badge); the rest are SIDEBAR_TOOLS ids.
-// Order within each group is the display order. (The `routines` tool shows as
+// The sidebar is three labeled groups. `tasks` is special — it renders via
+// TasksNavButton (the primary Work surface, with the attention badge + chime
+// the Inbox button used to carry); the rest are SIDEBAR_TOOLS ids. Order
+// within each group is the display order. (The `routines` tool shows as
 // "Scheduled Tasks" via APP_LABELS.)
 const NAV_SECTIONS: ReadonlyArray<{
   label: string;
@@ -63,7 +64,7 @@ const NAV_SECTIONS: ReadonlyArray<{
 }> = [
   {
     label: "Work",
-    items: ["inbox", "activity", "tasks", "routines"],
+    items: ["tasks", "activity", "routines"],
   },
   { label: "Knowledge", items: ["wiki", "graph"] },
   {
@@ -98,7 +99,7 @@ export function AppList() {
   const toolById = new Map(SIDEBAR_TOOLS.map((tool) => [tool.id, tool]));
 
   function renderItem(id: string) {
-    if (id === "inbox") return <InboxButton key="inbox" />;
+    if (id === "tasks") return <TasksNavButton key="tasks" />;
     const tool = toolById.get(id as (typeof SIDEBAR_TOOLS)[number]["id"]);
     if (!tool) return null;
     const Icon = APP_ICONS[id];

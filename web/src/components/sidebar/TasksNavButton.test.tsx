@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OfficeStats } from "../../api/platform";
 import * as platformApi from "../../api/platform";
 import { useAppStore } from "../../stores/app";
-import { InboxButton } from "./InboxButton";
+import { TasksNavButton } from "./TasksNavButton";
 
 vi.mock("../../routes/useCurrentRoute", async (importOriginal) => {
   const actual =
@@ -52,22 +52,27 @@ afterEach(() => {
   useAppStore.setState({ brokerConnected: false });
 });
 
-describe("<InboxButton>", () => {
+describe("<TasksNavButton>", () => {
+  it("labels the primary Work entry as Tasks", () => {
+    render(wrap(<TasksNavButton />));
+    expect(screen.getByText("Tasks")).toBeInTheDocument();
+  });
+
   it("renders the broker-computed inbox_attention as the badge (C1)", async () => {
     useAppStore.setState({ brokerConnected: true });
     vi.spyOn(platformApi, "getOfficeStats").mockResolvedValue(STATS);
 
-    render(wrap(<InboxButton />));
+    render(wrap(<TasksNavButton />));
 
-    // The badge is the broker's number — not a private re-count of a
-    // separate /inbox/items poll (the v1 "Inbox 10 vs 11" drift).
+    // The badge is the broker's number — the same attention roll-up that
+    // used to live on the standalone Inbox button, now hosted on Tasks.
     await waitFor(() => {
       expect(screen.getByTestId("inbox-unread-badge")).toHaveTextContent("11");
     });
   });
 
   it("renders no badge while the count is unknown or zero", () => {
-    render(wrap(<InboxButton />));
+    render(wrap(<TasksNavButton />));
     expect(screen.queryByTestId("inbox-unread-badge")).toBeNull();
   });
 });

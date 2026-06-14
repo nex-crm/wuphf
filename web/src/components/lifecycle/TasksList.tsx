@@ -19,6 +19,7 @@
 import { memo, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { getInboxItems } from "../../api/lifecycle";
 import type { OfficeStatsTasks } from "../../api/platform";
 import { getScheduler, type SchedulerJob } from "../../api/scheduler";
 import {
@@ -29,6 +30,12 @@ import {
 import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { router } from "../../lib/router";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
+import {
+  type InboxItem,
+  type InboxItemRequest,
+  type InboxItemReview,
+  renderInboxItemKey,
+} from "../../lib/types/inbox";
 import {
   type LifecycleStage,
   type LifecycleState,
@@ -73,7 +80,7 @@ const STAGE_HINT: Record<LifecycleStage, string> = {
   backlog: "Parked or awaiting staffing",
   in_progress: "Owner agent working — includes revising",
   blocked: "Blocked on an upstream merge",
-  needs_human: "Awaiting your decision",
+  needs_human: "Decisions, agent questions, and reviews waiting on you",
   done: "Landed",
   archive: "Filed away — archived or rejected",
 };
@@ -197,6 +204,79 @@ const ScheduledTaskCard = memo(function ScheduledTaskCard({
   );
 });
 
+/** Search text for a folded attention item, so the board filter matches a
+ *  request's question / author or a review's source + target path. */
+function attentionSearchText(item: InboxItemRequest | InboxItemReview): string {
+  if (item.kind === "request") {
+    return `${item.title ?? ""} ${item.request.question ?? ""} ${item.request.from ?? ""}`;
+  }
+  return `${item.title ?? ""} ${item.review.sourceSlug ?? ""} ${item.review.targetPath ?? ""}`;
+}
+
+/** Card for a non-task attention item — a blocking agent request or a
+ *  pending review — folded into the "Needs human input" lane when the
+ *  standalone Inbox was consolidated into the board. Clicking a request
+ *  opens the chat where its InterviewBar answers it; a review opens the
+ *  Wiki Reviews tab. Reuses the task-card shell so the lane reads
+ *  consistently with the lifecycle columns above it. */
+const AttentionItemCard = memo(function AttentionItemCard({
+  item,
+}: {
+  item: InboxItemRequest | InboxItemReview;
+}) {
+  function navigate() {
+    if (item.kind === "request") {
+      const channel = item.channel?.trim();
+      if (channel) {
+        void router.navigate({
+          to: "/channels/$channelSlug",
+          params: { channelSlug: channel },
+        });
+        return;
+      }
+      const issueId = item.request.issueId?.trim();
+      if (issueId) {
+        void router.navigate({
+          to: "/tasks/$taskId",
+          params: { taskId: issueId },
+        });
+        return;
+      }
+      void router.navigate({ to: "/tasks" });
+      return;
+    }
+    // review → the Wiki Reviews tab, the canonical promotion-review surface.
+    void router.navigate({ to: "/reviews" });
+  }
+
+  const isRequest = item.kind === "request";
+  const typeLabel = isRequest ? "Question" : "Review";
+  const title = isRequest
+    ? item.title || item.request.question || "Open request"
+    : item.title || "Pending review";
+  const subline = isRequest
+    ? item.request.from
+      ? `from @${item.request.from}`
+      : "Awaiting your answer"
+    : `${item.review.sourceSlug} → ${item.review.targetPath}`;
+
+  return (
+    <button
+      type="button"
+      className="issues-kanban-card"
+      onClick={navigate}
+      data-testid={isRequest ? "attention-request-row" : "attention-review-row"}
+      aria-label={`${typeLabel}: ${title}`}
+    >
+      <div className="issues-kanban-card-title">{title}</div>
+      <div className="issues-kanban-card-meta">
+        <span className="issues-kanban-card-kind">{typeLabel}</span>
+        <span className="issues-kanban-card-owner">{subline}</span>
+      </div>
+    </button>
+  );
+});
+
 function TasksListSkeleton() {
   return (
     <div
@@ -271,6 +351,11 @@ interface TasksListProps {
   initialTasks?: Task[];
   /** Used in tests to seed the shared stats counts without a broker. */
   initialStats?: OfficeStatsTasks;
+  /**
+   * Used in tests to seed the folded attention items (blocking requests +
+   * pending reviews) shown in the Needs-human lane without a broker poll.
+   */
+  initialInboxItems?: InboxItem[];
 }
 
 /**
@@ -330,7 +415,11 @@ function readLanePrefs(): Record<string, boolean> {
   return {};
 }
 
-export function TasksList({ initialTasks, initialStats }: TasksListProps = {}) {
+export function TasksList({
+  initialTasks,
+  initialStats,
+  initialInboxItems,
+}: TasksListProps = {}) {
   const [query, setQuery] = useState("");
   // Inline dialog replaces /tasks/new full-page form for the in-app path.
   // The route stays mounted as a fallback for direct URL navigation.
@@ -376,6 +465,18 @@ export function TasksList({ initialTasks, initialStats }: TasksListProps = {}) {
     enabled: !initialTasks,
   });
 
+  // Blocking requests + pending reviews fold into the Needs-human lane —
+  // the two non-task halves of the retired Inbox. Same fan-out the
+  // inbox_attention badge counts. Skipped in test renders (initialTasks
+  // set); tests seed `initialInboxItems` directly instead.
+  const inboxResult = useQuery({
+    queryKey: ["inbox-items", "board"],
+    queryFn: () => getInboxItems("all"),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+    enabled: !initialTasks,
+  });
+
   // Shared derived-stats source: lane header counts read the same
   // /office/stats payload the header strip / dashboard / inbox badge
   // consume, so the board header can never disagree with the rest of
@@ -414,6 +515,27 @@ export function TasksList({ initialTasks, initialStats }: TasksListProps = {}) {
       routineLabel(job).toLowerCase().includes(needle),
     );
   }, [scheduledJobs, query]);
+
+  // Non-task attention items folded into the Needs-human lane: every
+  // request + review the unified inbox feed returns (the same set the
+  // inbox_attention badge counts among those two kinds).
+  const attentionItems = useMemo<
+    Array<InboxItemRequest | InboxItemReview>
+  >(() => {
+    const items = initialInboxItems ?? inboxResult.data?.items ?? [];
+    return items.filter(
+      (item): item is InboxItemRequest | InboxItemReview =>
+        item.kind === "request" || item.kind === "review",
+    );
+  }, [initialInboxItems, inboxResult.data]);
+
+  const filteredAttention = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return attentionItems;
+    return attentionItems.filter((item) =>
+      attentionSearchText(item).toLowerCase().includes(needle),
+    );
+  }, [attentionItems, query]);
 
   // Bucket lifecycle tasks by stage. The scheduled stage is filled
   // separately from routines, so it stays empty here.
@@ -464,15 +586,18 @@ export function TasksList({ initialTasks, initialStats }: TasksListProps = {}) {
     if (stage === "scheduled") {
       return filteredScheduled.length;
     }
+    // Folded request + review cards live only in the Needs-human lane, so
+    // its header count is the decision-task count plus those extras.
+    const extras = stage === "needs_human" ? filteredAttention.length : 0;
     // Unfiltered board: lane header counts come from the shared stats
     // payload (one source for every surface). While a search filter is
     // active — or before the stats query resolves — the count reflects
     // exactly the cards rendered below it.
     if (!query.trim() && statsTasks) {
       const fromStats = statsCountForStage(statsTasks, stage);
-      if (fromStats !== null) return fromStats;
+      if (fromStats !== null) return fromStats + extras;
     }
-    return columns[stage].length;
+    return columns[stage].length + extras;
   }
 
   return (
@@ -561,6 +686,19 @@ export function TasksList({ initialTasks, initialStats }: TasksListProps = {}) {
                           <ScheduledTaskCard job={job} />
                         </li>
                       ))
+                    ) : stage === "needs_human" ? (
+                      <>
+                        {columns[stage].map((task) => (
+                          <li key={task.id}>
+                            <TaskCard task={task} />
+                          </li>
+                        ))}
+                        {filteredAttention.map((item) => (
+                          <li key={renderInboxItemKey(item)}>
+                            <AttentionItemCard item={item} />
+                          </li>
+                        ))}
+                      </>
                     ) : (
                       columns[stage].map((task) => (
                         <li key={task.id}>

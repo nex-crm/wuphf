@@ -4396,6 +4396,20 @@ button.verification-badge {
   font-variant-numeric: tabular-nums;
 }
 
+/* Type tag on a non-task attention card (a folded request / review) in the
+   Needs-human lane, so a question or review reads distinctly from a task. */
+.issues-kanban-card-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-row-active);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .issues-list--empty,
 .issues-list--error {
   align-items: center;

@@ -27,6 +27,7 @@ import {
 } from "iconoir-react";
 
 import { getUsage } from "../../api/platform";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import {
@@ -63,6 +64,10 @@ export function CollapsedSidebar({ onExpand }: { onExpand?: () => void }) {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const expand = onExpand ?? toggleCollapsed;
   const currentApp = useCurrentApp();
+  // Tasks is the primary surface and carries the attention roll-up; the
+  // collapsed rail has no room for a number, so show a dot when > 0.
+  const { data: officeStats } = useOfficeStats();
+  const attentionCount = officeStats?.inbox_attention ?? 0;
   const [popover, setPopover] = useState<Popover>(null);
   const [hint, setHint] = useState<HintState>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -171,12 +176,17 @@ export function CollapsedSidebar({ onExpand }: { onExpand?: () => void }) {
             tool.id === "wiki"
               ? WIKI_SURFACE_APPS.has(currentApp ?? "")
               : currentApp === tool.id;
+          const showAttentionDot = tool.id === "tasks" && attentionCount > 0;
           return (
             <button
               key={tool.id}
               type="button"
               className={`sidebar-icon-btn${isActive ? " active" : ""}`}
-              aria-label={tool.label}
+              aria-label={
+                showAttentionDot
+                  ? `${tool.label} (${attentionCount} need attention)`
+                  : tool.label
+              }
               onClick={() => navigateToSidebarApp(tool.id)}
               onMouseEnter={(e) => showHint(e, tool.label)}
               onMouseLeave={hideHint}
@@ -186,6 +196,9 @@ export function CollapsedSidebar({ onExpand }: { onExpand?: () => void }) {
               ) : (
                 <span className="sidebar-item-emoji">{tool.icon}</span>
               )}
+              {showAttentionDot ? (
+                <span className="sidebar-rail-dot" aria-hidden="true" />
+              ) : null}
             </button>
           );
         })}

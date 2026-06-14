@@ -117,7 +117,9 @@ function ActivityRow({ event }: { event: TaskActivityEvent }) {
 
   const handleClick = () => {
     if (!isOpenRequest) return;
-    void router.navigate({ to: "/inbox" });
+    // Open requests live in the board's "Needs human input" lane now that
+    // the standalone Inbox was consolidated into /tasks.
+    void router.navigate({ to: "/tasks" });
   };
 
   return (

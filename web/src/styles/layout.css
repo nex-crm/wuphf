@@ -383,6 +383,18 @@ html[data-theme="nex"]
   background: var(--accent-bg);
   color: var(--text);
 }
+/* Attention indicator on a collapsed-rail tool icon (Tasks carries the
+   inbox_attention count, which has no room for a number in the 30px rail). */
+.sidebar-rail-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
 .sidebar-icon-btn > svg {
   width: 16px;
   height: 16px;

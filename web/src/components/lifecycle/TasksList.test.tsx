@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { OfficeStatsTasks } from "../../api/platform";
 import type { Task } from "../../api/tasks";
+import type { InboxItem } from "../../lib/types/inbox";
 import { TasksList } from "./TasksList";
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -15,13 +16,21 @@ function makeTask(overrides: Partial<Task>): Task {
   };
 }
 
-function renderList(tasks: Task[], stats?: OfficeStatsTasks) {
+function renderList(
+  tasks: Task[],
+  stats?: OfficeStatsTasks,
+  inboxItems?: InboxItem[],
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <TasksList initialTasks={tasks} initialStats={stats} />
+      <TasksList
+        initialTasks={tasks}
+        initialStats={stats}
+        initialInboxItems={inboxItems}
+      />
     </QueryClientProvider>,
   );
 }
@@ -157,5 +166,70 @@ describe("<TasksList>", () => {
     expect(countFor("needs_human")).toBe("3");
     expect(countFor("done")).toBe("5");
     expect(countFor("archive")).toBe("0");
+  });
+
+  it("folds blocking requests and pending reviews into the Needs-human lane", () => {
+    // The standalone Inbox was consolidated into the board: its non-task
+    // attention items (agent questions + promotion reviews) render as cards
+    // next to the decision-state tasks already in the Needs-human lane, and
+    // the lane header count includes them.
+    const inboxItems: InboxItem[] = [
+      {
+        kind: "request",
+        requestId: "req-1",
+        title: "Approve the Q3 budget?",
+        request: {
+          kind: "decision",
+          question: "Approve the Q3 budget?",
+          from: "ceo",
+          blocking: true,
+        },
+      },
+      {
+        kind: "review",
+        reviewId: "rev-1",
+        title: "Promote onboarding playbook",
+        review: {
+          state: "pending",
+          reviewerSlug: "pam",
+          sourceSlug: "alex",
+          targetPath: "playbooks/onboarding.md",
+        },
+      },
+    ];
+
+    renderList(
+      [
+        makeTask({
+          id: "task-decision",
+          title: "Decision task",
+          task_type: "issue",
+          lifecycle_state: "decision",
+        }),
+      ],
+      {
+        backlog: 0,
+        active: 0,
+        blocked: 0,
+        review: 0,
+        needs_human: 1,
+        done: 0,
+        archive: 0,
+      },
+      inboxItems,
+    );
+
+    const needsHuman = screen.getByTestId("issues-kanban-column-needs_human");
+    expect(needsHuman).toHaveTextContent("Decision task");
+    expect(needsHuman).toHaveTextContent("Approve the Q3 budget?");
+    expect(needsHuman).toHaveTextContent("Promote onboarding playbook");
+    expect(screen.getByTestId("attention-request-row")).toBeInTheDocument();
+    expect(screen.getByTestId("attention-review-row")).toBeInTheDocument();
+
+    // 1 decision task (from stats) + 2 folded attention items.
+    const count = needsHuman.querySelector(
+      ".issues-kanban-column-count",
+    )?.textContent;
+    expect(count).toBe("3");
   });
 });

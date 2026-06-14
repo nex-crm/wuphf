@@ -4,7 +4,7 @@ import { SidebarContext } from "../../../.storybook/sidebar-decorator";
 import { AgentList } from "./AgentList";
 import { AppList } from "./AppList";
 import { ChannelList } from "./ChannelList";
-import { InboxButton } from "./InboxButton";
+import { TasksNavButton } from "./TasksNavButton";
 import { UsagePanel } from "./UsagePanel";
 import { WorkspaceSummary } from "./WorkspaceSummary";
 
@@ -53,11 +53,11 @@ const meta: Meta = {
 
 export default meta;
 
-export const InboxModule: StoryObj = {
-  name: "Inbox button",
+export const TasksModule: StoryObj = {
+  name: "Tasks button",
   render: () => (
     <div className="sidebar-primary">
-      <InboxButton />
+      <TasksNavButton />
     </div>
   ),
 };
