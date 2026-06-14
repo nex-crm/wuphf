@@ -7,6 +7,7 @@ import {
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
 } from "../../api/wiki";
+import { useWikiPanels } from "../../hooks/useWikiPanels";
 import { track } from "../../lib/analytics";
 import EditLogFooter from "./EditLogFooter";
 import { APP_NAV_PREFIX } from "./tree/WikiTree";
@@ -124,6 +125,7 @@ export default function Wiki({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadNonce, setLoadNonce] = useState(0);
+  const panels = useWikiPanels();
 
   // Resume where you left off: when the wiki opens with no explicit path,
   // navigate once to the last-viewed article. Guarded by a ref so it fires
@@ -225,10 +227,17 @@ export default function Wiki({
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
-      <div className="wiki-layout" data-view={view}>
+      <div
+        className="wiki-layout"
+        data-view={view}
+        data-left-collapsed={panels.leftCollapsed}
+        data-right-collapsed={panels.rightCollapsed}
+      >
         <WikiSidebar
           currentPath={appPath ?? articlePath}
           onNavigate={(path) => onNavigate(path)}
+          collapsed={panels.leftCollapsed}
+          onToggleCollapse={panels.toggleLeft}
         />
         {view === "audit" ? (
           <WikiAudit onNavigate={(path) => onNavigate(path)} />
@@ -254,6 +263,8 @@ export default function Wiki({
             catalog={catalog}
             onNavigate={(path) => onNavigate(path)}
             externalRefreshNonce={externalRefreshNonce}
+            rightCollapsed={panels.rightCollapsed}
+            onToggleRightCollapse={panels.toggleRight}
           />
         ) : resuming ? (
           <main

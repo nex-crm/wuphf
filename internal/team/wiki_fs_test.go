@@ -230,6 +230,67 @@ func TestWikiTreeSortOrder(t *testing.T) {
 	}
 }
 
+// Empty folders are scaffolding, not navigation: a directory with no
+// pages/files anywhere beneath it must not reach the tree. The Librarian (or
+// any writer) materializes a folder on demand by writing into it, so a folder
+// only appears once it holds content. Pruning is recursive and bottom-up — a
+// parent whose only children are themselves empty folders is pruned too.
+func TestWikiTreeOmitsEmptyDirs(t *testing.T) {
+	baseURL, repo, cleanup := newWikiFSTestServer(t)
+	defer cleanup()
+
+	mkdir := func(rel string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(repo.TeamDir(), filepath.FromSlash(rel)), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+	}
+
+	// A flat empty folder.
+	mkdir("empty-section")
+	// A folder whose only descendant is itself an empty folder → both prune.
+	mkdir("nested/inner")
+	// A folder holding only an empty subfolder → the parent prunes too.
+	mkdir("mixed/hollow")
+	// A folder with real content survives.
+	seedFile(t, repo, "real/note.md", "# Note\n")
+	// A folder with BOTH an empty subfolder and a real page: the page keeps the
+	// folder, but the empty subfolder is still pruned from its children.
+	mkdir("partly/hollow")
+	seedFile(t, repo, "partly/keep.md", "# Keep\n")
+
+	nodes := fetchTree(t, baseURL, "")
+
+	if n := findNode(nodes, "empty-section"); n != nil {
+		t.Errorf("empty-section should be pruned, got %+v", n)
+	}
+	if n := findNode(nodes, "nested"); n != nil {
+		t.Errorf("nested (recursively empty) should be pruned, got %+v", n)
+	}
+	if n := findNode(nodes, "mixed"); n != nil {
+		t.Errorf("mixed (only empty subdir) should be pruned, got %+v", n)
+	}
+
+	real := findNode(nodes, "real")
+	if real == nil {
+		t.Fatal("real (has note.md) should survive pruning")
+	}
+	if findNode(real.Children, "note.md") == nil {
+		t.Error("real should keep its note.md page")
+	}
+
+	partly := findNode(nodes, "partly")
+	if partly == nil {
+		t.Fatal("partly (has keep.md) should survive pruning")
+	}
+	if findNode(partly.Children, "keep.md") == nil {
+		t.Error("partly should keep its keep.md page")
+	}
+	if h := findNode(partly.Children, "hollow"); h != nil {
+		t.Errorf("partly's empty 'hollow' subdir should be pruned, got %+v", h)
+	}
+}
+
 func TestWikiTreeSubPathTraversalRejected(t *testing.T) {
 	baseURL, _, cleanup := newWikiFSTestServer(t)
 	defer cleanup()

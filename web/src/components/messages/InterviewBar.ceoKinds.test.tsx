@@ -999,7 +999,9 @@ describe("InterviewBar", () => {
       },
     };
 
-    render(<InterviewBar />, { wrapper: makeWrapper(suggestion) });
+    render(<InterviewBar channelSlug="ceo__human" />, {
+      wrapper: makeWrapper(suggestion),
+    });
 
     expect(screen.getByTestId("ceo-card-section")).toBeInTheDocument();
     expect(screen.getByTestId("ceo-form-field")).toBeInTheDocument();

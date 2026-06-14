@@ -40,6 +40,9 @@ import (
 //   - Children is populated only for "dir" nodes. Apps and websites are
 //     leaves even though they are directories on disk.
 //   - Ext is populated only for "file" nodes (lowercase, with the dot).
+//   - Recursively-empty plain "dir" nodes are pruned from the tree: a folder
+//     that holds no pages/files anywhere beneath it is scaffolding, not
+//     navigation, so it never reaches the wire. See buildTreeNodes.
 type TreeNode struct {
 	Name     string     `json:"name"`
 	Path     string     `json:"path"`
@@ -267,6 +270,17 @@ func buildTreeNodes(repoRoot, dir string) ([]TreeNode, error) {
 			node, derr := buildDirNode(repoRoot, full, name)
 			if derr != nil {
 				return nil, derr
+			}
+			// Prune recursively-empty plain directories. A "dir" whose subtree
+			// holds no pages/files (after the same pruning runs on its
+			// children) is scaffolding noise, not navigation — the wiki tree
+			// should surface folders only once they hold content, and let the
+			// Librarian (or any writer) materialize a folder on demand by
+			// writing into it. App/website dirs are leaves (real content) and
+			// are never pruned. The check works bottom-up: an inner empty dir
+			// drops first, which can leave its parent empty, dropped in turn.
+			if node.Type == treeTypeDir && len(node.Children) == 0 {
+				continue
 			}
 			nodes = append(nodes, node)
 			continue

@@ -108,4 +108,50 @@ describe("<WikiSidebar>", () => {
     );
     expect(row).toHaveAttribute("aria-selected", "true");
   });
+
+  it("hides the collapse control when no toggle handler is provided", async () => {
+    render(<WikiSidebar currentPath={null} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByText("Companies")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Collapse Pages panel" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a collapse control that calls the toggle handler", async () => {
+    const onToggleCollapse = vi.fn();
+    render(
+      <WikiSidebar
+        currentPath={null}
+        onNavigate={() => {}}
+        collapsed={false}
+        onToggleCollapse={onToggleCollapse}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Companies")).toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse Pages panel" }),
+    );
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+  });
+
+  it("folds to a rail when collapsed and expands again from it", () => {
+    const onToggleCollapse = vi.fn();
+    render(
+      <WikiSidebar
+        currentPath={null}
+        onNavigate={() => {}}
+        collapsed={true}
+        onToggleCollapse={onToggleCollapse}
+      />,
+    );
+    // The menu links + tree are replaced by the expand rail.
+    expect(screen.queryByTestId("wk-sidebar-home")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wk-tree")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Pages panel" }));
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { useActiveChannelSlug } from "../../routes/useCurrentRoute";
 import { AgentPanel } from "../agents/AgentPanel";
 import { CommandPaletteHost } from "../command/CommandPalette";
 import { TeamMemberWelcome } from "../join/TeamMemberWelcome";
@@ -24,6 +25,7 @@ export function Shell({ children }: ShellProps) {
   // — both rails are flex children of `.office`. The rail is 56px wide
   // and the channel sidebar keeps its own width; the layout reflows
   // automatically.
+  const activeChannelSlug = useActiveChannelSlug();
   return (
     <div className="office">
       <WorkspaceRail />
@@ -34,13 +36,14 @@ export function Shell({ children }: ShellProps) {
         <ChannelHeader />
         <RuntimeStrip />
         {children}
-        {/* Pending interviews + external-action approvals are answerable from
-            ANY surface, not just the raw channel view. InterviewBar reads the
-            office-wide request queue (useRequests) and is channel-agnostic, so
-            a single global mount here covers the home composer and the task
-            chat — where it used to be absent, leaving an agent's clarifying
-            question unanswerable without navigating to #general. */}
-        <InterviewBar />
+        {/* One mount here keeps the bar in a consistent spot above the status
+            bar across the home composer, channel, and task chat. It is scoped
+            to the chat the human is currently viewing (useActiveChannelSlug),
+            so an agent's question only surfaces in the channel it was asked
+            in instead of blocking the composer on every surface. On non-chat
+            surfaces the slug is null and the bar stays silent; office-wide
+            triage still lives in the Inbox. */}
+        <InterviewBar channelSlug={activeChannelSlug} />
         <StatusBar />
       </main>
       <ThreadPanel />

@@ -119,17 +119,40 @@ function useTreeFetchStub(nodes: WikiFSTreeNode[]): boolean {
 
 interface HarnessProps {
   currentPath: string | null;
+  collapsed?: boolean;
 }
 
-function Harness({ currentPath }: HarnessProps) {
+function Harness({ currentPath, collapsed = false }: HarnessProps) {
   const ready = useTreeFetchStub(TREE);
+  const [isCollapsed, setIsCollapsed] = useState(collapsed);
+  useEffect(() => setIsCollapsed(collapsed), [collapsed]);
   if (!ready) return null;
+  // Emulate the real .wiki-layout grid so the collapse actually reclaims the
+  // track width — the same data-left-collapsed contract the app drives.
   return (
-    <div
-      className="wiki-root"
-      style={{ height: 560, width: 320, display: "flex" }}
-    >
-      <WikiSidebar currentPath={currentPath} onNavigate={() => {}} />
+    <div className="wiki-root" style={{ height: 560, width: 560 }}>
+      <div
+        className="wiki-layout"
+        data-view="home"
+        data-left-collapsed={isCollapsed}
+        style={{ height: "100%" }}
+      >
+        <WikiSidebar
+          currentPath={currentPath}
+          onNavigate={() => {}}
+          collapsed={isCollapsed}
+          onToggleCollapse={() => setIsCollapsed((v) => !v)}
+        />
+        <div
+          style={{
+            padding: 24,
+            color: "var(--wk-text-muted)",
+            fontSize: 13,
+          }}
+        >
+          Reading column — collapse the page tree to reclaim this width.
+        </div>
+      </div>
     </div>
   );
 }
@@ -150,4 +173,9 @@ export const Default: Story = {
 /** An article open: its branch highlights once expanded. */
 export const WithActiveArticle: Story = {
   args: { currentPath: "team/companies/acme.md" },
+};
+
+/** Folded to a rail: the page tree yields its width to the reading column. */
+export const Collapsed: Story = {
+  args: { currentPath: "", collapsed: true },
 };

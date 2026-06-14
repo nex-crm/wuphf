@@ -56,6 +56,7 @@ import { WIKI_TREE_QUERY_KEY } from "./tree/WikiTree";
 import VersionHistory from "./VersionHistory";
 import WikiEditor from "./WikiEditor";
 import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
+import { CollapsedPanelRail, PanelCollapseButton } from "./WikiPanelChrome";
 import { categoryPath } from "./wikiPaths";
 
 const STALENESS_STALE_DAYS = 30;
@@ -201,6 +202,10 @@ interface WikiArticleProps {
    * additive trigger on top of the local refreshNonce used by inline edits.
    */
   externalRefreshNonce?: number;
+  /** Folds the right details rail to a thin strip when true. */
+  rightCollapsed?: boolean;
+  /** Toggles the right rail collapse. Omitted → no collapse affordance. */
+  onToggleRightCollapse?: () => void;
 }
 
 type DetectedEntity = { kind: EntityKind; slug: string };
@@ -300,6 +305,8 @@ export default function WikiArticle({
   catalog,
   onNavigate,
   externalRefreshNonce = 0,
+  rightCollapsed = false,
+  onToggleRightCollapse,
 }: WikiArticleProps) {
   const [tab, setTab] = useState<HatBarTab>("article");
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -638,6 +645,8 @@ export default function WikiArticle({
         toc={toc}
         onNavigate={onNavigate}
         onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
+        collapsed={rightCollapsed}
+        onToggleCollapse={onToggleRightCollapse}
       />
     </>
   );
@@ -1053,11 +1062,15 @@ function ArticleRightSidebar({
   toc,
   onNavigate,
   onMaintenanceApplied,
+  collapsed = false,
+  onToggleCollapse,
 }: {
   article: WikiArticleT;
   toc: TocEntry[];
   onNavigate: (path: string) => void;
   onMaintenanceApplied: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   // Consume the WikiLint "Suggest fix" hand-off exactly once per article
   // path. The consume call removes the slot from sessionStorage, so it is a
@@ -1078,8 +1091,30 @@ function ArticleRightSidebar({
       setInitialMaintenanceAction(target);
     }
   }, [article.path]);
+
+  if (collapsed && onToggleCollapse) {
+    return (
+      <aside className="wk-right-sidebar is-collapsed">
+        <CollapsedPanelRail
+          side="right"
+          label="Details"
+          onExpand={onToggleCollapse}
+        />
+      </aside>
+    );
+  }
+
   return (
     <aside className="wk-right-sidebar">
+      {onToggleCollapse ? (
+        <div className="wk-right-rail-head">
+          <PanelCollapseButton
+            side="right"
+            label="Details"
+            onClick={onToggleCollapse}
+          />
+        </div>
+      ) : null}
       <ArticleContents entries={toc} />
       <PageStatsPanel
         revisions={article.revisions}
