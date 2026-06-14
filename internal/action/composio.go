@@ -174,6 +174,12 @@ func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts Integrat
 		if platform == "" {
 			continue
 		}
+		// Hide Composio's own meta-toolkits (e.g. "Composio", "Composio
+		// Search"): the product is white-labeled as "Integrations".
+		if strings.HasPrefix(strings.ToLower(platform), "composio") ||
+			strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.Name)), "composio") {
+			continue
+		}
 		conns := byPlatform[platform]
 		hasConnection := len(conns) > 0
 		switch connectedFilter {

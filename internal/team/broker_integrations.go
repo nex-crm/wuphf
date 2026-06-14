@@ -71,8 +71,10 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	composio := action.NewComposioFromEnv()
 	resp := integrationsResponse{Providers: []integrationProviderStatus{
 		{
-			Provider:           "composio",
-			Label:              "Composio",
+			Provider: "composio",
+			// User-facing label is white-labeled to "Integrations"; the
+			// underlying provider key stays "composio" for routing/auth.
+			Label:              "Integrations",
 			Configured:         composio.Configured(),
 			SupportsConnect:    true,
 			SupportsDisconnect: true,

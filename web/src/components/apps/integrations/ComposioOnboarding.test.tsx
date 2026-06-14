@@ -34,12 +34,10 @@ describe("<ComposioOnboarding>", () => {
   it("renders Sign in with Composio as the primary CTA and hides the paste form", () => {
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     expect(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     ).toBeEnabled();
     // The manual paste path is a collapsed secondary fallback.
-    expect(
-      screen.queryByLabelText(/composio api key/i),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /or paste an api key/i }),
     ).toBeInTheDocument();
@@ -52,7 +50,7 @@ describe("<ComposioOnboarding>", () => {
     });
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     fireEvent.click(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     );
     await waitFor(() =>
       expect(
@@ -79,10 +77,10 @@ describe("<ComposioOnboarding>", () => {
     getComposioSigninStatus.mockResolvedValue({ status: "installing" });
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     fireEvent.click(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     );
     await waitFor(() =>
-      expect(screen.getByText(/setting up composio/i)).toBeInTheDocument(),
+      expect(screen.getByText(/setting up integrations/i)).toBeInTheDocument(),
     );
     await waitFor(() => expect(getComposioSigninStatus).toHaveBeenCalled());
   });
@@ -97,7 +95,7 @@ describe("<ComposioOnboarding>", () => {
     getComposioSigninStatus.mockResolvedValue({ status: "awaiting_login" });
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     fireEvent.click(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     );
     await waitFor(() =>
       expect(
@@ -125,7 +123,7 @@ describe("<ComposioOnboarding>", () => {
     const onConnected = vi.fn();
     render(wrap(<ComposioOnboarding onConnected={onConnected} />));
     fireEvent.click(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     );
     await waitFor(() => expect(onConnected).toHaveBeenCalled());
   });
@@ -137,7 +135,7 @@ describe("<ComposioOnboarding>", () => {
     });
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     fireEvent.click(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     );
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -146,14 +144,14 @@ describe("<ComposioOnboarding>", () => {
     );
     // Recoverable: the primary CTA is back.
     expect(
-      screen.getByRole("button", { name: /sign in with composio/i }),
+      screen.getByRole("button", { name: /connect integrations/i }),
     ).toBeEnabled();
   });
 
   it("keeps the manual fallback: renders the form and a get-key link when expanded", () => {
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     expandManualFallback();
-    expect(screen.getByLabelText(/composio api key/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/api key/i)).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /get an api key/i });
     // Regression: the old developer portal (app.composio.dev) is gone; the
     // current dashboard lives at dashboard.composio.dev.
@@ -163,15 +161,11 @@ describe("<ComposioOnboarding>", () => {
   it("disables connect until a key is entered", () => {
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     expandManualFallback();
-    expect(
-      screen.getByRole("button", { name: /connect composio/i }),
-    ).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/composio api key/i), {
+    expect(screen.getByRole("button", { name: /save key/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/api key/i), {
       target: { value: "ak_abc123" },
     });
-    expect(
-      screen.getByRole("button", { name: /connect composio/i }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: /save key/i })).toBeEnabled();
   });
 
   it("saves the pasted key via updateConfig and notifies on success", async () => {
@@ -179,10 +173,10 @@ describe("<ComposioOnboarding>", () => {
     const onConnected = vi.fn();
     render(wrap(<ComposioOnboarding onConnected={onConnected} />));
     expandManualFallback();
-    fireEvent.change(screen.getByLabelText(/composio api key/i), {
+    fireEvent.change(screen.getByLabelText(/api key/i), {
       target: { value: "  ak_abc123  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: /connect composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save key/i }));
     await waitFor(() =>
       expect(updateConfig).toHaveBeenCalledWith({
         composio_api_key: "ak_abc123",
@@ -194,7 +188,7 @@ describe("<ComposioOnboarding>", () => {
   it("toggles key visibility", () => {
     render(wrap(<ComposioOnboarding onConnected={() => {}} />));
     expandManualFallback();
-    const input = screen.getByLabelText(/composio api key/i);
+    const input = screen.getByLabelText(/api key/i);
     expect(input).toHaveAttribute("type", "password");
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(input).toHaveAttribute("type", "text");

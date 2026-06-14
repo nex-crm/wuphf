@@ -840,3 +840,42 @@ func TestComposioHasAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestComposioRESTCatalogHidesComposioToolkits(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+	})
+	mux.HandleFunc("/toolkits", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"slug": "composio", "name": "Composio"},
+				{"slug": "composio_search", "name": "Composio Search"},
+				{"slug": "gmail", "name": "Gmail"},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := &ComposioREST{
+		APIKey:  "cmp_test",
+		UserID:  "ceo@example.com",
+		BaseURL: server.URL,
+		Client:  server.Client(),
+	}
+	catalog, err := client.ListIntegrationCatalog(context.Background(), IntegrationCatalogOptions{Limit: 50})
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	// White-labeled: Composio's own toolkits must never reach the catalog.
+	for _, item := range catalog.Items {
+		if strings.HasPrefix(strings.ToLower(item.Name), "composio") ||
+			strings.HasPrefix(strings.ToLower(item.Platform), "composio") {
+			t.Fatalf("composio toolkit leaked into the catalog: %+v", item)
+		}
+	}
+	if len(catalog.Items) != 1 || catalog.Items[0].Name != "Gmail" {
+		t.Fatalf("expected only Gmail to remain, got %+v", catalog.Items)
+	}
+}
