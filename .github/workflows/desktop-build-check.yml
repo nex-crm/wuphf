@@ -1,0 +1,63 @@
+# Pre-release safety net: the desktop app is a fat self-contained binary, so a
+# change to the embedded UI (web/), the broker (internal/), the shell
+# (desktop/oswails/), or the Go deps can break the desktop build even when the
+# CLI is fine. Build it UNSIGNED on every PR that touches those paths so a break
+# fails the PR, not the release. No secrets — fast feedback only.
+name: desktop-build-check
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - "internal/**"
+      - "desktop/oswails/**"
+      - "embed.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/desktop-*.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            tags: "desktop"
+          - os: ubuntu-latest
+            tags: "desktop webkit2_41"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2
+
+      - name: Linux webview deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build embedded web bundle
+        run: cd web && bun install && bun run build
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Build desktop shell (unsigned)
+        run: |
+          GOBIN_DIR="$(go env GOPATH)/bin"
+          export PATH="$PATH:$GOBIN_DIR"
+          cd desktop/oswails
+          wails build -s -skipbindings -tags "${{ matrix.tags }}"
+
+      # The attach lifecycle (office.json) is shared with the CLI — keep it green.
+      - name: Vet + office tests
+        run: |
+          go vet -tags desktop ./desktop/oswails
+          go test ./internal/team/ -run 'OfficeInfo|RunningOfficeURL' -count=1

@@ -15,6 +15,7 @@ vi.mock("../../api/webauthn", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api/webauthn")>();
   return {
     ...actual,
+    isWebAuthnSupported: vi.fn(() => true),
     requestWebAuthnRegistrationChallenge: vi.fn(),
     runWebAuthnRegistrationCeremony: vi.fn(),
     verifyWebAuthnRegistration: vi.fn(),
@@ -30,6 +31,7 @@ const requestChallengeMock = vi.mocked(
 );
 const runCeremonyMock = vi.mocked(webauthn.runWebAuthnRegistrationCeremony);
 const verifyMock = vi.mocked(webauthn.verifyWebAuthnRegistration);
+const isWebAuthnSupportedMock = vi.mocked(webauthn.isWebAuthnSupported);
 const showNoticeMock = vi.mocked(showNotice);
 const [defaultRole] = APPROVAL_ROLE_VALUES;
 
@@ -40,6 +42,23 @@ describe("<CredentialRegistrationPanel>", () => {
     runCeremonyMock.mockReset();
     verifyMock.mockReset();
     showNoticeMock.mockReset();
+    // Default to a passkey-capable environment; the unsupported path overrides.
+    isWebAuthnSupportedMock.mockReset();
+    isWebAuthnSupportedMock.mockReturnValue(true);
+  });
+
+  it("explains passkeys are unavailable and offers no ceremony when WebAuthn is absent", () => {
+    isWebAuthnSupportedMock.mockReturnValue(false);
+
+    render(<CredentialRegistrationPanel />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "doesn't support passkeys",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Register security key" }),
+    ).not.toBeInTheDocument();
+    expect(requestChallengeMock).not.toHaveBeenCalled();
   });
 
   it("registers the selected role and shows the broker-confirmed credential", async () => {

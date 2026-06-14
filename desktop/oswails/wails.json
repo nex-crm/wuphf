@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "WUPHF",
+  "outputfilename": "WUPHF",
+  "frontend:install": "",
+  "frontend:build": "",
+  "author": {
+    "name": "Nex",
+    "email": ""
+  },
+  "info": {
+    "companyName": "Nex",
+    "productName": "WUPHF",
+    "productVersion": "0.0.0",
+    "comments": "WUPHF desktop shell (Wails) — in-process broker spike"
+  }
+}

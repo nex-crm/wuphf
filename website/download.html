@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Download WUPHF Desktop — macOS &amp; Windows</title>
+<meta name="description" content="Download the WUPHF desktop app for macOS and Windows. Your whole office of AI employees in a native window — no browser tab, no terminal.">
+<link rel="canonical" href="https://wuphf.team/download.html">
+<meta property="og:title" content="Download WUPHF Desktop">
+<meta property="og:description" content="The WUPHF office of AI employees as a native desktop app for macOS and Windows.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://wuphf.team/download.html">
+<meta property="og:image" content="https://wuphf.team/og-image.png">
+<meta name="theme-color" content="#1b0d2a">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1b0d2a; --surface: #24123a; --surface-high: #2e1647;
+    --border: #612a92; --yellow: #cf72d9; --yellow-dark: #9f4dbf;
+    --green: #D4DB18; --blue: #ffb3e6; --text: #ffebfc; --text-muted: #a580c0;
+    --font-display: 'Press Start 2P', monospace;
+    --font-vt: 'VT323', monospace;
+    --font-mono: 'DM Mono', monospace;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--font-mono);
+    font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+    background-image: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.08) 3px, rgba(0,0,0,0.08) 4px);
+    min-height: 100vh;
+  }
+  a { color: var(--yellow); }
+  /* nav */
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-bottom: 2px solid var(--border);
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  .nav-logo { font-family: var(--font-display); font-size: 13px; color: var(--text); text-decoration: none; }
+  .nav-logo .by { color: var(--text-muted); font-size: 8px; }
+  .nav-right { display: flex; align-items: center; gap: 18px; }
+  .nav-right a { font-size: 14px; text-decoration: none; color: var(--text-muted); }
+  .nav-right a:hover { color: var(--yellow); }
+  /* layout */
+  main { max-width: 920px; margin: 0 auto; padding: 56px 22px 96px; }
+  .hero { text-align: center; margin-bottom: 56px; }
+  h1 { font-family: var(--font-display); font-size: 26px; line-height: 1.4; color: var(--text); margin-bottom: 18px; }
+  h1 .accent { color: var(--yellow); }
+  .lead { font-family: var(--font-vt); font-size: 24px; color: var(--text-muted); max-width: 620px; margin: 0 auto 28px; }
+  /* primary detected button */
+  .btn-primary {
+    font-family: var(--font-display); font-size: 11px; color: var(--bg);
+    background: var(--yellow); border: none; padding: 16px 26px; cursor: pointer;
+    box-shadow: 4px 4px 0 var(--yellow-dark); text-decoration: none;
+    display: inline-flex; align-items: center; gap: 10px; letter-spacing: 0.06em;
+    transition: transform .08s, box-shadow .08s;
+  }
+  .btn-primary:hover { transform: translate(-1px,-1px); box-shadow: 5px 5px 0 var(--yellow-dark); }
+  .btn-primary:active { transform: translate(2px,2px); box-shadow: 2px 2px 0 var(--yellow-dark); }
+  .btn-sub { display: block; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 12px; }
+  /* cards */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } h1 { font-size: 19px; } }
+  .card {
+    background: var(--surface); border: 2px solid var(--border); padding: 26px 24px;
+    display: flex; flex-direction: column;
+  }
+  .card.detected { border-color: var(--yellow); box-shadow: 4px 4px 0 var(--yellow-dark); }
+  .card h2 { font-family: var(--font-display); font-size: 13px; color: var(--text); margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
+  .card .meta { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; }
+  .badge-you { font-family: var(--font-display); font-size: 7px; color: var(--bg); background: var(--green); padding: 3px 7px; }
+  .btn-dl {
+    font-family: var(--font-display); font-size: 10px; color: var(--bg); background: var(--yellow);
+    border: none; padding: 13px 18px; cursor: pointer; text-decoration: none; text-align: center;
+    box-shadow: 3px 3px 0 var(--yellow-dark); letter-spacing: 0.05em; transition: transform .08s, box-shadow .08s;
+  }
+  .btn-dl:hover { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 var(--yellow-dark); }
+  .btn-dl.ghost { color: var(--yellow); background: transparent; border: 2px solid var(--yellow); box-shadow: none; }
+  ol.steps { list-style: none; counter-reset: s; margin: 18px 0 0; }
+  ol.steps li { counter-increment: s; position: relative; padding: 6px 0 6px 30px; font-size: 14px; }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 0; top: 6px;
+    font-family: var(--font-display); font-size: 9px; color: var(--bg); background: var(--yellow-dark);
+    width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  }
+  code { font-family: var(--font-mono); background: var(--surface-high); color: var(--green); padding: 1px 6px; font-size: 13px; }
+  /* callout */
+  .callout { background: var(--surface-high); border-left: 3px solid var(--green); padding: 14px 16px; margin-top: 18px; font-size: 13.5px; }
+  .callout .ct { font-family: var(--font-display); font-size: 8px; color: var(--green); display: block; margin-bottom: 8px; letter-spacing: 0.06em; }
+  .callout ol { margin: 6px 0 0 18px; }
+  .callout li { margin: 3px 0; }
+  /* alt section */
+  .alt { margin-top: 56px; background: var(--surface); border: 2px solid var(--border); padding: 24px; }
+  .alt h3 { font-family: var(--font-display); font-size: 11px; color: var(--text); margin-bottom: 12px; }
+  .cmd { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg); border: 2px solid var(--yellow-dark); padding: 12px 14px; margin: 8px 0; }
+  .cmd code { background: none; color: var(--text); font-size: 14px; }
+  .cmd button { font-family: var(--font-display); font-size: 8px; color: var(--yellow); background: transparent; border: 1px solid var(--yellow-dark); padding: 6px 9px; cursor: pointer; }
+  .muted { color: var(--text-muted); font-size: 13.5px; }
+  footer { border-top: 2px solid var(--border); padding: 28px 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
+  footer a { margin: 0 8px; text-decoration: none; }
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-logo" href="/">WUPHF <span class="by">by Nex.ai</span></a>
+  <div class="nav-right">
+    <a href="/">← Home</a>
+    <a href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<main>
+  <section class="hero">
+    <h1>WUPHF <span class="accent">Desktop</span></h1>
+    <p class="lead">Your whole office of AI employees in a native window — no browser tab, no terminal. Same office as the CLI, just a real app.</p>
+    <a class="btn-primary" id="primaryDownload" href="https://github.com/nex-crm/wuphf/releases/latest" target="_blank" rel="noopener">Download</a>
+    <span class="btn-sub" id="primarySub">Pick your platform below</span>
+  </section>
+
+  <section class="cards">
+    <!-- macOS -->
+    <article class="card" id="card-mac">
+      <h2>macOS <span class="badge-you" id="you-mac" hidden>YOU</span></h2>
+      <p class="meta">Universal — Apple Silicon &amp; Intel · macOS 11+ · signed &amp; notarized by Apple</p>
+      <a class="btn-dl" href="https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-mac.dmg">Download .dmg</a>
+      <ol class="steps">
+        <li>Open the downloaded <code>WUPHF-mac.dmg</code>.</li>
+        <li>Drag <strong>WUPHF</strong> into your <strong>Applications</strong> folder.</li>
+        <li>Launch it from Applications or Spotlight — your office opens in the app.</li>
+      </ol>
+      <div class="callout" style="border-left-color: var(--yellow)">
+        <span class="ct" style="color: var(--yellow)">No scary warnings</span>
+        It's notarized by Apple, so it opens straight away — no "unidentified developer" prompt.
+      </div>
+    </article>
+
+    <!-- Windows -->
+    <article class="card" id="card-win">
+      <h2>Windows <span class="badge-you" id="you-win" hidden>YOU</span></h2>
+      <p class="meta">Windows 10/11 · 64-bit · WebView2 (built in to Windows)</p>
+      <a class="btn-dl" href="https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-windows-setup.exe">Download installer</a>
+      <ol class="steps">
+        <li>Run the downloaded <code>WUPHF-windows-setup.exe</code>.</li>
+        <li>Follow the installer, then launch <strong>WUPHF</strong> from the Start menu.</li>
+      </ol>
+      <div class="callout">
+        <span class="ct">What you'll see — and why</span>
+        The Windows app isn't code-signed <em>yet</em> (signing is on the way), so Windows will warn you. It's expected and safe:
+        <ol>
+          <li>Your browser may flag the download as "not commonly downloaded" → choose <strong>Keep</strong>.</li>
+          <li>Windows shows <strong>"Windows protected your PC"</strong> (SmartScreen) → click <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+        </ol>
+      </div>
+    </article>
+  </section>
+
+  <section class="alt">
+    <h3>Prefer the terminal? Or on Linux?</h3>
+    <p class="muted">The desktop app and the CLI are the same office — use whichever you like. The CLI runs everywhere, including Linux:</p>
+    <div class="cmd">
+      <code>npx wuphf@latest</code>
+      <button type="button" data-copy="npx wuphf@latest" aria-label="Copy command">COPY</button>
+    </div>
+    <p class="muted">A native Linux desktop build is on the roadmap; for now Linux runs via the CLI above (your office opens at <code>localhost:7891</code>).</p>
+  </section>
+</main>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener">GitHub</a>
+  <a href="https://github.com/nex-crm/wuphf/releases" target="_blank" rel="noopener">All releases</a>
+  <a href="https://github.com/nex-crm/wuphf/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+  <div style="margin-top:12px">Source-available · © Nex.ai</div>
+</footer>
+
+<script>
+  (function () {
+    // Detect OS and highlight the matching card + relabel the hero button.
+    var ua = navigator.userAgent || "";
+    var plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    var isMac = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
+    var isWin = /Win/i.test(plat) || /Windows/i.test(ua);
+    var MAC = "https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-mac.dmg";
+    var WIN = "https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-windows-setup.exe";
+    var btn = document.getElementById("primaryDownload");
+    var sub = document.getElementById("primarySub");
+    if (isMac) {
+      btn.href = MAC; btn.textContent = "Download for macOS";
+      sub.textContent = "Universal .dmg · Apple Silicon & Intel";
+      document.getElementById("card-mac").classList.add("detected");
+      document.getElementById("you-mac").hidden = false;
+    } else if (isWin) {
+      btn.href = WIN; btn.textContent = "Download for Windows";
+      sub.textContent = "Installer .exe · Windows 10/11 64-bit";
+      document.getElementById("card-win").classList.add("detected");
+      document.getElementById("you-win").hidden = false;
+    }
+    // Copy buttons
+    document.querySelectorAll("[data-copy]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var done = function () { var t = b.textContent; b.textContent = "COPIED"; setTimeout(function () { b.textContent = t; }, 1400); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(b.getAttribute("data-copy")).then(done).catch(function () {});
+        }
+      });
+    });
+  })();
+</script>
+</body>
+</html>

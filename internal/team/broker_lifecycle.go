@@ -117,6 +117,7 @@ func killPersistedOfficeProcess() error {
 	// Pre-fix this only happened on the corrupt-file / FindProcess-
 	// failed branches, leaving stale PIDs on the happy path.
 	_ = clearOfficePIDFile()
+	_ = clearOfficeInfo()
 	return nil
 }
 

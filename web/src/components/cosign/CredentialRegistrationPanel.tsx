@@ -5,6 +5,7 @@ import {
   APPROVAL_ROLE_VALUES,
   describeWebAuthnBrokerStorageError,
   isApprovalRole,
+  isWebAuthnSupported,
   requestWebAuthnRegistrationChallenge,
   runWebAuthnRegistrationCeremony,
   verifyWebAuthnRegistration,
@@ -13,6 +14,9 @@ import { showNotice } from "../ui/Toast";
 
 const ROLE_OPTIONS: readonly ApprovalRole[] = APPROVAL_ROLE_VALUES;
 const [DEFAULT_ROLE] = APPROVAL_ROLE_VALUES;
+
+const WEBAUTHN_UNSUPPORTED_MESSAGE =
+  "This environment doesn't support passkeys (WebAuthn), so a security key can't be registered here. Open WUPHF in a browser or on a platform with passkey support to bind an approval credential.";
 
 type RegistrationState =
   | { readonly kind: "idle" }
@@ -27,12 +31,23 @@ type RegistrationState =
 export function CredentialRegistrationPanel() {
   const [role, setRole] = useState<ApprovalRole>(DEFAULT_ROLE);
   const [state, setState] = useState<RegistrationState>({ kind: "idle" });
+  // Resolve once at render: passkey ceremonies are unavailable on webviews that
+  // ship no WebAuthn API (e.g. the Linux WebKitGTK desktop shell). Surface that
+  // plainly instead of a "Register" button whose only outcome is an error.
+  const supported = isWebAuthnSupported();
   const selectedRole = isApprovalRole(role) ? role : null;
   const running = state.kind === "running";
-  const canRegister = selectedRole !== null;
+  const canRegister = supported && selectedRole !== null;
 
   const handleRegister = async () => {
     if (running) return;
+    if (!supported) {
+      setState({
+        kind: "error",
+        message: WEBAUTHN_UNSUPPORTED_MESSAGE,
+      });
+      return;
+    }
     if (selectedRole === null) {
       setState({ kind: "error", message: "Choose a role before registering." });
       return;
@@ -91,52 +106,70 @@ export function CredentialRegistrationPanel() {
         </p>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(150px, 0.35fr) minmax(0, 1fr)",
-          gap: 12,
-          alignItems: "center",
-        }}
-      >
-        <label
-          htmlFor="webauthn-role"
+      {supported ? (
+        <>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(150px, 0.35fr) minmax(0, 1fr)",
+              gap: 12,
+              alignItems: "center",
+            }}
+          >
+            <label
+              htmlFor="webauthn-role"
+              style={{
+                color: "var(--text-secondary)",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              Approval role
+            </label>
+            <select
+              id="webauthn-role"
+              value={role}
+              onChange={(event) => {
+                if (isApprovalRole(event.target.value)) {
+                  setRole(event.target.value);
+                }
+              }}
+              style={inputStyle}
+            >
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleRegister}
+              disabled={running || !canRegister}
+            >
+              {running
+                ? "Waiting for security key..."
+                : "Register security key"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p
+          role="status"
           style={{
             color: "var(--text-secondary)",
             fontSize: 12,
-            fontWeight: 600,
+            lineHeight: 1.45,
+            margin: 0,
           }}
         >
-          Approval role
-        </label>
-        <select
-          id="webauthn-role"
-          value={role}
-          onChange={(event) => {
-            if (isApprovalRole(event.target.value)) {
-              setRole(event.target.value);
-            }
-          }}
-          style={inputStyle}
-        >
-          {ROLE_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={handleRegister}
-          disabled={running || !canRegister}
-        >
-          {running ? "Waiting for security key..." : "Register security key"}
-        </button>
-      </div>
+          {WEBAUTHN_UNSUPPORTED_MESSAGE}
+        </p>
+      )}
 
       {state.kind === "registered" ? (
         <RegistrationOutcome tone="success" title="Credential registered">
