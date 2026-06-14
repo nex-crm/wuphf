@@ -49,6 +49,12 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	if isDeterministicPhase2CEODM(msg.Channel) {
 		return
 	}
+	// Slack passivity: an untagged, non-task ambient human message in a Slack
+	// channel was recorded for context, but WUPHF acts there only when tagged.
+	// Wake no one (no targets, no "thinking" indicator) and return.
+	if l.broker != nil && l.broker.slackSuppressesWake(msg) {
+		return
+	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated

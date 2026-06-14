@@ -19,7 +19,7 @@ func gateFixture(t *testing.T) (*SlackTransport, *Broker, *brokerTransportHost) 
 	return tr, b, &brokerTransportHost{broker: b}
 }
 
-func TestPassivityGate_UntaggedHumanIgnored(t *testing.T) {
+func TestPassivityGate_UntaggedHumanRecordedButSuppressed(t *testing.T) {
 	tr, b, host := gateFixture(t)
 	err := tr.routeInbound(context.Background(), host, &slackevents.MessageEvent{
 		User: "U7", Channel: "C0123", Text: "just chatting with the team", TimeStamp: "1.0",
@@ -27,8 +27,37 @@ func TestPassivityGate_UntaggedHumanIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routeInbound: %v", err)
 	}
-	if msgs := b.ChannelMessages("slack-general"); len(msgs) != 0 {
-		t.Fatalf("untagged human chatter must be ignored, got %d messages", len(msgs))
+	// Recorded for context...
+	msgs := b.ChannelMessages("slack-general")
+	if len(msgs) != 1 {
+		t.Fatalf("untagged human chatter must be recorded for context, got %d", len(msgs))
+	}
+	// ...but it wakes no one: the message carries no tag and no task, in a Slack
+	// channel, so the delivery path suppresses it.
+	if !b.slackSuppressesWake(msgs[0]) {
+		t.Fatalf("untagged ambient Slack message must suppress the wake: %+v", msgs[0])
+	}
+}
+
+func TestSlackSuppressesWake(t *testing.T) {
+	b := newTestBrokerWithSlackChannel(t, "C0123") // slug slack-general
+	cases := []struct {
+		name string
+		msg  channelMessage
+		want bool
+	}{
+		{"untagged human in slack", channelMessage{From: "human:u7", Channel: "slack-general"}, true},
+		{"tagged human in slack", channelMessage{From: "human:u7", Channel: "slack-general", Tagged: []string{"ceo"}}, false},
+		{"task-thread reply in slack", channelMessage{From: "human:u7", Channel: "slack-general", SourceTaskID: "OFFICE-1"}, false},
+		{"foreign agent in slack", channelMessage{From: "claude-bot", Channel: "slack-general"}, false},
+		{"untagged human in non-slack", channelMessage{From: "human:u7", Channel: "general"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := b.slackSuppressesWake(tc.msg); got != tc.want {
+				t.Fatalf("slackSuppressesWake = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

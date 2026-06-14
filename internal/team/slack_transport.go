@@ -540,28 +540,20 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 		}
 	}
 
-	// Passivity gate (HUMAN messages only). Registered foreign agents are WUPHF's
-	// own delegates — allowlisted via /slack/agents, and their posts are part of
-	// active coordination, not ambient chatter — so they always ingress. A human,
-	// though, is a co-worker in a shared channel: WUPHF stays out of the way and
-	// acts only when (a) the message tags our bot, or (b) it continues work WUPHF
-	// already owns (a reply inside an existing task thread). Everything else,
-	// untagged channel chatter, is ignored: not ingested, no office turn.
-	if human {
-		mentioned := t.mentionsBot(msg.Text)
+	// Passivity. WUPHF records everything in the channel for context, but ACTS
+	// only when a human tags it. The "act only when tagged" half is enforced at
+	// delivery (slackSuppressesWake): an untagged, non-task human message is
+	// recorded but wakes no one. Here, on a fresh tag, we note WHERE it came from
+	// so the task it spins up can link its new thread back into the conversation
+	// (consumed by ensureTaskThreadRoot): the thread it was tagged in, or the tag
+	// message itself when posted at the channel root. Foreign agents are WUPHF's
+	// own allowlisted delegates, not taggers, so they skip this.
+	if human && t.Broker != nil {
 		inTaskThread := false
-		if ts := strings.TrimSpace(msg.ThreadTimeStamp); ts != "" && t.Broker != nil {
+		if ts := strings.TrimSpace(msg.ThreadTimeStamp); ts != "" {
 			inTaskThread = t.Broker.SlackThreadIsTaskRoot(ts)
 		}
-		if !mentioned && !inTaskThread {
-			return nil
-		}
-		// A fresh tag (not already inside a task thread) starts new work. Remember
-		// where it came from so the task the office spins up can link its new
-		// thread back into this conversation (consumed by ensureTaskThreadRoot):
-		// the thread it was tagged in, or the tag message itself when posted at
-		// the channel root.
-		if mentioned && !inTaskThread && t.Broker != nil {
+		if t.mentionsBot(msg.Text) && !inTaskThread {
 			origin := strings.TrimSpace(msg.ThreadTimeStamp)
 			if origin == "" {
 				origin = strings.TrimSpace(msg.TimeStamp)

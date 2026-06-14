@@ -68,3 +68,21 @@ func (b *Broker) clockNow() time.Time {
 	}
 	return time.Now()
 }
+
+// slackSuppressesWake reports whether a message must be recorded for context but
+// NOT wake anyone — an untagged, non-task ambient HUMAN message in a Slack
+// channel. This is the "act only when tagged" half of WUPHF's Slack passivity:
+// the message is still appended (so the office has channel context), but no
+// agent turn is dispatched for it. A tag lands the office lead in Tagged; a
+// task-thread reply carries SourceTaskID; either makes this return false so the
+// message wakes normally. Non-human (foreign agents) and non-Slack channels are
+// never suppressed.
+func (b *Broker) slackSuppressesWake(msg channelMessage) bool {
+	if !isHumanMessageSender(msg.From) {
+		return false
+	}
+	if len(msg.Tagged) > 0 || strings.TrimSpace(msg.SourceTaskID) != "" {
+		return false
+	}
+	return b.ChannelHasSurface(msg.Channel, "slack")
+}
