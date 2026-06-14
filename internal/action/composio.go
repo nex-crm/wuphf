@@ -80,6 +80,13 @@ func (c *ComposioREST) hasAuth() bool {
 
 // applyAuthHeaders sets the auth headers for the active mode: x-api-key for a
 // project key, else x-user-api-key + x-org-id (+ x-project-id when known).
+//
+// x-api-key (project ak_ key) is Composio's DOCUMENTED public-API auth and is
+// preferred whenever a key is present (manual paste). The x-user-api-key trio
+// is the auth the official `composio` CLI uses internally; it is not in the
+// public REST docs but is stable in practice (the CLI relies on it) and is the
+// only path available to the one-click sign-in, since the current CLI can't
+// mint a project ak_ key. Verified working on both /api/v3 and /api/v3.1.
 func (c *ComposioREST) applyAuthHeaders(h http.Header) {
 	if key := strings.TrimSpace(c.APIKey); key != "" {
 		h.Set("x-api-key", key)
@@ -241,6 +248,11 @@ func (c *ComposioREST) StartIntegrationConnection(ctx context.Context, req Integ
 		"auth_config_id": authConfigID,
 		"user_id":        strings.TrimSpace(c.UserID),
 	}
+	// Use link() (hosted auth), NOT initiate(): Composio is deprecating
+	// initiate() for Composio-managed OAuth (new orgs 2026-05-08, all orgs
+	// 2026-07-03). link() is the recommended, unaffected path and allows
+	// multiple accounts per toolkit. Do not switch this back to
+	// /connected_accounts initiate.
 	raw, err := c.post(ctx, "/connected_accounts/link", body)
 	if err != nil {
 		return IntegrationConnectResult{}, err
