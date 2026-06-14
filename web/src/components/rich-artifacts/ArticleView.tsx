@@ -5,6 +5,7 @@ import {
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
 import { router } from "../../lib/router";
+import { ArticleAttribution } from "../wiki/ArticleAttribution";
 import RichArtifactEmbed from "./RichArtifactEmbed";
 
 // ArticleView is the full-screen reader for a single HTML article (a rich
@@ -88,6 +89,7 @@ export function ArticleView({ articleId }: ArticleViewProps) {
             <span className="article-view-author">
               by @{artifact.createdBy}
             </span>
+            <ArticleAttribution articleRef={articleId} />
           </div>
         </div>
       </header>
