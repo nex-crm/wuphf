@@ -2,6 +2,7 @@ import { useMatches } from "@tanstack/react-router";
 
 import {
   agentDetailRoute,
+  agentDetailTabRoute,
   agentsRoute,
   appRoute,
   appTaskDetailRoute,
@@ -56,7 +57,7 @@ export type CurrentRoute =
   | { kind: "task-decision"; taskId: string }
   // Agents tool — roster grid + per-agent config/detail page.
   | { kind: "agents" }
-  | { kind: "agent-detail"; agentSlug: string }
+  | { kind: "agent-detail"; agentSlug: string; tab?: string }
   // Full-screen skill detail editor + viewer.
   | { kind: "skill-detail"; skillName: string }
   | { kind: "routine-detail"; routineSlug: string }
@@ -101,6 +102,7 @@ type CurrentRouteId =
   | typeof taskDecisionRoute.id
   | typeof agentsRoute.id
   | typeof agentDetailRoute.id
+  | typeof agentDetailTabRoute.id
   | typeof skillDetailRoute.id
   | typeof routineDetailRoute.id
   | typeof routineNewRoute.id;
@@ -125,6 +127,7 @@ const CURRENT_ROUTE_IDS = [
   taskDecisionRoute.id,
   agentsRoute.id,
   agentDetailRoute.id,
+  agentDetailTabRoute.id,
   skillDetailRoute.id,
   routineDetailRoute.id,
   routineNewRoute.id,
@@ -188,11 +191,18 @@ const ROUTE_DERIVERS = {
     kind: "task-decision",
     taskId: params.taskId ?? "",
   }),
-  // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
+  // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug)
+  // + tabbed subspace (/agents/$slug/$tab).
   [agentsRoute.id]: () => ({ kind: "agents" }),
   [agentDetailRoute.id]: (params) => ({
     kind: "agent-detail",
     agentSlug: params.agentSlug ?? "",
+    tab: undefined,
+  }),
+  [agentDetailTabRoute.id]: (params) => ({
+    kind: "agent-detail",
+    agentSlug: params.agentSlug ?? "",
+    tab: params.tab,
   }),
   [skillDetailRoute.id]: (params) => ({
     kind: "skill-detail",

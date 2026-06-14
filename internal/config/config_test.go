@@ -32,6 +32,70 @@ func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 	})
 }
 
+func TestIsAnalyticsEnabledDefaultsOnWhenUnset(t *testing.T) {
+	var c Config
+	if !c.IsAnalyticsTelemetryEnabled() {
+		t.Error("telemetry should default ON when unset")
+	}
+	if !c.IsAnalyticsSessionRecordingEnabled() {
+		t.Error("session recording should default ON when unset")
+	}
+}
+
+func TestIsAnalyticsRespectsExplicitOptOut(t *testing.T) {
+	no, yes := false, true
+	c := Config{AnalyticsTelemetryEnabled: &no, AnalyticsSessionRecordingEnabled: &yes}
+	if c.IsAnalyticsTelemetryEnabled() {
+		t.Error("telemetry explicit false should be honored")
+	}
+	if !c.IsAnalyticsSessionRecordingEnabled() {
+		t.Error("session recording explicit true should be honored")
+	}
+}
+
+func TestAnalyticsConsentRoundtrips(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		no := false
+		if err := Save(Config{AnalyticsTelemetryEnabled: &no}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		got, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.AnalyticsTelemetryEnabled == nil || *got.AnalyticsTelemetryEnabled {
+			t.Fatalf("telemetry opt-out did not round-trip: %+v", got.AnalyticsTelemetryEnabled)
+		}
+		// Recording was never set → nil → resolves ON.
+		if got.AnalyticsSessionRecordingEnabled != nil {
+			t.Errorf("expected recording unset, got %+v", got.AnalyticsSessionRecordingEnabled)
+		}
+		if !got.IsAnalyticsSessionRecordingEnabled() {
+			t.Error("unset recording should resolve ON")
+		}
+	})
+}
+
+func TestResolvePostHogKeyAndHostFromEnv(t *testing.T) {
+	t.Setenv("WUPHF_POSTHOG_KEY", "phc_test")
+	t.Setenv("POSTHOG_KEY", "ignored")
+	t.Setenv("WUPHF_POSTHOG_HOST", "https://eu.i.posthog.com")
+	if got := ResolvePostHogKey(); got != "phc_test" {
+		t.Errorf("key: WUPHF_POSTHOG_KEY should win, got %q", got)
+	}
+	if got := ResolvePostHogHost(); got != "https://eu.i.posthog.com" {
+		t.Errorf("host: got %q", got)
+	}
+}
+
+func TestResolvePostHogKeyFallsBackToBareEnv(t *testing.T) {
+	t.Setenv("WUPHF_POSTHOG_KEY", "")
+	t.Setenv("POSTHOG_KEY", "phc_bare")
+	if got := ResolvePostHogKey(); got != "phc_bare" {
+		t.Errorf("key fallback: got %q, want phc_bare", got)
+	}
+}
+
 func TestRoundtrip(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		in := Config{

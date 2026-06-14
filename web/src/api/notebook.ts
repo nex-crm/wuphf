@@ -4,6 +4,7 @@
  * opt-in with `VITE_NOTEBOOK_MOCK=true` for isolated UI work.
  */
 
+import { track } from "../lib/analytics";
 import {
   MOCK_AGENTS,
   MOCK_REVIEWS,
@@ -460,6 +461,9 @@ export async function promoteEntry(
       rationale: opts.rationale ?? "Ready for team wiki review.",
       reviewer_slug: opts.reviewer_slug,
     });
+    track("notebook_entry_promoted", {
+      reviewer_assigned: !!opts.reviewer_slug,
+    });
     if (submitted?.promotion_id) {
       const full = await fetchReview(submitted.promotion_id).catch(() => null);
       if (full) return full;
@@ -519,6 +523,10 @@ export async function updateReviewState(
       await client.post<unknown>(`/review/${encodeURIComponent(id)}/${verb}`, {
         actor_slug: opts.actor_slug ?? "",
         rationale: opts.rationale ?? "",
+      });
+      track("review_action", {
+        action: verb.replace(/-/g, "_"),
+        target: "notebook",
       });
       return await fetchReview(id);
     }

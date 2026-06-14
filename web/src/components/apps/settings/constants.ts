@@ -1,6 +1,7 @@
 import {
   Building,
   Key,
+  Lock,
   MediaImage,
   Puzzle,
   Settings as SettingsIcon,
@@ -37,6 +38,7 @@ export const SECTION_GROUPS: SectionGroup[] = [
     items: [
       { id: "intervals", Icon: Timer, name: "Polling" },
       { id: "flags", Icon: Terminal, name: "CLI Flags" },
+      { id: "privacy", Icon: Lock, name: "Privacy & Analytics" },
     ],
   },
   {

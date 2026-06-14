@@ -32,6 +32,7 @@ import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
 import { SECTION_GROUPS } from "./settings/constants";
+import { PrivacySection } from "./settings/PrivacySection";
 import { RuntimeProviderChecklist } from "./settings/RuntimeProviderChecklist";
 import { styles } from "./settings/styles";
 import type { SectionId, SectionProps } from "./settings/types";
@@ -1419,6 +1420,7 @@ export function SettingsApp() {
         )}
         {section === "intervals" && <IntervalsSection cfg={data} save={save} />}
         {section === "flags" && <FlagsSection />}
+        {section === "privacy" && <PrivacySection cfg={data} save={save} />}
         {section === "danger" && <DangerZoneSection />}
       </div>
     </div>

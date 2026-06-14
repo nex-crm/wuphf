@@ -42,6 +42,8 @@ import {
 import {
   isValidEmail,
   recordOnboardingEmailCaptured,
+  setAnalyticsConsent,
+  track,
 } from "../../../lib/analytics";
 import { HOME_COMPOSER_DRAFT_CHANNEL, useAppStore } from "../../../stores/app";
 import type { BlueprintOption } from "./types";
@@ -110,6 +112,8 @@ function initialAnswers(): OnboardingAnswers {
     agentName: "",
     agentInstructions: "",
     firstIssue: ONBOARDING_FIRST_ISSUE_EXAMPLE,
+    telemetryConsent: true,
+    recordingConsent: true,
   };
 }
 
@@ -242,6 +246,8 @@ export function useOnboardingWizard(
       const email = answers.email.trim();
       const firstIssue = answers.firstIssue.trim();
       const blueprintId = answers.blueprintId.trim();
+      const telemetryConsent = answers.telemetryConsent;
+      const recordingConsent = answers.recordingConsent;
 
       async function run(): Promise<void> {
         // 1. Persist identity so the office seed reads it back at complete time.
@@ -265,6 +271,8 @@ export function useOnboardingWizard(
           agents: answers.pickedAgents,
           owner_name: ownerName || undefined,
           owner_role: ownerRole || undefined,
+          analytics_telemetry_enabled: telemetryConsent,
+          analytics_session_recording_enabled: recordingConsent,
         });
 
         // already_completed is a success case (idempotent re-finish).
@@ -272,7 +280,35 @@ export function useOnboardingWizard(
           throw new Error("Onboarding did not complete");
         }
 
-        // 2b. With consent, register the welcome-step email with the collector.
+        // 2a. Apply the consent choice live so an opt-out takes effect this
+        //     session and gates the close-out events below (they no-op when
+        //     telemetry is turned off — we never send for a user who opted out).
+        setAnalyticsConsent({
+          telemetry: telemetryConsent,
+          recording: recordingConsent,
+        });
+
+        // 2b. Funnel close-out + the explicit consent record (both no-ops when
+        //     telemetry is off). No content, only counts + the chosen flags.
+        track("onboarding_completed", {
+          blueprint_id: blueprintId,
+          agent_count: answers.pickedAgents.length,
+          skipped_first_task: skipTask,
+          telemetry_consent: telemetryConsent,
+          recording_consent: recordingConsent,
+        });
+        track("analytics_consent_set", {
+          channel: "telemetry",
+          enabled: telemetryConsent,
+          surface: "onboarding",
+        });
+        track("analytics_consent_set", {
+          channel: "recording",
+          enabled: recordingConsent,
+          surface: "onboarding",
+        });
+
+        // 2c. With consent, register the welcome-step email with the collector.
         //     Runs after complete has succeeded so a lead capture never blocks
         //     landing in the office. See maybeRecordOnboardingEmail.
         maybeRecordOnboardingEmail(email, answers.keepInTouch);
@@ -310,6 +346,8 @@ export function useOnboardingWizard(
       answers.firstIssue,
       answers.blueprintId,
       answers.pickedAgents,
+      answers.telemetryConsent,
+      answers.recordingConsent,
       onComplete,
     ],
   );

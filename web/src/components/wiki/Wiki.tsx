@@ -7,6 +7,7 @@ import {
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
 } from "../../api/wiki";
+import { track } from "../../lib/analytics";
 import EditLogFooter from "./EditLogFooter";
 import { APP_NAV_PREFIX } from "./tree/WikiTree";
 import FileViewer, { isMarkdownPath } from "./viewers/FileViewer";
@@ -209,9 +210,17 @@ export default function Wiki({
   const categorySlug =
     view === "category" && articlePath ? parseCategoryPath(articlePath) : null;
 
-  // Persist the last-viewed article so the next wiki open resumes there.
+  // Persist the last-viewed article so the next wiki open resumes there, and
+  // record the view for knowledge-consumption analytics. Only the path depth
+  // is sent, never the path or content.
   useEffect(() => {
-    if (view === "article" && articlePath) writeLastViewed(articlePath);
+    if (view === "article" && articlePath) {
+      writeLastViewed(articlePath);
+      track("wiki_article_viewed", {
+        path_depth: articlePath.split("/").filter(Boolean).length,
+        source: "wiki",
+      });
+    }
   }, [view, articlePath]);
 
   return (

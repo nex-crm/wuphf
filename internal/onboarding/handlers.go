@@ -209,6 +209,11 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		ScanCompleted bool     `json:"scan_completed"`
 		OwnerName     string   `json:"owner_name"`
 		OwnerRole     string   `json:"owner_role"`
+		// Product analytics consent captured by the wizard's two toggles.
+		// Pointers so a legacy client that omits them leaves config alone
+		// (default ON resolves at read time). See docs/specs/product-analytics.md.
+		AnalyticsTelemetryEnabled        *bool `json:"analytics_telemetry_enabled,omitempty"`
+		AnalyticsSessionRecordingEnabled *bool `json:"analytics_session_recording_enabled,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -257,9 +262,11 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		}
 	}
 
-	// Persist company/owner fields only after validation and completeFn succeed
-	// so duplicate or invalid requests don't overwrite config state.
-	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted {
+	// Persist company/owner fields and analytics consent only after validation
+	// and completeFn succeed so duplicate or invalid requests don't overwrite
+	// config state.
+	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted ||
+		body.AnalyticsTelemetryEnabled != nil || body.AnalyticsSessionRecordingEnabled != nil {
 		if cfg, err := config.Load(); err == nil {
 			if website != "" {
 				cfg.CompanyWebsite = website
@@ -272,6 +279,16 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 			}
 			if website != "" || ownerName != "" || ownerRole != "" {
 				cfg.PendingCompanySeed = !body.ScanCompleted
+			}
+			// Copy into fresh locals so the stored pointer doesn't alias the
+			// decoded request body.
+			if body.AnalyticsTelemetryEnabled != nil {
+				v := *body.AnalyticsTelemetryEnabled
+				cfg.AnalyticsTelemetryEnabled = &v
+			}
+			if body.AnalyticsSessionRecordingEnabled != nil {
+				v := *body.AnalyticsSessionRecordingEnabled
+				cfg.AnalyticsSessionRecordingEnabled = &v
 			}
 			if err := config.Save(cfg); err != nil {
 				log.Printf("onboarding: complete: failed to persist company fields: %v", err)

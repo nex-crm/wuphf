@@ -2,6 +2,7 @@
  * Wiki API client — thin wrapper over the shared fetch helper in `client.ts`.
  */
 
+import { track, trackOn } from "../lib/analytics";
 import { del, get, post, sseURL } from "./client";
 import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
@@ -80,13 +81,19 @@ export async function writeHumanArticle(params: {
       commit_message: params.commitMessage,
       expected_sha: params.expectedSha,
     });
+    track("wiki_article_edited", { is_create: false, had_conflict: false });
     return res;
   } catch (err: unknown) {
     // The shared post() helper surfaces non-2xx as Error(text). For 409
     // the body is a JSON envelope — try to parse it out.
     const message = err instanceof Error ? err.message : String(err);
     const parsed = tryParseConflict(message);
-    if (parsed) return parsed;
+    if (parsed) {
+      // A conflict is still a human edit attempt — record it with the flag so
+      // we can see how often concurrent edits collide.
+      track("wiki_article_edited", { is_create: false, had_conflict: true });
+      return parsed;
+    }
     throw err;
   }
 }
@@ -309,7 +316,11 @@ export async function createPage(params: {
   const body: Record<string, string> = { path: params.path };
   if (params.title !== undefined) body.title = params.title;
   if (params.content !== undefined) body.content = params.content;
-  return post<CreatePageResult>("/wiki/page/create", body);
+  return trackOn(
+    post<CreatePageResult>("/wiki/page/create", body),
+    "wiki_article_edited",
+    { is_create: true, had_conflict: false },
+  );
 }
 
 /**

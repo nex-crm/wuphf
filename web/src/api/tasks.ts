@@ -1,3 +1,4 @@
+import { track, trackOn } from "../lib/analytics";
 import { isLifecycleState, type LifecycleState } from "../lib/types/lifecycle";
 import { get, post } from "./client";
 
@@ -286,6 +287,21 @@ export function createTasks(
     channel: opts?.channel || "general",
     created_by: opts?.createdBy || "human",
     tasks,
+  }).then((r) => {
+    // One task_created per planned task — properties come from the input, never
+    // the task title/details content.
+    for (const t of tasks) {
+      track("task_created", {
+        source: "home",
+        owner_agent: t.assignee || "",
+        provider: t.provider,
+        model: t.model,
+        effort: t.effort,
+        has_details: !!(t.details && t.details.trim()),
+        start_mode: t.park ? "backlog" : "start",
+      });
+    }
+    return r;
   });
 }
 
@@ -295,13 +311,17 @@ export function reassignTask(
   channel: string,
   actor = "human",
 ) {
-  return post<TaskResponse>("/tasks", {
-    action: "reassign",
-    id: taskId,
-    owner: newOwner,
-    channel: channel || "general",
-    created_by: actor,
-  });
+  return trackOn(
+    post<TaskResponse>("/tasks", {
+      action: "reassign",
+      id: taskId,
+      owner: newOwner,
+      channel: channel || "general",
+      created_by: actor,
+    }),
+    "task_status_changed",
+    { action: "reassign" },
+  );
 }
 
 export type TaskStatusAction =
@@ -347,7 +367,9 @@ export function updateTaskStatus(
     body.memory_workflow_override_reason = overrideReason;
     body.override_reason = overrideReason;
   }
-  return post<TaskResponse>("/tasks", body);
+  return trackOn(post<TaskResponse>("/tasks", body), "task_status_changed", {
+    action,
+  });
 }
 
 export function getTasks(
@@ -451,16 +473,25 @@ export function createSubTask(opts: {
   details?: string;
   owner?: string;
 }) {
-  return post<TaskResponse>("/tasks", {
-    action: "create",
-    channel: opts.channel || "general",
-    title: opts.title,
-    details: opts.details || "",
-    owner: opts.owner || "",
-    created_by: "human",
-    task_type: "issue",
-    parent_issue_id: opts.parentTaskId,
-  });
+  return trackOn(
+    post<TaskResponse>("/tasks", {
+      action: "create",
+      channel: opts.channel || "general",
+      title: opts.title,
+      details: opts.details || "",
+      owner: opts.owner || "",
+      created_by: "human",
+      task_type: "issue",
+      parent_issue_id: opts.parentTaskId,
+    }),
+    "task_created",
+    {
+      source: "subtask",
+      owner_agent: opts.owner || "",
+      has_details: !!(opts.details && opts.details.trim()),
+      start_mode: "start",
+    },
+  );
 }
 
 /** Reopen a closed Task (rejected/cancelled/approved). The broker
@@ -468,12 +499,16 @@ export function createSubTask(opts: {
  *  reopens straight into running (owner re-dispatched); an ownerless one
  *  lands ready and dispatches on assignment. */
 export function reopenTask(taskId: string, channel: string) {
-  return post<TaskResponse>("/tasks", {
-    action: "reopen",
-    id: taskId,
-    channel: channel || "general",
-    created_by: "human",
-  });
+  return trackOn(
+    post<TaskResponse>("/tasks", {
+      action: "reopen",
+      id: taskId,
+      channel: channel || "general",
+      created_by: "human",
+    }),
+    "task_status_changed",
+    { action: "reopen" },
+  );
 }
 
 export function getOfficeTasks(opts?: {

@@ -25,6 +25,7 @@ import {
 import { useInlineArtifacts } from "../../hooks/useInlineArtifacts";
 import { formatAgentName } from "../../lib/agentName";
 import { keyedByOccurrence } from "../../lib/reactKeys";
+import { ArticleAttribution } from "./ArticleAttribution";
 import ArticleContents from "./ArticleContents";
 import ArticleReadView from "./ArticleReadView";
 import ArticleStatusBanner from "./ArticleStatusBanner";
@@ -586,6 +587,9 @@ export default function WikiArticle({
             </div>
           </div>
           <ArticleTitle title={article.title} />
+          <div className="article-attribution-row">
+            <ArticleAttribution articleRef={path} />
+          </div>
           {byline}
           <ArticleBadges article={article} />
           <ArticleTabPanels

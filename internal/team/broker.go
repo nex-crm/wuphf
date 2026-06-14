@@ -639,6 +639,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
 	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))

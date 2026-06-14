@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,33 +19,6 @@ vi.mock("../../api/agentFiles", async () => {
     generateAgentFile: generateAgentFileMock,
   };
 });
-
-// Stub the heavy Tiptap editor: assert the wiring (path + save/cancel) without
-// loading the lazy rich-editor chunk in jsdom.
-vi.mock("../wiki/WikiEditor", () => ({
-  default: ({
-    path,
-    initialContent,
-    onSaved,
-    onCancel,
-  }: {
-    path: string;
-    initialContent: string;
-    onSaved: (sha: string) => void;
-    onCancel: () => void;
-  }) => (
-    <div data-testid="wiki-editor-stub">
-      <span data-testid="editor-path">{path}</span>
-      <span data-testid="editor-initial">{initialContent}</span>
-      <button type="button" onClick={() => onSaved("newsha")}>
-        stub-save
-      </button>
-      <button type="button" onClick={onCancel}>
-        stub-cancel
-      </button>
-    </div>
-  ),
-}));
 
 import type { OfficeMember } from "../../api/client";
 import { AgentInstructionsSection } from "./AgentInstructionsSection";
@@ -118,7 +91,7 @@ describe("<AgentInstructionsSection>", () => {
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("opens the editor on Edit and returns to view on save", async () => {
+  it("opens the structured block editor on Edit (default)", async () => {
     const user = userEvent.setup();
     render(wrap(<AgentInstructionsSection agent={specialist} />));
 
@@ -126,18 +99,91 @@ describe("<AgentInstructionsSection>", () => {
     await screen.findByText("Edit");
     await user.click(screen.getByText("Edit"));
 
-    const editor = await screen.findByTestId("wiki-editor-stub");
-    expect(editor).toBeInTheDocument();
-    expect(screen.getByTestId("editor-path")).toHaveTextContent(
-      "agents/growth/SOUL.md",
+    // Default editor is structured blocks: the SOUL schema sections each get a
+    // labelled textarea, and the file's preamble lands in an Overview block.
+    expect(
+      await screen.findByRole("textbox", { name: /SOUL — Who you are/i }),
+    ).toBeInTheDocument();
+    const overview = screen.getByRole("textbox", { name: "Overview" });
+    expect((overview as HTMLTextAreaElement).value).toMatch(/be relentless/i);
+    // The Blocks/Raw toggle is present, Blocks active.
+    expect(screen.getByRole("button", { name: "Blocks" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
+  });
 
-    // Saving exits edit mode (back to the view with the Edit button).
-    await user.click(screen.getByText("stub-save"));
-    await waitFor(() => {
-      expect(screen.queryByTestId("wiki-editor-stub")).not.toBeInTheDocument();
+  it("edits a section block and saves the reserialized file", async () => {
+    readAgentFileMock.mockResolvedValue({
+      path: "agents/growth/SOUL.md",
+      content: "# SOUL — @growth\n\n## Who you are\nold identity\n",
+      sha: "abc123",
+      exists: true,
     });
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    writeAgentFileMock.mockResolvedValue({
+      path: "agents/growth/SOUL.md",
+      commit_sha: "newsha",
+      bytes_written: 42,
+    });
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await screen.findByText("Edit");
+    await user.click(screen.getByText("Edit"));
+
+    const block = await screen.findByRole("textbox", {
+      name: /SOUL — Who you are/i,
+    });
+    expect((block as HTMLTextAreaElement).value).toBe("old identity");
+    fireEvent.change(block, { target: { value: "relentless about pipeline" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(writeAgentFileMock).toHaveBeenCalled());
+    const written = writeAgentFileMock.mock.calls[0][0] as { content: string };
+    // The save reserializes the blocks back into the file's `## ` structure.
+    expect(written.content).toContain("## Who you are");
+    expect(written.content).toContain("relentless about pipeline");
+    // Saving returns to the view (Edit button visible again).
+    await waitFor(() => expect(screen.getByText("Edit")).toBeInTheDocument());
+  });
+
+  it("can switch to the Raw (advanced) editor", async () => {
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await screen.findByText("Edit");
+    await user.click(screen.getByText("Edit"));
+    await screen.findByRole("textbox", { name: "Overview" });
+
+    // Raw is the escape hatch: the whole file as one markdown textarea.
+    await user.click(screen.getByRole("button", { name: "Raw" }));
+    const raw = await screen.findByLabelText(/raw markdown editor for SOUL/i);
+    expect((raw as HTMLTextAreaElement).value).toMatch(/be relentless/i);
+  });
+
+  it("does not wipe unsaved raw edits when the active Raw tab is re-clicked", async () => {
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await screen.findByText("Edit");
+    await user.click(screen.getByText("Edit"));
+    await screen.findByRole("textbox", { name: "Overview" });
+
+    await user.click(screen.getByRole("button", { name: "Raw" }));
+    const raw = await screen.findByLabelText(/raw markdown editor for SOUL/i);
+    fireEvent.change(raw, {
+      target: { value: "# SOUL — @growth\nedited raw" },
+    });
+
+    // Re-clicking the already-active Raw tab must preserve the edit, not
+    // re-seed the textarea from disk content.
+    await user.click(screen.getByRole("button", { name: "Raw" }));
+    expect((raw as HTMLTextAreaElement).value).toBe(
+      "# SOUL — @growth\nedited raw",
+    );
   });
 
   it("surfaces the seeded badge when a file has not been written yet", async () => {
@@ -194,11 +240,11 @@ describe("<AgentInstructionsSection>", () => {
         "agents/growth/SOUL.md",
       );
     });
-    // Editor opens seeded with the generated draft (not the on-disk content).
-    const editor = await screen.findByTestId("wiki-editor-stub");
-    expect(editor).toBeInTheDocument();
-    expect(screen.getByTestId("editor-initial")).toHaveTextContent(
-      "AI-authored, vivid and specific",
+    // The block editor opens seeded with the generated draft — the prose with
+    // no `## ` sections lands in the Overview block.
+    const overview = await screen.findByRole("textbox", { name: "Overview" });
+    expect((overview as HTMLTextAreaElement).value).toMatch(
+      /AI-authored, vivid and specific/,
     );
   });
 
@@ -211,6 +257,7 @@ describe("<AgentInstructionsSection>", () => {
     await user.click(await screen.findByText("Generate with AI"));
 
     expect(await screen.findByText("model unavailable")).toBeInTheDocument();
-    expect(screen.queryByTestId("wiki-editor-stub")).not.toBeInTheDocument();
+    // No editor opened — still in the view (the Edit affordance is showing).
+    expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 });
