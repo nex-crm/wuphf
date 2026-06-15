@@ -63,13 +63,25 @@ import {
 // ── Helpers ────────────────────────────────────────────────────────────
 
 export function isIssueTask(task: Task): boolean {
-  // Sub-tasks live on the parent Task's detail surface, not on the
-  // top-level board. Filtering them out here keeps the board scoped
-  // to "real" Tasks; children stay reachable via the parent Task.
+  // Sub-tasks are not top-level board rows — they render nested under their
+  // parent's card (see TaskCardGroup), in the parent's lane. Filtering them
+  // out of the top-level set here keeps each child tied to its parent instead
+  // of floating as an independent card.
   if (task.parent_issue_id && task.parent_issue_id.length > 0) {
     return false;
   }
   return task.task_type === "issue" || task.pipeline_id === "issue";
+}
+
+/** Returns the sub-task's parent id, or "" when the task is top-level. */
+function parentIssueId(task: Task): string {
+  return task.parent_issue_id?.trim() ?? "";
+}
+
+/** Lowercased haystack used by the board's filter box for a single task. */
+function taskMatchesQuery(task: Task, needle: string): boolean {
+  const hay = `${task.title ?? ""} ${task.description ?? ""} ${task.owner ?? ""} ${task.channel ?? ""}`;
+  return hay.toLowerCase().includes(needle);
 }
 
 /** Per-stage hint copy shown under the column header. The `scheduled`
@@ -91,7 +103,14 @@ const STAGE_HINT: Record<LifecycleStage, string> = {
 // memo, every card in every lane re-renders even when its own task is
 // unchanged. Props are a single `task` object — React Query keeps the
 // reference stable when the row's data hasn't changed.
-const TaskCard = memo(function TaskCard({ task }: { task: Task }) {
+const TaskCard = memo(function TaskCard({
+  task,
+  isSubtask = false,
+}: {
+  task: Task;
+  /** Renders the compact, indented variant shown nested under a parent. */
+  isSubtask?: boolean;
+}) {
   const state = taskToLifecycleState(task);
   const ownerSlug = task.owner?.trim() || undefined;
   // Live "what's happening" line: the owner's current activity snapshot
@@ -114,10 +133,12 @@ const TaskCard = memo(function TaskCard({ task }: { task: Task }) {
   return (
     <button
       type="button"
-      className="issues-kanban-card"
+      className={`issues-kanban-card${isSubtask ? " issues-kanban-card--subtask" : ""}`}
       onClick={navigate}
-      data-testid="issue-row"
-      aria-label={`Task: ${formatTaskTitleForDisplay(task.title)}, state: ${state}${
+      data-testid={isSubtask ? "issue-subtask-row" : "issue-row"}
+      aria-label={`${isSubtask ? "Sub-task" : "Task"}: ${formatTaskTitleForDisplay(
+        task.title,
+      )}, state: ${state}${
         ownerSlug ? `, owner: ${ownerSlug}` : ", unassigned"
       }`}
     >
@@ -141,6 +162,43 @@ const TaskCard = memo(function TaskCard({ task }: { task: Task }) {
         </div>
       ) : null}
     </button>
+  );
+});
+
+/**
+ * A top-level task card together with its sub-tasks, rendered as one list
+ * item. Sub-tasks nest directly beneath the parent card and stay in the
+ * SAME lane as the parent — regardless of each child's own lifecycle stage —
+ * so the board reads as a hierarchy ("these belong to that"). Each sub-task
+ * runs in its own chat channel and links to its own detail surface; the
+ * nesting is purely the visual tie back to the parent.
+ */
+const TaskCardGroup = memo(function TaskCardGroup({
+  task,
+  subtasks,
+}: {
+  task: Task;
+  subtasks: Task[];
+}) {
+  return (
+    <li className="issues-kanban-card-group">
+      <TaskCard task={task} />
+      {subtasks.length > 0 ? (
+        <ul
+          className="issues-kanban-subtasks"
+          aria-label={`Sub-tasks of ${
+            formatTaskTitleForDisplay(task.title) || "task"
+          }`}
+          data-testid={`issue-subtasks-${task.id}`}
+        >
+          {subtasks.map((child) => (
+            <li key={child.id}>
+              <TaskCard task={child} isSubtask />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
   );
 });
 
@@ -488,6 +546,21 @@ export function TasksList({
   const allTasks = result.data?.tasks ?? [];
   const tasks = useMemo(() => allTasks.filter(isIssueTask), [allTasks]);
 
+  // Group sub-tasks by their parent so each parent card can render its
+  // children nested beneath it (TaskCardGroup). Built from the full task set
+  // because sub-tasks are filtered out of the top-level `tasks` list above.
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const task of allTasks) {
+      const parentId = parentIssueId(task);
+      if (!parentId) continue;
+      const existing = map.get(parentId);
+      if (existing) existing.push(task);
+      else map.set(parentId, [task]);
+    }
+    return map;
+  }, [allTasks]);
+
   const scheduledJobs = useMemo<SchedulerJob[]>(() => {
     const jobs = schedulerResult.data?.jobs ?? [];
     // The work board shows the operator's own recurring routines, not the
@@ -502,11 +575,14 @@ export function TasksList({
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return tasks;
+    // A parent surfaces when it matches OR any of its sub-tasks match, so a
+    // search for a child's text still finds it (nested under its parent).
     return tasks.filter((t) => {
-      const hay = `${t.title ?? ""} ${t.description ?? ""} ${t.owner ?? ""} ${t.channel ?? ""}`;
-      return hay.toLowerCase().includes(needle);
+      if (taskMatchesQuery(t, needle)) return true;
+      const children = childrenByParent.get(t.id) ?? [];
+      return children.some((child) => taskMatchesQuery(child, needle));
     });
-  }, [tasks, query]);
+  }, [tasks, query, childrenByParent]);
 
   const filteredScheduled = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -689,9 +765,11 @@ export function TasksList({
                     ) : stage === "needs_human" ? (
                       <>
                         {columns[stage].map((task) => (
-                          <li key={task.id}>
-                            <TaskCard task={task} />
-                          </li>
+                          <TaskCardGroup
+                            key={task.id}
+                            task={task}
+                            subtasks={childrenByParent.get(task.id) ?? []}
+                          />
                         ))}
                         {filteredAttention.map((item) => (
                           <li key={renderInboxItemKey(item)}>
@@ -701,9 +779,11 @@ export function TasksList({
                       </>
                     ) : (
                       columns[stage].map((task) => (
-                        <li key={task.id}>
-                          <TaskCard task={task} />
-                        </li>
+                        <TaskCardGroup
+                          key={task.id}
+                          task={task}
+                          subtasks={childrenByParent.get(task.id) ?? []}
+                        />
                       ))
                     )}
                   </ul>
