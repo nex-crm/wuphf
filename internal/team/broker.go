@@ -165,6 +165,8 @@ type Broker struct {
 	wikiInitErr             error
 	customApps              *customAppStore
 	customAppOnce           sync.Once
+	appDev                  *appDevManager
+	appDevOnce              sync.Once
 	autoNotebookWriter      *AutoNotebookWriter
 	humanWikiWriter         *HumanWikiIntentWriter
 	obsidianWatcher         *ObsidianWatcher
@@ -807,9 +809,15 @@ func (b *Broker) Stop() {
 	// pending WaitGroup, so this is the only correct order.
 	b.mu.Lock()
 	obsidianWatcher := b.obsidianWatcher
+	appDev := b.appDev
 	b.mu.Unlock()
 	if obsidianWatcher != nil {
 		_ = obsidianWatcher.Stop()
+	}
+	// Tear down any live app-preview dev servers (bun processes + proxies) so
+	// they don't outlive the broker.
+	if appDev != nil {
+		appDev.StopAll()
 	}
 
 	if b.lifecycleCancel != nil {

@@ -12,6 +12,7 @@ import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { showNotice } from "../ui/Toast";
+import { AppLivePreview } from "./AppLivePreview";
 import { CustomAppFrame } from "./CustomAppFrame";
 
 interface CustomAppViewProps {
@@ -29,6 +30,9 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   const queryClient = useQueryClient();
   const openUpdateAppDialog = useAppStore((s) => s.openUpdateAppDialog);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Live = the running dev server (HMR); Sealed = the published single-file
+  // bundle. Default to Live so opening an app shows the real, current tool.
+  const [mode, setMode] = useState<"live" | "sealed">("live");
   const menuRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -140,6 +144,24 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
             <p className="custom-app-view__summary">{app.summary}</p>
           ) : null}
         </div>
+        <div className="custom-app-view__mode">
+          <button
+            type="button"
+            className="custom-app-view__mode-btn"
+            aria-pressed={mode === "live"}
+            onClick={() => setMode("live")}
+          >
+            Live
+          </button>
+          <button
+            type="button"
+            className="custom-app-view__mode-btn"
+            aria-pressed={mode === "sealed"}
+            onClick={() => setMode("sealed")}
+          >
+            Sealed
+          </button>
+        </div>
         <span
           className="custom-app-view__version"
           title={`Updated ${app.updatedAt}`}
@@ -207,7 +229,11 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
         </div>
       </header>
       <div className="custom-app-view__body">
-        <CustomAppFrame html={html} title={app.name} />
+        {mode === "live" ? (
+          <AppLivePreview appId={appId} title={app.name} />
+        ) : (
+          <CustomAppFrame html={html} title={app.name} />
+        )}
       </div>
     </div>
   );

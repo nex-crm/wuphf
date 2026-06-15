@@ -106,24 +106,47 @@ function errorMessage(err: unknown): string {
 }
 
 interface CustomAppFrameProps {
-  html: string;
   title: string;
+  /** Sealed mode: the published single-file bundle, rendered via srcDoc. */
+  html?: string;
+  /**
+   * Dev (live) mode: the broker dev-server proxy origin. When set the frame
+   * loads it directly with HMR instead of the sealed bundle. The proxy injects
+   * the security CSP (a generated vite.config can't strip it) and serves a
+   * DISTINCT 127.0.0.1 origin, so allow-same-origin grants the app only its OWN
+   * origin — never the parent app's session. The postMessage bridge below works
+   * in both modes (identity is by window reference, not origin).
+   */
+  devUrl?: string;
 }
 
-export function CustomAppFrame({ html, title }: CustomAppFrameProps) {
+export function CustomAppFrame({ html, title, devUrl }: CustomAppFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const srcDoc = useMemo(() => withAppCsp(html), [html]);
+  const srcDoc = useMemo(
+    () => (html !== undefined ? withAppCsp(html) : undefined),
+    [html],
+  );
 
   useEffect(() => {
+    // In DEV mode the frame is a real, known origin (the proxy), so pin replies
+    // to it — the office data must not reach a frame that navigated to a
+    // different origin. In SEALED mode the frame is an opaque origin ("null")
+    // and "*" is the only option (and is safe: no allow-same-origin, no nested
+    // browsing contexts).
+    let replyOrigin = "*";
+    if (devUrl) {
+      try {
+        replyOrigin = new URL(devUrl).origin;
+      } catch {
+        replyOrigin = "*";
+      }
+    }
     function reply(
       target: Window,
       id: string | number,
       payload: { ok: boolean; data?: unknown; error?: string },
     ): void {
-      // The frame is an opaque origin (no allow-same-origin), so we cannot
-      // target a concrete origin; "*" is acceptable because the payload is the
-      // user's own office data and the sandbox forbids nested browsing contexts.
-      target.postMessage({ source: HOST_SOURCE, id, ...payload }, "*");
+      target.postMessage({ source: HOST_SOURCE, id, ...payload }, replyOrigin);
     }
 
     async function handle(
@@ -167,7 +190,19 @@ export function CustomAppFrame({ html, title }: CustomAppFrameProps) {
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [devUrl]);
+
+  if (devUrl) {
+    return (
+      <iframe
+        ref={iframeRef}
+        className="custom-app-frame"
+        title={title}
+        sandbox="allow-scripts allow-same-origin"
+        src={devUrl}
+      />
+    );
+  }
 
   return (
     <iframe
