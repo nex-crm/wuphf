@@ -504,6 +504,138 @@ func TestNotificationTargetsForHumanMessageDirectToTaggedSpecialists(t *testing.
 	}
 }
 
+// TestNotificationTargetsCEOWakesOnlyOnMention locks the wake contract: the
+// CEO/lead wakes on untagged human messages and on any message that @mentions
+// it, but NOT on a specialist message that does not @mention it. Before the
+// fix, an untagged specialist message woke the CEO as the default routing hub,
+// so every status ping and live-stream note spawned a CEO turn.
+func TestNotificationTargetsCEOWakesOnlyOnMention(t *testing.T) {
+	newLauncher := func(focus bool) *Launcher {
+		return &Launcher{
+			focusMode: focus,
+			pack: &agent.PackDefinition{
+				LeadSlug: "ceo",
+				Agents: []agent.AgentConfig{
+					{Slug: "ceo", Name: "CEO"},
+					{Slug: "fe", Name: "Frontend Engineer"},
+					{Slug: "be", Name: "Backend Engineer"},
+				},
+			},
+		}
+	}
+	hasSlug := func(targets []notificationTarget, slug string) bool {
+		for _, tg := range targets {
+			if tg.Slug == slug {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, focus := range []bool{true, false} {
+		mode := "collaborative"
+		if focus {
+			mode = "focus"
+		}
+
+		t.Run(mode+"/untagged specialist message does not wake CEO", func(t *testing.T) {
+			l := newLauncher(focus)
+			// A substantive (non-[STATUS]) note: pre-fix this woke the CEO as
+			// the default routing hub. It must not anymore.
+			immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+				From:    "be",
+				Content: "wired up the handler and shipped the first slice, two files left",
+			})
+			if hasSlug(immediate, "ceo") || hasSlug(delayed, "ceo") {
+				t.Fatalf("CEO must not wake on an untagged specialist message; immediate=%+v delayed=%+v", immediate, delayed)
+			}
+		})
+
+		t.Run(mode+"/specialist mentioning CEO wakes CEO", func(t *testing.T) {
+			l := newLauncher(focus)
+			immediate, _ := l.notificationTargetsForMessage(channelMessage{
+				From:    "be",
+				Content: "@ceo this needs a routing decision",
+				Tagged:  []string{"ceo"},
+			})
+			if !hasSlug(immediate, "ceo") {
+				t.Fatalf("CEO must wake when a specialist @mentions it; got %+v", immediate)
+			}
+		})
+
+		t.Run(mode+"/untagged human message wakes CEO", func(t *testing.T) {
+			l := newLauncher(focus)
+			immediate, _ := l.notificationTargetsForMessage(channelMessage{
+				From:    "you",
+				Content: "what's the status of the launch?",
+			})
+			if !hasSlug(immediate, "ceo") {
+				t.Fatalf("CEO must wake on an untagged human message; got %+v", immediate)
+			}
+		})
+
+		// Automation/nex traffic is inbound external work (scheduled triggers,
+		// Nex notifications), not internal agent chatter — it routes to the CEO
+		// to triage even when untagged. The router keeps two independent wake
+		// predicates (Kind=="automation" and From=="nex"); cover each on its own
+		// so dropping either one fails this regression.
+		for _, inbound := range []struct {
+			name string
+			msg  channelMessage
+		}{
+			{name: "automation kind", msg: channelMessage{From: "scheduler", Kind: "automation", Content: "inbound: scheduled trigger fired"}},
+			{name: "nex sender", msg: channelMessage{From: "nex", Content: "inbound: new lead assigned to the workspace"}},
+		} {
+			inbound := inbound
+			t.Run(mode+"/untagged inbound "+inbound.name+" wakes CEO", func(t *testing.T) {
+				l := newLauncher(focus)
+				immediate, _ := l.notificationTargetsForMessage(inbound.msg)
+				if !hasSlug(immediate, "ceo") {
+					t.Fatalf("CEO must wake on untagged inbound %s work; got %+v", inbound.name, immediate)
+				}
+			})
+		}
+
+		t.Run(mode+"/human tagging a specialist AND CEO still wakes CEO", func(t *testing.T) {
+			// An explicit @mention of the CEO always wakes it, even when the
+			// human also tags a specialist in the same message.
+			l := newLauncher(focus)
+			immediate, _ := l.notificationTargetsForMessage(channelMessage{
+				From:    "you",
+				Content: "@ceo @be please handle this",
+				Tagged:  []string{"ceo", "be"},
+			})
+			if !hasSlug(immediate, "ceo") {
+				t.Fatalf("CEO must wake when a human @mentions it alongside a specialist; got %+v", immediate)
+			}
+			if !hasSlug(immediate, "be") {
+				t.Fatalf("the tagged specialist must also wake; got %+v", immediate)
+			}
+		})
+
+		if focus {
+			// Focus mode only: a human who tags a specialist (and not the CEO)
+			// gets that specialist directly; the CEO is not pulled in to
+			// re-route an explicit assignment. Collaborative mode keeps the
+			// CEO in the loop on every human message by design.
+			t.Run(mode+"/human tagging only a specialist does not wake CEO", func(t *testing.T) {
+				l := newLauncher(focus)
+				immediate, _ := l.notificationTargetsForMessage(channelMessage{
+					From:    "you",
+					Content: "@be ship the handler",
+					Tagged:  []string{"be"},
+				})
+				if hasSlug(immediate, "ceo") {
+					t.Fatalf("CEO must not wake when the human tags only a specialist; got %+v", immediate)
+				}
+				if !hasSlug(immediate, "be") {
+					t.Fatalf("the tagged specialist must wake; got %+v", immediate)
+				}
+			})
+		}
+	}
+}
+
 func TestNotificationTargetsForDMChannel(t *testing.T) {
 	// DMs should route only to the target agent, not to CEO or other specialists.
 	l := &Launcher{

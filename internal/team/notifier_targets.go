@@ -450,8 +450,10 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 					humanExplicitlyTaggedSpecialists = true
 				}
 			}
-			if !humanExplicitlyTaggedSpecialists {
-				// No specialist tagged — CEO decides who handles this.
+			// Wake the CEO when either no specialist was tagged (it routes the
+			// request) or the human explicitly @mentioned it (an explicit
+			// address always wakes, even alongside a tagged specialist).
+			if !humanExplicitlyTaggedSpecialists || containsSlug(msg.Tagged, lead) {
 				addImmediate(lead)
 			}
 		case msg.From == lead:
@@ -461,11 +463,16 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 				}
 			}
 		default:
-			// Specialist message: wake CEO only if it is a substantive update (not a status ping).
-			// [STATUS] lines are internal progress markers — CEO does not need to re-route on them.
-			isStatusOnly := strings.HasPrefix(strings.TrimSpace(msg.Content), "[STATUS]")
-			if !isStatusOnly {
-				addImmediate(lead)
+			// Specialist message: wake only the agents the specialist
+			// explicitly @-tagged (the CEO included, when tagged). An
+			// untagged specialist message — a [STATUS] progress ping or a
+			// richer live-stream note posted for human visibility — never
+			// wakes the CEO. No teammate is listening on an untagged agent
+			// message, so an agent that needs the CEO must @-tag it.
+			for _, slug := range msg.Tagged {
+				if slug != msg.From && allowTarget(slug) {
+					addImmediate(slug)
+				}
 			}
 		}
 		return immediate, delayed
@@ -508,9 +515,11 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			}
 		}
 	default:
-		// Specialist-to-channel message in collaborative mode: CEO stays in the loop
-		// plus any tagged agents and the task owner.
-		addImmediate(lead)
+		// Specialist-to-channel message that does NOT tag the CEO: an
+		// untagged agent message never wakes the CEO. Wake the task owner
+		// and any explicitly tagged agents only. An agent that needs the
+		// CEO must @-tag it (handled by the msg.Tagged-contains-lead case
+		// above).
 		if owner != "" && owner != lead && allowTarget(owner) {
 			addImmediate(owner)
 		}
