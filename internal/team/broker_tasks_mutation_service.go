@@ -548,6 +548,12 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		channel = "general"
 	}
 
+	// Pre-scaffold a new App Builder app (outside b.mu — the app store has its
+	// own lock) so its live preview boots a running scaffold in seconds. This
+	// also appends the pre-created app id to the task brief so the agent
+	// publishes onto the same app. No-op for every non-app create.
+	body = b.maybePrescaffoldAppForCreate(action, channel, body)
+
 	// Permission preflight must run before any gate with external side
 	// effects. The locked auth check below still runs again after these
 	// pre-phases, so a task whose owner/reviewer changes while a verification

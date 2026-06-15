@@ -31,30 +31,58 @@ export function AppsSection() {
   });
   const items = apps ?? [];
 
-  const realNames = useMemo(
-    () => new Set(items.map((a) => a.name.trim().toLowerCase())),
+  // Published apps are clickable; pre-scaffolded drafts (status "building") show
+  // as a real building row instead — their live preview is in the build task.
+  const readyItems = useMemo(
+    () => items.filter((a) => a.status !== "building"),
+    [items],
+  );
+  const buildingNames = useMemo(
+    () => items.filter((a) => a.status === "building").map((a) => a.name),
     [items],
   );
 
-  // A pending build resolves when its app appears in the list, or expires after
-  // the TTL (the build failed or the optimistic note outlived it).
+  const readyNames = useMemo(
+    () => new Set(readyItems.map((a) => a.name.trim().toLowerCase())),
+    [readyItems],
+  );
+  const buildingKeys = useMemo(
+    () => new Set(buildingNames.map((n) => n.trim().toLowerCase())),
+    [buildingNames],
+  );
+
+  // An optimistic note (added on submit) is superseded once a real draft or
+  // published app of that name exists, or it expires after the TTL.
   const pending = useMemo(() => {
     const now = Date.now();
     return Object.entries(appBuilds)
       .filter(
-        ([key, b]) => !realNames.has(key) && now - b.startedAt <= BUILD_TTL_MS,
+        ([key, b]) =>
+          !(readyNames.has(key) || buildingKeys.has(key)) &&
+          now - b.startedAt <= BUILD_TTL_MS,
       )
       .map(([, b]) => b.name);
-  }, [appBuilds, realNames]);
+  }, [appBuilds, readyNames, buildingKeys]);
+
+  // The full set of in-flight builds: real pre-scaffolded drafts first, then any
+  // optimistic notes not yet backed by a draft.
+  const building = useMemo(
+    () => [...buildingNames, ...pending],
+    [buildingNames, pending],
+  );
 
   useEffect(() => {
     const now = Date.now();
     for (const [key, b] of Object.entries(appBuilds)) {
-      if (realNames.has(key) || now - b.startedAt > BUILD_TTL_MS) {
+      if (
+        readyNames.has(key) ||
+        buildingKeys.has(key) ||
+        now - b.startedAt > BUILD_TTL_MS
+      ) {
         clearAppBuilding(b.name);
       }
     }
-  }, [appBuilds, realNames, clearAppBuilding]);
+  }, [appBuilds, readyNames, buildingKeys, clearAppBuilding]);
 
   return (
     <SidebarSection
@@ -64,7 +92,7 @@ export function AppsSection() {
       data-testid="sidebar-section-apps"
     >
       <div className="sidebar-apps">
-        {items.map((app) => (
+        {readyItems.map((app) => (
           <SidebarItem
             key={app.id}
             icon={
@@ -79,7 +107,7 @@ export function AppsSection() {
             onClick={() => navigateToSidebarApp(app.id)}
           />
         ))}
-        {pending.map((name) => (
+        {building.map((name) => (
           <div
             key={`building-${name.toLowerCase()}`}
             className="sidebar-app-building"

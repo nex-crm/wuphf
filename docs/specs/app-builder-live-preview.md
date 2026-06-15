@@ -1,8 +1,26 @@
 # App Builder — Live Dev-Server Preview (SOTA)
 
-Status: **planned, gated on PR #1096 merge + rebase.** Architecture approved by
-the founder (2026-06-15): live dev-server-per-app behind a broker proxy; the
-single-file build stays as the sealed "ship" artifact.
+Status: **Phase 1 SHIPPED (PR #1099) + instant-new-build (pre-scaffold)
+SHIPPED on the stacked branch.** Architecture approved by the founder
+(2026-06-15): live dev-server-per-app behind a broker proxy; the single-file
+build stays as the sealed "ship" artifact.
+
+## Shipped so far
+
+- **Phase 1 (PR #1099)** — `appDevManager` + per-app broker `httputil.ReverseProxy`
+  (agent-proof CSP injection, HMR WS tunnel, DNS-rebind guard), `CustomAppFrame`
+  dev mode, `AppLivePreview`. Existing apps preview live with HMR.
+- **Instant new-build (stacked PR)** — a new "Build app: X" task **pre-scaffolds**
+  the app's editable source from the embedded `templates/app-scaffold` the moment
+  the task is created (`customAppStore.Scaffold`, embedded via the `templates`
+  package; `MutateTask` create hook `maybePrescaffoldAppForCreate`). The draft is
+  recorded `status:"building"` (hidden from the sidebar, resolved by the build
+  task's preview) and the task brief carries the pre-created `app_id` so the agent
+  publishes onto the same app. `register_app` flips it to `ready` and bumps the
+  version; `writeAppSourceLocked` now preserves `node_modules` so the running dev
+  server survives a publish and hot-reloads the new source. **Live-verified:** a
+  brand-new build lights up a running scaffold in ~2s (bun install warm 99ms →
+  Vite ready 664ms), bridge populates office data cross-origin.
 
 ## Why
 

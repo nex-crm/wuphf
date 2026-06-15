@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/templates"
 )
 
 const (
@@ -51,7 +52,25 @@ const (
 	customAppSourceDir          = "src"
 	customAppMaxSourceFiles     = 300
 	customAppMaxSourceFileBytes = 512 * 1024
+	// customAppStatusBuilding marks a pre-scaffolded app that has no published
+	// build yet — the source exists (so the live dev preview can boot) but the
+	// App Builder has not run register_app. A missing/empty status means
+	// "ready" (back-compat with manifests written before this field existed).
+	customAppStatusBuilding = "building"
+	customAppStatusReady    = "ready"
 )
+
+// customAppPreservedSrcDirs are top-level entries under src/ that a publish must
+// NOT delete: build/install artifacts that are expensive to regenerate and that
+// a running dev server depends on. Keeping node_modules across a register_app
+// lets the live Vite server hot-reload the freshly published source instead of
+// crashing on a vanished dependency tree. They are also skipped when reading
+// source back (get_app) so the agent never sees node_modules.
+var customAppPreservedSrcDirs = map[string]bool{
+	"node_modules": true,
+	"dist":         true,
+	".vite":        true,
+}
 
 // CustomApp is the durable manifest for an agent-generated internal tool. The
 // built HTML bundle lives next to it on disk (Entry) so listings stay cheap.
@@ -64,6 +83,10 @@ type CustomApp struct {
 	Description string `json:"description,omitempty"`
 	Entry       string `json:"entry"`
 	Version     int    `json:"version"`
+	// Status is "building" for a pre-scaffolded app awaiting its first publish,
+	// or "ready"/"" for a published app. Lets the sidebar hide drafts while the
+	// build task's live preview still resolves them.
+	Status      string `json:"status,omitempty"`
 	CreatedBy   string `json:"createdBy"`
 	UpdatedBy   string `json:"updatedBy,omitempty"`
 	CreatedAt   string `json:"createdAt"`
@@ -294,6 +317,9 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 		}
 	}
 	app.Entry = customAppEntry
+	// A register_app is always a real published build, so it clears the
+	// "building" draft status a pre-scaffolded app carries.
+	app.Status = customAppStatusReady
 
 	dir := s.appDir(app.ID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -323,6 +349,125 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 	return app, nil
 }
 
+// scaffoldPlaceholderHTML is the sealed entry written for a not-yet-built app so
+// the sealed view (and get_app) has a valid document before the first publish.
+// The live preview never uses it — it boots the dev server on the source below.
+const scaffoldPlaceholderHTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+	`<meta name="viewport" content="width=device-width, initial-scale=1">` +
+	`<title>Building…</title></head><body style="font:14px system-ui;padding:2rem;color:#555">` +
+	`<p>This app is being built. The live preview shows progress as it is created.</p>` +
+	`</body></html>`
+
+// Scaffold materializes a brand-new app's editable source from the embedded
+// starter template and records a "building" draft manifest, BEFORE the App
+// Builder writes a single line of code. The live preview can then boot a real
+// dev server on this source in seconds — turning the old multi-minute
+// "Building…" dead air into an instant, running scaffold the human watches the
+// agent shape. The agent publishes the finished build with register_app(app_id)
+// using this same id, which flips the draft to a ready, listed app.
+//
+// Scaffold is idempotent: if the id already exists (draft or published) it
+// returns the existing manifest untouched, so a retried/duplicate task create
+// never clobbers in-flight work.
+func (s *customAppStore) Scaffold(id, name, icon, actor string, now time.Time) (CustomApp, error) {
+	if err := validateCustomAppID(id); err != nil {
+		return CustomApp{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return CustomApp{}, newCustomAppCallerError("app: name is required")
+	}
+	if len(name) > customAppMaxNameBytes {
+		return CustomApp{}, newCustomAppCallerError("app: name exceeds %d bytes", customAppMaxNameBytes)
+	}
+	if strings.ContainsRune(name, '\x00') {
+		return CustomApp{}, newCustomAppCallerError("app: name must not contain NUL bytes")
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = "app-builder"
+	}
+	icon = strings.TrimSpace(icon)
+	if icon == "" {
+		icon = customAppDefaultIcon
+	}
+	slug := slugifyNotebookEntry(name)
+	if slug == "" {
+		slug = "app"
+	}
+	stamp := now.UTC().Format(time.RFC3339Nano)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing, err := s.readManifestLocked(id); err == nil {
+		return existing, nil
+	}
+
+	app := CustomApp{
+		ID:        id,
+		Slug:      slug,
+		Name:      name,
+		Icon:      icon,
+		Entry:     customAppEntry,
+		Version:   0,
+		Status:    customAppStatusBuilding,
+		CreatedBy: actor,
+		UpdatedBy: actor,
+		CreatedAt: stamp,
+		UpdatedAt: stamp,
+	}
+	dir := s.appDir(app.ID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return CustomApp{}, fmt.Errorf("app: mkdir: %w", err)
+	}
+	if err := writeFileAtomic(filepath.Join(dir, customAppEntry), []byte(scaffoldPlaceholderHTML), 0o600); err != nil {
+		return CustomApp{}, fmt.Errorf("app: write placeholder: %w", err)
+	}
+	if err := writeScaffoldSourceLocked(filepath.Join(dir, customAppSourceDir)); err != nil {
+		return CustomApp{}, err
+	}
+	manifestBytes, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return CustomApp{}, fmt.Errorf("app: marshal manifest: %w", err)
+	}
+	manifestBytes = append(manifestBytes, '\n')
+	if err := writeFileAtomic(filepath.Join(dir, customAppManifestFile), manifestBytes, 0o600); err != nil {
+		return CustomApp{}, fmt.Errorf("app: write manifest: %w", err)
+	}
+	return app, nil
+}
+
+// writeScaffoldSourceLocked copies the embedded starter template into srcRoot,
+// stripping the "app-scaffold/" prefix so package.json/vite.config/index.html
+// land at the project root (srcRoot) and the app's own code under srcRoot/src.
+func writeScaffoldSourceLocked(srcRoot string) error {
+	return fs.WalkDir(templates.AppScaffold, templates.AppScaffoldRoot, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(templates.AppScaffoldRoot, p)
+		if err != nil {
+			return err
+		}
+		body, err := templates.AppScaffold.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		full := filepath.Join(srcRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return fmt.Errorf("app: mkdir scaffold dir: %w", err)
+		}
+		if err := writeFileAtomic(full, body, 0o600); err != nil {
+			return fmt.Errorf("app: write scaffold file %q: %w", rel, err)
+		}
+		return nil
+	})
+}
+
 func (s *customAppStore) snapshotVersionLocked(dir string, version int, htmlBody string) error {
 	if version < 1 {
 		return nil
@@ -348,7 +493,7 @@ func (s *customAppStore) writeAppSourceLocked(dir string, files map[string]strin
 		return newCustomAppCallerError("app: too many source files (%d > %d)", len(files), customAppMaxSourceFiles)
 	}
 	srcRoot := filepath.Join(dir, customAppSourceDir)
-	if err := os.RemoveAll(srcRoot); err != nil {
+	if err := clearSourceExceptArtifactsLocked(srcRoot); err != nil {
 		return fmt.Errorf("app: clear source: %w", err)
 	}
 	for rel, content := range files {
@@ -365,6 +510,33 @@ func (s *customAppStore) writeAppSourceLocked(dir string, files map[string]strin
 		}
 		if err := writeFileAtomic(full, []byte(content), 0o600); err != nil {
 			return fmt.Errorf("app: write source: %w", err)
+		}
+	}
+	return nil
+}
+
+// clearSourceExceptArtifactsLocked removes every top-level entry under src/
+// EXCEPT the preserved build/install artifacts (node_modules/, dist/, .vite/).
+// Replacing the source this way (instead of os.RemoveAll on the whole tree)
+// lets a publish land new source while a live dev server keeps running on the
+// same node_modules — Vite then hot-reloads the change rather than crashing on
+// a deleted dependency tree. Source deletes still propagate because every
+// non-preserved entry (including the app's own nested src/ dir) is removed and
+// rewritten from the new file set.
+func clearSourceExceptArtifactsLocked(srcRoot string) error {
+	entries, err := os.ReadDir(srcRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if customAppPreservedSrcDirs[e.Name()] {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(srcRoot, e.Name())); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -409,6 +581,11 @@ func (s *customAppStore) Source(id string) (map[string]string, error) {
 			return walkErr
 		}
 		if d.IsDir() {
+			// Never read back preserved build/install artifacts as "source" —
+			// node_modules would be thousands of files and is not the app.
+			if p != srcRoot && customAppPreservedSrcDirs[d.Name()] {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(srcRoot, p)

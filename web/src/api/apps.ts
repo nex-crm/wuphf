@@ -14,6 +14,11 @@ export interface CustomApp {
   description?: string;
   entry: string;
   version: number;
+  /**
+   * "building" = a pre-scaffolded app awaiting its first published build
+   * (shown as a building row, not a clickable app). Absent/"ready" = published.
+   */
+  status?: "building" | "ready";
   createdBy: string;
   updatedBy?: string;
   createdAt: string;
