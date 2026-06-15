@@ -714,7 +714,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
                 <TaskChannelChat channel={doc.channel} />
               </main>
             }
-            right={<AppBuildPreview taskTitle={doc.title} />}
+            right={<AppBuildPreview taskTitle={doc.title} taskId={taskId} />}
           />
         </div>
       ) : (

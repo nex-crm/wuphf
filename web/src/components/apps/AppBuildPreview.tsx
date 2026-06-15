@@ -4,6 +4,7 @@ import { OpenNewWindow } from "iconoir-react";
 
 import { type CustomApp, getApp, listApps } from "../../api/apps";
 import { router } from "../../lib/router";
+import { AppBuildActivity } from "./AppBuildActivity";
 import { AppLivePreview } from "./AppLivePreview";
 
 // Poll briefly while a build is in flight so a freshly-registered app (or a new
@@ -40,16 +41,19 @@ export function resolveAppForTask(
 interface AppBuildPreviewProps {
   /** The task title — the app name is parsed from it. */
   taskTitle: string;
+  /** The task id — scopes the live build-activity feed to this build. */
+  taskId?: string;
 }
 
 /**
  * AppBuildPreview is the live preview pane shown beside the chat on an App
- * Builder task. It resolves the app the task is building (by name) and renders
- * it in the same hardened sandbox as the full app surface, refreshing as new
- * versions are published. Until the first version lands it shows a building
- * placeholder, so the 20–60s build is never dead air.
+ * Builder task. It stacks a live build-activity feed (what the agent is doing,
+ * resolving ✓/✗) above a live preview of the app being built — the app is
+ * resolved by name and rendered in the same hardened sandbox as the full app
+ * surface, refreshing as new versions are published. Until the first version
+ * lands it shows a building placeholder, so the 20–60s build is never dead air.
  */
-export function AppBuildPreview({ taskTitle }: AppBuildPreviewProps) {
+export function AppBuildPreview({ taskTitle, taskId }: AppBuildPreviewProps) {
   const appName = useMemo(
     () => parseAppNameFromTaskTitle(taskTitle),
     [taskTitle],
@@ -73,65 +77,75 @@ export function AppBuildPreview({ taskTitle }: AppBuildPreviewProps) {
     refetchInterval: PREVIEW_POLL_MS,
   });
 
-  if (!(app && detail.data)) {
+  const preview = (() => {
+    if (!(app && detail.data)) {
+      return (
+        <section className="app-build-preview" aria-label="App preview">
+          <div className="app-build-preview__header">
+            <span className="app-build-preview__title">Preview</span>
+          </div>
+          <div className="app-build-preview__state" role="status">
+            <span className="app-build-preview__spinner" aria-hidden="true" />
+            <p className="app-build-preview__state-title">
+              {appName
+                ? `Building ${appName}…`
+                : "Waiting for the App Builder…"}
+            </p>
+            <p className="app-build-preview__state-detail">
+              The live preview appears here the moment the App Builder publishes
+              its first version.
+            </p>
+          </div>
+        </section>
+      );
+    }
+
+    const { app: meta } = detail.data;
     return (
       <section className="app-build-preview" aria-label="App preview">
         <div className="app-build-preview__header">
-          <span className="app-build-preview__title">Preview</span>
+          <span className="app-build-preview__icon" aria-hidden="true">
+            {meta.icon || "🧩"}
+          </span>
+          <span className="app-build-preview__title" title={meta.name}>
+            {meta.name}
+          </span>
+          <span className="app-build-preview__live">
+            <span className="app-build-preview__live-dot" aria-hidden="true" />
+            Live
+          </span>
+          <span
+            className="app-build-preview__version"
+            title={`Updated ${meta.updatedAt}`}
+          >
+            v{meta.version}
+          </span>
+          <button
+            type="button"
+            className="app-build-preview__open"
+            aria-label="Open app full screen"
+            title="Open full screen"
+            onClick={() =>
+              void router.navigate({
+                to: "/apps/$appId",
+                params: { appId: meta.id },
+              })
+            }
+          >
+            <OpenNewWindow width={14} height={14} />
+          </button>
         </div>
-        <div className="app-build-preview__state" role="status">
-          <span className="app-build-preview__spinner" aria-hidden="true" />
-          <p className="app-build-preview__state-title">
-            {appName ? `Building ${appName}…` : "Waiting for the App Builder…"}
-          </p>
-          <p className="app-build-preview__state-detail">
-            The live preview appears here the moment the App Builder publishes
-            its first version.
-          </p>
+        <div className="app-build-preview__frame">
+          <AppLivePreview appId={meta.id} title={meta.name} />
         </div>
       </section>
     );
-  }
-
-  const { app: meta } = detail.data;
+  })();
 
   return (
-    <section className="app-build-preview" aria-label="App preview">
-      <div className="app-build-preview__header">
-        <span className="app-build-preview__icon" aria-hidden="true">
-          {meta.icon || "🧩"}
-        </span>
-        <span className="app-build-preview__title" title={meta.name}>
-          {meta.name}
-        </span>
-        <span className="app-build-preview__live">
-          <span className="app-build-preview__live-dot" aria-hidden="true" />
-          Live
-        </span>
-        <span
-          className="app-build-preview__version"
-          title={`Updated ${meta.updatedAt}`}
-        >
-          v{meta.version}
-        </span>
-        <button
-          type="button"
-          className="app-build-preview__open"
-          aria-label="Open app full screen"
-          title="Open full screen"
-          onClick={() =>
-            void router.navigate({
-              to: "/apps/$appId",
-              params: { appId: meta.id },
-            })
-          }
-        >
-          <OpenNewWindow width={14} height={14} />
-        </button>
-      </div>
-      <div className="app-build-preview__frame">
-        <AppLivePreview appId={meta.id} title={meta.name} />
-      </div>
-    </section>
+    <div className="app-build-pane">
+      {taskId ? <AppBuildActivity taskId={taskId} /> : null}
+      {preview}
+    </div>
   );
 }
