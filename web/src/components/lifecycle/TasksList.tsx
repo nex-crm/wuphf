@@ -66,8 +66,10 @@ export function isIssueTask(task: Task): boolean {
   // Sub-tasks are not top-level board rows — they render nested under their
   // parent's card (see TaskCardGroup), in the parent's lane. Filtering them
   // out of the top-level set here keeps each child tied to its parent instead
-  // of floating as an independent card.
-  if (task.parent_issue_id && task.parent_issue_id.length > 0) {
+  // of floating as an independent card. Use the same trimmed parentIssueId()
+  // the grouping uses, so a whitespace-only parent_issue_id can't be excluded
+  // here yet treated as top-level there (which would hide the row entirely).
+  if (parentIssueId(task) !== "") {
     return false;
   }
   return task.task_type === "issue" || task.pipeline_id === "issue";

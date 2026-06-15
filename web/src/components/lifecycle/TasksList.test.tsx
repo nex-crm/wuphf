@@ -215,6 +215,26 @@ describe("<TasksList>", () => {
     expect(screen.getAllByTestId("issue-row")).toHaveLength(1);
   });
 
+  it("treats a whitespace-only parent_issue_id as top-level, not a hidden row", () => {
+    // isIssueTask and the parent/child grouping must agree on what counts as a
+    // sub-task. A whitespace-only parent_issue_id trims to empty, so it's a
+    // top-level Task and must render as a card — never vanish from both the
+    // top-level rows and the nested rows.
+    renderList([
+      makeTask({
+        id: "task-ws",
+        title: "Whitespace parent id task",
+        task_type: "issue",
+        parent_issue_id: "   ",
+        lifecycle_state: "running",
+      }),
+    ]);
+
+    expect(screen.getByText("Whitespace parent id task")).toBeInTheDocument();
+    expect(screen.getAllByTestId("issue-row")).toHaveLength(1);
+    expect(screen.queryByTestId("issue-subtask-row")).not.toBeInTheDocument();
+  });
+
   it("surfaces a parent when only a sub-task matches the filter", async () => {
     const user = userEvent.setup();
     renderList([
