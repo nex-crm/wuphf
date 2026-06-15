@@ -833,6 +833,7 @@ func renderAvailableAgentsBlock(members []officeMember, selfSlug string) string 
 	var sb strings.Builder
 	sb.WriteString("== AVAILABLE AGENTS ==\n")
 	sb.WriteString("These are the ONLY agent slugs valid for the `owner` field on team_task action=create and for @-mentions in chat. Pick an existing agent whose expertise fits the Issue — assigning yourself is fine when the work sits in your own domain. Only spin up a new agent (via team_member action=create) when NO existing agent fits.\n")
+	sb.WriteString("CONSIDER HELP BEFORE GOING SOLO. When a goal lands, do not quietly do multi-step or cross-domain work alone. First scan this roster (and the humans below) and decide who should carry each part: assign the best-fit specialist as owner, and split a goal that spans domains into Issues owned by the right agents instead of one Issue you run yourself. If the work genuinely needs an expertise no one here has, propose a new specialist with team_member action=create — that raises an approval the human accepts or rejects before the agent joins; name the role and why it is needed. Reach for an existing agent or a human first; propose a spawn only when there is a real gap.\n")
 	others := 0
 	for _, m := range members {
 		expertise := strings.Join(m.Expertise, ", ")
