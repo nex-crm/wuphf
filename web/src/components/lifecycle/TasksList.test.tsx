@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { OfficeStatsTasks } from "../../api/platform";
@@ -166,6 +167,97 @@ describe("<TasksList>", () => {
     expect(countFor("needs_human")).toBe("3");
     expect(countFor("done")).toBe("5");
     expect(countFor("archive")).toBe("0");
+  });
+
+  it("nests sub-tasks under their parent card, in the parent's lane", () => {
+    renderList([
+      makeTask({
+        id: "task-parent",
+        title: "Ship the Q3 launch",
+        task_type: "issue",
+        lifecycle_state: "running",
+      }),
+      makeTask({
+        id: "task-child-a",
+        title: "Draft the announcement copy",
+        task_type: "issue",
+        parent_issue_id: "task-parent",
+        // A done child still renders under the parent in the parent's lane,
+        // NOT in the Done lane — the parent's lane is where it shows.
+        lifecycle_state: "approved",
+      }),
+      makeTask({
+        id: "task-child-b",
+        title: "Set up the landing page",
+        task_type: "issue",
+        parent_issue_id: "task-parent",
+        lifecycle_state: "running",
+      }),
+    ]);
+
+    // Parent sits in the In-progress lane; both children nest under it there.
+    const inProgress = screen.getByTestId("issues-kanban-column-in_progress");
+    expect(inProgress).toHaveTextContent("Ship the Q3 launch");
+    expect(inProgress).toHaveTextContent("Draft the announcement copy");
+    expect(inProgress).toHaveTextContent("Set up the landing page");
+
+    // The done child is NOT promoted to the Done lane — it stays nested.
+    const done = screen.getByTestId("issues-kanban-column-done");
+    expect(done).not.toHaveTextContent("Draft the announcement copy");
+
+    // Children render in the dedicated sub-task list of their parent.
+    const subtaskList = screen.getByTestId("issue-subtasks-task-parent");
+    expect(subtaskList).toHaveTextContent("Draft the announcement copy");
+    expect(subtaskList).toHaveTextContent("Set up the landing page");
+    expect(screen.getAllByTestId("issue-subtask-row")).toHaveLength(2);
+
+    // Sub-tasks are never standalone top-level cards.
+    expect(screen.getAllByTestId("issue-row")).toHaveLength(1);
+  });
+
+  it("treats a whitespace-only parent_issue_id as top-level, not a hidden row", () => {
+    // isIssueTask and the parent/child grouping must agree on what counts as a
+    // sub-task. A whitespace-only parent_issue_id trims to empty, so it's a
+    // top-level Task and must render as a card — never vanish from both the
+    // top-level rows and the nested rows.
+    renderList([
+      makeTask({
+        id: "task-ws",
+        title: "Whitespace parent id task",
+        task_type: "issue",
+        parent_issue_id: "   ",
+        lifecycle_state: "running",
+      }),
+    ]);
+
+    expect(screen.getByText("Whitespace parent id task")).toBeInTheDocument();
+    expect(screen.getAllByTestId("issue-row")).toHaveLength(1);
+    expect(screen.queryByTestId("issue-subtask-row")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a parent when only a sub-task matches the filter", async () => {
+    const user = userEvent.setup();
+    renderList([
+      makeTask({
+        id: "task-parent",
+        title: "Ship the Q3 launch",
+        task_type: "issue",
+        lifecycle_state: "running",
+      }),
+      makeTask({
+        id: "task-child",
+        title: "Wire up Stripe webhooks",
+        task_type: "issue",
+        parent_issue_id: "task-parent",
+        lifecycle_state: "running",
+      }),
+    ]);
+
+    await user.type(screen.getByTestId("issues-list-search"), "stripe");
+
+    // The parent surfaces because its child matches, and the child is shown.
+    expect(screen.getByText("Ship the Q3 launch")).toBeInTheDocument();
+    expect(screen.getByText("Wire up Stripe webhooks")).toBeInTheDocument();
   });
 
   it("folds blocking requests and pending reviews into the Needs-human lane", () => {

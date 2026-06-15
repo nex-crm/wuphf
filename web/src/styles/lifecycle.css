@@ -4396,6 +4396,41 @@ button.verification-badge {
   font-variant-numeric: tabular-nums;
 }
 
+/* A parent card and its sub-tasks share one list item so they read as a unit.
+   The parent stays a full card; its children nest beneath it in the same lane,
+   indented behind a guide rail. */
+.issues-kanban-card-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Nested sub-task list under a parent card. The left rail + indent are the
+   visual tie that says "these belong to the card above". */
+.issues-kanban-subtasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 12px;
+  margin-left: 7px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+/* Compact, recessed variant for a sub-task card nested under its parent, so
+   the hierarchy reads at a glance without competing with the parent. */
+.issues-kanban-card--subtask {
+  padding: 7px 9px;
+  gap: 5px;
+  background: var(--bg-card-soft, var(--bg-card, var(--bg-primary, #fff)));
+}
+
+.issues-kanban-card--subtask .issues-kanban-card-title {
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
 /* Type tag on a non-task attention card (a folded request / review) in the
    Needs-human lane, so a question or review reads distinctly from a task. */
 .issues-kanban-card-kind {

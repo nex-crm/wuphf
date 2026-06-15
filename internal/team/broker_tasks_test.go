@@ -798,6 +798,108 @@ func TestBrokerTaskCreateKeepsDistinctTasksInSameThread(t *testing.T) {
 	}
 }
 
+// TestBrokerSubtaskMintsOwnChannelSeparateFromParent pins the fix for the
+// "sub-tasks share the parent's chat" bug: a sub-issue created with
+// parent_issue_id set must land in its OWN dedicated task-<childID> channel,
+// not the parent's. Agents create sub-issues from inside the parent's channel
+// (team_task forwards the current conversation as the channel), so the sub-issue
+// arrives carrying the parent's channel; the broker must override it. Without
+// the fix the child stays in the parent's channel and the two tasks share one
+// timeline. Exercised through the live HTTP /tasks path, not the internal call.
+func TestBrokerSubtaskMintsOwnChannelSeparateFromParent(t *testing.T) {
+	b := newTestBroker(t)
+	// Register the owner so it joins the parent's minted channel (and thus has
+	// access to create the sub-issue from there).
+	ensureTestMemberAccess(b, "general", "eng", "Eng")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(payload map[string]any) teamTask {
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("task post failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode task response: %v", err)
+		}
+		return result.Task
+	}
+
+	// Parent task defaults to #general → mints its own task-<id> channel.
+	parent := post(map[string]any{
+		"action":     "create",
+		"title":      "Ship the Q3 launch",
+		"details":    "Top-level launch objective",
+		"created_by": "ceo",
+		"owner":      "eng",
+	})
+	if parent.Channel == "general" || parent.Channel == "" {
+		t.Fatalf("expected parent to mint its own channel, got %q", parent.Channel)
+	}
+
+	// Sub-issue created by the CEO from inside the parent's channel (the way
+	// the CEO decomposes an Issue) — it arrives carrying the parent's channel.
+	child := post(map[string]any{
+		"action":          "create",
+		"title":           "Draft the launch announcement copy",
+		"details":         "Sub-issue of the launch",
+		"created_by":      "ceo",
+		"owner":           "eng",
+		"channel":         parent.Channel,
+		"parent_issue_id": parent.ID,
+	})
+
+	if child.ParentIssueID != parent.ID {
+		t.Fatalf("expected child parent_issue_id %q, got %q", parent.ID, child.ParentIssueID)
+	}
+	// The bug: child shared the parent's channel. The fix: child gets its own.
+	if child.Channel == parent.Channel {
+		t.Fatalf("sub-issue must not share the parent's channel %q", parent.Channel)
+	}
+	expectedSlug := normalizeChannelSlug("task-" + child.ID)
+	if child.Channel != expectedSlug {
+		t.Fatalf("expected sub-issue channel %q, got %q", expectedSlug, child.Channel)
+	}
+	// The minted child channel exists and links back to the child task.
+	b.mu.Lock()
+	var childCh *teamChannel
+	for i := range b.channels {
+		if b.channels[i].Slug == expectedSlug {
+			childCh = &b.channels[i]
+			break
+		}
+	}
+	b.mu.Unlock()
+	if childCh == nil {
+		t.Fatalf("expected channel %q to exist in broker, not found", expectedSlug)
+	}
+	if childCh.TaskID != child.ID {
+		t.Fatalf("expected child channel TaskID=%q, got %q", child.ID, childCh.TaskID)
+	}
+	// Each channel holds exactly its own task — no shared timeline.
+	if got := len(b.ChannelTasks(parent.Channel)); got != 1 {
+		t.Fatalf("expected one task in parent channel %q, got %d", parent.Channel, got)
+	}
+	if got := len(b.ChannelTasks(child.Channel)); got != 1 {
+		t.Fatalf("expected one task in child channel %q, got %d", child.Channel, got)
+	}
+}
+
 func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
@@ -2470,9 +2572,12 @@ func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
 
 // TestShouldMintPerTaskChannelGuards pins the channel-minting gate after
 // the keyword heuristic was dropped (2026-06-03): every real top-level
-// task in "general" mints its own channel, and only the three internal
-// guards (system task / incident self-heal / sub-task) withhold one. An
-// explicit non-general channel request is always left as-is.
+// task in "general" mints its own channel, and only the two internal
+// guards (system task / incident self-heal) withhold one. Sub-issues mint
+// their OWN channel separate from the parent — regardless of the incoming
+// channel, since the creating agent hands them the parent's channel — so a
+// child's chatter never lands in the parent's chat. For a top-level task an
+// explicit non-general channel request is left as-is.
 func TestShouldMintPerTaskChannelGuards(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -2484,7 +2589,9 @@ func TestShouldMintPerTaskChannelGuards(t *testing.T) {
 		{"business-objective task mints", "general", teamTask{Title: "Launch the sales campaign"}, true},
 		{"system task stays in general", "general", teamTask{Title: "Backup & Migration", System: true}, false},
 		{"incident self-heal stays in general", "general", teamTask{Title: "Recover", PipelineID: "incident"}, false},
-		{"sub-task stays on parent channel", "general", teamTask{Title: "child", ParentIssueID: "task-1"}, false},
+		{"sub-task mints its own channel", "general", teamTask{Title: "child", ParentIssueID: "task-1"}, true},
+		{"sub-task mints even when handed the parent's channel", "task-1", teamTask{Title: "child", ParentIssueID: "task-1"}, true},
+		{"sub-task incident self-heal still stays in general", "general", teamTask{Title: "child", ParentIssueID: "task-1", PipelineID: "incident"}, false},
 		{"explicit non-general channel kept", "youtube-factory", teamTask{Title: "Publish the launch video"}, false},
 		{"empty task in general still mints", "general", teamTask{}, true},
 	}

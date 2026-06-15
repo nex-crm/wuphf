@@ -266,17 +266,26 @@ func (b *Broker) preferredTaskChannelLocked(requestedChannel, _, _, _, _ string)
 // warrants a dedicated task-<id> channel.
 //
 // The product vision is "every task spins up its own channel", so the
-// default is to mint for any real, top-level task. We only withhold a
-// channel for the three internal-plumbing cases that genuinely belong in
-// #general (or on a parent):
-//  1. The resolved channel is "general" — an explicit non-general channel
-//     request is already a real channel, so leave it alone.
-//  2. It is not a system task (System==true is the Backup & Migration
+// default is to mint for any real task. We only withhold a channel for the
+// two internal-plumbing cases that genuinely belong in #general:
+//  1. It is not a system task (System==true is the Backup & Migration
 //     entry, which always owns "general").
-//  3. It is not an incident self-heal (PipelineID=="incident") — those are
+//  2. It is not an incident self-heal (PipelineID=="incident") — those are
 //     internal tooling, not user work.
-//  4. It is not a sub-issue (ParentIssueID!="") — sub-issues share their
-//     parent task's channel.
+//
+// Sub-issues (ParentIssueID!="") always mint their OWN task-<childID>
+// channel — separate from the parent. The channel handed to a sub-issue
+// create is the creating agent's current conversation, which is almost
+// always the parent task's channel, so we mint regardless of whether it
+// resolved to "general". Without this, every child posts its working
+// chatter into the parent's chat and the two tasks share one timeline
+// (the bug this guard previously caused). A sub-issue gets its own chat,
+// just like a top-level task; it stays tied to the parent via
+// ParentIssueID, which the Issue board nests under the parent card.
+//
+// Top-level tasks only mint when the resolved channel is "general" — an
+// explicit non-general channel request is already a real channel, so we
+// leave it alone.
 //
 // Note: this used to additionally require taskLooksLikeLiveBusinessObjective
 // (a keyword heuristic). That under-delivered the vision — a real task whose
@@ -284,9 +293,6 @@ func (b *Broker) preferredTaskChannelLocked(requestedChannel, _, _, _, _ string)
 // #general — so the heuristic was dropped (2026-06-03). The function is still
 // used elsewhere (notifications / pipeline), just not as a channel gate.
 func shouldMintPerTaskChannel(channel string, task *teamTask) bool {
-	if normalizeChannelSlug(channel) != "general" {
-		return false
-	}
 	if task == nil {
 		return false
 	}
@@ -297,6 +303,9 @@ func shouldMintPerTaskChannel(channel string, task *teamTask) bool {
 		return false
 	}
 	if strings.TrimSpace(task.ParentIssueID) != "" {
+		return true
+	}
+	if normalizeChannelSlug(channel) != "general" {
 		return false
 	}
 	return true
