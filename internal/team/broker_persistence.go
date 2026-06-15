@@ -357,13 +357,19 @@ func (b *Broker) writeBrokerState(write brokerStateWrite) error {
 		return nil
 	}
 	if write.remove {
+		// Remove only the primary state file when the broker holds nothing but
+		// defaults — a stale default file should not linger. Deliberately do NOT
+		// delete the .last-good snapshot here: that snapshot is the recovery copy
+		// of the last REAL office, and an in-memory revert to default (an
+		// accidental reseed, a transient blank-load, a bug) must never destroy
+		// it — otherwise both the live state and its only backup vanish at the
+		// same instant and the office is unrecoverable (the data-loss incident).
+		// A genuine, intentional wipe (Broker.Reset) removes the snapshot itself,
+		// right after this save, so legitimate resets still clear it.
 		if err := os.Remove(write.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		b.markBrokerStateWriteApplied(write.seq)
-		if err := os.Remove(write.snapshotPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(write.path), 0o700); err != nil {
@@ -391,6 +397,24 @@ func (b *Broker) markBrokerStateWriteApplied(seq uint64) {
 			return
 		}
 	}
+}
+
+// hasRealOfficeStateLocked reports whether this broker already holds a
+// populated, previously-set-up office. The signal is a single real
+// (non-system) task: the seed paths create a "Backup & Migration" SYSTEM task
+// on every fresh broker, so task presence alone is not enough — but any
+// non-system task means a human or agent actually used this office. It exists
+// as a data-loss guard: the onboarded.json marker and the on-disk broker state
+// can disagree after a clean-env restart (marker gone, real state intact), and
+// the onboarding-complete path keys off the marker. Checking the state itself
+// stops an onboarding reseed from wiping a real office the marker forgot about.
+func (b *Broker) hasRealOfficeStateLocked() bool {
+	for i := range b.tasks {
+		if !b.tasks[i].System {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broker) isDefaultBrokerStateLocked() bool {

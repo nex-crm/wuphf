@@ -153,6 +153,19 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 //
 // Caller must NOT hold b.mu.
 func (b *Broker) runSeedPhase(s *onboarding.State) error {
+	// Data-loss guard (see hasRealOfficeStateLocked): never seed over a real
+	// office, on either the blueprint or scratch path. A clean-env restart can
+	// clear the onboarded marker while the on-disk office survives; re-running
+	// the seed phase would otherwise wipe its channels and tasks. Adopt the
+	// existing office instead.
+	b.mu.Lock()
+	existingOffice := b.hasRealOfficeStateLocked()
+	b.mu.Unlock()
+	if existingOffice {
+		log.Printf("onboarding: existing office detected at seed phase; adopting it instead of reseeding (data-loss guard)")
+		return nil
+	}
+
 	blueprintID := strings.TrimSpace(s.FormAnswers.BlueprintID)
 	if blueprintID != "" {
 		// Blueprint path: reuse the existing atomic seed.
