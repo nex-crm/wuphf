@@ -160,9 +160,12 @@ repo rules).
 
 1. **Dev-server preview + proxy + live boot-log** — the headline win (fixes
    time-to-first-preview). Effort L.
-2. **Structured tool-activity cards in the chat** (port `DyadCardPrimitives` +
-   `getState` so spinners resolve to ✓/✗, no zombies). Broker emits
-   write/bash/edit start/done events interleaved with prose. Effort M.
+2. **Structured tool-activity cards** — SHIPPED (PR #1102). The `HeadlessEvent`
+   stream already exists; the App-Builder feed (`buildActivity.ts` +
+   `AppBuildActivity`) merges tool_use/tool_result into one resolving row.
+   getState equivalent: native `tool_result`s arrive name-less (referenced by
+   call id), so the reducer resolves a running row when the next tool_use starts
+   and at each turn boundary — only the active tool spins, no zombies.
 3. **Pre-commit `tsc --noEmit` + `vite build` gate + bounded ~2-round auto-fix**
    re-prompt with `file:line:col` (dyad `chat_stream_handlers.ts` auto-fix loop).
    Auto-loop build errors (ground truth); human-gate runtime errors. Effort M.
