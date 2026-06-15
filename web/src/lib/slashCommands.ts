@@ -68,6 +68,21 @@ export function handleSlashCommand(
     case "/help":
       store.setComposerHelpOpen(true);
       return true;
+    case "/create-app":
+      store.openCreateAppDialog();
+      return true;
+    case "/update-app": {
+      const appId = args.trim();
+      if (appId.startsWith("app_")) {
+        store.openUpdateAppDialog(appId);
+      } else {
+        showNotice(
+          "Usage: /update-app <app-id> — or open an app and click Edit.",
+          "info",
+        );
+      }
+      return true;
+    }
     case "/requests":
       navigateToApp("requests");
       return true;

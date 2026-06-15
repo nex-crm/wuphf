@@ -1,0 +1,121 @@
+import { del, get, post } from "./client";
+import type { Task, TaskResponse } from "./tasks";
+
+/**
+ * CustomApp is the manifest for an agent-generated internal tool. Mirrors the
+ * Go CustomApp shape (internal/team/custom_app.go).
+ */
+export interface CustomApp {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string;
+  summary?: string;
+  description?: string;
+  entry: string;
+  version: number;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  contentHash: string;
+}
+
+export interface CustomAppDetail {
+  app: CustomApp;
+  html: string;
+}
+
+export async function listApps(): Promise<CustomApp[]> {
+  const res = await get<{ apps: CustomApp[] }>("/apps");
+  return res.apps ?? [];
+}
+
+export async function getApp(id: string): Promise<CustomAppDetail> {
+  return get<CustomAppDetail>(`/apps/${encodeURIComponent(id)}`);
+}
+
+export async function deleteApp(id: string): Promise<void> {
+  await del(`/apps/${encodeURIComponent(id)}`);
+}
+
+export async function listAppVersions(id: string): Promise<number[]> {
+  const res = await get<{ versions: number[] }>(
+    `/apps/${encodeURIComponent(id)}/versions`,
+  );
+  return res.versions ?? [];
+}
+
+/**
+ * rollbackApp restores a prior version's bytes as a new forward version. History
+ * is append-only, so a rollback is itself reversible — this is the trust net that
+ * lets operators edit a depended-on tool without fear.
+ */
+export async function rollbackApp(
+  id: string,
+  version: number,
+): Promise<CustomApp> {
+  const res = await post<{ app: CustomApp }>(
+    `/apps/${encodeURIComponent(id)}/rollback`,
+    { version, actor: "human" },
+  );
+  return res.app;
+}
+
+export interface AppBuildRequest {
+  name: string;
+  description: string;
+  icon?: string;
+  summary?: string;
+  /** Set when improving an existing app rather than creating a new one. */
+  appId?: string;
+}
+
+/**
+ * requestAppBuild kicks off an App Builder task for an explicit, human-initiated
+ * build/improve (the /create-app, /update-app slash commands and the Edit button
+ * on an app screen). These paths skip the propose_app approval gate because the
+ * human already authorized the work. Implicit agent intent goes through
+ * propose_app -> a non-blocking approval instead.
+ *
+ * Returns the created Task so the caller can open its chat — an App Builder
+ * build is a normal task, and the human watches it happen in the task channel
+ * (with the live preview) rather than being left with a fire-and-forget toast.
+ */
+export async function requestAppBuild(req: AppBuildRequest): Promise<Task> {
+  const verb = req.appId ? "Improve" : "Build";
+  const title = `${verb} app: ${req.name}`;
+  const res = await post<TaskResponse>("/tasks", {
+    action: "create",
+    channel: "general",
+    title,
+    details: composeAppBrief(req),
+    owner: "app-builder",
+    created_by: "human",
+    task_type: "issue",
+  });
+  return res.task;
+}
+
+function composeAppBrief(req: AppBuildRequest): string {
+  const lines: string[] = [];
+  if (req.appId) {
+    lines.push(`Improve the existing app \`${req.appId}\` ("${req.name}").`);
+    lines.push(
+      "First call get_app to read its current source and manifest, then apply the change below.",
+    );
+  } else {
+    lines.push(`Build a new internal tool named "${req.name}".`);
+  }
+  if (req.summary?.trim()) {
+    lines.push("", `Summary: ${req.summary.trim()}`);
+  }
+  lines.push("", "What it should do:", req.description.trim());
+  lines.push(
+    "",
+    `When the build passes, register it with register_app${
+      req.appId ? ` (app_id=${req.appId})` : ""
+    } so it appears under Apps.`,
+  );
+  return lines.join("\n");
+}

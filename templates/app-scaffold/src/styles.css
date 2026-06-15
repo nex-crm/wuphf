@@ -1,0 +1,110 @@
+/*
+ * Self-contained styles only. No @import, no Google Fonts, no external assets —
+ * the sandbox blocks them. Use the system font stack. Keep it clean and legible;
+ * the app renders on a light surface inside WUPHF.
+ */
+
+:root {
+  --ink: #14181f;
+  --muted: #687083;
+  --line: rgba(20, 24, 31, 0.12);
+  --accent: #1342ff;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  color: var(--ink);
+  background: #fff;
+}
+
+.app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 24px 40px;
+}
+
+.app__title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.app__subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.app__subtitle code,
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: rgba(20, 24, 31, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.app__panel {
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.app__panel-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.app__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app__list-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.app__list-name {
+  font-weight: 550;
+}
+
+.app__list-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.app__muted {
+  color: var(--muted);
+}
+
+.app__error {
+  color: #d2453f;
+}

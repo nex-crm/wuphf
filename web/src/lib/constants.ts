@@ -18,6 +18,13 @@ export function appTitle(app: string): string {
   return app.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+/**
+ * Roster slug of the built-in App Builder agent (mirrors
+ * company.AppBuilderSlug / team's appBuilderSlug on the Go side). Tasks owned
+ * by this slug get the live app-build preview surface.
+ */
+export const APP_BUILDER_SLUG = "app-builder";
+
 export const ONBOARDING_COPY = {
   step1_headline: "AI employees with a shared brain",
   step1_subhead:

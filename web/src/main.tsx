@@ -28,6 +28,7 @@ import "./styles/onboarding-wizard.css";
 import "./styles/office-tour.css";
 import "./styles/office-tour-slides.css";
 import "./styles/operator.css";
+import "./styles/apps.css";
 
 // Attach the root route's component at startup. Defining the component
 // inside `lib/router.ts` would create a circular import: RootRoute reads
