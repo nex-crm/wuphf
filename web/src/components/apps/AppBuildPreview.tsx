@@ -4,7 +4,7 @@ import { OpenNewWindow } from "iconoir-react";
 
 import { type CustomApp, getApp, listApps } from "../../api/apps";
 import { router } from "../../lib/router";
-import { CustomAppFrame } from "./CustomAppFrame";
+import { AppLivePreview } from "./AppLivePreview";
 
 // Poll briefly while a build is in flight so a freshly-registered app (or a new
 // version) shows up in the preview within a few seconds, no reload needed.
@@ -93,7 +93,7 @@ export function AppBuildPreview({ taskTitle }: AppBuildPreviewProps) {
     );
   }
 
-  const { app: meta, html } = detail.data;
+  const { app: meta } = detail.data;
 
   return (
     <section className="app-build-preview" aria-label="App preview">
@@ -130,7 +130,7 @@ export function AppBuildPreview({ taskTitle }: AppBuildPreviewProps) {
         </button>
       </div>
       <div className="app-build-preview__frame">
-        <CustomAppFrame html={html} title={meta.name} />
+        <AppLivePreview appId={meta.id} title={meta.name} />
       </div>
     </section>
   );

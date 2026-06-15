@@ -566,6 +566,58 @@
   color: var(--text-secondary);
 }
 
+/* Streaming install/boot log while the live dev server warms up. */
+.app-build-preview__bootlog {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.app-build-preview__bootlog-text {
+  margin: 0;
+  max-width: 100%;
+  max-height: 240px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Live/Sealed preview toggle on the standalone app screen. */
+.custom-app-view__mode {
+  display: inline-flex;
+  margin-right: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+}
+
+.custom-app-view__mode-btn {
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.custom-app-view__mode-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
 /* Narrow: stack chat over preview and retire the drag handle. */
 @media (max-width: 720px) {
   .issue-doc-body--app-build .resizable-split {

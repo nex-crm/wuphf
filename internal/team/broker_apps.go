@@ -100,8 +100,65 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
 	case "rollback":
 		b.handleAppRollback(w, r, id)
+	case "dev":
+		b.handleAppDev(w, r, id, parts)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// appDevManager lazily constructs the live-preview dev-server manager on first
+// use (mirrors appStore). It shares the same custom-app store.
+func (b *Broker) appDevManager() *appDevManager {
+	b.appDevOnce.Do(func() {
+		b.appDev = newAppDevManager(b.appStore())
+	})
+	return b.appDev
+}
+
+// handleAppDev is the CONTROL plane for live previews: ensure/status/stop. The
+// preview content itself is served by a per-app reverse proxy on its own
+// ephemeral 127.0.0.1 port (see custom_app_dev.go); these endpoints just manage
+// its lifecycle and hand the FE the proxy origin to load.
+//
+//	GET  /apps/{id}/dev         -> ensure running, returns {ready,url,boot_log,error}
+//	GET  /apps/{id}/dev/status  -> current status without (re)starting
+//	POST /apps/{id}/dev/stop    -> tear down (App Builder / human only)
+func (b *Broker) handleAppDev(w http.ResponseWriter, r *http.Request, id string, parts []string) {
+	action := ""
+	if len(parts) > 2 {
+		action = parts[2]
+	}
+	mgr := b.appDevManager()
+	switch {
+	case r.Method == http.MethodGet && action == "":
+		st, err := mgr.Ensure(id)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+	case r.Method == http.MethodGet && action == "status":
+		st, ok := mgr.Status(id)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no preview running"})
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+	case r.Method == http.MethodPost && action == "stop":
+		actor, status, err := richArtifactAuthenticatedSlug(r, "", "actor")
+		if err != nil {
+			writeJSON(w, status, map[string]string{"error": err.Error()})
+			return
+		}
+		if !b.appWriterAllowed(r, actor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a human or the App Builder may stop a preview"})
+			return
+		}
+		mgr.Stop(id)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 

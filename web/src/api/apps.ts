@@ -62,6 +62,34 @@ export async function rollbackApp(
   return res.app;
 }
 
+/**
+ * Live dev-server preview status (GET /apps/{id}/dev). The broker runs a real
+ * Vite dev server per app behind a CSP-injecting proxy; `url` is the proxy
+ * origin to load in the iframe once `ready`. Until then `boot_log` streams the
+ * install/boot output. Mirrors the Go appDevStatus shape.
+ */
+export interface AppDevStatus {
+  ready: boolean;
+  url?: string;
+  boot_log?: string;
+  error?: string;
+}
+
+/** Ensure the app's live dev server is running and return its status. */
+export async function ensureAppDev(id: string): Promise<AppDevStatus> {
+  return get<AppDevStatus>(`/apps/${encodeURIComponent(id)}/dev`);
+}
+
+/** Poll the dev server's status without (re)starting it. */
+export async function getAppDevStatus(id: string): Promise<AppDevStatus> {
+  return get<AppDevStatus>(`/apps/${encodeURIComponent(id)}/dev/status`);
+}
+
+/** Tear down the app's live dev server. */
+export async function stopAppDev(id: string): Promise<void> {
+  await post(`/apps/${encodeURIComponent(id)}/dev/stop`, { actor: "human" });
+}
+
 export interface AppBuildRequest {
   name: string;
   description: string;
