@@ -120,7 +120,7 @@ func buildSlackHomeBlocks(b *Broker) []slack.Block {
 			"intake": true, "ready": true, "planning": true, "pending": true,
 			"open": true, "assigned": true, "drafting": true,
 			"review": true, "decision": true, "changes_requested": true,
-			"blocked_on_pr_merge": true, "queued_behind_owner": true,
+			"blocked": true, "queued_behind_owner": true,
 		}},
 		{"✅ Done recently", map[string]bool{
 			"done": true, "completed": true, "approved": true,

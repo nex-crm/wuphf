@@ -152,7 +152,7 @@ func taskAwaitsHumanFollowUpWake(task *teamTask) bool {
 	}
 	switch task.LifecycleState {
 	case LifecycleStateReview, LifecycleStateDecision,
-		LifecycleStateChangesRequested, LifecycleStateBlockedOnPRMerge:
+		LifecycleStateChangesRequested, LifecycleStateBlocked:
 		return true
 	}
 	if taskInTerminalDoneState(task) {

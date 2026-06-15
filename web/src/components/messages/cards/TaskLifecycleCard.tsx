@@ -171,7 +171,7 @@ export function TaskLifecycleCard({
         <span className="issue-lifecycle-card-title">{title}</span>
         {payload.from_state && payload.to_state ? (
           // Lifecycle enums never render raw at the human boundary —
-          // "running → blocked_on_pr_merge" read as engineering jargon to
+          // "running → blocked" read as engineering jargon to
           // a RevOps operator (ICP-eval v3 [17:33:18]).
           <span className="issue-lifecycle-card-meta">
             {humanizeLifecycleState(payload.from_state)} →{" "}

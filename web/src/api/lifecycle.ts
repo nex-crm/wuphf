@@ -328,7 +328,7 @@ export async function postTaskReject(
 
 /**
  * POST a manual Resume on a blocked task. Clears the
- * blocked_on_pr_merge state and re-queues the owner agent's lane, so the
+ * blocked state and re-queues the owner agent's lane, so the
  * task picks up where it left off. Mirrors the watchdog's resume path
  * but exposes the action to humans from the inbox card.
  *

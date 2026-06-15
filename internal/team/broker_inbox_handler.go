@@ -90,7 +90,7 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/tasks/")
-	// /tasks/{id}/block is the Lane F block-on-PR-merge action. Other
+	// /tasks/{id}/block is the Lane F block action. Other
 	// verbs (merge / request-changes / defer) are still reserved for
 	// Lane G; they return 404 here so a stray client cannot silently
 	// land on the wrong handler.
@@ -305,7 +305,7 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 //
 //	{"actor": "<slug>", "reason": "<text>"}
 //
-// Manually clears a blocked_on_pr_merge (or otherwise paused) task so
+// Manually clears a blocked (or otherwise paused) task so
 // the owner agent picks it up again. Wraps Broker.ResumeTask, which the
 // watchdog scheduler also calls on retry. Humans with reviewer access on
 // the task may resume it; everyone else gets 403. The action is

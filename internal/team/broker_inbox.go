@@ -157,7 +157,7 @@ func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
 	case InboxFilterRunning:
 		return []LifecycleState{LifecycleStateRunning}, nil
 	case InboxFilterBlocked:
-		return []LifecycleState{LifecycleStateBlockedOnPRMerge}, nil
+		return []LifecycleState{LifecycleStateBlocked}, nil
 	case InboxFilterApproved:
 		return []LifecycleState{LifecycleStateApproved}, nil
 	case InboxFilterAll:
@@ -301,7 +301,7 @@ func (b *Broker) inboxCountsLocked(cutoff time.Time) InboxCounts {
 	counts := InboxCounts{
 		DecisionRequired: len(b.lifecycleIndex[LifecycleStateDecision]),
 		Running:          len(b.lifecycleIndex[LifecycleStateRunning]),
-		Blocked:          len(b.lifecycleIndex[LifecycleStateBlockedOnPRMerge]),
+		Blocked:          len(b.lifecycleIndex[LifecycleStateBlocked]),
 	}
 	for _, taskID := range b.lifecycleIndex[LifecycleStateApproved] {
 		task := b.findTaskByIDLocked(taskID)

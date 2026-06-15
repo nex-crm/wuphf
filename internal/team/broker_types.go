@@ -256,7 +256,7 @@ type teamTask struct {
 	// BlockedOn is the typed-blocker list that supersedes DependsOn for
 	// the multi-agent harness path (Lane A foundation). Entries are task IDs
 	// or PR identifiers that must resolve before the task can leave
-	// blocked_on_pr_merge. DependsOn is preserved for legacy unblock paths;
+	// blocked. DependsOn is preserved for legacy unblock paths;
 	// the extended unblockDependentsLocked sweeps the union of both.
 	BlockedOn []string `json:"blocked_on,omitempty"`
 	// ParentIssueID is the id of the parent Issue when this task is a

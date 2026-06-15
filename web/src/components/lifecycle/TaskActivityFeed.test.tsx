@@ -157,7 +157,7 @@ describe("<TaskActivityFeed>", () => {
   });
 
   it("renders lifecycle enums as plain labels, never raw snake_case (E1)", async () => {
-    // ICP-eval v3 [17:33:18]: "blocked_on_pr_merge" read as engineering
+    // ICP-eval v3 [17:33:18]: "blocked" read as engineering
     // jargon to a RevOps operator on a human surface.
     tasksApi.getTaskActivity.mockResolvedValue({
       task_id: "task-1",
@@ -167,17 +167,15 @@ describe("<TaskActivityFeed>", () => {
           kind: "lifecycle",
           timestamp: "2026-06-09T10:00:00Z",
           actor: "ceo",
-          lifecycle: { from: "running", to: "blocked_on_pr_merge" },
+          lifecycle: { from: "running", to: "blocked" },
         },
       ] satisfies TaskActivityEvent[],
     });
     renderFeed();
 
-    expect(
-      await screen.findByText("Blocked on review merge"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Blocked")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.queryByText(/blocked_on_pr_merge/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/blocked/)).not.toBeInTheDocument();
   });
 
   it("never renders raw process exhaust in turn summaries (E1)", async () => {

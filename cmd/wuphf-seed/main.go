@@ -63,7 +63,7 @@ func main() {
 	fmt.Printf("seeded:\n")
 	fmt.Printf("  tutorial 1 (single-task happy path)   task=%s state=decision\n", tut1)
 	fmt.Printf("  tutorial 2 (reviewer timeout)         task=%s state=review (1 of 3 reviewers graded)\n", tut2)
-	fmt.Printf("  tutorial 3a (blocked task)            task=%s state=blocked_on_pr_merge\n", tut3a)
+	fmt.Printf("  tutorial 3a (blocked task)            task=%s state=blocked\n", tut3a)
 	fmt.Printf("  tutorial 3b (mergeable blocker)       task=%s state=decision\n", tut3b)
 	fmt.Printf("\nstate path: %s\n", statePath)
 }

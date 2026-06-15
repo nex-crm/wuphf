@@ -230,7 +230,7 @@ export function taskToLifecycleState(task: Task | undefined): LifecycleState {
     case "done":
       return "approved";
     case "blocked":
-      return "blocked_on_pr_merge";
+      return "blocked";
     case "review":
       return "review";
     case "rejected":

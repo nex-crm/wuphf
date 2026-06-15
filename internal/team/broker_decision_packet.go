@@ -1090,7 +1090,7 @@ func lifecycleStateForDecisionAction(action recordDecisionAction, currentState L
 	case RecordDecisionRequestChanges:
 		return LifecycleStateChangesRequested, "human requested changes"
 	case RecordDecisionBlock:
-		return LifecycleStateBlockedOnPRMerge, "human blocked on dependency"
+		return LifecycleStateBlocked, "human blocked on dependency"
 	case RecordDecisionDefer:
 		// Defer keeps the task on the human's plate but stops the
 		// broker's reviewer convergence countdown by parking it back

@@ -39,7 +39,7 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		// instead of "in_progress" to preserve the pre-Lane-A contract
 		// that ~10 broker code paths read. See lifecycleDerivedFields
 		// comment for full rationale.
-		{LifecycleStateBlockedOnPRMerge, "review", "ready_for_review", "blocked", true},
+		{LifecycleStateBlocked, "review", "ready_for_review", "blocked", true},
 		{LifecycleStateQueuedBehindOwner, "triage", "pending_review", "open", true},
 		{LifecycleStateChangesRequested, "implement", "pending_review", "in_progress", false},
 		{LifecycleStateApproved, "ship", "approved", "done", false},

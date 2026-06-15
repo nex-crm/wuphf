@@ -14,8 +14,8 @@ import {
 
 describe("humanizeLifecycleState", () => {
   it("maps every known enum to a plain label", () => {
-    expect(humanizeLifecycleState("blocked_on_pr_merge")).toBe(
-      "Blocked on review merge",
+    expect(humanizeLifecycleState("blocked")).toBe(
+      "Blocked",
     );
     expect(humanizeLifecycleState("queued_behind_owner")).toBe(
       "Queued behind owner",
@@ -38,7 +38,7 @@ describe("humanizeLifecycleState", () => {
 
   it("never returns a string containing an underscore", () => {
     for (const state of [
-      "blocked_on_pr_merge",
+      "blocked",
       "queued_behind_owner",
       "changes_requested",
       "some_future_state",
@@ -50,8 +50,17 @@ describe("humanizeLifecycleState", () => {
 
 describe("humanizeStateTokens", () => {
   it("replaces embedded enum tokens in prose", () => {
-    expect(humanizeStateTokens("running → blocked_on_pr_merge [deps]")).toBe(
-      "running → Blocked on review merge [deps]",
+    expect(
+      humanizeStateTokens("running → queued_behind_owner [deps]"),
+    ).toBe("running → Queued behind owner [deps]");
+  });
+
+  it("leaves plain-word state tokens like 'blocked' untouched in prose", () => {
+    // Only snake_case enum tokens are rewritten; single plain words read
+    // fine in prose, so 'blocked' (renamed from blocked_on_pr_merge) passes
+    // through unchanged — same treatment as 'review' / 'running'.
+    expect(humanizeStateTokens("running → blocked [deps]")).toBe(
+      "running → blocked [deps]",
     );
   });
 
@@ -100,8 +109,8 @@ describe("humanizeTurnOutcome", () => {
     expect(humanizeTurnOutcome("ok (no durable trace)")).toBe(
       "ok (no durable trace)",
     );
-    expect(humanizeTurnOutcome("moved to blocked_on_pr_merge")).toBe(
-      "moved to Blocked on review merge",
+    expect(humanizeTurnOutcome("moved to queued_behind_owner")).toBe(
+      "moved to Queued behind owner",
     );
   });
 });

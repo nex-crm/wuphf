@@ -153,7 +153,7 @@ func inboxCountsForItems(items []InboxItem, todayCutoff time.Time) InboxCounts {
 			counts.DecisionRequired++
 		case LifecycleStateRunning:
 			counts.Running++
-		case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner, LifecycleStateRejected:
+		case LifecycleStateBlocked, LifecycleStateQueuedBehindOwner, LifecycleStateRejected:
 			counts.Blocked++
 		case LifecycleStateApproved:
 			// ElapsedMs measures age, not absolute time, so derive

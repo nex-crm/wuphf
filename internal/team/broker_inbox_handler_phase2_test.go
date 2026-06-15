@@ -384,7 +384,7 @@ func TestHandleInboxItems_TaskRowCarriesBlockerAndDetails(t *testing.T) {
 			BlockedOn: []string{"task-upstream"},
 		},
 	}
-	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlocked, "seed"); err != nil {
 		b.mu.Unlock()
 		t.Fatalf("seed: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestHandleInboxItems_TaskRowCarriesBlockerAndDetails(t *testing.T) {
 
 // TestHandleTaskResume covers the POST /tasks/{id}/resume route that
 // the blocked-card "Resume" button posts to. Verifies the lifecycle
-// transitions away from blocked_on_pr_merge and that the JSON envelope
+// transitions away from blocked and that the JSON envelope
 // carries changed=true.
 func TestHandleTaskResume(t *testing.T) {
 	b := newTestBrokerForReview(t)
@@ -432,7 +432,7 @@ func TestHandleTaskResume(t *testing.T) {
 	b.tasks = []teamTask{
 		{ID: "task-blocked", Title: "Blocked", CreatedAt: now, UpdatedAt: now, Reviewers: []string{"owner"}, status: "blocked"},
 	}
-	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlocked, "seed"); err != nil {
 		b.mu.Unlock()
 		t.Fatalf("seed: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestHandleTaskResume(t *testing.T) {
 		}
 	}
 	b.mu.Unlock()
-	if state == LifecycleStateBlockedOnPRMerge {
+	if state == LifecycleStateBlocked {
 		t.Fatalf("task should have left blocked state after resume; still %s", state)
 	}
 }
@@ -490,7 +490,7 @@ func TestHandleTaskResume_NonReviewerForbidden(t *testing.T) {
 	b.tasks = []teamTask{
 		{ID: "task-blocked", Title: "Blocked", CreatedAt: now, UpdatedAt: now, Reviewers: []string{"mira"}, status: "blocked"},
 	}
-	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlocked, "seed"); err != nil {
 		b.mu.Unlock()
 		t.Fatalf("seed: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestHandleTaskResume_NonReviewerForbidden(t *testing.T) {
 		}
 	}
 	b.mu.Unlock()
-	if state != LifecycleStateBlockedOnPRMerge {
+	if state != LifecycleStateBlocked {
 		t.Fatalf("state should remain blocked after 403; got %s", state)
 	}
 }
@@ -548,7 +548,7 @@ func TestHandleTaskResume_RejectsMalformedJSON(t *testing.T) {
 	b.tasks = []teamTask{
 		{ID: "task-blocked", Title: "Blocked", CreatedAt: now, UpdatedAt: now, Reviewers: []string{"owner"}, status: "blocked"},
 	}
-	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlocked, "seed"); err != nil {
 		b.mu.Unlock()
 		t.Fatalf("seed: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestHandleTaskResume_RejectsMalformedJSON(t *testing.T) {
 		}
 	}
 	b.mu.Unlock()
-	if state != LifecycleStateBlockedOnPRMerge {
+	if state != LifecycleStateBlocked {
 		t.Fatalf("state should remain blocked after 400; got %s", state)
 	}
 }

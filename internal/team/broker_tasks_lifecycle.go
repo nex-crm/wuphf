@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// BlockTask transitions taskID to LifecycleStateBlockedOnPRMerge and
+// BlockTask transitions taskID to LifecycleStateBlocked and
 // records `blockerID` in task.BlockedOn so the unblock cascade fires
 // automatically when the blocker merges.
 //
@@ -78,7 +78,7 @@ func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, b
 		// gate (build-time gate #1) all stay in sync. The transition
 		// stamps status/blocked/pipelineStage/reviewState atomically and
 		// updates the lifecycleIndex bucket.
-		if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateBlockedOnPRMerge, reason); err != nil {
+		if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateBlocked, reason); err != nil {
 			return *task, false, err
 		}
 		task.UpdatedAt = now
@@ -90,11 +90,11 @@ func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, b
 			return teamTask{}, false, err
 		}
 		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.status+"]", 140), task.ID)
-		// Self-heal gate (build-time gate #1): blocked_on_pr_merge is a
+		// Self-heal gate (build-time gate #1): blocked is a
 		// typed legitimate state, not a self-heal trigger. Short-circuit
 		// the call site itself so the unit test can observe absence at
 		// the call boundary, not just the side-effect downstream.
-		if task.LifecycleState != LifecycleStateBlockedOnPRMerge {
+		if task.LifecycleState != LifecycleStateBlocked {
 			b.requestCapabilitySelfHealingLocked(task, actor, reason)
 		}
 		if err := b.saveLocked(); err != nil {
@@ -415,7 +415,7 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // "task_unblocked" action so the launcher can deliver a notification to the owner.
 //
 // Lane A extension: the function sweeps the union of (DependsOn, BlockedOn)
-// and branches on LifecycleState so harness tasks (blocked_on_pr_merge) move
+// and branches on LifecycleState so harness tasks (blocked) move
 // to review on resolution while legacy DependsOn-blocked tasks keep their
 // pre-Lane-A in_progress / open behavior.
 //
@@ -449,7 +449,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// are accepted so harness tasks (which set LifecycleState before
 		// the legacy fields settle) and pre-Lane-A tasks (which only
 		// have the legacy flag) cascade the same way.
-		if !task.blocked && task.LifecycleState != LifecycleStateBlockedOnPRMerge {
+		if !task.blocked && task.LifecycleState != LifecycleStateBlocked {
 			continue
 		}
 		// Sweep both legacy DependsOn and the new typed BlockedOn list so
@@ -475,7 +475,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// Snapshot BlockedOn so a transition failure below can roll
 		// back the filtered list. Mutating before the transition and
 		// then `continue`ing on error used to leave the task in
-		// LifecycleStateBlockedOnPRMerge with the completed blocker
+		// LifecycleStateBlocked with the completed blocker
 		// stripped out — the next merge cascade would skip the task
 		// (it's no longer in DependsOn/BlockedOn) and the task sat
 		// stuck forever.
@@ -502,7 +502,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// Branch on LifecycleState: harness tasks move to review,
 		// legacy tasks fall back to the pre-Lane-A behavior. The
 		// transition layer stamps every derived field for both paths.
-		if task.LifecycleState == LifecycleStateBlockedOnPRMerge {
+		if task.LifecycleState == LifecycleStateBlocked {
 			if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateReview, "blocker resolved by "+completedTaskID); err != nil {
 				// Restore BlockedOn so the next cascade can retry
 				// this dependent task instead of silently dropping

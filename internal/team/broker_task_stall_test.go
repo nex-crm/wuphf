@@ -169,7 +169,7 @@ func TestStallWatchdogClearsMarkerWhenTaskLeavesRunning(t *testing.T) {
 
 	b.mu.Lock()
 	task := b.findTaskByIDLocked("OFFICE-1")
-	task.LifecycleState = LifecycleStateBlockedOnPRMerge
+	task.LifecycleState = LifecycleStateBlocked
 	task.status = "blocked"
 	b.mu.Unlock()
 

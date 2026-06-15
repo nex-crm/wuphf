@@ -99,7 +99,7 @@ function actionsForState(state: LifecycleState): ActionDef[] {
           reasonHint: "Why cancel? One short line.",
         },
       ];
-    case "blocked_on_pr_merge":
+    case "blocked":
       // Blocked tasks are agent-internal blockers. The human only
       // sees this surface on the Issue detail page (the Inbox
       // intentionally hides blocked items per the product model:

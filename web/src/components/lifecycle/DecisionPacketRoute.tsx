@@ -252,7 +252,7 @@ function pendingStateExplainer(state: string, details?: string): string {
       return "Reviewers are grading the work. Detail surfaces once enough grades land.";
     case "changes_requested":
       return "Changes were requested. The owner agent is iterating on the spec.";
-    case "blocked_on_pr_merge":
+    case "blocked":
       // The lifecycle state name is historical — most real blocks are agent
       // timeouts, agent errors, or cross-task dependencies, not actual PR
       // merges. Prefer the broker's own reason when present so the human
@@ -291,7 +291,7 @@ function PacketPending({
   const blockedOn = item.task?.blockedOn ?? [];
   const explainer = pendingStateExplainer(state, details);
   const owner = item.agentSlug || item.task?.assignment || "";
-  const isBlocked = state === "blocked_on_pr_merge";
+  const isBlocked = state === "blocked";
   return (
     <div
       className="packet-shell packet-shell--message"

@@ -37,7 +37,7 @@ var slackCardActiveStates = map[string]bool{
 	string(LifecycleStateReview):            true,
 	string(LifecycleStateDecision):          true,
 	string(LifecycleStateChangesRequested):  true,
-	string(LifecycleStateBlockedOnPRMerge):  true,
+	string(LifecycleStateBlocked):           true,
 	string(LifecycleStateQueuedBehindOwner): true,
 }
 
@@ -59,7 +59,7 @@ var slackCardStateEmoji = map[string]string{
 	string(LifecycleStateReview):            "🔍",
 	string(LifecycleStateDecision):          "🧭",
 	string(LifecycleStateChangesRequested):  "✏️",
-	string(LifecycleStateBlockedOnPRMerge):  "⛔",
+	string(LifecycleStateBlocked):           "⛔",
 	string(LifecycleStateQueuedBehindOwner): "⏳",
 	string(LifecycleStateApproved):          "✅",
 	"done":                                  "✅",

@@ -144,7 +144,7 @@ function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
     case "running":
     case "intake":
       return "running";
-    case "blocked_on_pr_merge":
+    case "blocked":
     case "queued_behind_owner":
       return "blocked";
     case "review":
@@ -177,8 +177,8 @@ function describeActivity(
     case "running":
     case "intake":
       return "Idle — waiting for the next event.";
-    case "blocked_on_pr_merge":
-      return "Blocked — waiting for an upstream PR to merge.";
+    case "blocked":
+      return "Blocked — waiting on an upstream task, or its owner stopped.";
     case "review":
       return "In review — waiting for a reviewer.";
     case "decision":

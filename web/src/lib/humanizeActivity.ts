@@ -5,7 +5,7 @@
  * MCP tool ids ("mcp__wuphf-office__team_task"), raw tool-call JSON
  * ('[{"tool_name":…,"type":"tool_reference"}]') in the typing strip,
  * process exhaust ("signal: killed", "exit status 1") in the activity
- * feed, and lifecycle enums ("blocked_on_pr_merge") on cards. A person
+ * feed, and lifecycle enums ("blocked") on cards. A person
  * scanning chat, activity, or typing surfaces should never see code.
  *
  * This module is the single place those strings get cleaned. Every
@@ -21,7 +21,7 @@ const LIFECYCLE_STATE_LABELS: Record<string, string> = {
   running: "Running",
   review: "In review",
   decision: "Needs decision",
-  blocked_on_pr_merge: "Blocked on review merge",
+  blocked: "Blocked",
   queued_behind_owner: "Queued behind owner",
   changes_requested: "Changes requested",
   approved: "Approved",
@@ -45,9 +45,8 @@ export function humanizeLifecycleState(state: string): string {
 
 /**
  * Replace raw lifecycle enum tokens inside a prose string with their
- * plain labels ("running → blocked_on_pr_merge" → "Running → Blocked on
- * review merge"). Used on broker-written summary lines that embed state
- * names in free text.
+ * plain labels ("running → blocked" → "Running → Blocked"). Used on
+ * broker-written summary lines that embed state names in free text.
  */
 export function humanizeStateTokens(text: string): string {
   let out = text;

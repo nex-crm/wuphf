@@ -93,7 +93,7 @@ const STAGE_HINT: Record<LifecycleStage, string> = {
   scheduled: "Recurring scheduled tasks",
   backlog: "Parked or awaiting staffing",
   in_progress: "Owner agent working — includes revising",
-  blocked: "Blocked on an upstream merge",
+  blocked: "Waiting on an upstream task, or owner stopped",
   needs_human: "Decisions, agent questions, and reviews waiting on you",
   done: "Landed",
   archive: "Filed away — archived or rejected",

@@ -378,7 +378,7 @@ func (b *Broker) attachSelfHealCompletionToParentLocked(child *teamTask) {
 
 // requestCapabilitySelfHealingHook is a swap-able test hook used by the
 // build-time gate #1 unit test to observe whether the call site fires
-// (Lane A: blocked_on_pr_merge must NOT trigger self-heal). Production
+// (Lane A: blocked must NOT trigger self-heal). Production
 // always leaves this nil and the real implementation runs.
 var requestCapabilitySelfHealingHook func(blockedTask *teamTask, actor, detail string)
 

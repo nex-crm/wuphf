@@ -21,8 +21,8 @@ package team
 // the mutex held.
 //
 // Self-heal gating (build-time gate #1): when the new state is
-// LifecycleStateBlockedOnPRMerge the transition layer explicitly does NOT
-// invoke requestCapabilitySelfHealingLocked. The blocked-on-PR-merge state
+// LifecycleStateBlocked the transition layer explicitly does NOT
+// invoke requestCapabilitySelfHealingLocked. The blocked state
 // is a typed legitimate condition, not an error needing self-heal. The
 // unit test must observe the call site, not just the absence of side
 // effects, so the gate is implemented as a hard branch in BlockTask itself
@@ -89,20 +89,28 @@ const (
 	// decision instead of silently picking a state.
 	LifecycleStateUnknown LifecycleState = "unknown"
 
-	LifecycleStateIntake            LifecycleState = "intake"
-	LifecycleStateReady             LifecycleState = "ready"
-	LifecycleStateRunning           LifecycleState = "running"
-	LifecycleStateReview            LifecycleState = "review"
-	LifecycleStateDecision          LifecycleState = "decision"
-	LifecycleStateBlockedOnPRMerge  LifecycleState = "blocked_on_pr_merge"
+	LifecycleStateIntake   LifecycleState = "intake"
+	LifecycleStateReady    LifecycleState = "ready"
+	LifecycleStateRunning  LifecycleState = "running"
+	LifecycleStateReview   LifecycleState = "review"
+	LifecycleStateDecision LifecycleState = "decision"
+	// LifecycleStateBlocked is the generic "this task is paused" state: it is
+	// recoverable and waiting on something — an upstream dependency to finish,
+	// or an owner agent that stopped (timed out / errored) before durable
+	// progress. The unblock cascade (unblockDependentsLocked) moves it back to
+	// review when its blocker resolves. The legacy value was
+	// "blocked_on_pr_merge", a holdover from the retired PR-style review/merge
+	// model; WUPHF has no PRs, so the name was a misnomer. Persisted snapshots
+	// carrying the old value migrate via normalizeLegacyLifecycleStateName.
+	LifecycleStateBlocked           LifecycleState = "blocked"
 	LifecycleStateQueuedBehindOwner LifecycleState = "queued_behind_owner"
 	LifecycleStateChangesRequested  LifecycleState = "changes_requested"
 	LifecycleStateApproved          LifecycleState = "approved"
 	// LifecycleStateRejected marks work that a reviewer rejected
-	// outright as un-landable. Distinct from BlockedOnPRMerge
-	// (recoverable, waiting on upstream) and from ChangesRequested
-	// (non-terminal, owner revises). Dependent tasks STAY blocked
-	// because the work did not land.
+	// outright as un-landable. Distinct from Blocked (recoverable,
+	// waiting on upstream) and from ChangesRequested (non-terminal,
+	// owner revises). Dependent tasks STAY blocked because the work
+	// did not land.
 	LifecycleStateRejected LifecycleState = "rejected"
 
 	// LifecycleStateDrafting marks a task the human EXPLICITLY parked
@@ -141,6 +149,10 @@ const (
 //     LifecycleStatePlanning state; a persisted Planning task was an owner
 //     mid-plan with status=in_progress, so it resumes as a live Running
 //     task — the same state a plan-first-OFF task landed in).
+//   - "blocked_on_pr_merge" -> "blocked" (the PR-style review/merge model is
+//     retired; the state was always the generic recoverable-blocked state, so
+//     it keeps its behavior under the honest name. Existing prod snapshots
+//     carry the old value and must load cleanly).
 //
 // Pass-through for every other input so this stays a targeted shim, not a
 // general migration table.
@@ -154,6 +166,8 @@ func normalizeLegacyLifecycleStateName(s LifecycleState) LifecycleState {
 		return LifecycleStateApproved
 	case "planning":
 		return LifecycleStateRunning
+	case "blocked_on_pr_merge":
+		return LifecycleStateBlocked
 	}
 	return s
 }
@@ -169,7 +183,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateRunning,
 		LifecycleStateReview,
 		LifecycleStateDecision,
-		LifecycleStateBlockedOnPRMerge,
+		LifecycleStateBlocked,
 		LifecycleStateQueuedBehindOwner,
 		LifecycleStateChangesRequested,
 		LifecycleStateApproved,
@@ -193,7 +207,7 @@ type lifecycleDerivedFieldsRow struct {
 // lives in source so test build-time gate #3 (forward map) can walk it
 // directly.
 //
-// Deviation from design doc: the doc-prescribed row for blocked_on_pr_merge
+// Deviation from design doc: the doc-prescribed row for the blocked state
 // is {pipelineStage:"review", reviewState:"ready_for_review",
 // status:"in_progress", blocked:true}. Pre-Lane-A code paths in the broker
 // (notifier_targets.go, headless_codex_queue.go, broker_requests_interviews.go,
@@ -202,7 +216,7 @@ type lifecycleDerivedFieldsRow struct {
 // load-bearing signal that a task is paused. Flipping that contract in
 // Lane A would either regress dozens of legacy code paths or require a
 // matching Lane A sweep of every reader, which is out of scope here. We
-// keep status="blocked" for blocked_on_pr_merge and let Lane F's CLI
+// keep status="blocked" for the blocked state and let Lane F's CLI
 // rewrite or v1.1 cleanup migrate the readers off the legacy contract
 // once the rest of the harness is in place. The lifecycle index and the
 // LifecycleState field still source-of-truth correctly.
@@ -219,7 +233,7 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	LifecycleStateRunning:           {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
 	LifecycleStateReview:            {PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false},
 	LifecycleStateDecision:          {PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false},
-	LifecycleStateBlockedOnPRMerge:  {PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true},
+	LifecycleStateBlocked:           {PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true},
 	LifecycleStateQueuedBehindOwner: {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true},
 	LifecycleStateChangesRequested:  {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
 	LifecycleStateApproved:          {PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false},
@@ -269,7 +283,7 @@ const (
 // The mapping is:
 //   - backlog     ← drafting, intake, ready, unknown
 //   - in_progress ← running, review, changes_requested
-//   - blocked     ← blocked_on_pr_merge, queued_behind_owner
+//   - blocked     ← blocked, queued_behind_owner
 //   - needs_human ← decision
 //   - done        ← approved
 //   - archive     ← archived, rejected
@@ -282,7 +296,7 @@ func lifecycleStageFor(s LifecycleState) LifecycleStage {
 		return StageBacklog
 	case LifecycleStateRunning, LifecycleStateReview, LifecycleStateChangesRequested:
 		return StageInProgress
-	case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner:
+	case LifecycleStateBlocked, LifecycleStateQueuedBehindOwner:
 		return StageBlocked
 	case LifecycleStateDecision:
 		return StageNeedsHuman
@@ -319,7 +333,7 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false}:           LifecycleStateReady,
 	{PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false}: LifecycleStateRunning,
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false}:  LifecycleStateReview,
-	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true}:       LifecycleStateBlockedOnPRMerge,
+	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true}:       LifecycleStateBlocked,
 	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true}:            LifecycleStateQueuedBehindOwner,
 	{PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false}:                   LifecycleStateApproved,
 	{PipelineStage: "review", ReviewState: "rejected", Status: "rejected", Blocked: true}:              LifecycleStateRejected,
@@ -337,13 +351,13 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "implement", ReviewState: "changes_requested", Status: "in_progress", Blocked: false}: LifecycleStateChangesRequested,
 
 	// Pre-Lane-A code wrote status="blocked" instead of relying on the
-	// blocked bool. Map every reasonable variant to blocked_on_pr_merge so
+	// blocked bool. Map every reasonable variant to LifecycleStateBlocked so
 	// real production data has a deterministic landing pad.
-	{PipelineStage: "", ReviewState: "", Status: "blocked", Blocked: true}:                         LifecycleStateBlockedOnPRMerge,
-	{PipelineStage: "", ReviewState: "", Status: "blocked", Blocked: false}:                        LifecycleStateBlockedOnPRMerge,
-	{PipelineStage: "implement", ReviewState: "pending_review", Status: "blocked", Blocked: true}:  LifecycleStateBlockedOnPRMerge,
-	{PipelineStage: "implement", ReviewState: "pending_review", Status: "blocked", Blocked: false}: LifecycleStateBlockedOnPRMerge,
-	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: false}:  LifecycleStateBlockedOnPRMerge,
+	{PipelineStage: "", ReviewState: "", Status: "blocked", Blocked: true}:                         LifecycleStateBlocked,
+	{PipelineStage: "", ReviewState: "", Status: "blocked", Blocked: false}:                        LifecycleStateBlocked,
+	{PipelineStage: "implement", ReviewState: "pending_review", Status: "blocked", Blocked: true}:  LifecycleStateBlocked,
+	{PipelineStage: "implement", ReviewState: "pending_review", Status: "blocked", Blocked: false}: LifecycleStateBlocked,
+	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: false}:  LifecycleStateBlocked,
 
 	// Bare statuses without pipeline metadata cover ad-hoc tasks that
 	// never moved through the formal pipeline.
@@ -449,7 +463,7 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 	if derived == LifecycleStateUnknown {
 		switch status := strings.ToLower(strings.TrimSpace(task.status)); {
 		case task.blocked || status == "blocked":
-			derived = LifecycleStateBlockedOnPRMerge
+			derived = LifecycleStateBlocked
 		case isTerminalTeamTaskStatus(status):
 			derived = LifecycleStateApproved
 		case status == "review" || strings.EqualFold(strings.TrimSpace(task.reviewState), "ready_for_review"):
@@ -695,7 +709,7 @@ func (b *Broker) TransitionLifecycle(taskID string, newState LifecycleState, rea
 // OnDecisionRecorded is the registered handler for the future
 // decision.recorded manifest event (emitted by Lane C). The handler
 // extends unblockDependentsLocked over the union of DependsOn and
-// BlockedOn so tasks waiting on a PR merge transition into review the
+// BlockedOn so tasks waiting on a blocker transition into review the
 // instant the blocking decision lands. Acquires b.mu and persists; the
 // auto-notebook publish runs after persistence to mirror the existing
 // cascade pattern.

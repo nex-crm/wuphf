@@ -101,9 +101,8 @@ var (
 	// pays a ToolSearch tax rediscovering deferred MCP tools. Observed good
 	// turns already run 2.5–3.4m, so the old 4m default (WUPHF_TURN_TIMEOUT)
 	// force-killed legitimate orchestration mid-flight — the recovery path
-	// then mislabeled the office task as blocked_on_pr_merge ("Blocked on
-	// review merge") even though it had no PR. Give office turns their own
-	// generous budget, operator-tunable via WUPHF_OFFICE_TIMEOUT.
+	// then blocked the office task, leaving its work half-done. Give office
+	// turns their own generous budget, operator-tunable via WUPHF_OFFICE_TIMEOUT.
 	headlessCodexOfficeTurnTimeout        = headlessCodexTurnTimeoutEnv("WUPHF_OFFICE_TIMEOUT", 10*time.Minute)
 	headlessCodexOfficeLaunchTurnTimeout  = headlessCodexTurnTimeoutEnv("WUPHF_OFFICE_LAUNCH_TIMEOUT", 10*time.Minute)
 	headlessCodexLocalWorktreeTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_WORKTREE_TIMEOUT", 12*time.Minute)

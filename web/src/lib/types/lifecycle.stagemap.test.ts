@@ -19,7 +19,7 @@ const EXPECTED_WIRE_STATES = [
   "running",
   "review",
   "changes_requested",
-  "blocked_on_pr_merge",
+  "blocked",
   "queued_behind_owner",
   "decision",
   "approved",

@@ -103,7 +103,7 @@ func taskBoardStage(t *teamTask) string {
 		return boardStageBacklog
 	case LifecycleStateRunning, LifecycleStateReview, LifecycleStateChangesRequested:
 		return boardStageInProgress
-	case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner:
+	case LifecycleStateBlocked, LifecycleStateQueuedBehindOwner:
 		return boardStageBlocked
 	case LifecycleStateDecision:
 		return boardStageNeedsHuman
@@ -171,7 +171,7 @@ func inboxItemNeedsAttention(item InboxItem) bool {
 		}
 		switch item.TaskRow.LifecycleState {
 		case LifecycleStateDecision, LifecycleStateReview,
-			LifecycleStateChangesRequested, LifecycleStateBlockedOnPRMerge:
+			LifecycleStateChangesRequested, LifecycleStateBlocked:
 			return true
 		}
 	}

@@ -5,7 +5,7 @@
   "running": "in_progress",
   "review": "in_progress",
   "changes_requested": "in_progress",
-  "blocked_on_pr_merge": "blocked",
+  "blocked": "blocked",
   "queued_behind_owner": "blocked",
   "decision": "needs_human",
   "approved": "done",

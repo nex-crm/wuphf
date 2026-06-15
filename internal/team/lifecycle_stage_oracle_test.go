@@ -26,7 +26,7 @@ var wireLifecycleStates = []LifecycleState{
 	LifecycleStateRunning,
 	LifecycleStateReview,
 	LifecycleStateChangesRequested,
-	LifecycleStateBlockedOnPRMerge,
+	LifecycleStateBlocked,
 	LifecycleStateQueuedBehindOwner,
 	LifecycleStateDecision,
 	LifecycleStateApproved,

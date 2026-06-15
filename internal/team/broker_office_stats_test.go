@@ -79,7 +79,7 @@ func TestOfficeStats_MatchesListEndpoints(t *testing.T) {
 	seedTask("task-backlog", "Backlog spec", "issue", LifecycleStateIntake, "")
 	seedTask("task-running", "Running spec", "issue", LifecycleStateRunning, "")
 	seedTask("task-review", "Review spec", "issue", LifecycleStateReview, "")
-	seedTask("task-blocked", "Blocked spec", "issue", LifecycleStateBlockedOnPRMerge, "")
+	seedTask("task-blocked", "Blocked spec", "issue", LifecycleStateBlocked, "")
 	seedTask("task-decision", "Decision spec", "issue", LifecycleStateDecision, "")
 	seedTask("task-done", "Done spec", "issue", LifecycleStateApproved, "")
 	// Sub-task and non-spec execution task: visible to /tasks but NOT

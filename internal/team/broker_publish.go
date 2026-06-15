@@ -74,7 +74,7 @@ func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 
 // activeOwnerTaskIDLocked returns the task ID for the most recently-
 // updated task owned by `slug` that's in a pre-merge lifecycle state
-// (running, review, decision, blocked_on_pr_merge, changes_requested)
+// (running, review, decision, blocked, changes_requested)
 // AND is scoped to the message context (channel + optional thread).
 //
 // Scoping rules:
@@ -142,7 +142,7 @@ func lifecycleStateIsPreMerge(s LifecycleState) bool {
 	case LifecycleStateRunning,
 		LifecycleStateReview,
 		LifecycleStateDecision,
-		LifecycleStateBlockedOnPRMerge,
+		LifecycleStateBlocked,
 		LifecycleStateChangesRequested:
 		return true
 	}

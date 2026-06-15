@@ -22,7 +22,7 @@ describe("<LifecycleStatePill>", () => {
     "running",
     "review",
     "decision",
-    "blocked_on_pr_merge",
+    "blocked",
     "changes_requested",
     "approved",
   ])("renders without crashing for state=%s", (state) => {
@@ -30,8 +30,8 @@ describe("<LifecycleStatePill>", () => {
     expect(screen.getByLabelText(/^state:/i)).toBeInTheDocument();
   });
 
-  it("uses the locked label for blocked_on_pr_merge ('blocked')", () => {
-    render(<LifecycleStatePill state="blocked_on_pr_merge" />);
+  it("uses the locked label for blocked ('blocked')", () => {
+    render(<LifecycleStatePill state="blocked" />);
     expect(screen.getByLabelText(/state: blocked/i)).toBeInTheDocument();
   });
 });

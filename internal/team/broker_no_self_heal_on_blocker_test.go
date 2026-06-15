@@ -2,7 +2,7 @@ package team
 
 // broker_no_self_heal_on_blocker_test.go covers build-time gate #1 of the
 // Lane A success criteria: when a task transitions to
-// LifecycleStateBlockedOnPRMerge via BlockTask, the broker MUST NOT call
+// LifecycleStateBlocked via BlockTask, the broker MUST NOT call
 // requestCapabilitySelfHealingLocked. The blocked-on-PR-merge state is a
 // typed legitimate condition; treating it as an error and spawning a
 // repair task for the agent is the bug this gate prevents.
@@ -23,7 +23,7 @@ func TestBlockTaskDoesNotTriggerSelfHealOnPRMergeBlocker(t *testing.T) {
 	//   - Block it via BlockTask with a "capability gap"-shaped reason
 	//     that pre-Lane-A code WOULD have escalated to self-heal.
 	//   - Assert the call site did NOT fire (counter stays 0) AND that
-	//     the task landed in LifecycleStateBlockedOnPRMerge with the
+	//     the task landed in LifecycleStateBlocked with the
 	//     blocked bool set.
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
@@ -62,14 +62,14 @@ func TestBlockTaskDoesNotTriggerSelfHealOnPRMergeBlocker(t *testing.T) {
 	if !changed {
 		t.Fatalf("expected BlockTask to change task state, got %+v", got)
 	}
-	if got.LifecycleState != LifecycleStateBlockedOnPRMerge {
-		t.Fatalf("expected LifecycleStateBlockedOnPRMerge, got %q", got.LifecycleState)
+	if got.LifecycleState != LifecycleStateBlocked {
+		t.Fatalf("expected LifecycleStateBlocked, got %q", got.LifecycleState)
 	}
 	if !got.Blocked() {
 		t.Fatalf("expected blocked() to be true, got %+v", got)
 	}
 	if calls != 0 {
-		t.Fatalf("expected requestCapabilitySelfHealingLocked to be skipped for blocked_on_pr_merge tasks, got %d call(s)", calls)
+		t.Fatalf("expected requestCapabilitySelfHealingLocked to be skipped for blocked tasks, got %d call(s)", calls)
 	}
 }
 

@@ -408,7 +408,7 @@ func classifyIssueLifecycleTransition(from, to LifecycleState) IssueLifecycleTra
 		return IssueLifecycleTransitionApproved
 	case to == LifecycleStateRejected:
 		return IssueLifecycleTransitionRejected
-	case to == LifecycleStateBlockedOnPRMerge:
+	case to == LifecycleStateBlocked:
 		return IssueLifecycleTransitionBlocked
 	case to == LifecycleStateChangesRequested:
 		return IssueLifecycleTransitionRevising

@@ -785,9 +785,8 @@ func (l *Launcher) headlessCodexTurnTimeoutForTurn(slug string, turn headlessCod
 // keeps the short default so an urgent same-task wake (e.g. a specialist
 // handoff) can still cancel a stale lead turn and restart it with fresh
 // context; that preemption re-enqueues the work, it never blocks the task, so
-// it is not what left tasks "Blocked on review merge" (the 4m hard timeout
-// was). slug is threaded only to resolve the task identically to the timeout
-// path.
+// it is not what falsely blocked tasks in prod (the 4m hard timeout was). slug
+// is threaded only to resolve the task identically to the timeout path.
 func (l *Launcher) headlessCodexStaleCancelAfterForTurn(slug string, turn headlessCodexTurn) time.Duration {
 	if task := l.timedOutTaskForTurn(slug, turn); task != nil {
 		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {

@@ -31,8 +31,8 @@ func TestLifecycleStageForAllCanonicalStates(t *testing.T) {
 		{LifecycleStateRunning, StageInProgress},
 		{LifecycleStateReview, StageInProgress},
 		{LifecycleStateChangesRequested, StageInProgress},
-		// blocked ← blocked_on_pr_merge, queued_behind_owner
-		{LifecycleStateBlockedOnPRMerge, StageBlocked},
+		// blocked ← blocked, queued_behind_owner
+		{LifecycleStateBlocked, StageBlocked},
 		{LifecycleStateQueuedBehindOwner, StageBlocked},
 		// needs_human ← decision
 		{LifecycleStateDecision, StageNeedsHuman},

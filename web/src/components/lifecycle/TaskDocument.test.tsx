@@ -180,7 +180,7 @@ describe("normalizeTaskDocument", () => {
     const doc = normalizeTaskDocument(
       {
         taskId: "task-5",
-        lifecycleState: "blocked_on_pr_merge",
+        lifecycleState: "blocked",
         updatedAt: "2026-05-21T03:23:41Z",
       },
       {
@@ -190,14 +190,14 @@ describe("normalizeTaskDocument", () => {
         details: "Seed one profile per sender.",
         owner: "contact-intel",
         status: "blocked",
-        lifecycle_state: "blocked_on_pr_merge",
+        lifecycle_state: "blocked",
       },
     );
 
     expect(doc.title).toBe("Pull unread emails");
     expect(doc.channel).toBe("email-ops");
     expect(doc.ownerSlug).toBe("contact-intel");
-    expect(doc.lifecycleState).toBe("blocked_on_pr_merge");
+    expect(doc.lifecycleState).toBe("blocked");
     expect(doc.description).toBe("Seed one profile per sender.");
   });
 

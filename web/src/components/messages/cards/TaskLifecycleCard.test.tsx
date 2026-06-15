@@ -55,20 +55,20 @@ describe("TaskLifecycleCard", () => {
   });
 
   it("humanizes lifecycle enums in the transition meta (E1)", () => {
-    // ICP-eval v3 [17:33:18]: "running → blocked_on_pr_merge" rendered raw
+    // ICP-eval v3 [17:33:18]: "running → blocked" rendered raw
     // on a chat card — engineering jargon at the human boundary.
     render(
       <TaskLifecycleCard
         payload={{
           ...BASE,
           from_state: "running",
-          to_state: "blocked_on_pr_merge",
+          to_state: "blocked",
           transition: "blocked",
         }}
       />,
     );
     const card = screen.getByTestId("issue-lifecycle-card");
-    expect(card.textContent).toMatch(/Running →\s*Blocked on review merge/);
-    expect(card.textContent).not.toMatch(/blocked_on_pr_merge/);
+    expect(card.textContent).toMatch(/Running →\s*Blocked/);
+    expect(card.textContent).not.toMatch(/blocked/);
   });
 });

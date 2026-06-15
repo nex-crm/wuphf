@@ -21,7 +21,7 @@ export type LifecycleState =
   | "running"
   | "review"
   | "decision"
-  | "blocked_on_pr_merge"
+  | "blocked"
   | "queued_behind_owner"
   | "changes_requested"
   | "approved"
@@ -43,7 +43,7 @@ const ALL_LIFECYCLE_STATES: Record<LifecycleState, true> = {
   running: true,
   review: true,
   decision: true,
-  blocked_on_pr_merge: true,
+  blocked: true,
   queued_behind_owner: true,
   changes_requested: true,
   approved: true,
@@ -113,7 +113,7 @@ export function stageForState(s: LifecycleState): LifecycleStage {
     case "review":
     case "changes_requested":
       return "in_progress";
-    case "blocked_on_pr_merge":
+    case "blocked":
     case "queued_behind_owner":
       return "blocked";
     case "decision":
@@ -280,7 +280,7 @@ export interface InboxRow {
   isUrgent: boolean;
   /**
    * Typed-blocker task IDs from teamTask.BlockedOn. Empty for tasks
-   * that are not blocked; populated for blocked_on_pr_merge and any
+   * that are not blocked; populated for blocked and any
    * other state the broker carries a dependency on.
    */
   blockedOn?: string[];
@@ -397,7 +397,7 @@ export const STATE_PILL_TOKENS: Record<
     text: "var(--success-500)",
     label: "decision",
   },
-  blocked_on_pr_merge: {
+  blocked: {
     bg: "var(--warning-200)",
     text: "var(--warning-500)",
     label: "blocked",
@@ -530,7 +530,7 @@ export const FILTER_TO_STATES: Record<
   // running so inbox rows with this state still land somewhere readable.
   running: ["drafting", "intake", "ready", "running", "review"],
   blocked: [
-    "blocked_on_pr_merge",
+    "blocked",
     "queued_behind_owner",
     "changes_requested",
     "rejected",

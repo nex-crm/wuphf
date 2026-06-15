@@ -227,7 +227,7 @@ func inboxItemPriority(item InboxItem) int {
 			return 0
 		case LifecycleStateChangesRequested:
 			return 1
-		case LifecycleStateBlockedOnPRMerge:
+		case LifecycleStateBlocked:
 			return 2
 		case LifecycleStateReview, LifecycleStateRunning,
 			LifecycleStateReady, LifecycleStateIntake:
