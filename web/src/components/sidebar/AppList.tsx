@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-import { type ComponentType, useState } from "react";
+import { type ComponentType, Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookStack,
@@ -25,6 +25,7 @@ import {
   WIKI_SURFACE_APP_IDS,
 } from "../../routes/routeRegistry";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
+import { AppsSection } from "./AppsSection";
 import { SidebarItem } from "./SidebarItem";
 import { SidebarSection } from "./SidebarSection";
 import { TasksNavButton } from "./TasksNavButton";
@@ -136,15 +137,18 @@ export function AppList() {
   return (
     <div className="sidebar-scroll-wrap is-apps">
       {NAV_SECTIONS.map((section) => (
-        <SidebarSection
-          key={section.label}
-          label={section.label}
-          open={open[section.label] ?? true}
-          onToggle={() => toggle(section.label)}
-          data-testid={`sidebar-section-${section.label.toLowerCase()}`}
-        >
-          <div className="sidebar-apps">{section.items.map(renderItem)}</div>
-        </SidebarSection>
+        <Fragment key={section.label}>
+          {/* Apps is operator-facing, so it sits above Config, not at the bottom. */}
+          {section.label === "Config" ? <AppsSection /> : null}
+          <SidebarSection
+            label={section.label}
+            open={open[section.label] ?? true}
+            onToggle={() => toggle(section.label)}
+            data-testid={`sidebar-section-${section.label.toLowerCase()}`}
+          >
+            <div className="sidebar-apps">{section.items.map(renderItem)}</div>
+          </SidebarSection>
+        </Fragment>
       ))}
     </div>
   );

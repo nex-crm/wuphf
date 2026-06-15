@@ -168,14 +168,18 @@ type humanInterview struct {
 	// ConnectionUnverified is set when the action gate could not reach the
 	// resolver and degraded to approval-only, so the connection state is
 	// unconfirmed. The card surfaces a warning (review LOW #5).
-	ConnectionUnverified bool             `json:"connection_unverified,omitempty"`
-	DueAt                string           `json:"due_at,omitempty"`
-	FollowUpAt           string           `json:"follow_up_at,omitempty"`
-	ReminderAt           string           `json:"reminder_at,omitempty"`
-	RecheckAt            string           `json:"recheck_at,omitempty"`
-	CreatedAt            string           `json:"created_at"`
-	UpdatedAt            string           `json:"updated_at,omitempty"`
-	Answered             *interviewAnswer `json:"answered,omitempty"`
+	ConnectionUnverified bool `json:"connection_unverified,omitempty"`
+	// AppProposal marks this approval request as an App Builder proposal. On
+	// approve / approve_with_note the broker spawns a task owned by the App
+	// Builder agent to build (or improve) the app. Nil for every other request.
+	AppProposal *appProposalSpec `json:"app_proposal,omitempty"`
+	DueAt       string           `json:"due_at,omitempty"`
+	FollowUpAt  string           `json:"follow_up_at,omitempty"`
+	ReminderAt  string           `json:"reminder_at,omitempty"`
+	RecheckAt   string           `json:"recheck_at,omitempty"`
+	CreatedAt   string           `json:"created_at"`
+	UpdatedAt   string           `json:"updated_at,omitempty"`
+	Answered    *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {

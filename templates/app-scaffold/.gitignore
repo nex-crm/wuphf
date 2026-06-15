@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# bun.lock is intentionally committed: it pins the scaffold's dependencies so
+# every App build is deterministic and `bun install` resolves from cache
+# (fast + offline) instead of re-resolving from the network each time.
