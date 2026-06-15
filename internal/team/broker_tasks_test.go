@@ -2572,9 +2572,12 @@ func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
 
 // TestShouldMintPerTaskChannelGuards pins the channel-minting gate after
 // the keyword heuristic was dropped (2026-06-03): every real top-level
-// task in "general" mints its own channel, and only the three internal
-// guards (system task / incident self-heal / sub-task) withhold one. An
-// explicit non-general channel request is always left as-is.
+// task in "general" mints its own channel, and only the two internal
+// guards (system task / incident self-heal) withhold one. Sub-issues mint
+// their OWN channel separate from the parent — regardless of the incoming
+// channel, since the creating agent hands them the parent's channel — so a
+// child's chatter never lands in the parent's chat. For a top-level task an
+// explicit non-general channel request is left as-is.
 func TestShouldMintPerTaskChannelGuards(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -2586,7 +2589,9 @@ func TestShouldMintPerTaskChannelGuards(t *testing.T) {
 		{"business-objective task mints", "general", teamTask{Title: "Launch the sales campaign"}, true},
 		{"system task stays in general", "general", teamTask{Title: "Backup & Migration", System: true}, false},
 		{"incident self-heal stays in general", "general", teamTask{Title: "Recover", PipelineID: "incident"}, false},
-		{"sub-task stays on parent channel", "general", teamTask{Title: "child", ParentIssueID: "task-1"}, false},
+		{"sub-task mints its own channel", "general", teamTask{Title: "child", ParentIssueID: "task-1"}, true},
+		{"sub-task mints even when handed the parent's channel", "task-1", teamTask{Title: "child", ParentIssueID: "task-1"}, true},
+		{"sub-task incident self-heal still stays in general", "general", teamTask{Title: "child", ParentIssueID: "task-1", PipelineID: "incident"}, false},
 		{"explicit non-general channel kept", "youtube-factory", teamTask{Title: "Publish the launch video"}, false},
 		{"empty task in general still mints", "general", teamTask{}, true},
 	}
