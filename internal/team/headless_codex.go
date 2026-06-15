@@ -93,7 +93,18 @@ func headlessCodexTurnTimeoutEnv(name string, fallback time.Duration) time.Durat
 }
 
 var (
-	headlessCodexTurnTimeout              = headlessCodexTurnTimeoutEnv("WUPHF_TURN_TIMEOUT", 4*time.Minute)
+	headlessCodexTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_TURN_TIMEOUT", 4*time.Minute)
+	// headlessCodexOfficeTurnTimeout governs every office-mode turn that is
+	// not a one-time launch. The CEO/leader orchestration turn (decompose a
+	// request, spawn a specialist, create/assign tasks, post the synthesis)
+	// is the most tool-heavy turn in the system: on a cold session it also
+	// pays a ToolSearch tax rediscovering deferred MCP tools. Observed good
+	// turns already run 2.5–3.4m, so the old 4m default (WUPHF_TURN_TIMEOUT)
+	// force-killed legitimate orchestration mid-flight — the recovery path
+	// then mislabeled the office task as blocked_on_pr_merge ("Blocked on
+	// review merge") even though it had no PR. Give office turns their own
+	// generous budget, operator-tunable via WUPHF_OFFICE_TIMEOUT.
+	headlessCodexOfficeTurnTimeout        = headlessCodexTurnTimeoutEnv("WUPHF_OFFICE_TIMEOUT", 10*time.Minute)
 	headlessCodexOfficeLaunchTurnTimeout  = headlessCodexTurnTimeoutEnv("WUPHF_OFFICE_LAUNCH_TIMEOUT", 10*time.Minute)
 	headlessCodexLocalWorktreeTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_WORKTREE_TIMEOUT", 12*time.Minute)
 	headlessCodexStaleCancelAfter         = 90 * time.Second

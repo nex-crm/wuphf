@@ -2249,10 +2249,10 @@ func TestHeadlessCodexTurnTimeoutForLocalWorktreeTask(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
-	if got := l.headlessCodexTurnTimeoutForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
+	if got := l.headlessCodexTurnTimeoutForTurn("eng", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
 		t.Fatalf("expected local worktree timeout %s, got %s", headlessCodexLocalWorktreeTurnTimeout, got)
 	}
-	if got := l.headlessCodexStaleCancelAfterForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
+	if got := l.headlessCodexStaleCancelAfterForTurn("eng", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
 		t.Fatalf("expected local worktree stale cancel threshold %s, got %s", headlessCodexLocalWorktreeTurnTimeout, got)
 	}
 }
@@ -2276,11 +2276,61 @@ func TestHeadlessCodexTurnTimeoutForOfficeLaunchTask(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
-	if got := l.headlessCodexTurnTimeoutForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
+	if got := l.headlessCodexTurnTimeoutForTurn("gtm", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
 		t.Fatalf("expected office launch timeout %s, got %s", headlessCodexOfficeLaunchTurnTimeout, got)
 	}
-	if got := l.headlessCodexStaleCancelAfterForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
+	if got := l.headlessCodexStaleCancelAfterForTurn("gtm", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
 		t.Fatalf("expected office launch stale cancel threshold %s, got %s", headlessCodexOfficeLaunchTurnTimeout, got)
+	}
+}
+
+// TestHeadlessCodexTurnTimeoutForOfficeOrchestrationTask is the regression test
+// for the prod incident where CEO/office orchestration turns were force-killed
+// at the 4m default timeout. A non-launch office task (the CEO running an email
+// digest, decomposing a request, spawning a specialist) must get the generous
+// office budget for BOTH the hard timeout and the stale-cancel threshold, not
+// the tight 4m default that left tasks falsely "Blocked on review merge".
+func TestHeadlessCodexTurnTimeoutForOfficeOrchestrationTask(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := newTestBroker(t)
+	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Build a daily digest from my emails",
+		Owner:         "ceo",
+		CreatedBy:     "ceo",
+		TaskType:      "research",
+		ExecutionMode: "office",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
+	}
+
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+
+	if got := l.headlessCodexTurnTimeoutForTurn("ceo", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeTurnTimeout {
+		t.Fatalf("expected office orchestration timeout %s, got %s", headlessCodexOfficeTurnTimeout, got)
+	}
+	if got := l.headlessCodexTurnTimeoutForTurn("ceo", headlessCodexTurn{TaskID: task.ID}); got == headlessCodexTurnTimeout {
+		t.Fatalf("office orchestration turn must not fall back to the tight default %s", headlessCodexTurnTimeout)
+	}
+	// The hard timeout is widened, but the stale-cancel threshold for a
+	// routine office turn must STAY at the short default — an urgent same-task
+	// wake (a specialist handoff) still needs to preempt a stale lead turn and
+	// restart it with fresh context. That preemption re-enqueues the work; it
+	// never blocks the task, so it is not what caused the prod symptoms.
+	if got := l.headlessCodexStaleCancelAfterForTurn("ceo", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexStaleCancelAfter {
+		t.Fatalf("expected routine office stale cancel threshold to stay %s, got %s", headlessCodexStaleCancelAfter, got)
+	}
+
+	// Message-driven turns carry a channel-derived TaskID that does NOT match
+	// the real task ID, so resolution must fall back to the owner's active
+	// task via the slug. Without slug threading this turn would silently drop
+	// to the tight 4m default — the exact prod gap that left office tasks
+	// "Blocked on review merge". TaskID is left empty to force the fallback.
+	if got := l.headlessCodexTurnTimeoutForTurn("ceo", headlessCodexTurn{Channel: task.Channel}); got != headlessCodexOfficeTurnTimeout {
+		t.Fatalf("expected office budget via slug fallback %s, got %s", headlessCodexOfficeTurnTimeout, got)
 	}
 }
 

@@ -260,7 +260,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 			cancel = active.Cancel
 			staleAge = age
 		case age >= headlessCodexMinTurnAgeBeforeCancel &&
-			age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn):
+			age >= l.headlessCodexStaleCancelAfterForTurn(slug, active.Turn):
 			cancel = active.Cancel
 			staleAge = age
 		}
@@ -727,7 +727,7 @@ func (l *Launcher) beginHeadlessCodexTurn(lane headlessLane) (headlessCodexTurn,
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
-	timeout := l.headlessCodexTurnTimeoutForTurn(turn)
+	timeout := l.headlessCodexTurnTimeoutForTurn(slug, turn)
 	turnCtx, cancel := context.WithTimeout(baseCtx, timeout)
 	// Tag the turn context with its task id so the runner helpers
 	// (model / effort / provider / workspace) resolve THIS turn's task even when
@@ -752,27 +752,50 @@ func (l *Launcher) beginHeadlessCodexTurn(lane headlessLane) (headlessCodexTurn,
 	return turn, turnCtx, startedAt, timeout, true
 }
 
-func (l *Launcher) headlessCodexTurnTimeoutForTurn(turn headlessCodexTurn) time.Duration {
-	if task := l.timedOutTaskForTurn("", turn); task != nil {
+// headlessCodexTurnTimeoutForTurn resolves the hard wall-clock budget for a
+// turn. slug is the lane owner; it is threaded so the task resolves via the
+// same path the recovery layer uses (turn.TaskID first, then the owner's
+// active in-progress task) — message-driven turns carry a channel-derived
+// TaskID that does not match the real task ID, so without the slug fallback
+// an office orchestration turn would silently drop to the tight default.
+func (l *Launcher) headlessCodexTurnTimeoutForTurn(slug string, turn headlessCodexTurn) time.Duration {
+	if task := l.timedOutTaskForTurn(slug, turn); task != nil {
 		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 			return headlessCodexLocalWorktreeTurnTimeout
 		}
-		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "office") &&
-			strings.EqualFold(strings.TrimSpace(task.TaskType), "launch") {
-			return headlessCodexOfficeLaunchTurnTimeout
+		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "office") {
+			// Launch turns keep their dedicated budget; every other office
+			// turn (CEO orchestration, specialist office work) gets the
+			// office budget instead of the tight 4m default that used to
+			// force-kill multi-step orchestration mid-flight.
+			if strings.EqualFold(strings.TrimSpace(task.TaskType), "launch") {
+				return headlessCodexOfficeLaunchTurnTimeout
+			}
+			return headlessCodexOfficeTurnTimeout
 		}
 	}
 	return headlessCodexTurnTimeout
 }
 
-func (l *Launcher) headlessCodexStaleCancelAfterForTurn(turn headlessCodexTurn) time.Duration {
-	if task := l.timedOutTaskForTurn("", turn); task != nil {
+// headlessCodexStaleCancelAfterForTurn returns how long an active turn must run
+// before a newer non-human enqueue may preempt it. Worktree builds and one-time
+// office-launch turns are made effectively un-preemptable (threshold == their
+// own hard timeout) because they are long, single-shot, and restarting them
+// wastes the most work. Every other turn — including routine office turns —
+// keeps the short default so an urgent same-task wake (e.g. a specialist
+// handoff) can still cancel a stale lead turn and restart it with fresh
+// context; that preemption re-enqueues the work, it never blocks the task, so
+// it is not what left tasks "Blocked on review merge" (the 4m hard timeout
+// was). slug is threaded only to resolve the task identically to the timeout
+// path.
+func (l *Launcher) headlessCodexStaleCancelAfterForTurn(slug string, turn headlessCodexTurn) time.Duration {
+	if task := l.timedOutTaskForTurn(slug, turn); task != nil {
 		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
-			return l.headlessCodexTurnTimeoutForTurn(turn)
+			return l.headlessCodexTurnTimeoutForTurn(slug, turn)
 		}
 		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "office") &&
 			strings.EqualFold(strings.TrimSpace(task.TaskType), "launch") {
-			return l.headlessCodexTurnTimeoutForTurn(turn)
+			return l.headlessCodexTurnTimeoutForTurn(slug, turn)
 		}
 	}
 	return headlessCodexStaleCancelAfter
