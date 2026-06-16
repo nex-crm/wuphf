@@ -10,15 +10,21 @@ import (
 	"github.com/slack-go/slack"
 )
 
-// slack_thinking_status.go surfaces WUPHF's internal "agent is working" signal as
-// Slack's native AI status (assistant.threads.setStatus), so a Slack reader sees
-// "Scout is thinking…" while a turn runs instead of dead air until the reply.
+// slack_thinking_status.go surfaces WUPHF's internal "agent is working" signal in
+// Slack, so a reader sees "Scout is thinking…" in a task thread while a turn runs
+// instead of dead air until the reply.
+//
+// Mechanism: a posted-then-deleted in-thread message. Slack's NATIVE AI status
+// (assistant.threads.setStatus) only renders inside the 1:1 Assistant container
+// (the dedicated assistant pane/DM), NOT a shared channel thread — and the office
+// lives in a shared channel. So when an agent goes active we POST a transient
+// "💭 <name> is thinking…" message into that agent's running task threads, and
+// DELETE it when the agent goes idle (the real reply posts separately). This
+// reproduces the native "working → answer" feel where the office actually lives.
 //
 // It subscribes to the broker activity stream (the same signal the web UI shows
-// as "planning next step") and, when an agent goes active, sets the status on
-// that agent's running Slack task threads; it clears when the agent goes idle.
-// Best-effort: a status failure (e.g. the app missing the assistant:write scope)
-// is logged, never fatal, so the rest of the bridge is unaffected.
+// as "planning next step"). Best-effort: a post/delete failure is logged, never
+// fatal, so the rest of the bridge is unaffected.
 
 // slackTaskThreadRef locates a task's Slack thread root.
 type slackTaskThreadRef struct {
@@ -62,8 +68,8 @@ func isThinkingActivity(snap agentActivitySnapshot) bool {
 	return strings.EqualFold(strings.TrimSpace(snap.Status), "active")
 }
 
-// runAgentThinkingStatus mirrors the broker activity stream onto Slack's native
-// assistant status. It blocks until ctx is cancelled.
+// runAgentThinkingStatus mirrors the broker activity stream onto a transient
+// in-thread "working…" message. It blocks until ctx is cancelled.
 func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 	if t.Broker == nil || t.api == nil {
 		<-ctx.Done()
@@ -72,42 +78,51 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 	activity, unsub := t.Broker.SubscribeActivity(256)
 	defer unsub()
 
-	// shown tracks the status text currently set per thread (key = "chan|ts"),
-	// so we only call Slack when it actually changes — the activity stream emits
-	// many events per turn.
-	shown := map[string]string{}
+	// posted maps a thread (key = "chan|ts") to the message ts of the indicator
+	// currently shown there, so the activity stream's many per-turn events only
+	// ever post one indicator and delete it once.
+	posted := map[string]string{}
 	apply := func(ref slackTaskThreadRef, text string) {
 		key := ref.ChannelID + "|" + ref.ThreadTS
-		if shown[key] == text {
+		if text != "" {
+			if _, already := posted[key]; already {
+				return // indicator already shown for this thread
+			}
+			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_, ts, err := t.api.PostMessageContext(cctx, ref.ChannelID,
+				slack.MsgOptionText(text, false),
+				slack.MsgOptionTS(ref.ThreadTS),
+			)
+			cancel()
+			if err != nil {
+				log.Printf("[slack] thinking indicator post for %s: %v", ref.TaskID, err)
+				return
+			}
+			posted[key] = ts
+			return
+		}
+		// Idle: clear the indicator if one is up.
+		ts, up := posted[key]
+		if !up {
 			return
 		}
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := t.api.SetAssistantThreadsStatusContext(cctx, slack.AssistantThreadsSetStatusParameters{
-			ChannelID: ref.ChannelID,
-			ThreadTS:  ref.ThreadTS,
-			Status:    text,
-		})
+		_, _, err := t.api.DeleteMessageContext(cctx, ref.ChannelID, ts)
 		cancel()
 		if err != nil {
-			log.Printf("[slack] thinking status for %s: %v", ref.TaskID, err)
+			log.Printf("[slack] thinking indicator clear for %s: %v", ref.TaskID, err)
 			return
 		}
-		if text == "" {
-			delete(shown, key)
-		} else {
-			shown[key] = text
-		}
+		delete(posted, key)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Clear any lingering status on shutdown (best-effort, detached ctx).
-			for key := range shown {
-				if c, ts, ok := splitThreadKey(key); ok {
-					_ = t.api.SetAssistantThreadsStatusContext(context.Background(), slack.AssistantThreadsSetStatusParameters{
-						ChannelID: c, ThreadTS: ts, Status: "",
-					})
+			// Clear any lingering indicators on shutdown (best-effort, detached ctx).
+			for key, ts := range posted {
+				if c, _, ok := splitThreadKey(key); ok {
+					_, _, _ = t.api.DeleteMessageContext(context.Background(), c, ts)
 				}
 			}
 			return ctx.Err()
@@ -149,5 +164,5 @@ func (t *SlackTransport) thinkingStatusText(slug string) string {
 			}
 		}
 	}
-	return fmt.Sprintf("%s is thinking…", name)
+	return fmt.Sprintf("💭 %s is thinking…", name)
 }

@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,31 +86,29 @@ func TestRunAgentThinkingStatus_SetsAndClears(t *testing.T) {
 		b.mu.Unlock()
 	}
 
+	// Active → a "thinking…" indicator is POSTED into the task thread (10.0).
 	pushActivity(agentActivitySnapshot{Slug: "ceo", Status: "active", Activity: "thinking"})
 	if !waitFor(func() bool {
-		for _, s := range api.statuses {
-			if s.ThreadTS == "10.0" && s.Status != "" {
+		for _, p := range api.posts {
+			if p.ThreadTS == "10.0" && strings.Contains(p.Text, "thinking") {
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Fatalf("expected a non-empty thinking status on thread 10.0, got %+v", api.statuses)
+		t.Fatalf("expected a thinking indicator posted in thread 10.0, got posts=%+v", api.posts)
 	}
 
+	// Idle → the indicator is DELETED (the real reply posts separately).
 	pushActivity(agentActivitySnapshot{Slug: "ceo", Status: "idle", Activity: "idle"})
 	if !waitFor(func() bool {
-		// last status set on the thread should be the clear ("")
-		last := ""
-		seen := false
-		for _, s := range api.statuses {
-			if s.ThreadTS == "10.0" {
-				last = s.Status
-				seen = true
+		for _, d := range api.deletes {
+			if d.ChannelID == "C0123" {
+				return true
 			}
 		}
-		return seen && last == ""
+		return false
 	}) {
-		t.Fatalf("expected the status cleared on idle, got %+v", api.statuses)
+		t.Fatalf("expected the thinking indicator deleted on idle, got deletes=%+v", api.deletes)
 	}
 }

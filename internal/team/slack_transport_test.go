@@ -91,6 +91,9 @@ type fakeSlackAPI struct {
 	updates   []fakeUpdate
 	updateErr error
 
+	deletes   []fakeDelete
+	deleteErr error
+
 	ephemerals   []fakeEphemeral
 	ephemeralErr error
 
@@ -128,6 +131,11 @@ type fakeUpdate struct {
 	Timestamp string
 	Text      string
 	Blocks    string
+}
+
+type fakeDelete struct {
+	ChannelID string
+	Timestamp string
 }
 
 type fakeEphemeral struct {
@@ -254,6 +262,24 @@ func (f *fakeSlackAPI) PostEphemeralContext(_ context.Context, channelID, userID
 		Text:      firstValue(values, "text"),
 	})
 	return "1700000000.9999", nil
+}
+
+func (f *fakeSlackAPI) DeleteMessageContext(_ context.Context, channelID, timestamp string) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deleteErr != nil {
+		return "", "", f.deleteErr
+	}
+	f.deletes = append(f.deletes, fakeDelete{ChannelID: channelID, Timestamp: timestamp})
+	return channelID, timestamp, nil
+}
+
+func (f *fakeSlackAPI) snapshotDeletes() []fakeDelete {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fakeDelete, len(f.deletes))
+	copy(out, f.deletes)
+	return out
 }
 
 func (f *fakeSlackAPI) snapshotUpdates() []fakeUpdate {
