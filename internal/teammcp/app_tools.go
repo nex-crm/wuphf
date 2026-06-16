@@ -332,7 +332,18 @@ func resolveRegisterAppFiles(args RegisterAppArgs) (map[string]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if p != root && registerAppSkipDirs[d.Name()] {
+			if p == root {
+				return nil
+			}
+			if registerAppSkipDirs[d.Name()] {
+				return fs.SkipDir
+			}
+			// Skip a top-level app-scaffold/ — the agent sometimes copies the
+			// whole template FOLDER into its project (instead of its contents),
+			// leaving a duplicate scaffold. Persisting it is dead weight; the
+			// real project lives at the root. Scoped to the top level so a deeper
+			// dir that happens to be named app-scaffold is left alone.
+			if rel, err := filepath.Rel(root, p); err == nil && rel == "app-scaffold" {
 				return fs.SkipDir
 			}
 			return nil
