@@ -54,6 +54,18 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
 
+      - name: Free disk space for DMG packaging
+        # macos-14 runners ship near-full; `hdiutil create` for the universal .app
+        # has twice failed with "No space left on device" (v0.1.0, v0.227.0).
+        # Reclaim the simulator runtimes we never use (~10-20 GB) up front. This
+        # leaves the active Xcode/CLT intact, so codesign + notarytool still work.
+        run: |
+          df -h /
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          sudo rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport/* || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/* || true
+          df -h /
+
       - name: Resolve version
         id: ver
         env:
