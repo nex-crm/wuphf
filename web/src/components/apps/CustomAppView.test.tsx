@@ -20,10 +20,13 @@ vi.mock("../../api/apps", () => ({
   deleteApp: vi.fn(),
 }));
 
+// Stable store mock so tests can assert on openUpdateAppDialog calls (a fresh
+// vi.fn() per selector call would otherwise be unassertable).
+const openUpdateAppDialog = vi.fn();
 vi.mock("../../stores/app", () => ({
   useAppStore: (
     selector: (s: { openUpdateAppDialog: () => void }) => unknown,
-  ) => selector({ openUpdateAppDialog: vi.fn() }),
+  ) => selector({ openUpdateAppDialog }),
 }));
 
 vi.mock("../ui/Toast", () => ({ showNotice: vi.fn() }));
@@ -31,8 +34,38 @@ vi.mock("../ui/ConfirmDialog", () => ({ confirm: vi.fn() }));
 vi.mock("../../lib/sidebarNav", () => ({ navigateToSidebarApp: vi.fn() }));
 
 // The live preview boots a real dev server; stub it so the view renders inert.
+// Expose a button that fires onSelect so a test can simulate a "select to edit"
+// click without a real iframe/postMessage round-trip.
+interface MockLivePreviewProps {
+  selectMode?: boolean;
+  onSelect?: (sel: {
+    file: string;
+    line: number;
+    col: number;
+    tag: string;
+    label: string;
+  }) => void;
+}
 vi.mock("./AppLivePreview", () => ({
-  AppLivePreview: () => <div data-testid="live-preview" />,
+  AppLivePreview: ({ selectMode, onSelect }: MockLivePreviewProps) => (
+    <div data-testid="live-preview" data-select-mode={String(!!selectMode)}>
+      <button
+        type="button"
+        data-testid="fire-select"
+        onClick={() =>
+          onSelect?.({
+            file: "components/Button.tsx",
+            line: 12,
+            col: 4,
+            tag: "button",
+            label: "Save",
+          })
+        }
+      >
+        fire select
+      </button>
+    </div>
+  ),
 }));
 vi.mock("./CustomAppFrame", () => ({
   CustomAppFrame: ({ html, title }: { html: string; title: string }) => (
@@ -160,5 +193,44 @@ describe("CustomAppView version history", () => {
     );
     expect(vi.mocked(rollbackApp)).not.toHaveBeenCalled();
     expect(screen.getByTestId("live-preview")).toBeInTheDocument();
+  });
+});
+
+describe("CustomAppView select to edit", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getApp).mockResolvedValue(appDetail());
+  });
+
+  it("toggles select mode and opens the update dialog with a seed on select", async () => {
+    renderView();
+    await screen.findByText("Lead Scorer");
+
+    // Select mode is off until toggled on.
+    const toggle = screen.getByRole("button", { name: /select to edit/i });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByTestId("live-preview").getAttribute("data-select-mode"),
+    ).toBe("false");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByTestId("live-preview").getAttribute("data-select-mode"),
+    ).toBe("true");
+
+    // Simulating a select opens the update dialog seeded with the element +
+    // its source location, and turns select mode back off (one-shot).
+    fireEvent.click(screen.getByTestId("fire-select"));
+    expect(openUpdateAppDialog).toHaveBeenCalledTimes(1);
+    const [appId, name, seed] = openUpdateAppDialog.mock.calls[0];
+    expect(appId).toBe(APP_ID);
+    expect(name).toBe("Lead Scorer");
+    expect(typeof seed).toBe("string");
+    expect(seed).toContain("button");
+    expect(seed).toContain("components/Button.tsx:12");
+    expect(seed).toContain("Save");
+
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
 });

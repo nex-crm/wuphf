@@ -941,6 +941,55 @@
   color: var(--accent-contrast, #fff);
 }
 
+/* "Select to edit" / "History" share .custom-app-view__action; the pressed
+   state reads as an active toggle without a new control. */
+.custom-app-view__action[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--bg-subtle));
+  color: var(--accent);
+}
+
+/* Dismissible runtime-error banner over the live preview. Text-only: the
+   app-supplied message is rendered as React children, never as HTML. */
+.custom-app-view__app-error {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--red, #d64545);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--red-soft, rgba(214, 69, 69, 0.08));
+  color: var(--red, #d64545);
+}
+
+.custom-app-view__app-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.custom-app-view__app-error-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.custom-app-view__app-error-dismiss:hover {
+  background: var(--red-soft, rgba(214, 69, 69, 0.16));
+}
+
 /* Narrow: stack chat over preview and retire the drag handle. */
 @media (max-width: 720px) {
   .issue-doc-body--app-build .resizable-split {

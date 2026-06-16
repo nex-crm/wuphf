@@ -51,12 +51,81 @@ const ALLOWED_GET_PREFIXES: readonly string[] = [
 const HOST_SOURCE = "wuphf-host";
 const APP_SOURCE = "wuphf-app";
 
+// Host-side caps on app-supplied display strings. The app caps at its source
+// too, but the host is the trust boundary: re-cap before anything is stored in
+// host React state or shown to the operator.
+const SELECT_LABEL_MAX = 120;
+const SELECT_FILE_MAX = 256;
+const SELECT_TAG_MAX = 32;
+const APP_ERROR_MAX = 600;
+
 interface BrokerBridgeMessage {
   source: typeof APP_SOURCE;
   type: "broker";
   id: string | number;
   method?: string;
   path?: string;
+}
+
+/**
+ * Display-only payload from a dev-preview "select to edit" click. Carries the
+ * clicked element's source location + a short label so the host can prefill the
+ * App Builder edit dialog. It NEVER triggers a broker call or network request.
+ */
+export interface AppSelectPayload {
+  file: string;
+  line: number;
+  col: number;
+  tag: string;
+  label: string;
+}
+
+/** Display-only runtime error surfaced from inside the app (dev preview). */
+export interface AppErrorPayload {
+  message: string;
+  stack: string;
+}
+
+function capString(value: unknown, max: number): string {
+  const s = typeof value === "string" ? value : "";
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+function capInt(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+}
+
+/**
+ * Validate + cap an inbound "wuphf-select" payload into the host's trusted
+ * shape. Pure so it can be unit-tested without a real iframe. Returns null when
+ * the message isn't a usable selection (no file).
+ */
+export function parseSelectPayload(data: unknown): AppSelectPayload | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  const file = capString(d.file, SELECT_FILE_MAX);
+  if (!file) return null;
+  return {
+    file,
+    line: capInt(d.line),
+    col: capInt(d.col),
+    tag: capString(d.tag, SELECT_TAG_MAX),
+    label: capString(d.label, SELECT_LABEL_MAX),
+  };
+}
+
+/** Validate + cap an inbound "wuphf-error" payload. Pure for unit tests. */
+export function parseErrorPayload(data: unknown): AppErrorPayload {
+  if (!data || typeof data !== "object") {
+    return { message: "", stack: "" };
+  }
+  const d = data as Record<string, unknown>;
+  return {
+    message: capString(d.message, APP_ERROR_MAX),
+    stack: capString(d.stack, APP_ERROR_MAX),
+  };
 }
 
 export function isAllowedGetPath(path: string): boolean {
@@ -118,10 +187,34 @@ interface CustomAppFrameProps {
    * in both modes (identity is by window reference, not origin).
    */
   devUrl?: string;
+  /**
+   * Dev-only: when true the in-app inspector outlines elements and intercepts
+   * the next click to report its source location via `onSelect`. The host posts
+   * the toggle to the frame using the pinned dev origin.
+   */
+  selectMode?: boolean;
+  /** Dev-only: a "select to edit" click resolved to a source location. */
+  onSelect?: (sel: AppSelectPayload) => void;
+  /** Dev-only: a runtime error/unhandled rejection fired inside the app. */
+  onAppError?: (err: AppErrorPayload) => void;
 }
 
-export function CustomAppFrame({ html, title, devUrl }: CustomAppFrameProps) {
+export function CustomAppFrame({
+  html,
+  title,
+  devUrl,
+  selectMode,
+  onSelect,
+  onAppError,
+}: CustomAppFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Hold the latest callbacks in refs so the message listener effect (keyed on
+  // devUrl only) need not re-subscribe when a parent passes new closures — the
+  // broker listener identity stays stable, preserving existing behavior.
+  const onSelectRef = useRef(onSelect);
+  const onAppErrorRef = useRef(onAppError);
+  onSelectRef.current = onSelect;
+  onAppErrorRef.current = onAppError;
   const srcDoc = useMemo(
     () => (html !== undefined ? withAppCsp(html) : undefined),
     [html],
@@ -182,8 +275,25 @@ export function CustomAppFrame({ html, title, devUrl }: CustomAppFrameProps) {
       // Identity by window reference, not origin: a sandboxed opaque-origin
       // frame reports origin "null", so origin checks are useless here.
       if (!frame || event.source !== frame.contentWindow) return;
-      const data = event.data as Partial<BrokerBridgeMessage> | null;
-      if (!data || data.source !== APP_SOURCE || data.type !== "broker") return;
+      const data = event.data as {
+        source?: string;
+        type?: string;
+        id?: string | number;
+      } | null;
+      if (!data || data.source !== APP_SOURCE) return;
+      // Dev-only inspector messages: DISPLAY DATA ONLY. They surface to host
+      // React state via callbacks and MUST NOT touch the broker. Validate/cap
+      // then return early — they never fall through to broker handling.
+      if (data.type === "wuphf-select") {
+        const sel = parseSelectPayload(data);
+        if (sel) onSelectRef.current?.(sel);
+        return;
+      }
+      if (data.type === "wuphf-error") {
+        onAppErrorRef.current?.(parseErrorPayload(data));
+        return;
+      }
+      if (data.type !== "broker") return;
       if (data.id === undefined || event.source === null) return;
       void handle(data as BrokerBridgeMessage, event.source as Window);
     }
@@ -191,6 +301,35 @@ export function CustomAppFrame({ html, title, devUrl }: CustomAppFrameProps) {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [devUrl]);
+
+  // Push the select-mode toggle into the dev frame. Posted to the SAME pinned
+  // dev origin the bridge uses (never "*"), so only the known proxy frame can
+  // receive it. Re-posts on selectMode change and once the frame is ready
+  // (onLoad). Only meaningful in dev (no inspector in the sealed bundle); a
+  // no-op when there is no frame/contentWindow.
+  useEffect(() => {
+    if (!devUrl) return;
+    let replyOrigin: string;
+    try {
+      replyOrigin = new URL(devUrl).origin;
+    } catch {
+      return;
+    }
+    function post(): void {
+      iframeRef.current?.contentWindow?.postMessage(
+        {
+          source: HOST_SOURCE,
+          type: "wuphf-select-mode",
+          enabled: !!selectMode,
+        },
+        replyOrigin,
+      );
+    }
+    post();
+    const frame = iframeRef.current;
+    frame?.addEventListener("load", post);
+    return () => frame?.removeEventListener("load", post);
+  }, [selectMode, devUrl]);
 
   if (devUrl) {
     return (

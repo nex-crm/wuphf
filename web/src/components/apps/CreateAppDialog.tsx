@@ -32,11 +32,12 @@ export function CreateAppDialog() {
   const descRef = useRef<HTMLTextAreaElement>(null);
 
   // Reset fields whenever a fresh dialog opens (name is prefilled + locked in
-  // update mode; the human types only the change).
+  // update mode; the human types only the change). A "select to edit" flow may
+  // pass a seed — a concise instruction stub the human completes.
   useEffect(() => {
     if (dialog) {
       setName(dialog.name ?? "");
-      setDescription("");
+      setDescription(dialog.seed ?? "");
     }
   }, [dialog]);
 

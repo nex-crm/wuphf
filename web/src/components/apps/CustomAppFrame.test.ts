@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isAllowedGetPath, withAppCsp } from "./CustomAppFrame";
+import {
+  isAllowedGetPath,
+  parseErrorPayload,
+  parseSelectPayload,
+  withAppCsp,
+} from "./CustomAppFrame";
 
 describe("isAllowedGetPath", () => {
   it("allows whitelisted read-only office data paths", () => {
@@ -66,5 +71,89 @@ describe("withAppCsp", () => {
     expect(out).toContain("connect-src 'none'");
     expect(out).toContain("just a fragment");
     expect(out.startsWith("<!doctype html>")).toBe(true);
+  });
+
+  it("does not introduce any broker GET path beyond the existing allowlist", () => {
+    // The inspector messages are display-only and must NOT widen the allowlist.
+    // Spot-check that nothing new slipped into the permitted prefixes.
+    for (const p of ["/select", "/error", "/config", "/web-token"]) {
+      expect(isAllowedGetPath(p)).toBe(false);
+    }
+  });
+});
+
+describe("parseSelectPayload", () => {
+  it("accepts a well-formed selection and floors numeric fields", () => {
+    const sel = parseSelectPayload({
+      file: "components/Button.tsx",
+      line: 12.9,
+      col: 4.2,
+      tag: "BUTTON",
+      label: "Save",
+    });
+    expect(sel).toEqual({
+      file: "components/Button.tsx",
+      line: 12,
+      col: 4,
+      tag: "BUTTON",
+      label: "Save",
+    });
+  });
+
+  it("returns null when there is no usable file location", () => {
+    expect(parseSelectPayload(null)).toBeNull();
+    expect(parseSelectPayload({})).toBeNull();
+    expect(parseSelectPayload({ file: "" })).toBeNull();
+    expect(parseSelectPayload({ file: 42 })).toBeNull();
+    expect(parseSelectPayload("not an object")).toBeNull();
+  });
+
+  it("caps an over-long label and coerces bad numbers to 0", () => {
+    const long = "x".repeat(500);
+    const sel = parseSelectPayload({
+      file: "a.tsx",
+      line: -3,
+      col: Number.NaN,
+      tag: "div",
+      label: long,
+    });
+    expect(sel).not.toBeNull();
+    expect(sel?.label.length).toBe(120);
+    // Negative / NaN numbers are not trusted location data → 0.
+    expect(sel?.line).toBe(0);
+    expect(sel?.col).toBe(0);
+  });
+
+  it("caps an over-long file path and tag", () => {
+    const sel = parseSelectPayload({
+      file: `src/${"a".repeat(400)}.tsx`,
+      tag: "z".repeat(100),
+      label: "ok",
+    });
+    expect(sel?.file.length).toBe(256);
+    expect(sel?.tag.length).toBe(32);
+  });
+});
+
+describe("parseErrorPayload", () => {
+  it("caps message and stack to the host limit", () => {
+    const err = parseErrorPayload({
+      message: "m".repeat(900),
+      stack: "s".repeat(900),
+    });
+    expect(err.message.length).toBe(600);
+    expect(err.stack.length).toBe(600);
+  });
+
+  it("yields empty strings for missing or non-string fields", () => {
+    expect(parseErrorPayload(null)).toEqual({ message: "", stack: "" });
+    expect(parseErrorPayload({ message: 5, stack: {} })).toEqual({
+      message: "",
+      stack: "",
+    });
+    expect(parseErrorPayload({ message: "boom" })).toEqual({
+      message: "boom",
+      stack: "",
+    });
   });
 });

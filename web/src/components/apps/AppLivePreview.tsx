@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { ensureAppDev } from "../../api/apps";
-import { CustomAppFrame } from "./CustomAppFrame";
+import {
+  type AppErrorPayload,
+  type AppSelectPayload,
+  CustomAppFrame,
+} from "./CustomAppFrame";
 
 const DEV_POLL_MS = 1500;
 
@@ -27,6 +31,12 @@ function isLoopbackDevUrl(url: string | undefined): url is string {
 interface AppLivePreviewProps {
   appId: string;
   title: string;
+  /** Dev-only: toggle the in-app "select to edit" inspector. */
+  selectMode?: boolean;
+  /** Dev-only: a selected element resolved to a source location. */
+  onSelect?: (sel: AppSelectPayload) => void;
+  /** Dev-only: a runtime error surfaced from inside the running app. */
+  onAppError?: (err: AppErrorPayload) => void;
 }
 
 /**
@@ -35,7 +45,13 @@ interface AppLivePreviewProps {
  * the frame with no rebuild. While the server is installing/starting it streams
  * the boot log instead of a frozen placeholder, so the wait is never dead air.
  */
-export function AppLivePreview({ appId, title }: AppLivePreviewProps) {
+export function AppLivePreview({
+  appId,
+  title,
+  selectMode,
+  onSelect,
+  onAppError,
+}: AppLivePreviewProps) {
   const { data, isError, error } = useQuery({
     queryKey: ["app-dev", appId],
     queryFn: () => ensureAppDev(appId),
@@ -103,5 +119,13 @@ export function AppLivePreview({ appId, title }: AppLivePreviewProps) {
     );
   }
 
-  return <CustomAppFrame devUrl={data.url} title={title} />;
+  return (
+    <CustomAppFrame
+      devUrl={data.url}
+      title={title}
+      selectMode={selectMode}
+      onSelect={onSelect}
+      onAppError={onAppError}
+    />
+  );
 }
