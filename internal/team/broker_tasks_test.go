@@ -900,6 +900,84 @@ func TestBrokerSubtaskMintsOwnChannelSeparateFromParent(t *testing.T) {
 	}
 }
 
+// TestBrokerSecondTopLevelTaskFromTaskChannelMintsOwnChannel pins the fix for
+// the "every new Issue piles into the same chat" bug. A top-level Issue created
+// from inside ANOTHER Issue's per-task channel (the way the CEO creates a second
+// Issue while talking in the first Issue's chat) must mint its OWN channel, not
+// share the first Issue's. Reproduces the live OFFICE-22 / OFFICE-28 case where
+// a second issue (no parent_issue_id) landed in the first issue's task-<id>
+// channel. Exercised through the HTTP /tasks path, not the internal call.
+func TestBrokerSecondTopLevelTaskFromTaskChannelMintsOwnChannel(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(payload map[string]any) teamTask {
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("task post failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode task response: %v", err)
+		}
+		return result.Task
+	}
+
+	// First top-level Issue from #general → mints its own task-<id> channel.
+	first := post(map[string]any{
+		"action":     "create",
+		"title":      "Daily Digest from email",
+		"details":    "Top-level issue one",
+		"created_by": "ceo",
+	})
+	if first.Channel == "general" || first.Channel == "" {
+		t.Fatalf("expected first issue to mint its own channel, got %q", first.Channel)
+	}
+
+	// Second top-level Issue (NO parent_issue_id) created from inside the first
+	// Issue's chat — it arrives carrying the first Issue's channel.
+	second := post(map[string]any{
+		"action":     "create",
+		"title":      "Outbound email reply agent",
+		"details":    "Top-level issue two",
+		"created_by": "ceo",
+		"channel":    first.Channel,
+	})
+	if strings.TrimSpace(second.ParentIssueID) != "" {
+		t.Fatalf("expected a top-level issue (no parent), got parent %q", second.ParentIssueID)
+	}
+	// The bug: the second issue shared the first's channel.
+	if second.Channel == first.Channel {
+		t.Fatalf("second top-level Issue must not share the first Issue's channel %q", first.Channel)
+	}
+	expectedSlug := normalizeChannelSlug("task-" + second.ID)
+	if second.Channel != expectedSlug {
+		t.Fatalf("expected second issue channel %q, got %q", expectedSlug, second.Channel)
+	}
+	// Each channel holds exactly its own task — no shared timeline.
+	if got := len(b.ChannelTasks(first.Channel)); got != 1 {
+		t.Fatalf("expected one task in first channel %q, got %d", first.Channel, got)
+	}
+	if got := len(b.ChannelTasks(second.Channel)); got != 1 {
+		t.Fatalf("expected one task in second channel %q, got %d", second.Channel, got)
+	}
+}
+
 func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
@@ -2570,36 +2648,39 @@ func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
 	}
 }
 
-// TestShouldMintPerTaskChannelGuards pins the channel-minting gate after
-// the keyword heuristic was dropped (2026-06-03): every real top-level
-// task in "general" mints its own channel, and only the two internal
-// guards (system task / incident self-heal) withhold one. Sub-issues mint
-// their OWN channel separate from the parent — regardless of the incoming
-// channel, since the creating agent hands them the parent's channel — so a
-// child's chatter never lands in the parent's chat. For a top-level task an
-// explicit non-general channel request is left as-is.
+// TestShouldMintPerTaskChannelGuards pins the channel-minting gate. Every real
+// top-level task mints its own channel when it would otherwise default to
+// "general" OR when it was created from inside another task's per-task channel
+// (ownedByAnotherTask) — so a new Issue spun up from an existing Issue's chat
+// never piles into that chat. Only the two internal guards (system task /
+// incident self-heal) withhold a channel. Sub-issues always mint their OWN
+// channel, separate from the parent. A genuinely explicit, non-per-task shared
+// channel (e.g. a project/bridged channel) is left as-is.
 func TestShouldMintPerTaskChannelGuards(t *testing.T) {
 	cases := []struct {
-		name    string
-		channel string
-		task    teamTask
-		want    bool
+		name             string
+		channel          string
+		ownedByOtherTask bool
+		task             teamTask
+		want             bool
 	}{
-		{"plain keyword-less task mints", "general", teamTask{Title: "Tidy up the backlog"}, true},
-		{"business-objective task mints", "general", teamTask{Title: "Launch the sales campaign"}, true},
-		{"system task stays in general", "general", teamTask{Title: "Backup & Migration", System: true}, false},
-		{"incident self-heal stays in general", "general", teamTask{Title: "Recover", PipelineID: "incident"}, false},
-		{"sub-task mints its own channel", "general", teamTask{Title: "child", ParentIssueID: "task-1"}, true},
-		{"sub-task mints even when handed the parent's channel", "task-1", teamTask{Title: "child", ParentIssueID: "task-1"}, true},
-		{"sub-task incident self-heal still stays in general", "general", teamTask{Title: "child", ParentIssueID: "task-1", PipelineID: "incident"}, false},
-		{"explicit non-general channel kept", "youtube-factory", teamTask{Title: "Publish the launch video"}, false},
-		{"empty task in general still mints", "general", teamTask{}, true},
+		{"plain keyword-less task mints", "general", false, teamTask{Title: "Tidy up the backlog"}, true},
+		{"business-objective task mints", "general", false, teamTask{Title: "Launch the sales campaign"}, true},
+		{"system task stays in general", "general", false, teamTask{Title: "Backup & Migration", System: true}, false},
+		{"incident self-heal stays in general", "general", false, teamTask{Title: "Recover", PipelineID: "incident"}, false},
+		{"sub-task mints its own channel", "general", false, teamTask{Title: "child", ParentIssueID: "task-1"}, true},
+		{"sub-task mints even when handed the parent's channel", "task-1", true, teamTask{Title: "child", ParentIssueID: "task-1"}, true},
+		{"sub-task incident self-heal still stays in general", "general", false, teamTask{Title: "child", ParentIssueID: "task-1", PipelineID: "incident"}, false},
+		{"top-level task created in ANOTHER task's channel mints its own", "task-22", true, teamTask{Title: "Outbound email reply agent"}, true},
+		{"system task in another task's channel still does not mint", "task-22", true, teamTask{Title: "Backup", System: true}, false},
+		{"explicit non-per-task channel kept", "youtube-factory", false, teamTask{Title: "Publish the launch video"}, false},
+		{"empty task in general still mints", "general", false, teamTask{}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := shouldMintPerTaskChannel(tc.channel, &tc.task)
+			got := shouldMintPerTaskChannel(tc.channel, tc.ownedByOtherTask, &tc.task)
 			if got != tc.want {
-				t.Fatalf("shouldMintPerTaskChannel(%q, %+v) = %v, want %v", tc.channel, tc.task, got, tc.want)
+				t.Fatalf("shouldMintPerTaskChannel(%q, %v, %+v) = %v, want %v", tc.channel, tc.ownedByOtherTask, tc.task, got, tc.want)
 			}
 		})
 	}

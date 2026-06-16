@@ -278,9 +278,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	// the per-task channel deterministically.
 	b.counter++
 	taskID := b.allocateIssueIDLocked()
-	// Mint a dedicated channel for new business-objective tasks that
-	// defaulted to "general".
-	if shouldMintPerTaskChannel(channel, &teamTask{
+	// Mint a dedicated channel for a task that defaulted to "general" or was
+	// created from inside another task's chat (so it never shares one).
+	if shouldMintPerTaskChannel(channel, b.channelOwnedByAnotherTaskLocked(channel), &teamTask{
 		Title:   title,
 		Details: strings.TrimSpace(details),
 		Owner:   strings.TrimSpace(owner),

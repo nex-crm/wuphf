@@ -141,9 +141,10 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
-		// Mint a dedicated channel for new business-objective tasks
-		// that defaulted to "general".
-		if shouldMintPerTaskChannel(taskChannel, &teamTask{
+		// Mint a dedicated channel for each task that defaulted to "general"
+		// or was planned from inside another task's chat — so decomposing a
+		// goal never piles every resulting task into one shared timeline.
+		if shouldMintPerTaskChannel(taskChannel, b.channelOwnedByAnotherTaskLocked(taskChannel), &teamTask{
 			Title:         strings.TrimSpace(item.Title),
 			Details:       strings.TrimSpace(item.Details),
 			Owner:         strings.TrimSpace(item.Assignee),
@@ -412,9 +413,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	// the per-task channel deterministically.
 	b.counter++
 	taskID := b.allocateIssueIDLocked()
-	// Mint a dedicated channel for new business-objective tasks that
-	// defaulted to "general".
-	if shouldMintPerTaskChannel(channel, &teamTask{
+	// Mint a dedicated channel for a task that defaulted to "general" or was
+	// created from inside another task's chat (so it never shares one).
+	if shouldMintPerTaskChannel(channel, b.channelOwnedByAnotherTaskLocked(channel), &teamTask{
 		Title:         title,
 		Details:       strings.TrimSpace(input.Details),
 		Owner:         strings.TrimSpace(input.Owner),

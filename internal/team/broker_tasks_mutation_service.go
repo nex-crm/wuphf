@@ -704,11 +704,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		// name the per-task channel "task-<id>" deterministically.
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
-		// For new business-objective tasks that defaulted to "general",
-		// mint a dedicated task-<id> channel so each goal runs in
-		// isolation.  Non-business / system / sub-issue / incident tasks
-		// stay in "general" (shouldMintPerTaskChannel guards all that).
-		if shouldMintPerTaskChannel(channel, &teamTask{
+		// Mint a dedicated task-<id> channel so each goal runs in isolation.
+		// This fires when the task defaulted to "general" AND when it was
+		// created from inside another task's chat (channelOwnedByAnotherTask) —
+		// otherwise a new Issue spun up from an existing Issue's chat would
+		// silently share that chat. System / incident tasks stay in "general"
+		// (shouldMintPerTaskChannel guards all that).
+		if shouldMintPerTaskChannel(channel, b.channelOwnedByAnotherTaskLocked(channel), &teamTask{
 			Title:         strings.TrimSpace(body.Title),
 			Details:       strings.TrimSpace(body.Details),
 			Owner:         strings.TrimSpace(body.Owner),
