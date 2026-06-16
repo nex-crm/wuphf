@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "verify": "tsc --noEmit && vite build"
   },
   "dependencies": {
     "react": "^19.0.0",
