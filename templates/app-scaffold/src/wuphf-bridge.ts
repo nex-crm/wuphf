@@ -99,8 +99,15 @@ export function getOfficeMembers(): Promise<{ members: OfficeMember[] }> {
   return callBroker<{ members: OfficeMember[] }>("/office-members");
 }
 
+/**
+ * All current office tasks across every channel (not just the default one).
+ * `all_channels=true` is what the WUPHF task list itself uses; without it you
+ * only get the "general" channel, which is usually empty.
+ */
 export function getTasks(): Promise<{ tasks: OfficeTask[] }> {
-  return callBroker<{ tasks: OfficeTask[] }>("/tasks");
+  return callBroker<{ tasks: OfficeTask[] }>(
+    "/tasks?all_channels=true&viewer_slug=human",
+  );
 }
 
 // ── The one safe write: create a follow-up task ─────────────────────────────
