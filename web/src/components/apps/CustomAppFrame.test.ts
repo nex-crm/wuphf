@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { get } from "../../api/client";
 import {
   isAllowedGetPath,
   parseErrorPayload,
   parseSelectPayload,
+  routeInboundMessage,
   withAppCsp,
 } from "./CustomAppFrame";
+
+vi.mock("../../api/client", () => ({ get: vi.fn() }));
 
 describe("isAllowedGetPath", () => {
   it("allows whitelisted read-only office data paths", () => {
@@ -132,6 +136,153 @@ describe("parseSelectPayload", () => {
     });
     expect(sel?.file.length).toBe(256);
     expect(sel?.tag.length).toBe(32);
+  });
+});
+
+describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
+  // A fake frame whose contentWindow is the trusted sender; serviceBrokerGet
+  // replies via target.postMessage, so the window needs that method.
+  function makeFrame(): {
+    frame: HTMLIFrameElement;
+    win: { postMessage: ReturnType<typeof vi.fn> };
+  } {
+    const win = { postMessage: vi.fn() };
+    const frame = { contentWindow: win } as unknown as HTMLIFrameElement;
+    return { frame, win };
+  }
+
+  function event(source: unknown, data: unknown): MessageEvent {
+    return { source, data } as unknown as MessageEvent;
+  }
+
+  beforeEach(() => {
+    vi.mocked(get).mockReset();
+    vi.mocked(get).mockResolvedValue({});
+  });
+
+  it("drops a message whose source is not the frame's window (identity check)", () => {
+    const { frame } = makeFrame();
+    const onSelect = vi.fn();
+    routeInboundMessage(
+      event(
+        { postMessage: vi.fn() }, // a DIFFERENT window
+        {
+          source: "wuphf-app",
+          type: "broker",
+          id: 1,
+          method: "GET",
+          path: "/tasks",
+        },
+      ),
+      frame,
+      "*",
+      { current: onSelect },
+      { current: vi.fn() },
+    );
+    expect(get).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("routes a wuphf-select to the callback and NEVER touches the broker", () => {
+    const { frame, win } = makeFrame();
+    const onSelect = vi.fn();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "wuphf-select",
+        file: "a.tsx",
+        line: 3,
+        col: 1,
+        tag: "button",
+        label: "Save",
+      }),
+      frame,
+      "*",
+      { current: onSelect },
+      { current: vi.fn() },
+    );
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "a.tsx", tag: "button" }),
+    );
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("routes a wuphf-error to the callback and NEVER touches the broker", () => {
+    const { frame, win } = makeFrame();
+    const onErr = vi.fn();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "wuphf-error",
+        message: "boom",
+        stack: "s",
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: onErr },
+    );
+    expect(onErr).toHaveBeenCalledWith({ message: "boom", stack: "s" });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("services an allowlisted broker GET", () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "broker",
+        id: 7,
+        method: "GET",
+        path: "/tasks",
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(get).toHaveBeenCalledWith("/tasks");
+  });
+
+  it("rejects a non-GET broker request before any broker call", () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "broker",
+        id: 9,
+        method: "POST",
+        path: "/tasks",
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(get).not.toHaveBeenCalled();
+    // It replied with the GET-only error rather than fetching anything.
+    expect(win.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false }),
+      "*",
+    );
+  });
+
+  it("ignores a message that is not from the app source at all", () => {
+    const { frame, win } = makeFrame();
+    const onSelect = vi.fn();
+    routeInboundMessage(
+      event(win, {
+        source: "somewhere-else",
+        type: "wuphf-select",
+        file: "a.tsx",
+      }),
+      frame,
+      "*",
+      { current: onSelect },
+      { current: vi.fn() },
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
   });
 });
 

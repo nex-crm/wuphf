@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { type RefObject, useEffect, useMemo, useRef } from "react";
 
 import { get } from "../../api/client";
 
@@ -174,6 +174,175 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "request failed";
 }
 
+/**
+ * Service one broker bridge request: enforce GET-only + the read-only path
+ * allowlist, then reply to the frame at the pinned origin. Module-scoped so the
+ * component/listener stays simple; all the security checks live here.
+ */
+async function serviceBrokerGet(
+  message: BrokerBridgeMessage,
+  target: Window,
+  replyOrigin: string,
+): Promise<void> {
+  const reply = (payload: {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  }): void => {
+    target.postMessage(
+      { source: HOST_SOURCE, id: message.id, ...payload },
+      replyOrigin,
+    );
+  };
+  const method = String(message.method ?? "GET").toUpperCase();
+  const path = String(message.path ?? "");
+  if (method !== "GET") {
+    reply({
+      ok: false,
+      error: "Apps can only read data (GET) in this version.",
+    });
+    return;
+  }
+  if (!isAllowedGetPath(path)) {
+    reply({ ok: false, error: `Path not permitted for apps: ${path}` });
+    return;
+  }
+  try {
+    const data = await get(path);
+    reply({ ok: true, data });
+  } catch (err) {
+    reply({ ok: false, error: errorMessage(err) });
+  }
+}
+
+type SelectHandlerRef = {
+  current: ((sel: AppSelectPayload) => void) | undefined;
+};
+type ErrorHandlerRef = {
+  current: ((err: AppErrorPayload) => void) | undefined;
+};
+
+/**
+ * Route one inbound app→host message. Module-scoped (shallow nesting) so the
+ * security-relevant branching stays flat and readable. Order is the contract:
+ * identity check first, then the display-only inspector types (which return
+ * early and NEVER reach the broker), then the broker GET path.
+ */
+export function routeInboundMessage(
+  event: MessageEvent,
+  frame: HTMLIFrameElement | null,
+  replyOrigin: string,
+  onSelectRef: SelectHandlerRef,
+  onAppErrorRef: ErrorHandlerRef,
+): void {
+  // Identity by window reference, not origin: a sandboxed opaque-origin frame
+  // reports origin "null", so origin checks are useless here.
+  if (!frame || event.source !== frame.contentWindow) return;
+  const data = event.data as {
+    source?: string;
+    type?: string;
+    id?: string | number;
+  } | null;
+  if (!data || data.source !== APP_SOURCE) return;
+  // Dev-only inspector messages: DISPLAY DATA ONLY. They surface to host React
+  // state via callbacks and MUST NOT touch the broker. Validate/cap then return
+  // early — they never fall through to broker handling.
+  if (data.type === "wuphf-select") {
+    const sel = parseSelectPayload(data);
+    if (sel) onSelectRef.current?.(sel);
+    return;
+  }
+  if (data.type === "wuphf-error") {
+    onAppErrorRef.current?.(parseErrorPayload(data));
+    return;
+  }
+  if (data.type !== "broker") return;
+  if (data.id === undefined || event.source === null) return;
+  void serviceBrokerGet(
+    data as BrokerBridgeMessage,
+    event.source as Window,
+    replyOrigin,
+  );
+}
+
+/**
+ * useAppBridge wires the host side of the postMessage bridge: it services
+ * read-only broker GETs and routes the dev-only inspector messages
+ * (`wuphf-select` / `wuphf-error`) to display-only callbacks. Keyed on devUrl
+ * only — the callback refs let new parent closures flow through without
+ * re-subscribing, so the identity-by-window listener stays stable.
+ */
+function useAppBridge(
+  iframeRef: RefObject<HTMLIFrameElement | null>,
+  devUrl: string | undefined,
+  onSelectRef: SelectHandlerRef,
+  onAppErrorRef: ErrorHandlerRef,
+): void {
+  useEffect(() => {
+    // In DEV mode the frame is a real, known origin (the proxy), so pin replies
+    // to it — the office data must not reach a frame that navigated to a
+    // different origin. In SEALED mode the frame is an opaque origin ("null")
+    // and "*" is the only option (and is safe: no allow-same-origin, no nested
+    // browsing contexts).
+    let replyOrigin = "*";
+    if (devUrl) {
+      try {
+        replyOrigin = new URL(devUrl).origin;
+      } catch {
+        replyOrigin = "*";
+      }
+    }
+
+    const onMessage = (event: MessageEvent): void =>
+      routeInboundMessage(
+        event,
+        iframeRef.current,
+        replyOrigin,
+        onSelectRef,
+        onAppErrorRef,
+      );
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [devUrl, iframeRef, onSelectRef, onAppErrorRef]);
+}
+
+/**
+ * useSelectModeSync pushes the select-mode toggle into the dev frame. Posted to
+ * the SAME pinned dev origin the bridge uses (never "*"), so only the known
+ * proxy frame can receive it. Re-posts on selectMode change and once the frame
+ * is ready (onLoad). Only meaningful in dev; a no-op when there is no frame.
+ */
+function useSelectModeSync(
+  iframeRef: RefObject<HTMLIFrameElement | null>,
+  devUrl: string | undefined,
+  selectMode: boolean | undefined,
+): void {
+  useEffect(() => {
+    if (!devUrl) return;
+    let replyOrigin: string;
+    try {
+      replyOrigin = new URL(devUrl).origin;
+    } catch {
+      return;
+    }
+    function post(): void {
+      iframeRef.current?.contentWindow?.postMessage(
+        {
+          source: HOST_SOURCE,
+          type: "wuphf-select-mode",
+          enabled: !!selectMode,
+        },
+        replyOrigin,
+      );
+    }
+    post();
+    const frame = iframeRef.current;
+    frame?.addEventListener("load", post);
+    return () => frame?.removeEventListener("load", post);
+  }, [selectMode, devUrl, iframeRef]);
+}
+
 interface CustomAppFrameProps {
   title: string;
   /** Sealed mode: the published single-file bundle, rendered via srcDoc. */
@@ -220,116 +389,8 @@ export function CustomAppFrame({
     [html],
   );
 
-  useEffect(() => {
-    // In DEV mode the frame is a real, known origin (the proxy), so pin replies
-    // to it — the office data must not reach a frame that navigated to a
-    // different origin. In SEALED mode the frame is an opaque origin ("null")
-    // and "*" is the only option (and is safe: no allow-same-origin, no nested
-    // browsing contexts).
-    let replyOrigin = "*";
-    if (devUrl) {
-      try {
-        replyOrigin = new URL(devUrl).origin;
-      } catch {
-        replyOrigin = "*";
-      }
-    }
-    function reply(
-      target: Window,
-      id: string | number,
-      payload: { ok: boolean; data?: unknown; error?: string },
-    ): void {
-      target.postMessage({ source: HOST_SOURCE, id, ...payload }, replyOrigin);
-    }
-
-    async function handle(
-      message: BrokerBridgeMessage,
-      target: Window,
-    ): Promise<void> {
-      const method = String(message.method ?? "GET").toUpperCase();
-      const path = String(message.path ?? "");
-      if (method !== "GET") {
-        reply(target, message.id, {
-          ok: false,
-          error: "Apps can only read data (GET) in this version.",
-        });
-        return;
-      }
-      if (!isAllowedGetPath(path)) {
-        reply(target, message.id, {
-          ok: false,
-          error: `Path not permitted for apps: ${path}`,
-        });
-        return;
-      }
-      try {
-        const data = await get(path);
-        reply(target, message.id, { ok: true, data });
-      } catch (err) {
-        reply(target, message.id, { ok: false, error: errorMessage(err) });
-      }
-    }
-
-    function onMessage(event: MessageEvent): void {
-      const frame = iframeRef.current;
-      // Identity by window reference, not origin: a sandboxed opaque-origin
-      // frame reports origin "null", so origin checks are useless here.
-      if (!frame || event.source !== frame.contentWindow) return;
-      const data = event.data as {
-        source?: string;
-        type?: string;
-        id?: string | number;
-      } | null;
-      if (!data || data.source !== APP_SOURCE) return;
-      // Dev-only inspector messages: DISPLAY DATA ONLY. They surface to host
-      // React state via callbacks and MUST NOT touch the broker. Validate/cap
-      // then return early — they never fall through to broker handling.
-      if (data.type === "wuphf-select") {
-        const sel = parseSelectPayload(data);
-        if (sel) onSelectRef.current?.(sel);
-        return;
-      }
-      if (data.type === "wuphf-error") {
-        onAppErrorRef.current?.(parseErrorPayload(data));
-        return;
-      }
-      if (data.type !== "broker") return;
-      if (data.id === undefined || event.source === null) return;
-      void handle(data as BrokerBridgeMessage, event.source as Window);
-    }
-
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [devUrl]);
-
-  // Push the select-mode toggle into the dev frame. Posted to the SAME pinned
-  // dev origin the bridge uses (never "*"), so only the known proxy frame can
-  // receive it. Re-posts on selectMode change and once the frame is ready
-  // (onLoad). Only meaningful in dev (no inspector in the sealed bundle); a
-  // no-op when there is no frame/contentWindow.
-  useEffect(() => {
-    if (!devUrl) return;
-    let replyOrigin: string;
-    try {
-      replyOrigin = new URL(devUrl).origin;
-    } catch {
-      return;
-    }
-    function post(): void {
-      iframeRef.current?.contentWindow?.postMessage(
-        {
-          source: HOST_SOURCE,
-          type: "wuphf-select-mode",
-          enabled: !!selectMode,
-        },
-        replyOrigin,
-      );
-    }
-    post();
-    const frame = iframeRef.current;
-    frame?.addEventListener("load", post);
-    return () => frame?.removeEventListener("load", post);
-  }, [selectMode, devUrl]);
+  useAppBridge(iframeRef, devUrl, onSelectRef, onAppErrorRef);
+  useSelectModeSync(iframeRef, devUrl, selectMode);
 
   if (devUrl) {
     return (
