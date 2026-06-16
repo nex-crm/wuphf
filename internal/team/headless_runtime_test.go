@@ -116,6 +116,31 @@ func TestEffectiveProviderKindPrefersTask(t *testing.T) {
 	}
 }
 
+// TestGatewayAgentResolvesToGatewayKind locks the predicate the durability-guard
+// skip depends on. A foreign Slack/Openclaw agent has no local runtime: its turn
+// is a no-op and its real work happens in Slack, unobservable in WUPHF's action
+// log. The queue worker therefore skips headlessTurnCompletedDurably for gateway
+// kinds. Without that skip, every foreign-agent no-op turn fails the
+// external-evidence guard and mints a bogus "[@hermes] Repeated errors blocked"
+// self-heal task on each (re)assignment. This guards the resolution that gates
+// the skip: a Slack-bound owner must read as a gateway kind, a local coding agent
+// must not.
+func TestGatewayAgentResolvesToGatewayKind(t *testing.T) {
+	lSlack := launcherWithActiveTask(t, "hermes",
+		provider.ProviderBinding{Kind: provider.KindSlack},
+		teamTask{ID: "OFFICE-9", Title: "Build HubSpot CRM card"})
+	if got := lSlack.effectiveProviderKindForAgent(context.Background(), "hermes"); !provider.IsGatewayKind(got) {
+		t.Fatalf("foreign Slack agent must resolve to a gateway kind so durability is skipped; got %q", got)
+	}
+
+	lLocal := launcherWithActiveTask(t, "eng",
+		provider.ProviderBinding{Kind: provider.KindClaudeCode},
+		teamTask{ID: "OFFICE-10", Title: "Build the feature"})
+	if got := lLocal.effectiveProviderKindForAgent(context.Background(), "eng"); provider.IsGatewayKind(got) {
+		t.Fatalf("local coding agent must NOT be a gateway kind (durability still applies); got %q", got)
+	}
+}
+
 // TestPerTaskRuntimeWireRoundTrip: provider/model/effort survive a
 // marshal/unmarshal cycle with their stable wire keys.
 func TestPerTaskRuntimeWireRoundTrip(t *testing.T) {

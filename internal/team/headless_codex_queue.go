@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // taskRunsInIsolatedWorktree reports whether a task executes in its own git
@@ -433,7 +435,15 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
 			ctxErr := turnCtx.Err()
 			isDurabilityError := false
-			if err == nil {
+			// Gateway agents (foreign Slack/Openclaw/Hermes) have no local
+			// runtime: their turn is a deliberate no-op (the real work is the
+			// Slack ping, done outside WUPHF). The durability guard demands an
+			// external-workflow record in WUPHF's OWN action log, which a foreign
+			// agent can never produce — so running it here would fail every such
+			// turn and mint a bogus "Repeated errors blocked" self-heal task on
+			// every (re)assignment. Skip durability for gateway kinds entirely.
+			isGateway := provider.IsGatewayKind(l.effectiveProviderKindForAgent(turnCtx, slug))
+			if err == nil && !isGateway {
 				l.headless.mu.Lock()
 				active := l.headless.active[lane]
 				l.headless.mu.Unlock()
