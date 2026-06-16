@@ -6,14 +6,18 @@ needs a new build**: a change to `web/`, `internal/`, `desktop/oswails/`, or the
 Go deps ships only when a fresh signed artifact is cut. Docs/website/test/CI
 changes do not.
 
-Automated by `.github/workflows/desktop-release.yml`. It fires on every product
-release tag `v*` (the desktop app rides the main release cadence) and on a
-standalone `desktop-v*` tag or manual dispatch → build → sign → notarize. On a
-`v*` tag the signed dmg + Windows installer are APPENDED to the published GitHub
-Release goreleaser creates for that tag; on a `desktop-v*` tag / dispatch they go
-to a DRAFT to review first. The `desktop-build-check.yml` PR gate builds it
-unsigned on any PR touching those paths, so a desktop-breaking change fails the
-PR, not the release.
+Automated by `.github/workflows/desktop-release.yml`. The desktop app rides the
+main release cadence: `auto-release.yml` dispatches it at each new `v*` tag (a
+GITHUB_TOKEN tag push can't fire `on: push: tags`, so the dispatch is the real
+trigger — same reason it dispatches `release.yml`). It also runs on a manually
+pushed `v*`/`desktop-v*` tag and on manual dispatch → build → sign → notarize. On
+a `v*` tag the job WAITS for the published GitHub Release that
+`release.yml`/goreleaser creates for the tag, then APPENDS the signed dmg +
+Windows installer to it; on a `desktop-v*` tag / dispatch it owns a DRAFT to
+review first. If Azure signing secrets are absent the Windows installer ships
+unsigned and the run logs a `::warning::` plus a job-summary note. The
+`desktop-build-check.yml` PR gate builds it unsigned on any PR touching those
+paths, so a desktop-breaking change fails the PR, not the release.
 
 ## One-time setup
 
