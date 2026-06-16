@@ -92,3 +92,16 @@ jobs:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           gh workflow run release.yml --ref "$VERSION"
+
+      - name: Dispatch desktop-release workflow at the new tag
+        # Same GITHUB_TOKEN limitation as the Release dispatch above: a tag pushed
+        # with GITHUB_TOKEN never fires desktop-release.yml's `on: push: tags`, so
+        # dispatch it explicitly. Every product release then also builds + attaches
+        # the signed desktop apps. --ref points the run at the new tag (so its
+        # github.ref_name is the v* tag → draft:false → append to the release);
+        # the bare version is passed as the stamping input.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          gh workflow run desktop-release.yml --ref "$VERSION" -f version="${VERSION#v}"

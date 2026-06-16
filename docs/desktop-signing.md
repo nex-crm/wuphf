@@ -6,8 +6,16 @@ needs a new build**: a change to `web/`, `internal/`, `desktop/oswails/`, or the
 Go deps ships only when a fresh signed artifact is cut. Docs/website/test/CI
 changes do not.
 
-Automated by `.github/workflows/desktop-release.yml` (tag `desktop-v*` or manual
-dispatch → build → sign → notarize → draft GitHub Release). The
+Automated by `.github/workflows/desktop-release.yml`. The desktop app rides the
+main release cadence: `auto-release.yml` dispatches it at each new `v*` tag (a
+GITHUB_TOKEN tag push can't fire `on: push: tags`, so the dispatch is the real
+trigger — same reason it dispatches `release.yml`). It also runs on a manually
+pushed `v*`/`desktop-v*` tag and on manual dispatch → build → sign → notarize. On
+a `v*` tag the job WAITS for the published GitHub Release that
+`release.yml`/goreleaser creates for the tag, then APPENDS the signed dmg +
+Windows installer to it; on a `desktop-v*` tag / dispatch it owns a DRAFT to
+review first. If Azure signing secrets are absent the Windows installer ships
+unsigned and the run logs a `::warning::` plus a job-summary note. The
 `desktop-build-check.yml` PR gate builds it unsigned on any PR touching those
 paths, so a desktop-breaking change fails the PR, not the release.
 
@@ -43,13 +51,15 @@ Signing account + certificate profile, then add: `AZURE_TENANT_ID`,
 
 ## Cut a release
 
+The desktop app rides the main `v*` cadence, so every product release already
+cuts a signed dmg + Windows installer and appends them to that tag's GitHub
+Release — no separate step. For an out-of-band desktop-only build:
+
 ```bash
-git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+git tag desktop-v0.1.1 && git push origin desktop-v0.1.1
 # → desktop-release.yml builds, signs, notarizes, and drafts a GitHub Release.
 # Review the draft, then publish. Link the .dmg / .exe on the website.
 ```
-Switch the release trigger from `desktop-v*` to `v*` once the desktop ships on
-the main product cadence (so every `wuphf` release also cuts a dmg).
 
 ## Manual macOS build (local, validated 2026-06-14)
 
