@@ -132,6 +132,12 @@ export interface AppBuilderDialogState {
   appId?: string;
   /** App name, prefilled in "update" mode for display. */
   name?: string;
+  /**
+   * Optional prefill for the description textarea. "Select to edit" seeds a
+   * concise instruction stub (e.g. the element + its source location) so the
+   * human only types the actual change.
+   */
+  seed?: string;
 }
 
 export interface AppStore {
@@ -238,7 +244,7 @@ export interface AppStore {
   // task. null when closed.
   appBuilderDialog: AppBuilderDialogState | null;
   openCreateAppDialog: () => void;
-  openUpdateAppDialog: (appId: string, name?: string) => void;
+  openUpdateAppDialog: (appId: string, name?: string, seed?: string) => void;
   closeAppBuilderDialog: () => void;
 
   // Optimistic "building…" rows for the Apps sidebar: a 20-60s App Builder
@@ -427,8 +433,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   appBuilderDialog: null,
   openCreateAppDialog: () => set({ appBuilderDialog: { mode: "create" } }),
-  openUpdateAppDialog: (appId, name) =>
-    set({ appBuilderDialog: { mode: "update", appId, name } }),
+  openUpdateAppDialog: (appId, name, seed) =>
+    set({ appBuilderDialog: { mode: "update", appId, name, seed } }),
   closeAppBuilderDialog: () => set({ appBuilderDialog: null }),
 
   appBuilds: {},

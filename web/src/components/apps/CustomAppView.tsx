@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClockRotateRight, EditPencil, MoreHoriz } from "iconoir-react";
+import {
+  ClockRotateRight,
+  CursorPointer,
+  EditPencil,
+  MoreHoriz,
+  Xmark,
+} from "iconoir-react";
 
 import {
   deleteApp,
@@ -16,10 +22,21 @@ import { confirm } from "../ui/ConfirmDialog";
 import { showNotice } from "../ui/Toast";
 import { AppLivePreview } from "./AppLivePreview";
 import { AppVersionTimeline } from "./AppVersionTimeline";
-import { CustomAppFrame } from "./CustomAppFrame";
+import { type AppSelectPayload, CustomAppFrame } from "./CustomAppFrame";
 
 interface CustomAppViewProps {
   appId: string;
+}
+
+/**
+ * Build the App Builder description seed from a "select to edit" click: a
+ * concise instruction stub naming the element + its source location, leaving a
+ * trailing space so the human types only the actual change. Pure for tests.
+ */
+export function buildSelectSeed(sel: AppSelectPayload): string {
+  const where = `${sel.file}:${sel.line}`;
+  const label = sel.label ? ` ("${sel.label}")` : "";
+  return `Change the <${sel.tag || "element"}> at \`${where}\`${label}: `;
 }
 
 /**
@@ -44,6 +61,10 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   // Live = the running dev server (HMR); Sealed = the published single-file
   // bundle. Default to Live so opening an app shows the real, current tool.
   const [mode, setMode] = useState<"live" | "sealed">("live");
+  // "Select to edit" inspector toggle (dev/live only) + the latest runtime
+  // error the app surfaced, shown as a dismissible banner over the preview.
+  const [selectMode, setSelectMode] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -110,6 +131,15 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   function onSelectVersion(version: number): void {
     // Selecting the current build is "back to live", not a preview.
     setPreviewVersion(version === currentVersion ? null : version);
+  }
+
+  function onSelectElement(sel: AppSelectPayload): void {
+    // One-shot: a select ends the inspector mode, then opens the edit dialog
+    // prefilled with a concise instruction stub from the clicked element.
+    setSelectMode(false);
+    if (data) {
+      openUpdateAppDialog(data.app.id, data.app.name, buildSelectSeed(sel));
+    }
   }
 
   function onDelete(): void {
@@ -206,6 +236,21 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
         >
           v{app.version}
         </span>
+        {/* Select to edit is a live-preview affordance: it intercepts a click
+            in the running app to seed a precise edit. It's meaningless while
+            viewing the sealed bundle or a read-only past version. */}
+        {!isPreviewing && mode === "live" ? (
+          <button
+            type="button"
+            className="custom-app-view__action"
+            aria-pressed={selectMode}
+            onClick={() => setSelectMode((on) => !on)}
+            title="Click an element in the preview to edit it"
+          >
+            <CursorPointer width={15} height={15} />
+            <span>Select to edit</span>
+          </button>
+        ) : null}
         <button
           type="button"
           className="custom-app-view__action"
@@ -263,6 +308,21 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
           />
         ) : null}
         <div className="custom-app-view__stage">
+          {appError && !isPreviewing && mode === "live" ? (
+            <div className="custom-app-view__app-error" role="alert">
+              <span className="custom-app-view__app-error-text">
+                {appError}
+              </span>
+              <button
+                type="button"
+                className="custom-app-view__app-error-dismiss"
+                aria-label="Dismiss error"
+                onClick={() => setAppError(null)}
+              >
+                <Xmark width={14} height={14} />
+              </button>
+            </div>
+          ) : null}
           {isPreviewing ? (
             <PreviewBanner
               version={previewVersion as number}
@@ -286,7 +346,15 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
               />
             )
           ) : mode === "live" ? (
-            <AppLivePreview appId={appId} title={app.name} />
+            <AppLivePreview
+              appId={appId}
+              title={app.name}
+              selectMode={selectMode}
+              onSelect={onSelectElement}
+              onAppError={(err) =>
+                setAppError(err.message || "The app threw a runtime error.")
+              }
+            />
           ) : (
             <CustomAppFrame html={html} title={app.name} />
           )}

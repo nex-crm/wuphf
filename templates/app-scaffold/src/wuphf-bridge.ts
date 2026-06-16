@@ -10,6 +10,12 @@
  * Wire contract (must match web/src/components/apps/CustomAppFrame.tsx):
  *   app  -> host : { source: "wuphf-app",  type: "broker", id, method:"GET", path }
  *   host -> app  : { source: "wuphf-host", id, ok, data? , error? }
+ *
+ * Dev-only inspector messages (see ./wuphf-inspector.ts) ride the same channel
+ * but are display-only — they NEVER reach this broker path or any network:
+ *   host -> app  : { source: "wuphf-host", type: "wuphf-select-mode", enabled }
+ *   app  -> host : { source: "wuphf-app",  type: "wuphf-select", file, line, col, tag, label }
+ *   app  -> host : { source: "wuphf-app",  type: "wuphf-error", message, stack }
  */
 
 interface PendingResolver {
