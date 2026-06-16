@@ -126,7 +126,6 @@ export function CreateAppDialog() {
     description.trim().length > 0 && (isUpdate || name.trim().length > 0);
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-dismiss matches HelpModal/VersionModal; the keyboard path is the document-level Escape handler above.
     <div className="help-overlay">
       <button
         type="button"

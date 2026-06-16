@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ClockRotateRight,
@@ -9,6 +9,8 @@ import {
 } from "iconoir-react";
 
 import {
+  type CustomApp,
+  type CustomAppVersion,
   deleteApp,
   getApp,
   getAppVersion,
@@ -28,28 +30,41 @@ interface CustomAppViewProps {
   appId: string;
 }
 
+type PreviewMode = "live" | "sealed";
+
 /**
  * Build the App Builder description seed from a "select to edit" click: a
  * concise instruction stub naming the element + its source location, leaving a
  * trailing space so the human types only the actual change. Pure for tests.
+ *
+ * The element text/tag/file are app-supplied (a hostile app could forge them),
+ * so strip backticks and newlines before interpolating: that keeps a crafted
+ * label from breaking out of the code-span or injecting extra lines into the
+ * seed the human reviews. The human still edits + submits the dialog, so this
+ * is defense-in-depth, not the trust boundary.
  */
 export function buildSelectSeed(sel: AppSelectPayload): string {
-  const where = `${sel.file}:${sel.line}`;
-  const label = sel.label ? ` ("${sel.label}")` : "";
-  return `Change the <${sel.tag || "element"}> at \`${where}\`${label}: `;
+  const clean = (s: string): string => s.replace(/[`\r\n]+/g, " ").trim();
+  const where = `${clean(sel.file)}:${sel.line}`;
+  const label = sel.label ? ` ("${clean(sel.label)}")` : "";
+  const tag = clean(sel.tag) || "element";
+  return `Change the <${tag}> at \`${where}\`${label}: `;
 }
 
 /**
  * CustomAppView renders one agent-generated internal tool: a header (icon, name,
- * version, History, Edit, an overflow menu) above the sandboxed frame. Edit is
- * the primary action; the destructive Delete lives in the overflow menu so a
- * stray click can't remove a depended-on tool.
+ * version, Select-to-edit, History, Edit, an overflow menu) above the sandboxed
+ * frame. Edit is the primary action; the destructive Delete lives in the
+ * overflow menu so a stray click can't remove a depended-on tool.
  *
  * History is the trust net behind the modify wedge: it opens an append-only
  * version timeline beside the preview. Selecting an older build previews it
  * NON-destructively (the current version is untouched); "Restore this version"
  * then re-publishes those bytes as a new forward version, so a restore is itself
  * reversible. An operator can look before they leap.
+ *
+ * This component is the orchestrator (queries, mutations, state, handlers); the
+ * header and body chrome live in AppViewHeader / AppViewBody below.
  */
 export function CustomAppView({ appId }: CustomAppViewProps) {
   const queryClient = useQueryClient();
@@ -60,7 +75,7 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   const [previewVersion, setPreviewVersion] = useState<number | null>(null);
   // Live = the running dev server (HMR); Sealed = the published single-file
   // bundle. Default to Live so opening an app shows the real, current tool.
-  const [mode, setMode] = useState<"live" | "sealed">("live");
+  const [mode, setMode] = useState<PreviewMode>("live");
   // "Select to edit" inspector toggle (dev/live only) + the latest runtime
   // error the app surfaced, shown as a dismissible banner over the preview.
   const [selectMode, setSelectMode] = useState(false);
@@ -198,170 +213,347 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
 
   return (
     <div className="custom-app-view">
-      <header className="custom-app-view__header">
-        <span className="custom-app-view__icon" aria-hidden="true">
-          {app.icon || "🧩"}
-        </span>
-        <div className="custom-app-view__heading">
-          <h1 className="custom-app-view__name">{app.name}</h1>
-          {app.summary ? (
-            <p className="custom-app-view__summary">{app.summary}</p>
-          ) : null}
+      <AppViewHeader
+        app={app}
+        mode={mode}
+        onMode={setMode}
+        isPreviewing={isPreviewing}
+        selectMode={selectMode}
+        onToggleSelect={() => setSelectMode((on) => !on)}
+        historyOpen={historyOpen}
+        onToggleHistory={toggleHistory}
+        onEdit={() => openUpdateAppDialog(app.id, app.name)}
+        menuOpen={menuOpen}
+        onToggleMenu={() => setMenuOpen((open) => !open)}
+        menuRef={menuRef}
+        onDelete={onDelete}
+      />
+      <AppViewBody
+        appId={appId}
+        app={app}
+        html={html}
+        mode={mode}
+        historyOpen={historyOpen}
+        versions={versions.data ?? []}
+        versionsLoading={versions.isLoading}
+        previewVersion={previewVersion}
+        isPreviewing={isPreviewing}
+        previewHtml={versionPreview.data?.html}
+        previewLoading={versionPreview.isLoading}
+        previewUpdatedBy={versionPreview.data?.updatedBy}
+        previewUpdatedAt={versionPreview.data?.updatedAt}
+        restoring={rollback.isPending}
+        onRestore={() => rollback.mutate(previewVersion as number)}
+        onBack={() => setPreviewVersion(null)}
+        onSelectVersion={onSelectVersion}
+        selectMode={selectMode}
+        onSelectElement={onSelectElement}
+        onAppError={(msg) => setAppError(msg)}
+        appError={appError}
+        onDismissError={() => setAppError(null)}
+      />
+    </div>
+  );
+}
+
+interface AppViewHeaderProps {
+  app: CustomApp;
+  mode: PreviewMode;
+  onMode: (mode: PreviewMode) => void;
+  isPreviewing: boolean;
+  selectMode: boolean;
+  onToggleSelect: () => void;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
+  onEdit: () => void;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  menuRef: RefObject<HTMLDivElement | null>;
+  onDelete: () => void;
+}
+
+function AppViewHeader({
+  app,
+  mode,
+  onMode,
+  isPreviewing,
+  selectMode,
+  onToggleSelect,
+  historyOpen,
+  onToggleHistory,
+  onEdit,
+  menuOpen,
+  onToggleMenu,
+  menuRef,
+  onDelete,
+}: AppViewHeaderProps) {
+  return (
+    <header className="custom-app-view__header">
+      <span className="custom-app-view__icon" aria-hidden="true">
+        {app.icon || "🧩"}
+      </span>
+      <div className="custom-app-view__heading">
+        <h1 className="custom-app-view__name">{app.name}</h1>
+        {app.summary ? (
+          <p className="custom-app-view__summary">{app.summary}</p>
+        ) : null}
+      </div>
+      {/* The Live/Sealed toggle is meaningless while previewing an older,
+          already-sealed build, so it yields to the preview banner. */}
+      {isPreviewing ? null : (
+        <div className="custom-app-view__mode">
+          <button
+            type="button"
+            className="custom-app-view__mode-btn"
+            aria-pressed={mode === "live"}
+            onClick={() => onMode("live")}
+          >
+            Live
+          </button>
+          <button
+            type="button"
+            className="custom-app-view__mode-btn"
+            aria-pressed={mode === "sealed"}
+            onClick={() => onMode("sealed")}
+          >
+            Sealed
+          </button>
         </div>
-        {/* The Live/Sealed toggle is meaningless while previewing an older,
-            already-sealed build, so it yields to the preview banner. */}
-        {isPreviewing ? null : (
-          <div className="custom-app-view__mode">
+      )}
+      <span
+        className="custom-app-view__version"
+        title={`Updated ${app.updatedAt}`}
+      >
+        v{app.version}
+      </span>
+      {/* Select to edit is a live-preview affordance: it intercepts a click in
+          the running app to seed a precise edit. It's meaningless while viewing
+          the sealed bundle or a read-only past version. */}
+      {!isPreviewing && mode === "live" ? (
+        <button
+          type="button"
+          className="custom-app-view__action"
+          aria-pressed={selectMode}
+          onClick={onToggleSelect}
+          title="Click an element in the preview to edit it"
+        >
+          <CursorPointer width={15} height={15} />
+          <span>Select to edit</span>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="custom-app-view__action"
+        aria-pressed={historyOpen}
+        onClick={onToggleHistory}
+      >
+        <ClockRotateRight width={15} height={15} />
+        <span>History</span>
+      </button>
+      <button
+        type="button"
+        className="custom-app-view__action"
+        onClick={onEdit}
+      >
+        <EditPencil width={15} height={15} />
+        <span>Edit</span>
+      </button>
+      <div className="custom-app-view__menu-wrap" ref={menuRef}>
+        <button
+          type="button"
+          className="custom-app-view__icon-btn"
+          aria-label="More actions"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={onToggleMenu}
+        >
+          <MoreHoriz width={16} height={16} />
+        </button>
+        {menuOpen ? (
+          <div className="custom-app-view__menu" role="menu">
             <button
               type="button"
-              className="custom-app-view__mode-btn"
-              aria-pressed={mode === "live"}
-              onClick={() => setMode("live")}
+              role="menuitem"
+              className="custom-app-view__menu-item custom-app-view__menu-item--danger"
+              onClick={onDelete}
             >
-              Live
-            </button>
-            <button
-              type="button"
-              className="custom-app-view__mode-btn"
-              aria-pressed={mode === "sealed"}
-              onClick={() => setMode("sealed")}
-            >
-              Sealed
+              Delete app
             </button>
           </div>
-        )}
-        <span
-          className="custom-app-view__version"
-          title={`Updated ${app.updatedAt}`}
-        >
-          v{app.version}
-        </span>
-        {/* Select to edit is a live-preview affordance: it intercepts a click
-            in the running app to seed a precise edit. It's meaningless while
-            viewing the sealed bundle or a read-only past version. */}
-        {!isPreviewing && mode === "live" ? (
-          <button
-            type="button"
-            className="custom-app-view__action"
-            aria-pressed={selectMode}
-            onClick={() => setSelectMode((on) => !on)}
-            title="Click an element in the preview to edit it"
-          >
-            <CursorPointer width={15} height={15} />
-            <span>Select to edit</span>
-          </button>
         ) : null}
-        <button
-          type="button"
-          className="custom-app-view__action"
-          aria-pressed={historyOpen}
-          onClick={toggleHistory}
-        >
-          <ClockRotateRight width={15} height={15} />
-          <span>History</span>
-        </button>
-        <button
-          type="button"
-          className="custom-app-view__action"
-          onClick={() => openUpdateAppDialog(app.id, app.name)}
-        >
-          <EditPencil width={15} height={15} />
-          <span>Edit</span>
-        </button>
-        <div className="custom-app-view__menu-wrap" ref={menuRef}>
-          <button
-            type="button"
-            className="custom-app-view__icon-btn"
-            aria-label="More actions"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            <MoreHoriz width={16} height={16} />
-          </button>
-          {menuOpen ? (
-            <div className="custom-app-view__menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                className="custom-app-view__menu-item custom-app-view__menu-item--danger"
-                onClick={onDelete}
-              >
-                Delete app
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </header>
-      <div
-        className={`custom-app-view__body${
-          historyOpen ? " custom-app-view__body--history" : ""
-        }`}
-      >
-        {historyOpen ? (
-          <AppVersionTimeline
-            versions={versions.data ?? []}
-            isLoading={versions.isLoading}
-            selectedVersion={previewVersion}
+      </div>
+    </header>
+  );
+}
+
+interface AppViewBodyProps {
+  appId: string;
+  app: CustomApp;
+  html: string;
+  mode: PreviewMode;
+  historyOpen: boolean;
+  versions: CustomAppVersion[];
+  versionsLoading: boolean;
+  previewVersion: number | null;
+  isPreviewing: boolean;
+  previewHtml?: string;
+  previewLoading: boolean;
+  previewUpdatedBy?: string;
+  previewUpdatedAt?: string;
+  restoring: boolean;
+  onRestore: () => void;
+  onBack: () => void;
+  onSelectVersion: (version: number) => void;
+  selectMode: boolean;
+  onSelectElement: (sel: AppSelectPayload) => void;
+  onAppError: (message: string) => void;
+  appError: string | null;
+  onDismissError: () => void;
+}
+
+function AppViewBody({
+  appId,
+  app,
+  html,
+  mode,
+  historyOpen,
+  versions,
+  versionsLoading,
+  previewVersion,
+  isPreviewing,
+  previewHtml,
+  previewLoading,
+  previewUpdatedBy,
+  previewUpdatedAt,
+  restoring,
+  onRestore,
+  onBack,
+  onSelectVersion,
+  selectMode,
+  onSelectElement,
+  onAppError,
+  appError,
+  onDismissError,
+}: AppViewBodyProps) {
+  return (
+    <div
+      className={`custom-app-view__body${
+        historyOpen ? " custom-app-view__body--history" : ""
+      }`}
+    >
+      {historyOpen ? (
+        <AppVersionTimeline
+          versions={versions}
+          isLoading={versionsLoading}
+          selectedVersion={previewVersion}
+          currentVersion={app.version}
+          onSelect={onSelectVersion}
+        />
+      ) : null}
+      <div className="custom-app-view__stage">
+        {appError && !isPreviewing && mode === "live" ? (
+          <div className="custom-app-view__app-error" role="alert">
+            <span className="custom-app-view__app-error-text">{appError}</span>
+            <button
+              type="button"
+              className="custom-app-view__app-error-dismiss"
+              aria-label="Dismiss error"
+              onClick={onDismissError}
+            >
+              <Xmark width={14} height={14} />
+            </button>
+          </div>
+        ) : null}
+        {isPreviewing ? (
+          <PreviewBanner
+            version={previewVersion as number}
             currentVersion={app.version}
-            onSelect={onSelectVersion}
+            updatedBy={previewUpdatedBy}
+            updatedAt={previewUpdatedAt}
+            restoring={restoring}
+            onRestore={onRestore}
+            onBack={onBack}
           />
         ) : null}
-        <div className="custom-app-view__stage">
-          {appError && !isPreviewing && mode === "live" ? (
-            <div className="custom-app-view__app-error" role="alert">
-              <span className="custom-app-view__app-error-text">
-                {appError}
-              </span>
-              <button
-                type="button"
-                className="custom-app-view__app-error-dismiss"
-                aria-label="Dismiss error"
-                onClick={() => setAppError(null)}
-              >
-                <Xmark width={14} height={14} />
-              </button>
-            </div>
-          ) : null}
-          {isPreviewing ? (
-            <PreviewBanner
-              version={previewVersion as number}
-              currentVersion={app.version}
-              updatedBy={versionPreview.data?.updatedBy}
-              updatedAt={versionPreview.data?.updatedAt}
-              restoring={rollback.isPending}
-              onRestore={() => rollback.mutate(previewVersion as number)}
-              onBack={() => setPreviewVersion(null)}
-            />
-          ) : null}
-          {isPreviewing ? (
-            versionPreview.isLoading || !versionPreview.data ? (
-              <div className="custom-app-view__preview-loading">
-                Loading v{previewVersion}…
-              </div>
-            ) : (
-              <CustomAppFrame
-                html={versionPreview.data.html}
-                title={`${app.name} (v${previewVersion})`}
-              />
-            )
-          ) : mode === "live" ? (
-            <AppLivePreview
-              appId={appId}
-              title={app.name}
-              selectMode={selectMode}
-              onSelect={onSelectElement}
-              onAppError={(err) =>
-                setAppError(err.message || "The app threw a runtime error.")
-              }
-            />
-          ) : (
-            <CustomAppFrame html={html} title={app.name} />
-          )}
-        </div>
+        <AppViewStageFrame
+          appId={appId}
+          app={app}
+          html={html}
+          mode={mode}
+          isPreviewing={isPreviewing}
+          previewVersion={previewVersion}
+          previewHtml={previewHtml}
+          previewLoading={previewLoading}
+          selectMode={selectMode}
+          onSelectElement={onSelectElement}
+          onAppError={onAppError}
+        />
       </div>
     </div>
   );
+}
+
+interface AppViewStageFrameProps {
+  appId: string;
+  app: CustomApp;
+  html: string;
+  mode: PreviewMode;
+  isPreviewing: boolean;
+  previewVersion: number | null;
+  previewHtml?: string;
+  previewLoading: boolean;
+  selectMode: boolean;
+  onSelectElement: (sel: AppSelectPayload) => void;
+  onAppError: (message: string) => void;
+}
+
+/**
+ * AppViewStageFrame picks the right surface for the stage: a read-only snapshot
+ * of a past version (with a loading shim), the live dev preview, or the sealed
+ * single-file bundle.
+ */
+function AppViewStageFrame({
+  appId,
+  app,
+  html,
+  mode,
+  isPreviewing,
+  previewVersion,
+  previewHtml,
+  previewLoading,
+  selectMode,
+  onSelectElement,
+  onAppError,
+}: AppViewStageFrameProps) {
+  if (isPreviewing) {
+    if (previewLoading || previewHtml === undefined) {
+      return (
+        <div className="custom-app-view__preview-loading">
+          Loading v{previewVersion}…
+        </div>
+      );
+    }
+    return (
+      <CustomAppFrame
+        html={previewHtml}
+        title={`${app.name} (v${previewVersion})`}
+      />
+    );
+  }
+  if (mode === "live") {
+    return (
+      <AppLivePreview
+        appId={appId}
+        title={app.name}
+        selectMode={selectMode}
+        onSelect={onSelectElement}
+        onAppError={(err) =>
+          onAppError(err.message || "The app threw a runtime error.")
+        }
+      />
+    );
+  }
+  return <CustomAppFrame html={html} title={app.name} />;
 }
 
 interface PreviewBannerProps {
