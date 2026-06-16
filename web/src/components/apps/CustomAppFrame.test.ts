@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { get } from "../../api/client";
+import { get, post } from "../../api/client";
+import { confirm } from "../ui/ConfirmDialog";
 import {
   isAllowedGetPath,
   parseErrorPayload,
@@ -9,7 +10,12 @@ import {
   withAppCsp,
 } from "./CustomAppFrame";
 
-vi.mock("../../api/client", () => ({ get: vi.fn() }));
+vi.mock("../../api/client", () => ({ get: vi.fn(), post: vi.fn() }));
+// Auto-accept the human confirmation so the create_task path runs to the POST.
+vi.mock("../ui/ConfirmDialog", () => ({
+  confirm: vi.fn((opts: { onConfirm: () => unknown }) => opts.onConfirm()),
+}));
+vi.mock("../ui/Toast", () => ({ showNotice: vi.fn() }));
 
 describe("isAllowedGetPath", () => {
   it("allows whitelisted read-only office data paths", () => {
@@ -158,6 +164,88 @@ describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
   beforeEach(() => {
     vi.mocked(get).mockReset();
     vi.mocked(get).mockResolvedValue({});
+    vi.mocked(post).mockReset();
+    vi.mocked(post).mockResolvedValue({ task: { id: "OFFICE-9" } });
+    // Reset call history, then keep the confirm mock auto-accepting.
+    vi.mocked(confirm).mockReset();
+    vi.mocked(confirm).mockImplementation(
+      (opts: { onConfirm: () => unknown }) => opts.onConfirm(),
+    );
+  });
+
+  it("create_task confirms, then POSTs a host-parameterized task", async () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "action",
+        id: 3,
+        action: "create_task",
+        payload: { title: "Follow up on Acme", details: "renewal due" },
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(confirm).toHaveBeenCalledTimes(1);
+    // Flush the onConfirm microtask chain.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledWith(
+      "/tasks",
+      expect.objectContaining({
+        action: "create",
+        title: "Follow up on Acme",
+        created_by: "human",
+        task_type: "issue",
+      }),
+    );
+    // The app cannot set owner/type/privileged fields.
+    const body = vi.mocked(post).mock.calls[0][1] as Record<string, unknown>;
+    expect(body.owner).toBeUndefined();
+  });
+
+  it("rejects an unknown action without confirming or posting", () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "action",
+        id: 4,
+        action: "delete_everything",
+        payload: {},
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    expect(win.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false }),
+      "*",
+    );
+  });
+
+  it("requires a non-empty title before confirming", () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "action",
+        id: 5,
+        action: "create_task",
+        payload: { title: "   " },
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("drops a message whose source is not the frame's window (identity check)", () => {
