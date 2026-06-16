@@ -248,6 +248,39 @@ describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("coalesces: a second create_task while one is pending is refused", () => {
+    vi.useFakeTimers();
+    // Leave the first confirmation pending (don't auto-accept).
+    vi.mocked(confirm).mockImplementation(() => undefined);
+    const { frame, win } = makeFrame();
+    const send = (id: number): void =>
+      routeInboundMessage(
+        event(win, {
+          source: "wuphf-app",
+          type: "action",
+          id,
+          action: "create_task",
+          payload: { title: "Spam me" },
+        }),
+        frame,
+        "*",
+        { current: vi.fn() },
+        { current: vi.fn() },
+      );
+    send(10); // first → confirmation shown, now pending
+    send(11); // second → must be refused while one awaits the human
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const lastReply = win.postMessage.mock.calls.at(-1)?.[0] as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(lastReply.ok).toBe(false);
+    expect(lastReply.error).toMatch(/already awaiting/i);
+    // Free the module lock so later tests aren't blocked.
+    vi.advanceTimersByTime(70_000);
+    vi.useRealTimers();
+  });
+
   it("drops a message whose source is not the frame's window (identity check)", () => {
     const { frame } = makeFrame();
     const onSelect = vi.fn();

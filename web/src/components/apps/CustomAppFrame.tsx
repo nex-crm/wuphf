@@ -231,6 +231,14 @@ async function serviceBrokerGet(
   }
 }
 
+// Only one create_task confirmation may be pending at a time. A hostile app
+// that loops createTask() on load would otherwise drip confirmations and train
+// the human to reflexively accept (confirm-fatigue). While one is awaiting the
+// human, further requests are refused; the lock frees on accept or after a
+// safety window (the human ignored/cancelled the dialog).
+let createTaskPending = false;
+const CREATE_TASK_LOCK_MS = 65_000;
+
 /**
  * Service the one safe write apps may request: create_task. The app supplies a
  * title + details ONLY; the host fixes every other field (a top-level office
@@ -268,11 +276,25 @@ function serviceCreateTask(
     reply({ ok: false, error: "A task needs a title." });
     return;
   }
+  if (createTaskPending) {
+    reply({
+      ok: false,
+      error:
+        "A task is already awaiting your confirmation — finish that first.",
+    });
+    return;
+  }
   const details = capString(input.details, ACTION_DETAILS_MAX);
+  createTaskPending = true;
+  const release = window.setTimeout(() => {
+    createTaskPending = false;
+  }, CREATE_TASK_LOCK_MS);
   confirm({
     message: `Create a task for the team?\n\n“${title}”`,
     confirmLabel: "Create task",
     onConfirm: async () => {
+      window.clearTimeout(release);
+      createTaskPending = false;
       try {
         const res = await post<{ task?: { id?: string } }>("/tasks", {
           action: "create",
