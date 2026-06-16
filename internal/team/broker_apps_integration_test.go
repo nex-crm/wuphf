@@ -137,6 +137,127 @@ func TestRegisterAppRestrictedToAppBuilder(t *testing.T) {
 	}
 }
 
+// TestAppVersionEndpointsNonDestructive drives the version-timeline HTTP surface
+// end-to-end: listing retained builds (structured, newest-first, current-flagged)
+// and reading one past build's bytes for preview WITHOUT changing the current
+// version. This is the new serving surface behind Phase 4's history timeline.
+func TestAppVersionEndpointsNonDestructive(t *testing.T) {
+	// Isolate the app store under a temp runtime home so the test never touches
+	// a real ~/.wuphf/apps. Must be set before the first /apps call constructs
+	// the store (appStore() reads CustomAppsRootDir lazily, via sync.Once).
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	htmlB := `<!doctype html><html><head></head><body><div id="root">B</div><script>var b=2;</script></body></html>`
+
+	// Register v1, then update to v2 (both as the App Builder).
+	v1Body, _ := json.Marshal(map[string]any{"name": "Lead Scorer", "html": validAppHTML})
+	created := postAppsAsAgent(t, base+"/apps", b.Token(), appBuilderSlug, v1Body)
+	app, _ := created["app"].(map[string]any)
+	id, _ := app["id"].(string)
+	if id == "" {
+		t.Fatalf("no app id in register response: %v", created)
+	}
+	v2Body, _ := json.Marshal(map[string]any{"id": id, "name": "Lead Scorer", "html": htmlB})
+	postAppsAsAgent(t, base+"/apps", b.Token(), appBuilderSlug, v2Body)
+
+	// List → two structured versions, newest first, v2 current.
+	status, list := getAppsJSON(t, base+"/apps/"+id+"/versions", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("list versions: %d", status)
+	}
+	versions, _ := list["versions"].([]any)
+	if len(versions) != 2 {
+		t.Fatalf("versions = %v, want 2", versions)
+	}
+	first, _ := versions[0].(map[string]any)
+	if v, _ := first["version"].(float64); int(v) != 2 {
+		t.Fatalf("newest version = %v, want 2", first["version"])
+	}
+	if cur, _ := first["current"].(bool); !cur {
+		t.Fatalf("newest version should be current: %v", first)
+	}
+	if by, _ := first["updatedBy"].(string); by != appBuilderSlug {
+		t.Fatalf("newest updatedBy = %q, want %q", by, appBuilderSlug)
+	}
+
+	// Read v1's bytes for preview — flat shape, exact v1 bytes, NOT current.
+	status, ver := getAppsJSON(t, base+"/apps/"+id+"/versions/1", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("get version 1: %d", status)
+	}
+	if html, _ := ver["html"].(string); html != validAppHTML {
+		t.Fatalf("v1 html mismatch: %q", ver["html"])
+	}
+	if cur, _ := ver["current"].(bool); cur {
+		t.Fatalf("v1 must not be flagged current: %v", ver)
+	}
+
+	// Non-destructive: the current build is still v2 after the preview read.
+	status, curResp := getAppsJSON(t, base+"/apps/"+id, b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("get current: %d", status)
+	}
+	curApp, _ := curResp["app"].(map[string]any)
+	if v, _ := curApp["version"].(float64); int(v) != 2 {
+		t.Fatalf("preview read changed current version to %v", curApp["version"])
+	}
+	if html, _ := curResp["html"].(string); html != htmlB {
+		t.Fatalf("preview read changed the current bytes")
+	}
+
+	// Unknown version → 400-class caller error (consistent with rollback).
+	status, _ = getAppsJSON(t, base+"/apps/"+id+"/versions/99", b.Token())
+	if status != http.StatusBadRequest {
+		t.Fatalf("unknown version status = %d, want 400", status)
+	}
+}
+
+func getAppsJSON(t *testing.T, url, token string) (int, map[string]any) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var out map[string]any
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &out)
+	}
+	return resp.StatusCode, out
+}
+
+func postAppsAsAgent(t *testing.T, url, token, agentSlug string, body []byte) map[string]any {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-WUPHF-Agent", agentSlug)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST %s -> %d: %s", url, resp.StatusCode, raw)
+	}
+	var out map[string]any
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &out)
+	}
+	return out
+}
+
 func postAppsStatus(t *testing.T, url, token, agentSlug string, body []byte) int {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))

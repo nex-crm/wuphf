@@ -1,9 +1,11 @@
 # App Builder — Live Dev-Server Preview (SOTA)
 
-Status: **Phase 1 SHIPPED (PR #1099) + instant-new-build (pre-scaffold)
-SHIPPED on the stacked branch.** Architecture approved by the founder
-(2026-06-15): live dev-server-per-app behind a broker proxy; the single-file
-build stays as the sealed "ship" artifact.
+Status: **Phase 1 SHIPPED (PR #1099) + instant-new-build (pre-scaffold,
+#1100) + structured build-activity feed (Phase 2, #1102) + version timeline /
+non-destructive preview (Phase 4) all SHIPPED on the stacked branch.**
+Architecture approved by the founder (2026-06-15): live dev-server-per-app
+behind a broker proxy; the single-file build stays as the sealed "ship"
+artifact.
 
 ## Shipped so far
 
@@ -169,9 +171,19 @@ repo rules).
 3. **Pre-commit `tsc --noEmit` + `vite build` gate + bounded ~2-round auto-fix**
    re-prompt with `file:line:col` (dyad `chat_stream_handlers.ts` auto-fix loop).
    Auto-loop build errors (ground truth); human-gate runtime errors. Effort M.
-4. **Git-commit-per-response version timeline** (we already commit to git):
-   non-destructive preview of a past version + forward-preserving "Restore".
-   Effort M.
+4. **Version timeline + non-destructive preview** — SHIPPED. Every published
+   build is already retained append-only under `apps/<id>/versions/v<N>/`
+   (snapshot dirs, NOT git — the store is deliberately decoupled from the wiki
+   git worker). This phase exposes that history: each snapshot now carries a
+   `meta.json` (who/when), `GET /apps/{id}/versions` returns structured,
+   current-flagged entries, and the new `GET /apps/{id}/versions/{n}` reads a
+   past build's bytes WITHOUT changing the current version. The app view gained a
+   **History** toggle → a timeline rail beside the preview; selecting an older
+   build previews it read-only (a banner offers "Restore this version" /
+   "Back to current"). Restore reuses the existing append-only `Rollback`
+   (re-publishes those bytes as a new forward version), so a restore is itself
+   reversible. Restore moved out of the overflow menu (which now holds only the
+   destructive Delete).
 5. **Select-to-edit** (`data-dyad-id="file:line:col"` JSX tagging + injected
    selector → source map) **+ iframe error capture** via postMessage — the magic
    moment; works under our sandbox. Effort S–M.

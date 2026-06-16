@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -90,6 +91,12 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 	case "versions":
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// /apps/{id}/versions/{n} reads one retained build for non-destructive
+		// preview; /apps/{id}/versions lists them.
+		if len(parts) > 2 {
+			b.handleAppVersion(w, r, id, parts[2])
 			return
 		}
 		versions, err := b.appStore().ListVersions(id)
@@ -196,6 +203,31 @@ func (b *Broker) handleAppRoot(w http.ResponseWriter, r *http.Request, id string
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleAppVersion serves GET /apps/{id}/versions/{n}: one retained build's
+// bytes + metadata for non-destructive preview. It NEVER changes the current
+// version — restoring is the separate POST /apps/{id}/rollback. The bytes were
+// validated at write time and render in the same sandboxed frame as the sealed
+// current view, so this adds no new rendering surface.
+func (b *Broker) handleAppVersion(w http.ResponseWriter, r *http.Request, id, raw string) {
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid version"})
+		return
+	}
+	ver, htmlBody, err := b.appStore().GetVersion(id, n)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":   ver.Version,
+		"updatedAt": ver.UpdatedAt,
+		"updatedBy": ver.UpdatedBy,
+		"current":   ver.Current,
+		"html":      htmlBody,
+	})
 }
 
 func (b *Broker) handleAppRollback(w http.ResponseWriter, r *http.Request, id string) {

@@ -44,11 +44,44 @@ export async function deleteApp(id: string): Promise<void> {
   await del(`/apps/${encodeURIComponent(id)}`);
 }
 
-export async function listAppVersions(id: string): Promise<number[]> {
-  const res = await get<{ versions: number[] }>(
+/**
+ * CustomAppVersion is one retained build in an app's append-only history.
+ * Metadata (updatedBy/updatedAt) is captured at snapshot time; builds from
+ * before that existed degrade to just the version number. Mirrors the Go
+ * CustomAppVersion shape (internal/team/custom_app.go).
+ */
+export interface CustomAppVersion {
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+  /** True for the app's live current build. */
+  current: boolean;
+}
+
+export async function listAppVersions(id: string): Promise<CustomAppVersion[]> {
+  const res = await get<{ versions: CustomAppVersion[] }>(
     `/apps/${encodeURIComponent(id)}/versions`,
   );
   return res.versions ?? [];
+}
+
+export interface AppVersionDetail extends CustomAppVersion {
+  html: string;
+}
+
+/**
+ * getAppVersion reads one retained build's bytes + metadata for non-destructive
+ * preview. It NEVER changes the current version — that is the separate
+ * {@link rollbackApp}. The bytes render in the same sandboxed frame as the
+ * sealed current view.
+ */
+export async function getAppVersion(
+  id: string,
+  version: number,
+): Promise<AppVersionDetail> {
+  return get<AppVersionDetail>(
+    `/apps/${encodeURIComponent(id)}/versions/${version}`,
+  );
 }
 
 /**
