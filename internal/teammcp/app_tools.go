@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -54,7 +56,11 @@ type RegisterAppArgs struct {
 	Icon        string `json:"icon,omitempty" jsonschema:"Optional emoji icon."`
 	Summary     string `json:"summary,omitempty" jsonschema:"One-line summary shown in the sidebar."`
 	Description string `json:"description,omitempty" jsonschema:"What the app does — keep this current as it evolves."`
-	HTML        string `json:"html" jsonschema:"The COMPLETE self-contained index.html: all JS/CSS inlined (vite-plugin-singlefile). No external scripts/styles/fonts and no network fetches — read workspace data only through the injected WUPHF bridge (window.parent postMessage)."`
+	// PREFER html_path. The built single-file bundle is minified onto enormous
+	// single lines (100k+ chars) that an agent cannot reliably read back and
+	// re-emit as a JSON string — pass the path and let the broker read the file.
+	HTMLPath string `json:"html_path,omitempty" jsonschema:"PREFERRED. Absolute path to the built dist/index.html (the broker reads it). Use this instead of pasting the bundle — minified single-file output has 100k+ char lines you cannot reliably read and re-emit."`
+	HTML     string `json:"html,omitempty" jsonschema:"Fallback only. The COMPLETE self-contained index.html as a string. Prefer html_path — minified output is too large to paste reliably. All JS/CSS inlined (vite-plugin-singlefile); no external scripts/styles/fonts and no network fetches; read workspace data only through the injected WUPHF bridge (window.parent postMessage)."`
 	// Files is the source project so future edits modify real files instead of
 	// regenerating from prose. Strongly recommended.
 	Files map[string]string `json:"files,omitempty" jsonschema:"The app's SOURCE project as a map of relative path -> file content (e.g. src/App.tsx, package.json, vite.config.ts). EXCLUDE node_modules and dist. Persisting source is how an operator's later edit is reliable instead of a from-scratch regeneration."`
@@ -201,8 +207,9 @@ func handleRegisterApp(ctx context.Context, _ *mcp.CallToolRequest, args Registe
 	if name == "" {
 		return toolError(fmt.Errorf("name is required")), nil, nil
 	}
-	if strings.TrimSpace(args.HTML) == "" {
-		return toolError(fmt.Errorf("html is required: pass the complete self-contained index.html")), nil, nil
+	html, err := resolveRegisterAppHTML(args)
+	if err != nil {
+		return toolError(err), nil, nil
 	}
 	appID := strings.TrimSpace(args.AppID)
 	if appID != "" {
@@ -217,7 +224,7 @@ func handleRegisterApp(ctx context.Context, _ *mcp.CallToolRequest, args Registe
 		"icon":        strings.TrimSpace(args.Icon),
 		"summary":     strings.TrimSpace(args.Summary),
 		"description": strings.TrimSpace(args.Description),
-		"html":        args.HTML,
+		"html":        html,
 		"files":       args.Files,
 		"actor":       slug,
 	}, &result); err != nil {
@@ -228,6 +235,47 @@ func handleRegisterApp(ctx context.Context, _ *mcp.CallToolRequest, args Registe
 		return toolError(fmt.Errorf("marshal register_app response: %w", err)), nil, nil
 	}
 	return textResult(string(payload)), nil, nil
+}
+
+// registerAppMaxHTMLBytes caps the bundle read from html_path (mirrors the
+// broker store's own ceiling, so we fail here with a clear message rather than
+// after a wasted round-trip).
+const registerAppMaxHTMLBytes = 4 * 1024 * 1024
+
+// resolveRegisterAppHTML returns the bundle to publish: the literal html when
+// the agent passed one, otherwise the contents of html_path read by the broker.
+// Reading the file here is the whole point — the minified single-file bundle has
+// 100k+ char lines an agent can't reliably read back into a JSON string, so the
+// agent passes a path and the broker (same filesystem) reads it directly.
+func resolveRegisterAppHTML(args RegisterAppArgs) (string, error) {
+	if html := strings.TrimSpace(args.HTML); html != "" {
+		return args.HTML, nil
+	}
+	path := strings.TrimSpace(args.HTMLPath)
+	if path == "" {
+		return "", fmt.Errorf("provide html_path (absolute path to the built dist/index.html) or, as a fallback, html")
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("html_path must be an absolute path to the built dist/index.html; got %q", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("read html_path %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("html_path %q is a directory; point it at the built index.html", path)
+	}
+	if info.Size() > registerAppMaxHTMLBytes {
+		return "", fmt.Errorf("built bundle is %d bytes, over the %d cap; trim it before publishing", info.Size(), registerAppMaxHTMLBytes)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read html_path %q: %w", path, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return "", fmt.Errorf("html_path %q is empty", path)
+	}
+	return string(data), nil
 }
 
 // validateCustomAppIDLocal mirrors the broker's validateCustomAppID so the tool

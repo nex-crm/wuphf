@@ -340,6 +340,13 @@ func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 	if slug == l.targeter().LeadSlug() {
 		return "30"
 	}
+	// The App Builder's single "task" is a multi-step BUILD — copy the scaffold,
+	// write several files, bun install, run the verify gate, fix, then publish —
+	// which blows past a chat specialist's budget. Observed: it hit the 15-turn
+	// cap mid-build, before register_app. Give it real build headroom.
+	if strings.EqualFold(strings.TrimSpace(slug), appBuilderSlug) {
+		return "60"
+	}
 	return "15"
 }
 
