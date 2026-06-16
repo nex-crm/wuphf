@@ -17,8 +17,11 @@ sandbox enforce most of them, so breaking one means a broken or rejected app.
    images. No `@import`. Images must be inline `data:`/`blob:` URLs.
 2. **No direct network.** The app runs in a sandbox with `connect-src 'none'`.
    NEVER use `fetch`, `XMLHttpRequest`, or `WebSocket`. Read workspace data ONLY
-   through `src/wuphf-bridge.ts` (`callBroker` / `getOfficeMembers` / `getTasks`).
-   The bridge is read-only and limited to an allowlist of broker GET paths.
+   through `src/wuphf-bridge.ts` (`callBroker` / `getOfficeMembers` / `getTasks`),
+   which is read-only and limited to an allowlist of broker GET paths. The ONE
+   write is `createTask({ title, details })` — the host confirms with the human,
+   then creates a normal office task. Wire it to a button (e.g. "Start a follow-up
+   task"); never call it on load.
 3. **No secrets, no auth.** The app never holds a token; the host bridge uses the
    signed-in user's session. Do not invent API keys or login flows.
 4. **Keep it one app.** Single SPA, no router needed for a focused tool. Don't add

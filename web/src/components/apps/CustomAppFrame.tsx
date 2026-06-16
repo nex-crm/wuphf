@@ -1,6 +1,8 @@
 import { type RefObject, useEffect, useMemo, useRef } from "react";
 
-import { get } from "../../api/client";
+import { get, post } from "../../api/client";
+import { confirm } from "../ui/ConfirmDialog";
+import { showNotice } from "../ui/Toast";
 
 /**
  * CustomAppFrame renders an agent-generated internal tool inside a hardened
@@ -17,7 +19,9 @@ import { get } from "../../api/client";
  *     only — everything must be self-contained.
  *   - The ONLY way out is window.parent.postMessage to this component, which
  *     services a small READ-ONLY allowlist of broker GETs using the signed-in
- *     user's own session (the app never holds a token). Writes are rejected.
+ *     user's own session (the app never holds a token), PLUS a single narrow
+ *     write — `create_task` — that the host fully parameterizes and gates behind
+ *     a human confirmation. Arbitrary writes (any other path/method) are rejected.
  */
 
 const APP_CSP = [
@@ -58,6 +62,10 @@ const SELECT_LABEL_MAX = 120;
 const SELECT_FILE_MAX = 256;
 const SELECT_TAG_MAX = 32;
 const APP_ERROR_MAX = 600;
+// Caps on the one safe write an app may request (create_task). The app supplies
+// only a title + details; the host parameterizes every other field.
+const ACTION_TITLE_MAX = 200;
+const ACTION_DETAILS_MAX = 4000;
 
 interface BrokerBridgeMessage {
   source: typeof APP_SOURCE;
@@ -65,6 +73,14 @@ interface BrokerBridgeMessage {
   id: string | number;
   method?: string;
   path?: string;
+}
+
+interface AppActionMessage {
+  source: typeof APP_SOURCE;
+  type: "action";
+  id: string | number;
+  action?: string;
+  payload?: unknown;
 }
 
 /**
@@ -215,6 +231,68 @@ async function serviceBrokerGet(
   }
 }
 
+/**
+ * Service the one safe write apps may request: create_task. The app supplies a
+ * title + details ONLY; the host fixes every other field (a top-level office
+ * issue, created by the signed-in human) so an app can never mint a
+ * privileged/owned task or mutate anything else. It is gated behind a human
+ * confirmation — a state-changing action the human may not have explicitly
+ * authorized (the app could fire on load), so we show it before it happens
+ * rather than surprise them. The created task is visible in the normal feed.
+ */
+function serviceCreateTask(
+  message: AppActionMessage,
+  target: Window,
+  replyOrigin: string,
+): void {
+  const reply = (payload: {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  }): void => {
+    target.postMessage(
+      { source: HOST_SOURCE, id: message.id, ...payload },
+      replyOrigin,
+    );
+  };
+  if (message.action !== "create_task") {
+    reply({ ok: false, error: `Unsupported app action: ${message.action}` });
+    return;
+  }
+  const input =
+    message.payload && typeof message.payload === "object"
+      ? (message.payload as Record<string, unknown>)
+      : {};
+  const title = capString(input.title, ACTION_TITLE_MAX).trim();
+  if (!title) {
+    reply({ ok: false, error: "A task needs a title." });
+    return;
+  }
+  const details = capString(input.details, ACTION_DETAILS_MAX);
+  confirm({
+    message: `Create a task for the team?\n\n“${title}”`,
+    confirmLabel: "Create task",
+    onConfirm: async () => {
+      try {
+        const res = await post<{ task?: { id?: string } }>("/tasks", {
+          action: "create",
+          channel: "general",
+          title,
+          details,
+          created_by: "human",
+          task_type: "issue",
+        });
+        const id = res?.task?.id ?? "";
+        showNotice(`Created task${id ? ` ${id}` : ""}: ${title}`, "success");
+        reply({ ok: true, data: { id, title } });
+      } catch (err) {
+        showNotice("Could not create the task.", "error");
+        reply({ ok: false, error: errorMessage(err) });
+      }
+    },
+  });
+}
+
 type SelectHandlerRef = {
   current: ((sel: AppSelectPayload) => void) | undefined;
 };
@@ -254,6 +332,16 @@ export function routeInboundMessage(
   }
   if (data.type === "wuphf-error") {
     onAppErrorRef.current?.(parseErrorPayload(data));
+    return;
+  }
+  // The one safe write: a human-confirmed, host-parameterized create_task.
+  if (data.type === "action") {
+    if (data.id === undefined || event.source === null) return;
+    serviceCreateTask(
+      data as AppActionMessage,
+      event.source as Window,
+      replyOrigin,
+    );
     return;
   }
   if (data.type !== "broker") return;
@@ -326,7 +414,7 @@ function useSelectModeSync(
     } catch {
       return;
     }
-    function post(): void {
+    function postToggle(): void {
       iframeRef.current?.contentWindow?.postMessage(
         {
           source: HOST_SOURCE,
@@ -336,10 +424,10 @@ function useSelectModeSync(
         replyOrigin,
       );
     }
-    post();
+    postToggle();
     const frame = iframeRef.current;
-    frame?.addEventListener("load", post);
-    return () => frame?.removeEventListener("load", post);
+    frame?.addEventListener("load", postToggle);
+    return () => frame?.removeEventListener("load", postToggle);
   }, [selectMode, devUrl, iframeRef]);
 }
 
