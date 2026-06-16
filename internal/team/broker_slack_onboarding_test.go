@@ -68,8 +68,11 @@ func TestSlackAppManifestEndpoint(t *testing.T) {
 	for _, want := range []string{
 		"socket_mode_enabled", "app_home", "message.groups", "app_mention",
 		"chat:write", "users:read", "pins:write", "is_enabled",
-		// Agents & AI Apps surface: enables the native "is thinking…" status.
+		// Agents & AI Apps surface: enables the native "is thinking…" status +
+		// the Assistant pane (a DM surface) and its lifecycle/DM events.
 		"assistant_view", "assistant_description", "assistant:write",
+		"assistant_thread_started", "assistant_thread_context_changed",
+		"message.im", "im:history", "im:read", "im:write",
 	} {
 		if !strings.Contains(mj, want) {
 			t.Errorf("office manifest missing %q:\n%s", want, mj)

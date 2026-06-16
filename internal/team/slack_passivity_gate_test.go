@@ -51,6 +51,9 @@ func TestSlackSuppressesWake(t *testing.T) {
 		{"task-thread reply in slack", channelMessage{From: "human:u7", Channel: "slack-general", SourceTaskID: "OFFICE-1"}, false},
 		{"foreign agent in slack", channelMessage{From: "claude-bot", Channel: "slack-general"}, false},
 		{"untagged human in non-slack", channelMessage{From: "human:u7", Channel: "general"}, false},
+		// A 1:1 DM (the Assistant pane) is the human addressing the office
+		// directly — always wake, even untagged.
+		{"untagged human in DM", channelMessage{From: "human:u7", Channel: DMSlugFor("ceo")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

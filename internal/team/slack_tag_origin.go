@@ -84,5 +84,11 @@ func (b *Broker) slackSuppressesWake(msg channelMessage) bool {
 	if len(msg.Tagged) > 0 || strings.TrimSpace(msg.SourceTaskID) != "" {
 		return false
 	}
+	// A 1:1 DM (the Assistant pane / direct message) is the human addressing the
+	// office directly: always respond, exactly like the main channel's @-mention.
+	// Passivity is only for the SHARED channel, where ambient chatter is not for us.
+	if IsDMSlug(msg.Channel) {
+		return false
+	}
 	return b.ChannelHasSurface(msg.Channel, "slack")
 }

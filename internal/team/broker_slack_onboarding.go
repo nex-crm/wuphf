@@ -87,11 +87,13 @@ func officeSlackAppManifest(appName string) officeSlackManifest {
 	return officeSlackManifest{
 		DisplayInformation: slackManifestDisplay{
 			Name:        appName,
-			Description: "Your AI office, bridged into Slack — tasks, agents, and the team wiki, right where you work.",
+			Description: "Your AI office, bridged into Slack: tasks, agents, and the team wiki, right where you work.",
 		},
 		Features: officeManifestFeatures{
-			BotUser:       slackManifestBotUser{DisplayName: "wuphf", AlwaysOnline: true},
-			AppHome:       officeManifestAppHome{HomeTabEnabled: true, MessagesTabEnabled: false},
+			BotUser: slackManifestBotUser{DisplayName: "wuphf", AlwaysOnline: true},
+			// MessagesTab must be on for the Assistant pane to render (Slack opens
+			// the assistant container in the app's Messages tab).
+			AppHome:       officeManifestAppHome{HomeTabEnabled: true, MessagesTabEnabled: true},
 			AssistantView: officeManifestAssistantView{AssistantDescription: "Your AI office, working tasks with you right in Slack."},
 		},
 		OauthConfig: slackManifestOauth{
@@ -105,6 +107,11 @@ func officeSlackAppManifest(appName string) officeSlackManifest {
 				"chat:write",
 				"groups:history",
 				"groups:read",
+				// im:* scopes back the Assistant pane (a 1:1 DM surface): read the
+				// user's messages there and reply.
+				"im:history",
+				"im:read",
+				"im:write",
 				"pins:write",
 				"search:read.public",
 				"users:read",
@@ -114,8 +121,12 @@ func officeSlackAppManifest(appName string) officeSlackManifest {
 			EventSubscriptions: officeManifestEvents{BotEvents: []string{
 				"app_home_opened",
 				"app_mention",
+				// Assistant pane lifecycle + the DM messages it carries.
+				"assistant_thread_started",
+				"assistant_thread_context_changed",
 				"message.channels",
 				"message.groups",
+				"message.im",
 			}},
 			Interactivity:     officeManifestInteractivity{IsEnabled: true},
 			SocketModeEnabled: true,
