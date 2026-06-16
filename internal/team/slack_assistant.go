@@ -20,9 +20,12 @@ import "strings"
 // re-established after a restart without persisting Slack-channel ids.
 
 // seedAssistantThread binds an Assistant-pane IM channel to the office lead's DM
-// so messages typed in the pane reach the office and replies come back. Channel-
-// agnostic and idempotent; best-effort (a missing lead or broker just no-ops).
-func (t *SlackTransport) seedAssistantThread(channelID string) {
+// so messages typed in the pane reach the office and replies come back, and
+// records the pane's thread root so the office's replies thread under it.
+// Channel-agnostic and idempotent; best-effort (a missing lead or broker just
+// no-ops). threadTS is the Assistant thread root from the lifecycle event (may
+// be empty on some events; inbound messages refine it).
+func (t *SlackTransport) seedAssistantThread(channelID, threadTS string) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" || t.Broker == nil {
 		return
@@ -35,6 +38,7 @@ func (t *SlackTransport) seedAssistantThread(channelID string) {
 	if dmSlug == "" {
 		return
 	}
+	t.Broker.RecordAssistantThread(dmSlug, threadTS)
 	// Create the DM and bind its Slack surface to the pane's IM channel, so the
 	// lead's replies are queued for delivery (ExternalQueue only returns messages
 	// for channels that carry a slack surface) and post straight back into the
@@ -72,4 +76,34 @@ func (b *Broker) BindSlackDMSurface(slug, imChannelID string) {
 		ch.Surface = &channelSurface{Provider: "slack", RemoteID: imChannelID}
 		_ = b.saveLocked()
 	}
+}
+
+// RecordAssistantThread remembers the Slack Assistant thread root for a DM, so
+// the office's replies in that DM thread under the same root (keeping the pane a
+// single conversation). Latest non-empty root wins; empty is ignored. In-memory:
+// the pane re-announces its thread on open, so this is re-established as needed.
+func (b *Broker) RecordAssistantThread(dmSlug, threadTS string) {
+	threadTS = strings.TrimSpace(threadTS)
+	dmSlug = normalizeChannelSlug(dmSlug)
+	if b == nil || dmSlug == "" || threadTS == "" {
+		return
+	}
+	b.mu.Lock()
+	if b.assistantThreads == nil {
+		b.assistantThreads = map[string]string{}
+	}
+	b.assistantThreads[dmSlug] = threadTS
+	b.mu.Unlock()
+}
+
+// AssistantThreadFor returns the recorded Assistant thread root for a DM, or ""
+// if none — in which case the office reply posts at the DM top level.
+func (b *Broker) AssistantThreadFor(dmSlug string) string {
+	dmSlug = normalizeChannelSlug(dmSlug)
+	if b == nil || dmSlug == "" {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.assistantThreads[dmSlug]
 }

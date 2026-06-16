@@ -466,11 +466,11 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 		// lead's DM so the user can chat with the office natively. The DM messages
 		// themselves arrive as ordinary MessageEvents (message.im) below.
 		if started, isStart := apiEvent.InnerEvent.Data.(*slackevents.AssistantThreadStartedEvent); isStart {
-			t.seedAssistantThread(started.AssistantThread.ChannelID)
+			t.seedAssistantThread(started.AssistantThread.ChannelID, started.AssistantThread.ThreadTimeStamp)
 			return true
 		}
 		if changed, isChanged := apiEvent.InnerEvent.Data.(*slackevents.AssistantThreadContextChangedEvent); isChanged {
-			t.seedAssistantThread(changed.AssistantThread.ChannelID)
+			t.seedAssistantThread(changed.AssistantThread.ChannelID, changed.AssistantThread.ThreadTimeStamp)
 			return true
 		}
 		msg, ok := apiEvent.InnerEvent.Data.(*slackevents.MessageEvent)
@@ -537,6 +537,17 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 	if !ok {
 		log.Printf("[slack] inbound: unmapped channel %s", msg.Channel)
 		return nil
+	}
+
+	// Assistant pane (a DM): remember the conversation's thread root so the
+	// office's reply threads under it. thread_ts identifies the pane thread; the
+	// first message has none, so its own ts IS the root.
+	if t.Broker != nil && IsDMSlug(channel) {
+		root := strings.TrimSpace(msg.ThreadTimeStamp)
+		if root == "" {
+			root = strings.TrimSpace(msg.TimeStamp)
+		}
+		t.Broker.RecordAssistantThread(channel, root)
 	}
 
 	// Resolve the sender. A registered foreign agent is attributed to its
@@ -775,12 +786,20 @@ func (t *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 	// No per-message task footnote: task messages now thread under the task's
 	// single root card (which carries the task definition + web link), so a
 	// repeated "↳ task" line on every reply would just clutter the thread.
-	return transport.Outbound{
+	out := transport.Outbound{
 		Participant:  spawnedSender,
 		Binding:      transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: ch},
 		Text:         text,
 		SourceTaskID: strings.TrimSpace(msg.SourceTaskID),
-	}, true
+	}
+	// Assistant pane: thread the office's reply under the pane's conversation root
+	// so it lands inside the thread the user is reading, not as a loose top-level
+	// IM message. Only for a DM with no task anchor (a task message threads under
+	// its task root in Send instead).
+	if out.SourceTaskID == "" && IsDMSlug(ch) && t.Broker != nil {
+		out.ThreadKey = t.Broker.AssistantThreadFor(ch)
+	}
+	return out, true
 }
 
 // leadingMentionSlugs parses the ADDRESSING position of a message: the run of
