@@ -171,8 +171,17 @@ func TestCustomAppVersionRetentionAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("versions: %v", err)
 	}
-	if len(vs) != 2 || vs[0] != 2 || vs[1] != 1 {
-		t.Fatalf("versions = %v, want [2 1]", vs)
+	if len(vs) != 2 || vs[0].Version != 2 || vs[1].Version != 1 {
+		t.Fatalf("versions = %v, want [v2 v1]", vs)
+	}
+	// The newest snapshot is the current build; the prior one is not.
+	if !vs[0].Current || vs[1].Current {
+		t.Fatalf("current flags = [%v %v], want [true false]", vs[0].Current, vs[1].Current)
+	}
+	// Capture metadata (who/when) rides along with each retained build so the
+	// timeline can label it.
+	if vs[1].UpdatedBy != "app-builder" || vs[1].UpdatedAt == "" {
+		t.Fatalf("v1 meta = %+v, want updatedBy app-builder + a timestamp", vs[1])
 	}
 
 	// Rollback to v1 restores htmlA's exact bytes as a NEW version (append-only).
@@ -189,6 +198,55 @@ func TestCustomAppVersionRetentionAndRollback(t *testing.T) {
 	}
 	if vs2, _ := store.ListVersions(id); len(vs2) != 3 {
 		t.Fatalf("versions after rollback = %v, want 3 entries", vs2)
+	}
+}
+
+// TestCustomAppGetVersionNonDestructive verifies the timeline's preview read:
+// fetching a past version returns its exact bytes + metadata and does NOT change
+// the current build.
+func TestCustomAppGetVersionNonDestructive(t *testing.T) {
+	store := newCustomAppStore(t.TempDir())
+	now := time.Unix(1_700_000_000, 0).UTC()
+	htmlA := validAppHTML
+	htmlB := `<!doctype html><html><head></head><body><div id="root">B</div><script>var b=2;</script></body></html>`
+
+	a, err := store.Save(CustomAppWriteRequest{Name: "Tool", HTML: htmlA, Actor: "app-builder"}, now)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := a.ID
+	if _, err := store.Save(CustomAppWriteRequest{ID: id, Name: "Tool", HTML: htmlB, Actor: "pam"}, now.Add(time.Minute)); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	// Reading v1 returns htmlA's bytes, its capture metadata, and is NOT current.
+	ver, body, err := store.GetVersion(id, 1)
+	if err != nil {
+		t.Fatalf("get version 1: %v", err)
+	}
+	if body != htmlA {
+		t.Fatalf("v1 bytes are not htmlA")
+	}
+	if ver.Current {
+		t.Fatalf("v1 should not be current")
+	}
+	if ver.UpdatedBy != "app-builder" {
+		t.Fatalf("v1 updatedBy = %q, want app-builder", ver.UpdatedBy)
+	}
+
+	// v2 reads back as the current build.
+	if v2, _, err := store.GetVersion(id, 2); err != nil || !v2.Current {
+		t.Fatalf("v2 = %+v err=%v, want current", v2, err)
+	}
+
+	// The current build is untouched by the preview reads.
+	if _, cur, _ := store.Get(id); cur != htmlB {
+		t.Fatalf("preview read mutated the current build")
+	}
+
+	// Unknown version is a caller (400-class) error, not a 500.
+	if _, _, err := store.GetVersion(id, 99); !isCustomAppCallerError(err) {
+		t.Fatalf("get unknown version err = %v, want caller error", err)
 	}
 }
 

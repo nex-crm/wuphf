@@ -49,6 +49,7 @@ const (
 	// back to a known-good build, and the App Builder can edit real source
 	// instead of regenerating from prose.
 	customAppVersionsDir        = "versions"
+	customAppVersionMetaFile    = "meta.json"
 	customAppSourceDir          = "src"
 	customAppMaxSourceFiles     = 300
 	customAppMaxSourceFileBytes = 512 * 1024
@@ -339,7 +340,7 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 	// Retain this version's built bytes (append-only history) so a later edit
 	// can roll back to a known-good build. Without this the version counter is
 	// a false affordance — it promises an undo that cannot happen.
-	if err := s.snapshotVersionLocked(dir, app.Version, htmlBody); err != nil {
+	if err := s.snapshotVersionLocked(dir, app, htmlBody); err != nil {
 		return CustomApp{}, err
 	}
 	// Persist the source project when provided so edits modify real files.
@@ -468,16 +469,27 @@ func writeScaffoldSourceLocked(srcRoot string) error {
 	})
 }
 
-func (s *customAppStore) snapshotVersionLocked(dir string, version int, htmlBody string) error {
-	if version < 1 {
+func (s *customAppStore) snapshotVersionLocked(dir string, app CustomApp, htmlBody string) error {
+	if app.Version < 1 {
 		return nil
 	}
-	vdir := filepath.Join(dir, customAppVersionsDir, fmt.Sprintf("v%d", version))
+	vdir := filepath.Join(dir, customAppVersionsDir, fmt.Sprintf("v%d", app.Version))
 	if err := os.MkdirAll(vdir, 0o700); err != nil {
 		return fmt.Errorf("app: mkdir version: %w", err)
 	}
 	if err := writeFileAtomic(filepath.Join(vdir, customAppEntry), []byte(htmlBody), 0o600); err != nil {
 		return fmt.Errorf("app: write version snapshot: %w", err)
+	}
+	// Capture who/when beside the bytes so the history timeline can label each
+	// build. Versions snapshotted before this file existed degrade gracefully to
+	// a bare version number (readVersionMetaLocked returns ok=false).
+	meta := customAppVersionMeta{Version: app.Version, UpdatedAt: app.UpdatedAt, UpdatedBy: app.UpdatedBy}
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("app: marshal version meta: %w", err)
+	}
+	if err := writeFileAtomic(filepath.Join(vdir, customAppVersionMetaFile), metaBytes, 0o600); err != nil {
+		return fmt.Errorf("app: write version meta: %w", err)
 	}
 	return nil
 }
@@ -605,22 +617,50 @@ func (s *customAppStore) Source(id string) (map[string]string, error) {
 	return out, nil
 }
 
-// ListVersions returns the retained version numbers, newest first.
-func (s *customAppStore) ListVersions(id string) ([]int, error) {
+// CustomAppVersion is one retained build in an app's append-only history,
+// surfaced by the version timeline. Metadata (who/when) is captured at snapshot
+// time; builds snapshotted before that existed degrade to just the version
+// number. Current marks the app's live build.
+type CustomAppVersion struct {
+	Version   int    `json:"version"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	UpdatedBy string `json:"updatedBy,omitempty"`
+	Current   bool   `json:"current"`
+}
+
+// customAppVersionMeta is the on-disk metadata stored beside each retained build
+// (versions/v<N>/meta.json). Current is intentionally NOT persisted — it is
+// derived against the manifest at read time so it can never go stale.
+type customAppVersionMeta struct {
+	Version   int    `json:"version"`
+	UpdatedAt string `json:"updatedAt"`
+	UpdatedBy string `json:"updatedBy"`
+}
+
+// ListVersions returns the retained versions, newest first, each annotated with
+// its capture metadata and whether it is the current build.
+func (s *customAppStore) ListVersions(id string) ([]CustomAppVersion, error) {
 	if err := validateCustomAppID(id); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Best-effort current version: a missing manifest just means nothing is
+	// marked current (the versions dir read below still drives the list), so an
+	// unknown/corrupt app degrades to an empty list rather than an error.
+	var current int
+	if app, err := s.readManifestLocked(id); err == nil {
+		current = app.Version
+	}
 	dir := filepath.Join(s.appDir(id), customAppVersionsDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []int{}, nil
+			return []CustomAppVersion{}, nil
 		}
 		return nil, fmt.Errorf("app: read versions: %w", err)
 	}
-	out := []int{}
+	out := []CustomAppVersion{}
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "v") {
 			continue
@@ -629,10 +669,60 @@ func (s *customAppStore) ListVersions(id string) ([]int, error) {
 		if err != nil || n < 1 {
 			continue
 		}
-		out = append(out, n)
+		ver := CustomAppVersion{Version: n, Current: n == current}
+		if meta, ok := s.readVersionMetaLocked(dir, n); ok {
+			ver.UpdatedAt = meta.UpdatedAt
+			ver.UpdatedBy = meta.UpdatedBy
+		}
+		out = append(out, ver)
 	}
-	sort.Sort(sort.Reverse(sort.IntSlice(out)))
+	sort.Slice(out, func(i, j int) bool { return out[i].Version > out[j].Version })
 	return out, nil
+}
+
+// GetVersion returns a retained build's bytes plus its metadata WITHOUT changing
+// the current version — the non-destructive read behind the timeline's preview.
+// Restoring is the separate, explicit Rollback.
+func (s *customAppStore) GetVersion(id string, version int) (CustomAppVersion, string, error) {
+	if err := validateCustomAppID(id); err != nil {
+		return CustomAppVersion{}, "", err
+	}
+	if version < 1 {
+		return CustomAppVersion{}, "", newCustomAppCallerError("app: invalid version %d", version)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	versionsDir := filepath.Join(s.appDir(id), customAppVersionsDir)
+	body, err := os.ReadFile(filepath.Join(versionsDir, fmt.Sprintf("v%d", version), customAppEntry))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return CustomAppVersion{}, "", newCustomAppCallerError("app: version v%d not found", version)
+		}
+		return CustomAppVersion{}, "", fmt.Errorf("app: read version: %w", err)
+	}
+	ver := CustomAppVersion{Version: version}
+	if app, err := s.readManifestLocked(id); err == nil {
+		ver.Current = version == app.Version
+	}
+	if meta, ok := s.readVersionMetaLocked(versionsDir, version); ok {
+		ver.UpdatedAt = meta.UpdatedAt
+		ver.UpdatedBy = meta.UpdatedBy
+	}
+	return ver, string(body), nil
+}
+
+// readVersionMetaLocked reads versions/v<N>/meta.json. ok=false (not an error)
+// when the file is absent or unparseable, so legacy snapshots degrade quietly.
+func (s *customAppStore) readVersionMetaLocked(versionsDir string, version int) (customAppVersionMeta, bool) {
+	raw, err := os.ReadFile(filepath.Join(versionsDir, fmt.Sprintf("v%d", version), customAppVersionMetaFile))
+	if err != nil {
+		return customAppVersionMeta{}, false
+	}
+	var meta customAppVersionMeta
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return customAppVersionMeta{}, false
+	}
+	return meta, true
 }
 
 // Rollback restores a prior version's built bytes as a NEW forward version.

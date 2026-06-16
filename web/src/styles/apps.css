@@ -246,6 +246,38 @@
 .custom-app-view__body {
   min-height: 0;
   overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* History open: a version-timeline rail to the left of the live preview. */
+.custom-app-view__body--history {
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.custom-app-view__stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The frame / live preview / loader fills the stage below any banner. */
+.custom-app-view__stage > * {
+  min-height: 0;
+}
+
+.custom-app-view__stage > *:last-child {
+  flex: 1 1 auto;
+}
+
+.custom-app-view__preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .custom-app-frame {
@@ -254,6 +286,147 @@
   height: 100%;
   border: 0;
   background: #fff;
+}
+
+/* Read-only banner over a non-destructive version preview. */
+.custom-app-view__banner {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.custom-app-view__banner-text strong {
+  font-family: var(--font-mono, monospace);
+}
+
+.custom-app-view__banner-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.custom-app-view__banner-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.custom-app-view__banner-btn:hover {
+  background: var(--bg-card);
+}
+
+.custom-app-view__banner-btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.custom-app-view__banner-btn--primary:hover {
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.custom-app-view__banner-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Version timeline rail. */
+.app-version-timeline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-card);
+  overflow-y: auto;
+}
+
+.app-version-timeline__header {
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.app-version-timeline__empty {
+  padding: 4px 14px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.app-version-timeline__list {
+  margin: 0;
+  padding: 0 6px 8px;
+  list-style: none;
+}
+
+.app-version-timeline__row {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.app-version-timeline__row:hover {
+  background: var(--bg-subtle);
+}
+
+.app-version-timeline__row--active {
+  background: var(--bg-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.app-version-timeline__badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-version-timeline__current {
+  justify-self: start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.app-version-timeline__meta {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* App Builder dialog body — the Radix Dialog primitive handles the shell. */

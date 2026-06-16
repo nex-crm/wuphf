@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EditPencil, MoreHoriz } from "iconoir-react";
+import { ClockRotateRight, EditPencil, MoreHoriz } from "iconoir-react";
 
 import {
   deleteApp,
   getApp,
+  getAppVersion,
   listAppVersions,
   rollbackApp,
 } from "../../api/apps";
+import { formatRelativeTime } from "../../lib/format";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { showNotice } from "../ui/Toast";
 import { AppLivePreview } from "./AppLivePreview";
+import { AppVersionTimeline } from "./AppVersionTimeline";
 import { CustomAppFrame } from "./CustomAppFrame";
 
 interface CustomAppViewProps {
@@ -21,15 +24,23 @@ interface CustomAppViewProps {
 
 /**
  * CustomAppView renders one agent-generated internal tool: a header (icon, name,
- * version, Edit, an overflow menu) above the sandboxed CustomAppFrame. Edit is
- * the primary action. The destructive Delete and the version rollback both live
- * in the overflow menu so an operator can't lose or break a depended-on tool
- * with a stray click — the trust net the modify wedge needs.
+ * version, History, Edit, an overflow menu) above the sandboxed frame. Edit is
+ * the primary action; the destructive Delete lives in the overflow menu so a
+ * stray click can't remove a depended-on tool.
+ *
+ * History is the trust net behind the modify wedge: it opens an append-only
+ * version timeline beside the preview. Selecting an older build previews it
+ * NON-destructively (the current version is untouched); "Restore this version"
+ * then re-publishes those bytes as a new forward version, so a restore is itself
+ * reversible. An operator can look before they leap.
  */
 export function CustomAppView({ appId }: CustomAppViewProps) {
   const queryClient = useQueryClient();
   const openUpdateAppDialog = useAppStore((s) => s.openUpdateAppDialog);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // The older build being previewed, or null while viewing the current build.
+  const [previewVersion, setPreviewVersion] = useState<number | null>(null);
   // Live = the running dev server (HMR); Sealed = the published single-file
   // bundle. Default to Live so opening an app shows the real, current tool.
   const [mode, setMode] = useState<"live" | "sealed">("live");
@@ -44,12 +55,23 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   const versions = useQuery({
     queryKey: ["app-versions", appId],
     queryFn: () => listAppVersions(appId),
-    enabled: menuOpen,
+    enabled: historyOpen,
+  });
+
+  const currentVersion = data?.app.version ?? 0;
+  const isPreviewing =
+    previewVersion !== null && previewVersion !== currentVersion;
+
+  const versionPreview = useQuery({
+    queryKey: ["app-version", appId, previewVersion],
+    queryFn: () => getAppVersion(appId, previewVersion as number),
+    enabled: isPreviewing,
   });
 
   const rollback = useMutation({
     mutationFn: (version: number) => rollbackApp(appId, version),
     onSuccess: async (restored) => {
+      setPreviewVersion(null);
       await queryClient.invalidateQueries({ queryKey: ["app", appId] });
       await queryClient.invalidateQueries({
         queryKey: ["app-versions", appId],
@@ -76,6 +98,19 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
+
+  function toggleHistory(): void {
+    setHistoryOpen((open) => {
+      // Leaving history drops any in-flight preview so the frame returns to live.
+      if (open) setPreviewVersion(null);
+      return !open;
+    });
+  }
+
+  function onSelectVersion(version: number): void {
+    // Selecting the current build is "back to live", not a preview.
+    setPreviewVersion(version === currentVersion ? null : version);
+  }
 
   function onDelete(): void {
     if (!data) return;
@@ -130,7 +165,6 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   }
 
   const { app, html } = data;
-  const priorVersions = (versions.data ?? []).filter((v) => v !== app.version);
 
   return (
     <div className="custom-app-view">
@@ -144,30 +178,43 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
             <p className="custom-app-view__summary">{app.summary}</p>
           ) : null}
         </div>
-        <div className="custom-app-view__mode">
-          <button
-            type="button"
-            className="custom-app-view__mode-btn"
-            aria-pressed={mode === "live"}
-            onClick={() => setMode("live")}
-          >
-            Live
-          </button>
-          <button
-            type="button"
-            className="custom-app-view__mode-btn"
-            aria-pressed={mode === "sealed"}
-            onClick={() => setMode("sealed")}
-          >
-            Sealed
-          </button>
-        </div>
+        {/* The Live/Sealed toggle is meaningless while previewing an older,
+            already-sealed build, so it yields to the preview banner. */}
+        {isPreviewing ? null : (
+          <div className="custom-app-view__mode">
+            <button
+              type="button"
+              className="custom-app-view__mode-btn"
+              aria-pressed={mode === "live"}
+              onClick={() => setMode("live")}
+            >
+              Live
+            </button>
+            <button
+              type="button"
+              className="custom-app-view__mode-btn"
+              aria-pressed={mode === "sealed"}
+              onClick={() => setMode("sealed")}
+            >
+              Sealed
+            </button>
+          </div>
+        )}
         <span
           className="custom-app-view__version"
           title={`Updated ${app.updatedAt}`}
         >
           v{app.version}
         </span>
+        <button
+          type="button"
+          className="custom-app-view__action"
+          aria-pressed={historyOpen}
+          onClick={toggleHistory}
+        >
+          <ClockRotateRight width={15} height={15} />
+          <span>History</span>
+        </button>
         <button
           type="button"
           className="custom-app-view__action"
@@ -189,33 +236,6 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
           </button>
           {menuOpen ? (
             <div className="custom-app-view__menu" role="menu">
-              <div className="custom-app-view__menu-section">
-                Restore a previous version
-              </div>
-              {versions.isLoading ? (
-                <div className="custom-app-view__menu-empty">Loading…</div>
-              ) : priorVersions.length === 0 ? (
-                <div className="custom-app-view__menu-empty">
-                  No earlier versions yet.
-                </div>
-              ) : (
-                priorVersions.slice(0, 8).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    role="menuitem"
-                    className="custom-app-view__menu-item"
-                    disabled={rollback.isPending}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      rollback.mutate(v);
-                    }}
-                  >
-                    Restore v{v}
-                  </button>
-                ))
-              )}
-              <div className="custom-app-view__menu-divider" />
               <button
                 type="button"
                 role="menuitem"
@@ -228,12 +248,103 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
           ) : null}
         </div>
       </header>
-      <div className="custom-app-view__body">
-        {mode === "live" ? (
-          <AppLivePreview appId={appId} title={app.name} />
-        ) : (
-          <CustomAppFrame html={html} title={app.name} />
-        )}
+      <div
+        className={`custom-app-view__body${
+          historyOpen ? " custom-app-view__body--history" : ""
+        }`}
+      >
+        {historyOpen ? (
+          <AppVersionTimeline
+            versions={versions.data ?? []}
+            isLoading={versions.isLoading}
+            selectedVersion={previewVersion}
+            currentVersion={app.version}
+            onSelect={onSelectVersion}
+          />
+        ) : null}
+        <div className="custom-app-view__stage">
+          {isPreviewing ? (
+            <PreviewBanner
+              version={previewVersion as number}
+              currentVersion={app.version}
+              updatedBy={versionPreview.data?.updatedBy}
+              updatedAt={versionPreview.data?.updatedAt}
+              restoring={rollback.isPending}
+              onRestore={() => rollback.mutate(previewVersion as number)}
+              onBack={() => setPreviewVersion(null)}
+            />
+          ) : null}
+          {isPreviewing ? (
+            versionPreview.isLoading || !versionPreview.data ? (
+              <div className="custom-app-view__preview-loading">
+                Loading v{previewVersion}…
+              </div>
+            ) : (
+              <CustomAppFrame
+                html={versionPreview.data.html}
+                title={`${app.name} (v${previewVersion})`}
+              />
+            )
+          ) : mode === "live" ? (
+            <AppLivePreview appId={appId} title={app.name} />
+          ) : (
+            <CustomAppFrame html={html} title={app.name} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface PreviewBannerProps {
+  version: number;
+  currentVersion: number;
+  updatedBy?: string;
+  updatedAt?: string;
+  restoring: boolean;
+  onRestore: () => void;
+  onBack: () => void;
+}
+
+/**
+ * PreviewBanner sits atop a non-destructive version preview: it names what the
+ * operator is looking at and offers the two safe exits — restore these bytes as
+ * a new forward version, or step back to the current build.
+ */
+function PreviewBanner({
+  version,
+  currentVersion,
+  updatedBy,
+  updatedAt,
+  restoring,
+  onRestore,
+  onBack,
+}: PreviewBannerProps) {
+  const meta = [updatedBy, updatedAt && formatRelativeTime(updatedAt)]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="custom-app-view__banner" role="status">
+      <span className="custom-app-view__banner-text">
+        Viewing <strong>v{version}</strong> (read-only)
+        {meta ? ` · ${meta}` : ""}
+      </span>
+      <div className="custom-app-view__banner-actions">
+        <button
+          type="button"
+          className="custom-app-view__banner-btn custom-app-view__banner-btn--primary"
+          disabled={restoring}
+          onClick={onRestore}
+        >
+          {restoring ? "Restoring…" : "Restore this version"}
+        </button>
+        <button
+          type="button"
+          className="custom-app-view__banner-btn"
+          onClick={onBack}
+        >
+          Back to current v{currentVersion}
+        </button>
       </div>
     </div>
   );
