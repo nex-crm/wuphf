@@ -3,15 +3,17 @@ package team
 // slack_task_reporting.go makes a task's Slack thread a live status feed for
 // the humans and foreign agents watching it. Three signals land here:
 //
-//	subtask created + assigned → one line in the PARENT task's thread that
-//	                             @-pings the assignee (a registered foreign
-//	                             agent gets a real <@U…>), so an agent that was
-//	                             handed work is actually notified — not silently
-//	                             assigned. This is the bug the bridge had: an
-//	                             assignee was only ever pinged when a CEO message
-//	                             LED with "@agent"; a bare subtask assignment
-//	                             pinged nobody, so e.g. Hermes got a subtask and
-//	                             never knew.
+//	subtask created + assigned → the real @-ping + full task context is posted
+//	                             into the SUBTASK's OWN thread, and only a plain
+//	                             (no-ping) MENTION line lands in the parent. The
+//	                             ping is what makes a foreign agent pick the work
+//	                             up; putting it in the subtask thread is what
+//	                             makes the agent work THERE. The earlier version
+//	                             pinged the assignee in the PARENT thread, so a
+//	                             foreign agent (e.g. Hermes) replied in the parent
+//	                             and never started its subtask. The assignee must
+//	                             be ADDRESSED where the work lives (the subtask),
+//	                             not where it is tracked (the parent).
 //	lifecycle state change     → a concise threaded update in the task's own
 //	                             thread (planning → running → review → done),
 //	                             de-duped so identical states never spam.
@@ -114,7 +116,8 @@ func (r *slackTaskReporter) prime() {
 func (r *slackTaskReporter) reconcile(ctx context.Context) {
 	for _, task := range r.t.Broker.AllTasks() {
 		task := task
-		// New subtask with a parent → announce + ping in the PARENT thread.
+		// New subtask with a parent → delegate (ping + context) in the SUBTASK
+		// thread, mention (no ping) in the PARENT thread.
 		if parent := strings.TrimSpace(task.ParentIssueID); parent != "" && !r.seenSubtasks[task.ID] {
 			if r.reportSubtaskAssigned(ctx, &task, parent) {
 				r.seenSubtasks[task.ID] = true
@@ -130,51 +133,80 @@ func (r *slackTaskReporter) reconcile(ctx context.Context) {
 	}
 }
 
-// reportSubtaskAssigned posts one line in the PARENT task's Slack thread that
-// names the new subtask, links it, and pings its owner. A registered foreign
-// agent gets a real <@U…> mention (so it is actually notified); any other owner
-// renders as a plain escaped name. Returns true when the line was posted (or
-// when there is nothing to post for a legitimate reason, e.g. no parent thread
-// yet), so the caller marks the subtask seen and does not retry forever.
+// reportSubtaskAssigned delivers a newly-assigned subtask two ways:
+//
+//  1. DELEGATION in the SUBTASK's OWN thread — a real <@U…> ping for the owner
+//     plus the task's title and details, so a registered foreign agent picks the
+//     work up and works it THERE. This is the only place the assignee is pinged.
+//  2. MENTION in the PARENT thread — a plain, no-ping line naming the subtask and
+//     its owner, so humans watching the parent see the structure without pulling
+//     the assignee into the wrong thread.
+//
+// Returns true when the subtask has been handled (delivered, or unbridged so
+// there is nothing to deliver), so the caller marks it seen. Returns false only
+// on a transient failure worth retrying, or when there is no owner to address
+// yet (left unseen so a later poll delivers once an owner is set).
 func (r *slackTaskReporter) reportSubtaskAssigned(ctx context.Context, sub *teamTask, parentID string) bool {
 	owner := strings.TrimSpace(sub.Owner)
 	if owner == "" {
-		// No assignee to ping yet. Leave it UNSEEN so a later poll, once an
-		// owner is set, posts the ping.
+		// No assignee to address yet. Leave UNSEEN so a later poll delivers once
+		// an owner is set.
 		return false
 	}
-	// The parent must have a Slack thread root for the line to have a home.
-	threadTS := r.t.ensureTaskThreadRoot(ctx, parentID)
-	if threadTS == "" {
-		// Parent not bridged (or its channel has no Slack surface). Mark seen so
-		// we don't re-attempt every tick — the parent will never gain a thread.
-		return true
-	}
-	parentTask := r.t.Broker.TaskByID(parentID)
-	if parentTask == nil {
-		return true
-	}
-	channelID := r.t.channelIDForSlug(normalizeChannelSlug(parentTask.Channel))
-	if channelID == "" {
-		return true
-	}
 
-	idLink := r.t.taskIDLink(sub.ID)
-	state := slackTaskCardState(sub)
-	text := fmt.Sprintf("Subtask %s: %s → %s (%s)",
-		idLink, slackEscape(truncate(strings.TrimSpace(sub.Title), 200)),
-		r.t.ownerMention(owner), slackEscape(state))
-
+	// 1) Delegate in the subtask's own thread: ping + full context.
+	subThreadTS := r.t.ensureTaskThreadRoot(ctx, sub.ID)
+	subChannelID := r.t.channelIDForSlug(normalizeChannelSlug(sub.Channel))
+	if subThreadTS == "" || subChannelID == "" {
+		// Subtask not bridged to a Slack surface — nothing to deliver. Mark seen
+		// so we don't re-probe it every tick.
+		return true
+	}
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if _, _, err := r.t.api.PostMessageContext(cctx, channelID,
-		slack.MsgOptionText(text, false),
-		slack.MsgOptionTS(threadTS),
-	); err != nil {
-		log.Printf("[slack] subtask report failed for %s: %v", sub.ID, err)
+	_, _, err := r.t.api.PostMessageContext(cctx, subChannelID,
+		slack.MsgOptionText(r.t.subtaskDelegationText(sub, owner), false),
+		slack.MsgOptionTS(subThreadTS),
+	)
+	cancel()
+	if err != nil {
+		log.Printf("[slack] subtask delegation failed for %s: %v", sub.ID, err)
 		return false
+	}
+
+	// 2) Mention (no ping) in the parent thread so the parent stays a live map of
+	//    its subtasks. Best-effort: a failure here does not undo the delegation.
+	if parentTS := r.t.ensureTaskThreadRoot(ctx, parentID); parentTS != "" {
+		if parentTask := r.t.Broker.TaskByID(parentID); parentTask != nil {
+			if parentChannelID := r.t.channelIDForSlug(normalizeChannelSlug(parentTask.Channel)); parentChannelID != "" {
+				line := fmt.Sprintf("Subtask %s assigned to %s (%s); handed off in its own thread.",
+					r.t.taskIDLink(sub.ID), r.t.ownerLabel(owner), slackEscape(slackTaskCardState(sub)))
+				pctx, pcancel := context.WithTimeout(ctx, 30*time.Second)
+				if _, _, perr := r.t.api.PostMessageContext(pctx, parentChannelID,
+					slack.MsgOptionText(line, false),
+					slack.MsgOptionTS(parentTS),
+				); perr != nil {
+					log.Printf("[slack] subtask parent mention failed for %s: %v", sub.ID, perr)
+				}
+				pcancel()
+			}
+		}
 	}
 	return true
+}
+
+// subtaskDelegationText is the message posted INTO a subtask's own thread to hand
+// it to its owner: a real ping (so a foreign agent picks it up), the linked id +
+// title, the task details as context, and an instruction to work it in-thread.
+func (t *SlackTransport) subtaskDelegationText(sub *teamTask, owner string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s you own %s: *%s*.\n",
+		t.ownerMention(owner), t.taskIDLink(sub.ID),
+		slackEscape(truncate(strings.TrimSpace(sub.Title), 200)))
+	if details := strings.TrimSpace(sub.Details); details != "" {
+		fmt.Fprintf(&b, "%s\n", slackEscape(truncate(details, 1500)))
+	}
+	b.WriteString("Work this task in THIS thread: post your progress and the deliverable here, and reply here if you need anything to proceed.")
+	return b.String()
 }
 
 // reportLifecycle posts a concise state-change line into the task's own Slack
@@ -282,6 +314,24 @@ func (t *SlackTransport) ownerMention(owner string) string {
 		}
 	}
 	return "@" + slackEscape(name)
+}
+
+// ownerLabel renders a task owner for a FYI/status reference that must NOT ping —
+// always the plain display name, never a <@U…>. Used in the parent thread, where
+// naming the assignee should not pull a foreign agent into the wrong thread. The
+// real ping is reserved for the subtask delegation (ownerMention).
+func (t *SlackTransport) ownerLabel(owner string) string {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return "unassigned"
+	}
+	name := owner
+	if names := t.Broker.MemberDisplayNames(); names != nil {
+		if n := strings.TrimSpace(names[normalizeActorSlug(owner)]); n != "" {
+			name = n
+		}
+	}
+	return slackEscape(name)
 }
 
 // wikiTitleFromPath derives a human title from a wiki path: the base file name

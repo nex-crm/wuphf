@@ -26,10 +26,14 @@ func TestSlackChannelConventionNote(t *testing.T) {
 	note := l.slackChannelConventionNote("slack-office")
 	for _, want := range []string{
 		"NEVER @-tag",
-		"START your message with @agent-slug",
+		// Delegation goes through a subtask, not a parent-thread tag.
+		"give it its OWN subtask",
+		"Do NOT @-tag the assignee in the parent",
 		"ONE coordinating presence",
 		"post NOTHING",
 		"acknowledgement-only",
+		// Task threads are active, unlike the main channel.
+		"INSIDE A TASK THREAD you are NOT passive",
 	} {
 		if !strings.Contains(note, want) {
 			t.Errorf("slack convention note missing %q", want)

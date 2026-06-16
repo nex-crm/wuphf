@@ -103,27 +103,52 @@ func TestReportSubtaskAssignedPingsRegisteredAgent(t *testing.T) {
 	seedReportTask(b, sub)
 
 	r := &slackTaskReporter{t: tr, lastState: map[string]string{}, seenSubtasks: map[string]bool{}}
+	// Establish the parent + subtask thread roots first so their ts values are
+	// known and stable; reconcile then threads the delegation/mention onto them.
+	parentTS := tr.ensureTaskThreadRoot(context.Background(), "OFFICE-1")
+	subTS := tr.ensureTaskThreadRoot(context.Background(), "OFFICE-2")
+	if parentTS == "" || subTS == "" || parentTS == subTS {
+		t.Fatalf("parent and subtask must have distinct thread roots: parent=%q sub=%q", parentTS, subTS)
+	}
 	r.reconcile(context.Background())
 
 	posts := api.snapshotPosts()
-	var subtaskLine string
-	for _, p := range posts {
-		if strings.Contains(p.Text, "Subtask") {
-			subtaskLine = p.Text
-			if p.ThreadTS == "" {
-				t.Errorf("subtask line must be threaded under the parent: %+v", p)
-			}
+	var delegation, parentMention *fakePost
+	for i := range posts {
+		p := &posts[i]
+		if strings.Contains(p.Text, "<@U999>") && p.ThreadTS == subTS {
+			delegation = p
+		}
+		if strings.Contains(p.Text, "assigned to") && p.ThreadTS == parentTS {
+			parentMention = p
 		}
 	}
-	if subtaskLine == "" {
-		t.Fatalf("expected a subtask report line, got posts=%+v", posts)
+
+	// 1) The real ping + context lands in the SUBTASK's own thread — so a foreign
+	//    agent picks up the work and works it there, not in the parent.
+	if delegation == nil {
+		t.Fatalf("expected a delegation (ping + context) in the subtask thread %q, posts=%+v", subTS, posts)
 	}
-	// The assignee is pinged with a REAL <@U…> mention — the core bug fix.
-	if !strings.Contains(subtaskLine, "<@U999>") {
-		t.Errorf("subtask line must ping the registered agent: %q", subtaskLine)
+	if !strings.Contains(delegation.Text, "<http://host/tasks/OFFICE-2|OFFICE-2>") {
+		t.Errorf("delegation must link the subtask id: %q", delegation.Text)
 	}
-	if !strings.Contains(subtaskLine, "<http://host/tasks/OFFICE-2|OFFICE-2>") {
-		t.Errorf("subtask line must link the subtask id: %q", subtaskLine)
+	if !strings.Contains(delegation.Text, "Draft the brief") {
+		t.Errorf("delegation must carry the task title as context: %q", delegation.Text)
+	}
+	if !strings.Contains(delegation.Text, "THIS thread") {
+		t.Errorf("delegation must tell the agent to work in-thread: %q", delegation.Text)
+	}
+
+	// 2) The PARENT thread gets a plain mention with NO ping, so the assignee is
+	//    not pulled into the parent.
+	if parentMention == nil {
+		t.Fatalf("expected a mention line in the parent thread %q, posts=%+v", parentTS, posts)
+	}
+	if strings.Contains(parentMention.Text, "<@U999>") {
+		t.Errorf("parent mention must NOT ping the assignee: %q", parentMention.Text)
+	}
+	if !strings.Contains(parentMention.Text, "<http://host/tasks/OFFICE-2|OFFICE-2>") {
+		t.Errorf("parent mention must link the subtask id: %q", parentMention.Text)
 	}
 
 	// De-dupe: a second pass announces nothing new.
