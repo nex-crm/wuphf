@@ -40,3 +40,11 @@ bun install
 bun run build          # produces dist/index.html (single file)
 # then call the register_app MCP tool with the contents of dist/index.html
 ```
+
+## Live-preview tooling (do not remove)
+
+`src/wuphf-inspector.ts` and the `data-wuphf-source` stamping in `vite.config.ts`
+power the live preview's **select to edit** and runtime-error surfacing. They are
+dev-only — `vite.config.ts` injects the inspector and the production single-file
+build strips all of it — so leave both in place. You may freely rewrite
+`src/main.tsx`; the inspector loads via `index.html`, not the entry file.

@@ -2,12 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
-import { installInspector } from "./wuphf-inspector";
 import "./styles.css";
 
-// Dev-only: wires up "select to edit" + runtime-error surfacing for the WUPHF
-// live preview. No-op (and tree-shaken) in the sealed production build.
-installInspector();
+// NOTE: the live-preview "select to edit" + error-capture inspector is injected
+// by vite.config.ts (dev only), NOT imported here — so it survives any rewrite
+// of this entry file by the App Builder and never ships in the sealed build.
 
 const root = document.getElementById("root");
 if (root) {
