@@ -123,13 +123,40 @@ func (r *slackTaskReporter) reconcile(ctx context.Context) {
 				r.seenSubtasks[task.ID] = true
 			}
 		}
-		// Lifecycle state change → update in the task's OWN thread.
+		// Lifecycle state change → only post the ones a reader actually needs:
+		// outcomes (done/approved/rejected) and attention/coordination
+		// (blocked/decision/changes-requested). Routine internal transitions
+		// (running/review/queued/…) are NOT posted — narrating every step is the
+		// notification overwhelm we are deliberately avoiding (work quietly, speak
+		// for outcomes). We still record the state so a later worth-posting
+		// transition is detected as a change.
 		state := slackTaskCardState(&task)
 		if r.lastState[task.ID] != state {
-			if r.reportLifecycle(ctx, &task, state) {
+			if !slackLifecycleWorthReporting(state) {
+				r.lastState[task.ID] = state // seen, but not worth a post
+			} else if r.reportLifecycle(ctx, &task, state) {
 				r.lastState[task.ID] = state
 			}
 		}
+	}
+}
+
+// slackLifecycleWorthReporting reports whether a lifecycle state is worth a Slack
+// post. Only OUTCOME states (the task finished or was decided) and
+// COORDINATION/attention states (something needs a human or surfaces a blocker)
+// qualify. Routine internal transitions stay silent — the thread shows the work,
+// not a play-by-play of every status change.
+func slackLifecycleWorthReporting(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "done", "completed",
+		string(LifecycleStateApproved),
+		string(LifecycleStateRejected),
+		string(LifecycleStateBlockedOnPRMerge),
+		string(LifecycleStateChangesRequested),
+		string(LifecycleStateDecision):
+		return true
+	default:
+		return false
 	}
 }
 

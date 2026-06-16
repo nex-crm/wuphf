@@ -68,15 +68,12 @@ type slackAPI interface {
 	// where WUPHF was tagged.
 	GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error)
 	// SetAssistantThreadsStatusContext sets the native AI "is thinking…" status
-	// on a thread (assistant.threads.setStatus); an empty Status clears it. The
-	// native status only renders inside Slack's 1:1 Assistant container, not a
-	// shared channel, so the office uses a posted-then-deleted in-thread message
-	// (see runAgentThinkingStatus) for the channel "working…" indicator instead.
-	// Kept for a future native 1:1 assistant surface. Requires assistant:write.
+	// on a thread (assistant.threads.setStatus); an empty Status clears it. This
+	// is the office's "working…" signal: it costs zero channel messages (it shows
+	// in the thread composer footer and clears on completion), so it never spams
+	// followers or eats the rate budget the way a posted status line would. Needs
+	// the app's Assistant feature + assistant:write; degrades silently otherwise.
 	SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error
-	// DeleteMessageContext deletes a previously-posted message (chat.delete),
-	// used to clear the transient "working…" indicator once an agent goes idle.
-	DeleteMessageContext(ctx context.Context, channelID, timestamp string) (string, string, error)
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -138,10 +135,6 @@ func (c *slackClient) GetPermalinkContext(ctx context.Context, params *slack.Per
 
 func (c *slackClient) SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error {
 	return c.api.SetAssistantThreadsStatusContext(ctx, params)
-}
-
-func (c *slackClient) DeleteMessageContext(ctx context.Context, channelID, timestamp string) (string, string, error) {
-	return c.api.DeleteMessageContext(ctx, channelID, timestamp)
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and

@@ -84,8 +84,19 @@ func isThinkingActivity(snap agentActivitySnapshot) bool {
 	return strings.EqualFold(strings.TrimSpace(snap.Status), "active")
 }
 
-// runAgentThinkingStatus mirrors the broker activity stream onto a transient
-// in-thread "working…" message. It blocks until ctx is cancelled.
+// runAgentThinkingStatus mirrors the broker activity stream onto Slack's NATIVE
+// assistant status (assistant.threads.setStatus). It blocks until ctx is
+// cancelled.
+//
+// Native status is the right mechanism here precisely because it costs ZERO
+// channel messages: it shows "<name> is thinking…" in the thread's composer
+// footer while a turn runs and clears the instant the agent goes idle, without
+// posting (and then deleting) a real message. Posting status messages is the
+// notification-overwhelm / rate-limit trap we are avoiding — a status line
+// cannot be cleanly retracted and pings every thread follower. The call is
+// best-effort: if the app lacks the Assistant feature / assistant:write scope
+// the status simply does not render (logged at most once), and the office stays
+// quiet rather than falling back to posting messages.
 func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 	if t.Broker == nil || t.api == nil {
 		<-ctx.Done()
@@ -94,34 +105,39 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 	activity, unsub := t.Broker.SubscribeActivity(256)
 	defer unsub()
 
-	// posted tracks at most ONE indicator per OWNER (key = owner slug), recording
-	// where it was posted so it can be cleared. Scoping per-owner (not per-thread)
-	// bounds the indicator to a single post + delete per turn: an owner with many
-	// still-executable tasks would otherwise post/delete in every one of their
-	// threads on every activity event and blow Slack's rate limit (observed live).
-	type indicator struct{ channelID, ts string }
-	posted := map[string]indicator{}
+	// shown tracks the single thread (per OWNER) the status is currently set on,
+	// so we set/clear exactly once per turn. Scoping per-owner (the most-recently-
+	// updated active thread) keeps us from setting status on every task an owner
+	// still holds.
+	type statusRef struct{ channelID, threadTS string }
+	shown := map[string]statusRef{}
+	setStatus := func(channelID, threadTS, text string) error {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		return t.api.SetAssistantThreadsStatusContext(cctx, slack.AssistantThreadsSetStatusParameters{
+			ChannelID: channelID, ThreadTS: threadTS, Status: text,
+		})
+	}
 	clear := func(slug string) {
-		ind, up := posted[slug]
+		ref, up := shown[slug]
 		if !up {
 			return
 		}
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, _, err := t.api.DeleteMessageContext(cctx, ind.channelID, ind.ts)
-		cancel()
-		if err != nil {
-			log.Printf("[slack] thinking indicator clear for %s: %v", slug, err)
+		if err := setStatus(ref.channelID, ref.threadTS, ""); err != nil {
+			log.Printf("[slack] thinking status clear for %s: %v", slug, err)
 			return
 		}
-		delete(posted, slug)
+		delete(shown, slug)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Clear any lingering indicators on shutdown (best-effort, detached ctx).
-			for _, ind := range posted {
-				_, _, _ = t.api.DeleteMessageContext(context.Background(), ind.channelID, ind.ts)
+			// Clear any lingering status on shutdown (best-effort, detached ctx).
+			for _, ref := range shown {
+				_ = t.api.SetAssistantThreadsStatusContext(context.Background(), slack.AssistantThreadsSetStatusParameters{
+					ChannelID: ref.channelID, ThreadTS: ref.threadTS, Status: "",
+				})
 			}
 			return ctx.Err()
 		case snap, ok := <-activity:
@@ -133,9 +149,9 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 				clear(slug)
 				continue
 			}
-			// Active. Show one indicator in the owner's most-recently-updated task
-			// thread (refs[0]); if one is already up for this owner, do nothing.
-			if _, already := posted[slug]; already {
+			// Active. Set the status on the owner's most-recently-updated task
+			// thread (refs[0]); if it's already set for this owner, do nothing.
+			if _, already := shown[slug]; already {
 				continue
 			}
 			refs := t.Broker.ActiveSlackTaskThreadsForOwner(slug)
@@ -143,17 +159,11 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 				continue
 			}
 			ref := refs[0]
-			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			_, ts, err := t.api.PostMessageContext(cctx, ref.ChannelID,
-				slack.MsgOptionText(t.thinkingStatusText(slug), false),
-				slack.MsgOptionTS(ref.ThreadTS),
-			)
-			cancel()
-			if err != nil {
-				log.Printf("[slack] thinking indicator post for %s: %v", ref.TaskID, err)
+			if err := setStatus(ref.ChannelID, ref.ThreadTS, t.thinkingStatusText(slug)); err != nil {
+				log.Printf("[slack] thinking status for %s: %v", ref.TaskID, err)
 				continue
 			}
-			posted[slug] = indicator{channelID: ref.ChannelID, ts: ts}
+			shown[slug] = statusRef{channelID: ref.ChannelID, threadTS: ref.ThreadTS}
 		}
 	}
 }
@@ -169,5 +179,5 @@ func (t *SlackTransport) thinkingStatusText(slug string) string {
 			}
 		}
 	}
-	return fmt.Sprintf("💭 %s is thinking…", name)
+	return fmt.Sprintf("%s is thinking…", name)
 }

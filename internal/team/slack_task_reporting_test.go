@@ -204,33 +204,55 @@ func setReportTaskOwner(b *Broker, id, owner string) {
 
 // --- Item 3: lifecycle reporting ---
 
-func TestReportLifecycleTransitionsAndDeDupes(t *testing.T) {
+func TestReportLifecycleOnlyOutcomeAndCoordinationStates(t *testing.T) {
 	api := newFakeSlackAPI()
 	tr, b := newTestSlackTransport(t, "C0123", api)
 	b.SetWebURL("http://host")
 	seedReportTask(b, teamTask{ID: "OFFICE-5", Channel: "slack-general", Title: "Ship it", Owner: "ceo", LifecycleState: LifecycleStateRunning})
 
 	r := &slackTaskReporter{t: tr, lastState: map[string]string{}, seenSubtasks: map[string]bool{}}
-	// First sighting (running) is a transition from "" → posts.
+	// Routine internal state (running) must NOT post — narrating every step is the
+	// notification overwhelm we avoid (work quietly, speak for outcomes).
 	r.reconcile(context.Background())
-	if countLifecycleLines(api, "running") != 1 {
-		t.Fatalf("expected one running line, posts=%+v", api.snapshotPosts())
+	if n := countLifecycleLines(api, "is now"); n != 0 {
+		t.Fatalf("routine state (running) must not post a lifecycle line, got %d: %+v", n, api.snapshotPosts())
 	}
-	// Same state → no new post.
-	r.reconcile(context.Background())
-	if countLifecycleLines(api, "running") != 1 {
-		t.Fatalf("identical state must not re-post: posts=%+v", api.snapshotPosts())
-	}
-	// Transition to review → one new post.
+	// review is also routine internal → still silent.
 	setReportTaskState(b, "OFFICE-5", LifecycleStateReview)
 	r.reconcile(context.Background())
-	if countLifecycleLines(api, "review") != 1 {
-		t.Fatalf("expected one review line, posts=%+v", api.snapshotPosts())
+	if n := countLifecycleLines(api, "is now"); n != 0 {
+		t.Fatalf("review must not post a lifecycle line, got %d: %+v", n, api.snapshotPosts())
 	}
-	// The lifecycle line links the task id.
+	// Transition to an OUTCOME (approved) → one post.
+	setReportTaskState(b, "OFFICE-5", LifecycleStateApproved)
+	r.reconcile(context.Background())
+	if countLifecycleLines(api, "approved") != 1 {
+		t.Fatalf("expected one approved (outcome) line, posts=%+v", api.snapshotPosts())
+	}
+	// Same state → no new post (dedup).
+	r.reconcile(context.Background())
+	if countLifecycleLines(api, "approved") != 1 {
+		t.Fatalf("identical state must not re-post: posts=%+v", api.snapshotPosts())
+	}
+	// The lifecycle line ("… is now approved") links the task id.
 	for _, p := range api.snapshotPosts() {
-		if strings.Contains(p.Text, "review") && !strings.Contains(p.Text, "<http://host/tasks/OFFICE-5|OFFICE-5>") {
+		if strings.Contains(p.Text, "is now") && strings.Contains(p.Text, "approved") &&
+			!strings.Contains(p.Text, "<http://host/tasks/OFFICE-5|OFFICE-5>") {
 			t.Errorf("lifecycle line must link the task id: %q", p.Text)
+		}
+	}
+}
+
+// TestSlackLifecycleWorthReporting locks the outcome/coordination allowlist.
+func TestSlackLifecycleWorthReporting(t *testing.T) {
+	for _, s := range []string{"done", "completed", "approved", "rejected", "blocked_on_pr_merge", "changes_requested", "decision"} {
+		if !slackLifecycleWorthReporting(s) {
+			t.Errorf("%q is an outcome/coordination state and should be reported", s)
+		}
+	}
+	for _, s := range []string{"running", "review", "ready", "intake", "queued_behind_owner", "archived", "unknown", ""} {
+		if slackLifecycleWorthReporting(s) {
+			t.Errorf("%q is routine/internal and must stay silent", s)
 		}
 	}
 }

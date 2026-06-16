@@ -25,6 +25,9 @@ func TestSlackChannelConventionNote(t *testing.T) {
 
 	note := l.slackChannelConventionNote("slack-office")
 	for _, want := range []string{
+		// Work quietly: outcomes + coordination only, no progress narration.
+		"WORK QUIETLY, SPEAK FOR OUTCOMES AND COORDINATION",
+		"NEVER post progress or status",
 		"NEVER @-tag",
 		// Delegation goes through a subtask, not a parent-thread tag.
 		"give it its OWN subtask",

@@ -2,7 +2,6 @@ package team
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 )
@@ -115,29 +114,34 @@ func TestRunAgentThinkingStatus_SetsAndClears(t *testing.T) {
 		b.mu.Unlock()
 	}
 
-	// Active → a "thinking…" indicator is POSTED into the task thread (10.0).
+	// Active → native assistant status is SET on the task thread (10.0). No
+	// channel message is posted (that would be the notification-overwhelm trap).
 	pushActivity(agentActivitySnapshot{Slug: "ceo", Status: "active", Activity: "thinking"})
 	if !waitFor(func() bool {
-		for _, p := range api.posts {
-			if p.ThreadTS == "10.0" && strings.Contains(p.Text, "thinking") {
+		for _, s := range api.statuses {
+			if s.ThreadTS == "10.0" && s.Status != "" {
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Fatalf("expected a thinking indicator posted in thread 10.0, got posts=%+v", api.posts)
+		t.Fatalf("expected a non-empty thinking status on thread 10.0, got %+v", api.statuses)
+	}
+	if len(api.posts) != 0 {
+		t.Fatalf("the thinking indicator must NOT post a channel message, got posts=%+v", api.posts)
 	}
 
-	// Idle → the indicator is DELETED (the real reply posts separately).
+	// Idle → the status is CLEARED ("").
 	pushActivity(agentActivitySnapshot{Slug: "ceo", Status: "idle", Activity: "idle"})
 	if !waitFor(func() bool {
-		for _, d := range api.deletes {
-			if d.ChannelID == "C0123" {
-				return true
+		last, seen := "", false
+		for _, s := range api.statuses {
+			if s.ThreadTS == "10.0" {
+				last, seen = s.Status, true
 			}
 		}
-		return false
+		return seen && last == ""
 	}) {
-		t.Fatalf("expected the thinking indicator deleted on idle, got deletes=%+v", api.deletes)
+		t.Fatalf("expected the status cleared on idle, got %+v", api.statuses)
 	}
 }
