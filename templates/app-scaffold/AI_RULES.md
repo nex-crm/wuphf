@@ -35,8 +35,14 @@ sandbox enforce most of them, so breaking one means a broken or rejected app.
 
 ## Build & publish
 
+Build errors are ground truth. **Run the verify gate before you publish** and do
+NOT call `register_app` until it passes clean. If it fails, read the reported
+`file:line:col` errors, fix them, and run the gate again — up to ~2 rounds. If it
+still fails, report the blocker instead of publishing a broken app.
+
 ```bash
 bun install
+bun run verify         # GATE: tsc --noEmit && vite build — must pass before publish
 bun run build          # produces dist/index.html (single file)
 # then call the register_app MCP tool with the contents of dist/index.html
 ```
