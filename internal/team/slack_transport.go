@@ -462,6 +462,17 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 			t.publishHomeTab(ctx, home.User)
 			return true
 		}
+		// Assistant-pane lifecycle: bind the pane's IM channel to the office
+		// lead's DM so the user can chat with the office natively. The DM messages
+		// themselves arrive as ordinary MessageEvents (message.im) below.
+		if started, isStart := apiEvent.InnerEvent.Data.(*slackevents.AssistantThreadStartedEvent); isStart {
+			t.seedAssistantThread(started.AssistantThread.ChannelID)
+			return true
+		}
+		if changed, isChanged := apiEvent.InnerEvent.Data.(*slackevents.AssistantThreadContextChangedEvent); isChanged {
+			t.seedAssistantThread(changed.AssistantThread.ChannelID)
+			return true
+		}
 		msg, ok := apiEvent.InnerEvent.Data.(*slackevents.MessageEvent)
 		if !ok {
 			return true
@@ -738,6 +749,13 @@ func (t *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 	// Decision/interview cards are agent-authored (From is the raising agent),
 	// so the approval-gate path is unaffected.
 	if isHumanMessageSender(msg.From) {
+		return transport.Outbound{}, false
+	}
+	// Intentional-silence chokepoint: an agent that posts a NO_REPLY/[SILENT]
+	// marker (or hallucinates a "(silent)" narration line) said it has nothing to
+	// send. Drop it here, at the single send-point, so a quiet turn stays quiet
+	// even if a prompt regression slips the marker through (see slack_silence.go).
+	if slackOutboundIsSilent(msg.Content) {
 		return transport.Outbound{}, false
 	}
 	// A spawned Slack agent posts as ITSELF: capture the sender BEFORE the
