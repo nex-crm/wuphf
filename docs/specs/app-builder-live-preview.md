@@ -168,9 +168,14 @@ repo rules).
    getState equivalent: native `tool_result`s arrive name-less (referenced by
    call id), so the reducer resolves a running row when the next tool_use starts
    and at each turn boundary — only the active tool spins, no zombies.
-3. **Pre-commit `tsc --noEmit` + `vite build` gate + bounded ~2-round auto-fix**
-   re-prompt with `file:line:col` (dyad `chat_stream_handlers.ts` auto-fix loop).
-   Auto-loop build errors (ground truth); human-gate runtime errors. Effort M.
+3. **Pre-publish `tsc --noEmit` + `vite build` gate + bounded ~2-round auto-fix**
+   — SHIPPED (PR #1106). The scaffold ships a `verify` script
+   (`tsc --noEmit && vite build`); the App Builder build playbook
+   (`prompt_apps.go` + `AI_RULES.md`) MANDATES the gate before `register_app`,
+   bounded to ~2 fix rounds, and refuses to publish a build that doesn't pass.
+   Build errors are ground truth; enforced via the builder prompt + scaffold
+   script (the broker can't re-run `tsc`, so the gate's teeth are model
+   compliance — accepted ceiling).
 4. **Version timeline + non-destructive preview** — SHIPPED. Every published
    build is already retained append-only under `apps/<id>/versions/v<N>/`
    (snapshot dirs, NOT git — the store is deliberately decoupled from the wiki
@@ -184,9 +189,18 @@ repo rules).
    (re-publishes those bytes as a new forward version), so a restore is itself
    reversible. Restore moved out of the overflow menu (which now holds only the
    destructive Delete).
-5. **Select-to-edit** (`data-dyad-id="file:line:col"` JSX tagging + injected
-   selector → source map) **+ iframe error capture** via postMessage — the magic
-   moment; works under our sandbox. Effort S–M.
+5. **Select-to-edit** + **iframe error capture** — SHIPPED (PR #1106). A dev-only
+   Babel plugin stamps `data-wuphf-source="file:line:col"` on host JSX (React 19
+   removed fiber `_debugSource`, so a DOM attribute is the version-proof source
+   map); the inspector is injected at the HTML level (static module script) so it
+   survives the agent rewriting `main.tsx`, reads the nearest stamped ancestor on
+   click, and posts a display-only `wuphf-select`/`wuphf-error` over the existing
+   bridge (no new broker reach; tree-shaken from the sealed build). The host opens
+   a human-gated prefilled edit dialog / dismissible error banner. **Live-verified:
+   data-attribute stamping (18 elements); the full click→dialog round-trip is
+   correct-in-principle (grader verdict) but was NOT green-lit in the test browser
+   (service-worker/extension module-load interference) — needs a clean-browser
+   check.**
 
 ## Open questions for build time
 
