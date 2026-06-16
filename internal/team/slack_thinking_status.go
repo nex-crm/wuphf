@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,7 +36,10 @@ type slackTaskThreadRef struct {
 
 // ActiveSlackTaskThreadsForOwner returns the Slack thread roots of executable
 // (Running/Approved) tasks owned by slug that have a posted card — the threads
-// where "owner is thinking…" belongs while the owner runs a turn.
+// where "owner is thinking…" belongs while the owner runs a turn. Sorted most-
+// recently-updated first, so callers that want a single best-guess "thread the
+// owner is working in now" (the thinking indicator) can take the first element
+// without fanning out across every task the owner happens to still own.
 func (b *Broker) ActiveSlackTaskThreadsForOwner(slug string) []slackTaskThreadRef {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -43,7 +47,11 @@ func (b *Broker) ActiveSlackTaskThreadsForOwner(slug string) []slackTaskThreadRe
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	var out []slackTaskThreadRef
+	type scored struct {
+		ref     slackTaskThreadRef
+		updated string
+	}
+	var rows []scored
 	for i := range b.tasks {
 		tk := &b.tasks[i]
 		if !strings.EqualFold(strings.TrimSpace(tk.Owner), slug) {
@@ -56,7 +64,15 @@ func (b *Broker) ActiveSlackTaskThreadsForOwner(slug string) []slackTaskThreadRe
 		if !ok || rec.ChannelID == "" || rec.Timestamp == "" {
 			continue
 		}
-		out = append(out, slackTaskThreadRef{TaskID: tk.ID, ChannelID: rec.ChannelID, ThreadTS: rec.Timestamp})
+		rows = append(rows, scored{
+			ref:     slackTaskThreadRef{TaskID: tk.ID, ChannelID: rec.ChannelID, ThreadTS: rec.Timestamp},
+			updated: tk.UpdatedAt,
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].updated > rows[j].updated })
+	out := make([]slackTaskThreadRef, len(rows))
+	for i := range rows {
+		out[i] = rows[i].ref
 	}
 	return out
 }
@@ -78,79 +94,68 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 	activity, unsub := t.Broker.SubscribeActivity(256)
 	defer unsub()
 
-	// posted maps a thread (key = "chan|ts") to the message ts of the indicator
-	// currently shown there, so the activity stream's many per-turn events only
-	// ever post one indicator and delete it once.
-	posted := map[string]string{}
-	apply := func(ref slackTaskThreadRef, text string) {
-		key := ref.ChannelID + "|" + ref.ThreadTS
-		if text != "" {
-			if _, already := posted[key]; already {
-				return // indicator already shown for this thread
-			}
-			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			_, ts, err := t.api.PostMessageContext(cctx, ref.ChannelID,
-				slack.MsgOptionText(text, false),
-				slack.MsgOptionTS(ref.ThreadTS),
-			)
-			cancel()
-			if err != nil {
-				log.Printf("[slack] thinking indicator post for %s: %v", ref.TaskID, err)
-				return
-			}
-			posted[key] = ts
-			return
-		}
-		// Idle: clear the indicator if one is up.
-		ts, up := posted[key]
+	// posted tracks at most ONE indicator per OWNER (key = owner slug), recording
+	// where it was posted so it can be cleared. Scoping per-owner (not per-thread)
+	// bounds the indicator to a single post + delete per turn: an owner with many
+	// still-executable tasks would otherwise post/delete in every one of their
+	// threads on every activity event and blow Slack's rate limit (observed live).
+	type indicator struct{ channelID, ts string }
+	posted := map[string]indicator{}
+	clear := func(slug string) {
+		ind, up := posted[slug]
 		if !up {
 			return
 		}
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, _, err := t.api.DeleteMessageContext(cctx, ref.ChannelID, ts)
+		_, _, err := t.api.DeleteMessageContext(cctx, ind.channelID, ind.ts)
 		cancel()
 		if err != nil {
-			log.Printf("[slack] thinking indicator clear for %s: %v", ref.TaskID, err)
+			log.Printf("[slack] thinking indicator clear for %s: %v", slug, err)
 			return
 		}
-		delete(posted, key)
+		delete(posted, slug)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			// Clear any lingering indicators on shutdown (best-effort, detached ctx).
-			for key, ts := range posted {
-				if c, _, ok := splitThreadKey(key); ok {
-					_, _, _ = t.api.DeleteMessageContext(context.Background(), c, ts)
-				}
+			for _, ind := range posted {
+				_, _, _ = t.api.DeleteMessageContext(context.Background(), ind.channelID, ind.ts)
 			}
 			return ctx.Err()
 		case snap, ok := <-activity:
 			if !ok {
 				return nil
 			}
-			refs := t.Broker.ActiveSlackTaskThreadsForOwner(snap.Slug)
+			slug := snap.Slug
+			if !isThinkingActivity(snap) {
+				clear(slug)
+				continue
+			}
+			// Active. Show one indicator in the owner's most-recently-updated task
+			// thread (refs[0]); if one is already up for this owner, do nothing.
+			if _, already := posted[slug]; already {
+				continue
+			}
+			refs := t.Broker.ActiveSlackTaskThreadsForOwner(slug)
 			if len(refs) == 0 {
 				continue
 			}
-			text := ""
-			if isThinkingActivity(snap) {
-				text = t.thinkingStatusText(snap.Slug)
+			ref := refs[0]
+			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_, ts, err := t.api.PostMessageContext(cctx, ref.ChannelID,
+				slack.MsgOptionText(t.thinkingStatusText(slug), false),
+				slack.MsgOptionTS(ref.ThreadTS),
+			)
+			cancel()
+			if err != nil {
+				log.Printf("[slack] thinking indicator post for %s: %v", ref.TaskID, err)
+				continue
 			}
-			for _, ref := range refs {
-				apply(ref, text)
-			}
+			posted[slug] = indicator{channelID: ref.ChannelID, ts: ts}
 		}
 	}
-}
-
-func splitThreadKey(key string) (channelID, threadTS string, ok bool) {
-	parts := strings.SplitN(key, "|", 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 // thinkingStatusText renders the status line for an agent, e.g.

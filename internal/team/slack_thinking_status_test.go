@@ -40,6 +40,35 @@ func TestActiveSlackTaskThreadsForOwner(t *testing.T) {
 	}
 }
 
+// TestActiveSlackTaskThreadsForOwner_SortedByRecency locks the ordering the
+// thinking indicator relies on to stay bounded: most-recently-updated first, so
+// the loop posts one indicator in refs[0] (the thread the owner is most likely
+// working) instead of fanning out across every executable task it still owns and
+// blowing Slack's rate limit.
+func TestActiveSlackTaskThreadsForOwner_SortedByRecency(t *testing.T) {
+	b := newTestBrokerWithSlackChannel(t, "C0123")
+	b.mu.Lock()
+	b.tasks = append(b.tasks,
+		teamTask{ID: "OLD", Owner: "ceo", LifecycleState: LifecycleStateRunning, UpdatedAt: "2026-06-16T10:00:00Z"},
+		teamTask{ID: "NEW", Owner: "ceo", LifecycleState: LifecycleStateRunning, UpdatedAt: "2026-06-16T12:00:00Z"},
+		teamTask{ID: "MID", Owner: "ceo", LifecycleState: LifecycleStateRunning, UpdatedAt: "2026-06-16T11:00:00Z"},
+	)
+	b.slackTaskCards = map[string]slackTaskCardRecord{
+		"OLD": {ChannelID: "C0123", Timestamp: "1.0"},
+		"NEW": {ChannelID: "C0123", Timestamp: "2.0"},
+		"MID": {ChannelID: "C0123", Timestamp: "3.0"},
+	}
+	b.mu.Unlock()
+
+	refs := b.ActiveSlackTaskThreadsForOwner("ceo")
+	if len(refs) != 3 {
+		t.Fatalf("want 3 active threads, got %d: %+v", len(refs), refs)
+	}
+	if refs[0].TaskID != "NEW" {
+		t.Fatalf("most-recently-updated task must sort first; got %s", refs[0].TaskID)
+	}
+}
+
 func TestRunAgentThinkingStatus_SetsAndClears(t *testing.T) {
 	api := newFakeSlackAPI()
 	tr, b := newTestSlackTransport(t, "C0123", api)
