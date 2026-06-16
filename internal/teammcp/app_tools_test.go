@@ -92,6 +92,8 @@ func TestResolveRegisterAppFiles(t *testing.T) {
 	must("src/styles.css", "body{}")
 	must("node_modules/react/index.js", "module.exports={}") // must be skipped
 	must("dist/index.html", "<html></html>")                 // must be skipped
+	must("app-scaffold/src/App.tsx", "dup")                  // nested template copy — must be skipped
+	must("app-scaffold/package.json", "{}")                  // ditto
 
 	t.Run("copies the whole tree and skips build dirs", func(t *testing.T) {
 		files, err := resolveRegisterAppFiles(RegisterAppArgs{SourcePath: root})
@@ -104,8 +106,10 @@ func TestResolveRegisterAppFiles(t *testing.T) {
 			}
 		}
 		for bad := range files {
-			if strings.HasPrefix(bad, "node_modules/") || strings.HasPrefix(bad, "dist/") {
-				t.Errorf("build artifact %q should have been skipped", bad)
+			if strings.HasPrefix(bad, "node_modules/") ||
+				strings.HasPrefix(bad, "dist/") ||
+				strings.HasPrefix(bad, "app-scaffold/") {
+				t.Errorf("artifact %q should have been skipped", bad)
 			}
 		}
 		// The exact gap that broke a real publish: main.tsx imports ./App, so
