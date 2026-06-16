@@ -47,9 +47,11 @@ still fails, report the blocker instead of publishing a broken app.
 bun install
 bun run verify         # GATE: tsc --noEmit && vite build — must pass before publish
 bun run build          # produces dist/index.html (single file)
-# then call register_app with html_path = the ABSOLUTE path to dist/index.html
-# (the broker reads the file — do NOT paste the minified bundle; its lines are
-#  100k+ chars and cannot be read back reliably).
+# then call register_app with:
+#   html_path   = ABSOLUTE path to dist/index.html  (broker reads the bundle)
+#   source_path = ABSOLUTE path to this project root (broker copies the whole
+#                 tree minus node_modules/dist, so the saved source always builds)
+# Do NOT paste the minified bundle and do NOT hand-list files — both drop data.
 ```
 
 ## Live-preview tooling (do not remove)

@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -61,9 +62,13 @@ type RegisterAppArgs struct {
 	// re-emit as a JSON string — pass the path and let the broker read the file.
 	HTMLPath string `json:"html_path,omitempty" jsonschema:"PREFERRED. Absolute path to the built dist/index.html (the broker reads it). Use this instead of pasting the bundle — minified single-file output has 100k+ char lines you cannot reliably read and re-emit."`
 	HTML     string `json:"html,omitempty" jsonschema:"Fallback only. The COMPLETE self-contained index.html as a string. Prefer html_path — minified output is too large to paste reliably. All JS/CSS inlined (vite-plugin-singlefile); no external scripts/styles/fonts and no network fetches; read workspace data only through the injected WUPHF bridge (window.parent postMessage)."`
+	// PREFER source_path. Hand-assembling the files map is error-prone — agents
+	// drop files (e.g. App.tsx) and ship a source tree that won't build. Point at
+	// the dir that just passed the verify gate and the broker copies it whole.
+	SourcePath string `json:"source_path,omitempty" jsonschema:"PREFERRED. Absolute path to your source project root (the dir with package.json + src/, the one you just built). The broker copies the WHOLE tree (minus node_modules/dist/.vite/.git) so the persisted source is complete and the live preview + later edits work. Use this instead of hand-listing files."`
 	// Files is the source project so future edits modify real files instead of
-	// regenerating from prose. Strongly recommended.
-	Files map[string]string `json:"files,omitempty" jsonschema:"The app's SOURCE project as a map of relative path -> file content (e.g. src/App.tsx, package.json, vite.config.ts). EXCLUDE node_modules and dist. Persisting source is how an operator's later edit is reliable instead of a from-scratch regeneration."`
+	// regenerating from prose. Fallback for source_path.
+	Files map[string]string `json:"files,omitempty" jsonschema:"Fallback for source_path. The app's SOURCE project as a map of relative path -> file content (e.g. src/App.tsx, package.json, vite.config.ts). MUST include every file the app imports — a partial map ships a broken app. EXCLUDE node_modules and dist. Prefer source_path so nothing is dropped."`
 }
 
 // registerAppTools wires the Apps tools. Discovery + proposal are open to every
@@ -84,7 +89,7 @@ func registerAppTools(server *mcp.Server, slug string) {
 		), handleGetApp)
 		mcp.AddTool(server, officeWriteTool(
 			"register_app",
-			"Publish a built app so it appears under Apps. Pass the COMPLETE self-contained index.html. Set app_id to update an existing app in place. App Builder only.",
+			"Publish a built app so it appears under Apps. Pass html_path (absolute path to the built dist/index.html) and source_path (absolute path to the project root) — the broker reads both from disk, so you never paste the minified bundle or hand-list files. Set app_id to update an existing app in place. App Builder only.",
 		), handleRegisterApp)
 	}
 }
@@ -211,6 +216,10 @@ func handleRegisterApp(ctx context.Context, _ *mcp.CallToolRequest, args Registe
 	if err != nil {
 		return toolError(err), nil, nil
 	}
+	files, err := resolveRegisterAppFiles(args)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
 	appID := strings.TrimSpace(args.AppID)
 	if appID != "" {
 		if err := validateCustomAppIDLocal(appID); err != nil {
@@ -225,7 +234,7 @@ func handleRegisterApp(ctx context.Context, _ *mcp.CallToolRequest, args Registe
 		"summary":     strings.TrimSpace(args.Summary),
 		"description": strings.TrimSpace(args.Description),
 		"html":        html,
-		"files":       args.Files,
+		"files":       files,
 		"actor":       slug,
 	}, &result); err != nil {
 		return toolError(err), nil, nil
@@ -276,6 +285,90 @@ func resolveRegisterAppHTML(args RegisterAppArgs) (string, error) {
 		return "", fmt.Errorf("html_path %q is empty", path)
 	}
 	return string(data), nil
+}
+
+const (
+	registerAppMaxSourceFiles     = 300
+	registerAppMaxSourceFileBytes = 512 * 1024
+	registerAppMaxSourceTotal     = 8 * 1024 * 1024
+)
+
+// registerAppSkipDirs are never persisted as source: build/install artifacts and
+// VCS metadata. Skipping them (rather than relying on the agent to omit them) is
+// what makes source_path a complete-but-not-bloated copy.
+var registerAppSkipDirs = map[string]bool{
+	"node_modules": true,
+	"dist":         true,
+	".vite":        true,
+	".git":         true,
+}
+
+// resolveRegisterAppFiles returns the source project to persist. When the agent
+// passed source_path, the broker copies the WHOLE tree (minus build/VCS dirs) so
+// the persisted source always builds — closing the "agent dropped a file from
+// the map and shipped a broken app" gap. Falls back to an explicit files map.
+func resolveRegisterAppFiles(args RegisterAppArgs) (map[string]string, error) {
+	if len(args.Files) > 0 {
+		return args.Files, nil
+	}
+	root := strings.TrimSpace(args.SourcePath)
+	if root == "" {
+		return nil, nil // html-only publish; no editable source persisted
+	}
+	if !filepath.IsAbs(root) {
+		return nil, fmt.Errorf("source_path must be an absolute path to the project root; got %q", root)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("read source_path %q: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("source_path %q must be the project directory (with package.json + src/)", root)
+	}
+	files := make(map[string]string)
+	var total int64
+	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if p != root && registerAppSkipDirs[d.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if fi.Size() > registerAppMaxSourceFileBytes {
+			return nil // skip oversized files (e.g. a giant lockfile); not app source
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = string(body)
+		total += int64(len(body))
+		if len(files) > registerAppMaxSourceFiles {
+			return fmt.Errorf("source_path has more than %d files; is node_modules excluded?", registerAppMaxSourceFiles)
+		}
+		if total > registerAppMaxSourceTotal {
+			return fmt.Errorf("source_path exceeds %d bytes", registerAppMaxSourceTotal)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("copy source_path %q: %w", root, walkErr)
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("source_path %q has no source files", root)
+	}
+	return files, nil
 }
 
 // validateCustomAppIDLocal mirrors the broker's validateCustomAppID so the tool

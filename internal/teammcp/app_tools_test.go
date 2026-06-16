@@ -71,3 +71,70 @@ func TestResolveRegisterAppHTML(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveRegisterAppFiles covers the source_path fix: the broker copies the
+// WHOLE project tree (minus build/VCS dirs) so the agent can't ship a partial,
+// unbuildable source by dropping a file from a hand-listed map.
+func TestResolveRegisterAppFiles(t *testing.T) {
+	root := t.TempDir()
+	must := func(rel, content string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	must("package.json", "{}")
+	must("src/main.tsx", "import { App } from './App'")
+	must("src/App.tsx", "export const App = () => null")
+	must("src/styles.css", "body{}")
+	must("node_modules/react/index.js", "module.exports={}") // must be skipped
+	must("dist/index.html", "<html></html>")                 // must be skipped
+
+	t.Run("copies the whole tree and skips build dirs", func(t *testing.T) {
+		files, err := resolveRegisterAppFiles(RegisterAppArgs{SourcePath: root})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		for _, want := range []string{"package.json", "src/main.tsx", "src/App.tsx", "src/styles.css"} {
+			if _, ok := files[want]; !ok {
+				t.Errorf("missing %q from copied source", want)
+			}
+		}
+		for bad := range files {
+			if strings.HasPrefix(bad, "node_modules/") || strings.HasPrefix(bad, "dist/") {
+				t.Errorf("build artifact %q should have been skipped", bad)
+			}
+		}
+		// The exact gap that broke a real publish: main.tsx imports ./App, so
+		// App.tsx MUST be persisted alongside it.
+		if _, ok := files["src/App.tsx"]; !ok {
+			t.Fatal("src/App.tsx was dropped — this is the bug source_path fixes")
+		}
+	})
+
+	t.Run("explicit files map still wins", func(t *testing.T) {
+		files, err := resolveRegisterAppFiles(RegisterAppArgs{
+			Files:      map[string]string{"src/App.tsx": "x"},
+			SourcePath: root,
+		})
+		if err != nil || len(files) != 1 {
+			t.Fatalf("explicit files should win; got %v err %v", files, err)
+		}
+	})
+
+	t.Run("neither source nor files is fine (html-only)", func(t *testing.T) {
+		files, err := resolveRegisterAppFiles(RegisterAppArgs{})
+		if err != nil || files != nil {
+			t.Fatalf("want (nil,nil) for html-only; got %v %v", files, err)
+		}
+	})
+
+	t.Run("relative source_path rejected", func(t *testing.T) {
+		if _, err := resolveRegisterAppFiles(RegisterAppArgs{SourcePath: "src"}); err == nil {
+			t.Fatal("expected an error for a relative source_path")
+		}
+	})
+}
