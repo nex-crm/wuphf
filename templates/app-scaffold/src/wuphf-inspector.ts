@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * wuphf-inspector — DEV-ONLY in-app runtime that powers the host's
  * "select to edit" and runtime-error surfacing in the live preview.
@@ -26,106 +27,62 @@ const APP_SOURCE = "wuphf-app";
 const LABEL_MAX = 120;
 const ERROR_MAX = 600;
 
-// React attaches its fiber to a DOM node under a key whose suffix is a random
-// number, so we can't hardcode it. These are the two historical prefixes
-// (current React uses `__reactFiber$`; older builds used `__reactInternalInstance$`).
-const FIBER_KEY_PREFIXES = ["__reactFiber$", "__reactInternalInstance$"];
+// The source location is read from a DOM attribute the dev-only Babel plugin in
+// vite.config.ts stamps on every host JSX element: data-wuphf-source="rel:line:col".
+// This replaces walking React fibers for `_debugSource`, which React 19 removed —
+// a real DOM attribute is version-proof and survives a click on any descendant.
+const SOURCE_ATTR = "data-wuphf-source";
 
-interface DebugSource {
-  fileName: string;
-  lineNumber: number;
-  columnNumber?: number;
-}
-
-interface ReactFiberLike {
-  return?: ReactFiberLike | null;
-  _debugSource?: DebugSource;
-}
-
-interface SelectPayload {
+interface SourceLoc {
   file: string;
   line: number;
   col: number;
+}
+
+interface SelectPayload extends SourceLoc {
   tag: string;
   label: string;
 }
 
-/**
- * Read `import.meta.env.DEV` without depending on `vite/client` ambient types
- * (the scaffold tsconfig does not include them). Narrow through `unknown` so we
- * never introduce an `any`, and default to production (no-op) if the shape is
- * unexpected.
- */
-function isDev(): boolean {
-  const meta = import.meta as unknown as {
-    env?: { DEV?: boolean };
-  };
-  return meta.env?.DEV === true;
-}
+// Accessed directly (not via an alias) so Vite statically replaces it with
+// `false` in the production build, letting Rollup tree-shake this whole module
+// out of the sealed single-file bundle. The `vite/client` reference above types
+// `import.meta.env` without an `any`.
+const DEV = import.meta.env.DEV;
 
 function cap(value: string, max: number): string {
   return value.length > max ? value.slice(0, max) : value;
 }
 
-/** Find the React fiber attached to a DOM node, if any. */
-function fiberForNode(node: Element): ReactFiberLike | null {
-  const keys = Object.keys(node);
-  for (const key of keys) {
-    if (FIBER_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-      const value = (node as unknown as Record<string, unknown>)[key];
-      return (value as ReactFiberLike) ?? null;
-    }
-  }
-  return null;
-}
-
-/** Walk up the fiber tree until one carries a `_debugSource`. */
-function debugSourceForNode(node: Element): DebugSource | null {
-  let fiber = fiberForNode(node);
-  let hops = 0;
-  // Bound the walk: React trees are deep but a debug source is always within a
-  // few hops of the clicked node. 200 is a generous ceiling against cycles.
-  while (fiber && hops < 200) {
-    if (
-      fiber._debugSource &&
-      typeof fiber._debugSource.fileName === "string"
-    ) {
-      return fiber._debugSource;
-    }
-    fiber = fiber.return ?? null;
-    hops += 1;
-  }
-  return null;
-}
-
 /**
- * Turn an absolute Vite file path into a workspace-relative one: strip
- * everything up to and including the last `/src/`, else fall back to basename.
+ * Resolve a clicked node to its JSX source location by reading the nearest
+ * ancestor's stamped `data-wuphf-source="rel:line:col"`. `closest` covers the
+ * common case of clicking a text run inside a stamped element.
  */
-function relativeFile(fileName: string): string {
-  const marker = "/src/";
-  const idx = fileName.lastIndexOf(marker);
-  if (idx >= 0) return fileName.slice(idx + marker.length);
-  const slash = fileName.lastIndexOf("/");
-  return slash >= 0 ? fileName.slice(slash + 1) : fileName;
+function sourceForNode(node: Element): SourceLoc | null {
+  const el = node.closest(`[${SOURCE_ATTR}]`);
+  const raw = el?.getAttribute(SOURCE_ATTR);
+  if (!raw) return null;
+  // "relative/path:line:col" — anchor the two trailing numeric groups so a path
+  // is parsed correctly even if it (unexpectedly) contained a colon.
+  const m = raw.match(/^(.*):(\d+):(\d+)$/);
+  if (!m) return null;
+  return { file: m[1], line: Number(m[2]), col: Number(m[3]) };
 }
 
 function selectPayloadFor(target: Element): SelectPayload | null {
-  const source = debugSourceForNode(target);
+  const source = sourceForNode(target);
   if (!source) return null;
   const tag = target.tagName.toLowerCase();
-  const label = cap((target.textContent ?? "").trim().replace(/\s+/g, " "), LABEL_MAX);
-  return {
-    file: relativeFile(source.fileName),
-    line: source.lineNumber,
-    col: source.columnNumber ?? 0,
-    tag,
-    label,
-  };
+  const label = cap(
+    (target.textContent ?? "").trim().replace(/\s+/g, " "),
+    LABEL_MAX,
+  );
+  return { file: source.file, line: source.line, col: source.col, tag, label };
 }
 
 export function installInspector(): void {
-  if (!isDev()) return;
+  if (!DEV) return;
   // Guard against double-install (StrictMode / HMR can re-run module init).
   const flag = "__wuphfInspectorInstalled";
   const w = window as unknown as Record<string, unknown>;
@@ -259,3 +216,11 @@ export function installInspector(): void {
     },
   );
 }
+
+// Self-install on load: vite.config.ts injects this module as a static external
+// `<script type="module" src=…>` (dev only), so loading it IS the install. A
+// static module script is part of the document's module graph — the browser
+// loads it reliably, unlike a fire-and-forget dynamic import that can lose the
+// race at first paint. Idempotent (the guard inside) + dev-gated + tree-shaken
+// from the sealed build, where this module is never imported.
+installInspector();
