@@ -202,6 +202,43 @@ type WorkflowSpec struct {
 	// ImprovementSignals are what to watch in live usage that should propose an
 	// overlay.
 	ImprovementSignals []ImprovementSignal `json:"improvement_signals,omitempty"`
+	// GuardConfig carries the per-workflow guard-evaluation constants the spec's
+	// guards reference but a fixture does not always carry — the named thresholds
+	// (e.g. icp_threshold) and the fixture-key aliases (e.g. renewal_date ->
+	// renewal_in_days). It is OPTIONAL (omitempty) and additive: a spec without it
+	// evaluates guards against fixture data alone. Carrying these on the CONTRACT,
+	// not in the kernel runner, is what lets a new workflow's rubric constants ship
+	// with its spec instead of forcing an edit to the protected runtime — the
+	// contract is self-contained and the kernel stops growing per workflow.
+	GuardConfig GuardConfig `json:"guard_config,omitempty"`
+}
+
+// GuardConfig is the per-workflow guard-evaluation knowledge a generic evaluator
+// cannot read out of the fixture alone: the named thresholds a guard compares
+// against, and the aliases mapping a guard operand's wording to the fixture key
+// that actually carries its value. It is per-WORKFLOW domain knowledge, so it
+// lives on the spec (or the outside-kernel registry that seeds the spec), NOT
+// hardcoded in the kernel's DefaultGuardEvaluator. The zero value is empty: a
+// guard whose operand is neither in the fixture nor in Thresholds simply does not
+// hold (the evaluator fails the guard rather than the run).
+type GuardConfig struct {
+	// Thresholds supplies a deterministic value for a named threshold operand the
+	// fixture does not carry (e.g. {"icp_threshold": 50}). These are the rubric
+	// constants a real ICP / match / renewal model holds, kept explicit and stable
+	// so generation stays deterministic and a scenario is self-contained.
+	Thresholds map[string]float64 `json:"thresholds,omitempty"`
+	// FixtureAliases maps a guard operand's last path segment to the fixture key
+	// that actually carries its value, when the contract's domain wording and the
+	// fixture's wording differ (e.g. the guard speaks of "renewal_date - now" while
+	// the fixture carries the already-computed "renewal_in_days").
+	FixtureAliases map[string]string `json:"fixture_aliases,omitempty"`
+}
+
+// isEmpty reports whether the config carries no thresholds and no aliases. A bare
+// DefaultGuardEvaluator with an empty config is enriched by NewRunner from the
+// running spec's GuardConfig; a non-empty one the caller supplied is respected.
+func (c GuardConfig) isEmpty() bool {
+	return len(c.Thresholds) == 0 && len(c.FixtureAliases) == 0
 }
 
 // Entity is a domain object the workflow moves (e.g. a trial signup, an

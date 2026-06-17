@@ -177,5 +177,8 @@
       "kind": "operator-edit",
       "watch": "guards[has_confident_match].expr"
     }
-  ]
+  ],
+  "guard_config": {
+    "thresholds": { "match_threshold": 0.5 }
+  }
 }

@@ -165,5 +165,8 @@
       "kind": "operator-edit",
       "watch": "actions[route_to_ae].target"
     }
-  ]
+  ],
+  "guard_config": {
+    "thresholds": { "icp_threshold": 50 }
+  }
 }

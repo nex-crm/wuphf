@@ -1,22 +1,39 @@
 package workflowpress
 
-// blueprints.go holds the three registered SynthesisBlueprint skeletons, one per
-// ground-truth RevOps workflow. Each is the deterministic state-machine shape
-// Synthesize fuses with evidence-derived signals to produce a draft that
-// structurally matches the hand-authored contract under testdata/examples.
+// revops_workflows.go is an OUTSIDE-THE-KERNEL resident: the per-workflow domain
+// knowledge for the three ground-truth RevOps workflows. It is NOT part of the
+// protected kernel (contract schema, generator, shipcheck, runner runtime, overlay
+// machinery) — it is data the kernel reads through the BlueprintRegistry seam.
 //
-// A blueprint is the operator domain knowledge a generic inference pass cannot
+// This file is what proves the kernel-boundary discipline: adding a new workflow
+// registers a SynthesisBlueprint (and its GuardConfig) HERE — or in a sibling
+// registry — and edits NO kernel file. The kernel stops growing per workflow.
+//
+// Each blueprint is the operator domain knowledge a generic inference pass cannot
 // read out of HTTP traces: the named states a record passes through, the events
-// that drive them, the guards that gate them, the action graph, the SLAs and the
-// verification scenarios. Provenance on each element is the blueprint's claim;
-// Synthesize keeps operator-stated tiers (the operator explicitly told us) and
-// treats everything else as inferred. The evidence supplies entities,
-// exceptions and improvement signals on top.
+// that drive them, the guards that gate them, the action graph, the SLAs, the
+// verification scenarios, and the guard constants (thresholds + fixture aliases).
+// Provenance on each element is the blueprint's claim; Synthesize keeps
+// operator-stated tiers (the operator explicitly told us) and treats everything
+// else as inferred. The evidence supplies entities, exceptions and improvement
+// signals on top.
 //
 // These blueprints are intentionally hand-written, not generated: they stand in
-// for the model's structural proposal so synthesis is deterministic and
-// testable. The freeze gate + human review is what turns any of these drafts
-// into a trusted contract.
+// for the model's structural proposal so synthesis is deterministic and testable.
+// The freeze gate + human review is what turns any of these drafts into a trusted
+// contract.
+
+// RevOpsRegistry returns the BlueprintRegistry for the three ground-truth RevOps
+// workflows. It is the canonical outside-kernel registry the package's tests and a
+// production caller pass to Synthesize. Registering a fourth workflow adds an entry
+// to the map below (or composes a second registry) and touches no kernel file.
+func RevOpsRegistry() MapBlueprintRegistry {
+	return NewBlueprintRegistry(map[string]SynthesisBlueprint{
+		"trial-to-ae-routing":       trialToAERoutingBlueprint(),
+		"renewal-risk-sweep":        renewalRiskSweepBlueprint(),
+		"inbound-lead-dedupe-merge": inboundLeadDedupeMergeBlueprint(),
+	})
+}
 
 // obs builds an observed-tier provenance with the given confidence and optional
 // evidence pointers; observed means the element was seen in captured evidence.
@@ -54,6 +71,13 @@ func trialToAERoutingBlueprint() SynthesisBlueprint {
 			// The AE roster is something the operator named, not something we
 			// scraped — raise it to operator-stated.
 			"AccountExecutive": stated(1.0),
+		},
+		// The ICP threshold is this workflow's rubric constant; it rides on the
+		// contract's GuardConfig, not in the kernel runner.
+		GuardConfig: GuardConfig{
+			Thresholds: map[string]float64{
+				"icp_threshold": 50, // a lead at/above 50 fits the ICP
+			},
 		},
 		States: []State{
 			{Name: "received", Description: "A trial signup has arrived but is not yet enriched.", Initial: true, Provenance: obs(0.95)},
@@ -122,6 +146,14 @@ func renewalRiskSweepBlueprint() SynthesisBlueprint {
 		EntityProvenance: map[string]Provenance{
 			// The CS task is the operator's own output object, named by the operator.
 			"CSTask": stated(1.0),
+		},
+		// The renewal guard speaks of "renewal_date - now" but the fixture carries the
+		// already-computed "renewal_in_days"; the alias bridges the two. The
+		// renewal-window constant is this workflow's, not the kernel's.
+		GuardConfig: GuardConfig{
+			FixtureAliases: map[string]string{
+				"renewal_date": "renewal_in_days",
+			},
 		},
 		States: []State{
 			{Name: "idle", Description: "Waiting for the weekly sweep trigger.", Initial: true, Provenance: stated(1.0)},
@@ -198,6 +230,13 @@ func inboundLeadDedupeMergeBlueprint() SynthesisBlueprint {
 			// The match candidate is a synthesised scoring object, not a record we
 			// observed directly — it is inferred.
 			"MatchCandidate": inferred(0.7),
+		},
+		// The match threshold gating merge-vs-create is this workflow's rubric
+		// constant, carried on the contract.
+		GuardConfig: GuardConfig{
+			Thresholds: map[string]float64{
+				"match_threshold": 0.5, // a candidate at/above 0.5 is a confident match
+			},
 		},
 		States: []State{
 			{Name: "received", Description: "A new inbound lead has arrived.", Initial: true, Provenance: obs(0.95)},

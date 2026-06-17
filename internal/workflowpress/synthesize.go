@@ -30,10 +30,17 @@ import (
 // So Synthesize fuses two inputs:
 //
 //   - the evidence-derived signals, carried deterministically from the research;
-//   - a per-workflow SynthesisBlueprint: the state-machine skeleton, registered
-//     in-package keyed by workflow id. This stands in for the model's structural
-//     proposal; encoding it deterministically is what makes synthesis testable
-//     and reproducible instead of a freeform LLM call.
+//   - a per-workflow SynthesisBlueprint: the state-machine skeleton, supplied by
+//     an injected BlueprintRegistry keyed by workflow id. This stands in for the
+//     model's structural proposal; encoding it deterministically is what makes
+//     synthesis testable and reproducible instead of a freeform LLM call.
+//
+// The registry is the kernel-boundary seam for per-workflow domain knowledge: the
+// blueprints (and the guard thresholds/aliases each carries) live OUTSIDE the
+// kernel, in an injected registry, so adding a new workflow edits the registry —
+// never this synthesis machinery and never the runner runtime. The kernel holds
+// the SynthesisBlueprint SHAPE and the carry/degrade logic; the registry holds the
+// per-workflow DATA.
 //
 // Every element the operator did not explicitly state is marked TrustInferred
 // (or carried at its observed tier), and every inferred/observed write-action is
@@ -81,26 +88,61 @@ type SynthesisBlueprint struct {
 	// EntityDescriptions optionally attaches a human description to a carried
 	// entity, keyed by entity name.
 	EntityDescriptions map[string]string
+	// GuardConfig is the per-workflow guard-evaluation knowledge (named thresholds
+	// + fixture aliases) the blueprint's guards reference. Synthesize copies it onto
+	// the draft spec so the contract is self-contained and the kernel runner holds
+	// no per-workflow constants. Optional: a blueprint whose guards compare only
+	// fixture-carried operands may leave it zero.
+	GuardConfig GuardConfig
 }
 
-// blueprints is the in-package registry of synthesis skeletons, keyed by
-// workflow id. It is the deterministic stand-in for the model's structural
-// proposal. Registering a blueprint here is the only place a new workflow's
-// shape enters synthesis; the evidence supplies every derivable signal on top of
-// it. Kept private so the registry is append-only from inside the package.
-var blueprints = map[string]SynthesisBlueprint{
-	"trial-to-ae-routing":       trialToAERoutingBlueprint(),
-	"renewal-risk-sweep":        renewalRiskSweepBlueprint(),
-	"inbound-lead-dedupe-merge": inboundLeadDedupeMergeBlueprint(),
+// BlueprintRegistry supplies the per-workflow SynthesisBlueprint Synthesize fuses
+// with evidence. It is the kernel-boundary seam: the blueprints (and the guard
+// thresholds/aliases they carry) are per-workflow DOMAIN KNOWLEDGE that lives
+// OUTSIDE the kernel, injected here, so adding a new workflow registers a
+// blueprint with a registry and edits NO kernel file (not this synthesis
+// machinery, not the runner runtime). The kernel defines the seam and the
+// carry/degrade logic; an implementation (see RevOps registry, outside the
+// kernel) holds the data.
+type BlueprintRegistry interface {
+	// Blueprint returns the registered skeleton for a workflow id, and false when
+	// none is registered. Implementations must be deterministic: the same id always
+	// returns the same blueprint.
+	Blueprint(workflowID string) (SynthesisBlueprint, bool)
+}
+
+// MapBlueprintRegistry is the simplest BlueprintRegistry: a map of workflow id ->
+// blueprint. An outside-kernel package builds one with NewBlueprintRegistry from
+// its per-workflow blueprint set; the kernel never hardcodes the entries.
+type MapBlueprintRegistry map[string]SynthesisBlueprint
+
+// Blueprint implements BlueprintRegistry.
+func (m MapBlueprintRegistry) Blueprint(workflowID string) (SynthesisBlueprint, bool) {
+	bp, ok := m[workflowID]
+	return bp, ok
+}
+
+// NewBlueprintRegistry builds a MapBlueprintRegistry from a workflow-id-keyed set
+// of blueprints. It copies the input map so the caller cannot mutate the registry
+// after construction. This is the constructor an outside-kernel workflow package
+// uses to register its blueprints without touching any kernel file.
+func NewBlueprintRegistry(blueprints map[string]SynthesisBlueprint) MapBlueprintRegistry {
+	out := make(MapBlueprintRegistry, len(blueprints))
+	for id, bp := range blueprints {
+		out[id] = bp
+	}
+	return out
 }
 
 // Synthesize deterministically carries research signals into a DRAFT
-// WorkflowSpec. The draft is NOT frozen: it is the operator-reviewable proposal
-// that Freeze turns into a contract only on approval.
+// WorkflowSpec, using the injected BlueprintRegistry for the per-workflow
+// state-machine skeleton. The draft is NOT frozen: it is the operator-reviewable
+// proposal that Freeze turns into a contract only on approval.
 //
 // The pipeline is:
 //
-//  1. look up the per-workflow blueprint (the state-machine skeleton);
+//  1. look up the per-workflow blueprint in the registry (the state-machine
+//     skeleton — per-workflow knowledge that lives outside the kernel);
 //  2. carry the entities from the research's InferredSchemas, attaching fields
 //     and provenance (observed by default — they came from real records —
 //     raised to operator-stated only where the blueprint says the operator named
@@ -109,18 +151,24 @@ var blueprints = map[string]SynthesisBlueprint{
 //     the blueprint, degrading every non-operator-stated element to inferred;
 //  4. force RequiresApproval on every inferred/observed write-action (the
 //     trust-tier security rule);
-//  5. derive exceptions from the research's ObservedExceptions and improvement
+//  5. copy the blueprint's GuardConfig (thresholds + aliases) onto the draft so
+//     the contract carries its own guard constants — the kernel runner holds
+//     none;
+//  6. derive exceptions from the research's ObservedExceptions and improvement
 //     signals from its OperatorEdits, recurring exceptions and SLAs.
 //
 // It returns a draft whose STRUCTURE matches the hand-authored contract for the
 // workflow. Synthesize does not call Validate; the draft may legitimately be
 // incomplete until the operator reviews it. Freeze is where validation gates.
-func Synthesize(research WorkflowResearch) (WorkflowSpec, error) {
+func Synthesize(research WorkflowResearch, registry BlueprintRegistry) (WorkflowSpec, error) {
 	id := strings.TrimSpace(research.WorkflowID)
 	if id == "" {
 		return WorkflowSpec{}, fmt.Errorf("workflowpress: synthesize: %w: workflow_id", ErrEmptyField)
 	}
-	bp, ok := blueprints[id]
+	if registry == nil {
+		return WorkflowSpec{}, fmt.Errorf("workflowpress: synthesize: %w: nil blueprint registry", ErrNoBlueprint)
+	}
+	bp, ok := registry.Blueprint(id)
 	if !ok {
 		return WorkflowSpec{}, fmt.Errorf("workflowpress: synthesize: %w: no blueprint for workflow %q", ErrNoBlueprint, id)
 	}
@@ -147,8 +195,30 @@ func Synthesize(research WorkflowResearch) (WorkflowSpec, error) {
 		SLAs:                  cloneSLAs(bp.SLAs),
 		VerificationScenarios: cloneScenarios(bp.VerificationScenarios),
 		ImprovementSignals:    synthImprovementSignals(research, bp),
+		// The blueprint's guard constants travel onto the contract so the generated
+		// tool is self-contained and the kernel runner holds no per-workflow values.
+		GuardConfig: cloneGuardConfig(bp.GuardConfig),
 	}
 	return draft, nil
+}
+
+// cloneGuardConfig deep-copies a GuardConfig so the draft does not alias the
+// registry's maps (the registry is shared across syntheses).
+func cloneGuardConfig(in GuardConfig) GuardConfig {
+	var out GuardConfig
+	if len(in.Thresholds) > 0 {
+		out.Thresholds = make(map[string]float64, len(in.Thresholds))
+		for k, v := range in.Thresholds {
+			out.Thresholds[k] = v
+		}
+	}
+	if len(in.FixtureAliases) > 0 {
+		out.FixtureAliases = make(map[string]string, len(in.FixtureAliases))
+		for k, v := range in.FixtureAliases {
+			out.FixtureAliases[k] = v
+		}
+	}
+	return out
 }
 
 const (

@@ -168,6 +168,9 @@ func cloneSpec(s WorkflowSpec) *WorkflowSpec {
 	out.SLAs = cloneSLAs(s.SLAs)
 	out.VerificationScenarios = cloneScenarios(s.VerificationScenarios)
 	out.ImprovementSignals = cloneSignals(s.ImprovementSignals)
+	// GuardConfig carries maps; deep-copy them so the frozen contract never aliases
+	// the draft's per-workflow guard constants.
+	out.GuardConfig = cloneGuardConfig(s.GuardConfig)
 	return &out
 }
 

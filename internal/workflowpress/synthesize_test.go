@@ -55,7 +55,7 @@ func synthDraft(t *testing.T, name string) WorkflowSpec {
 	if err != nil {
 		t.Fatalf("Discover(%s): %v", name, err)
 	}
-	draft, err := Synthesize(research)
+	draft, err := Synthesize(research, RevOpsRegistry())
 	if err != nil {
 		t.Fatalf("Synthesize(%s): %v", name, err)
 	}
@@ -268,7 +268,7 @@ func TestSynthesizeDerivesImprovementSignalsFromEdits(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Discover(%s): %v", name, err)
 			}
-			draft, err := Synthesize(research)
+			draft, err := Synthesize(research, RevOpsRegistry())
 			if err != nil {
 				t.Fatalf("Synthesize(%s): %v", name, err)
 			}
@@ -296,11 +296,11 @@ func TestSynthesizeIsDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	first, err := Synthesize(research)
+	first, err := Synthesize(research, RevOpsRegistry())
 	if err != nil {
 		t.Fatalf("Synthesize: %v", err)
 	}
-	second, err := Synthesize(research)
+	second, err := Synthesize(research, RevOpsRegistry())
 	if err != nil {
 		t.Fatalf("Synthesize (second): %v", err)
 	}
@@ -332,7 +332,7 @@ func TestSynthesizeDoesNotAliasBlueprint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	first, err := Synthesize(research)
+	first, err := Synthesize(research, RevOpsRegistry())
 	if err != nil {
 		t.Fatalf("Synthesize: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestSynthesizeDoesNotAliasBlueprint(t *testing.T) {
 	first.States[0].Name = "MUTATED"
 	first.Actions[0].RequiresApproval = !first.Actions[0].RequiresApproval
 
-	second, err := Synthesize(research)
+	second, err := Synthesize(research, RevOpsRegistry())
 	if err != nil {
 		t.Fatalf("Synthesize (second): %v", err)
 	}
@@ -352,7 +352,7 @@ func TestSynthesizeDoesNotAliasBlueprint(t *testing.T) {
 // TestSynthesizeRejectsEmptyWorkflowID proves the one structural input gate.
 func TestSynthesizeRejectsEmptyWorkflowID(t *testing.T) {
 	t.Parallel()
-	_, err := Synthesize(WorkflowResearch{WorkflowID: "  "})
+	_, err := Synthesize(WorkflowResearch{WorkflowID: "  "}, RevOpsRegistry())
 	if !errors.Is(err, ErrEmptyField) {
 		t.Fatalf("Synthesize(empty id) = %v, want ErrEmptyField", err)
 	}
@@ -362,7 +362,7 @@ func TestSynthesizeRejectsEmptyWorkflowID(t *testing.T) {
 // blueprint: an unknown workflow id has no skeleton and cannot be synthesised.
 func TestSynthesizeRejectsUnknownWorkflow(t *testing.T) {
 	t.Parallel()
-	_, err := Synthesize(WorkflowResearch{WorkflowID: "no-such-workflow"})
+	_, err := Synthesize(WorkflowResearch{WorkflowID: "no-such-workflow"}, RevOpsRegistry())
 	if !errors.Is(err, ErrNoBlueprint) {
 		t.Fatalf("Synthesize(unknown) = %v, want ErrNoBlueprint", err)
 	}

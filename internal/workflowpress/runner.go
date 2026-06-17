@@ -125,8 +125,19 @@ func NewRunner(spec *WorkflowSpec, exec Executor, guard GuardEvaluator) (*Runner
 	if exec == nil {
 		exec = NewHostExecutor()
 	}
-	if guard == nil {
-		guard = DefaultGuardEvaluator{}
+	// Wire the spec's per-workflow GuardConfig (named thresholds + fixture aliases)
+	// into the guard evaluator. A nil evaluator, or a bare DefaultGuardEvaluator the
+	// caller passed without config, is enriched from spec.GuardConfig so the kernel
+	// never holds per-workflow constants — they travel on the contract. A caller who
+	// supplied a DefaultGuardEvaluator already carrying a config, or a custom
+	// evaluator entirely, is respected as-is.
+	switch g := guard.(type) {
+	case nil:
+		guard = NewDefaultGuardEvaluator(spec.GuardConfig)
+	case DefaultGuardEvaluator:
+		if g.Config.isEmpty() {
+			guard = NewDefaultGuardEvaluator(spec.GuardConfig)
+		}
 	}
 	r := &Runner{
 		spec:      spec,
@@ -339,38 +350,36 @@ type GuardEvaluator interface {
 //   - Each side is resolved to a float: a numeric literal stays itself; an
 //     identifier (possibly dotted, e.g. usage_trend.delta_pct) resolves by
 //     matching its last path segment against a fixture key, then against the
-//     fixture's known aliases (defaultFixtureAliases), then against a small
-//     threshold registry (defaultThresholds) for a named threshold absent from
-//     the fixture.
+//     spec's GuardConfig.FixtureAliases, then against the spec's
+//     GuardConfig.Thresholds for a named threshold absent from the fixture.
 //   - A side that resolves to nothing makes the guard fail (false), not error —
 //     a guard whose data is absent simply does not hold.
 //
-// This covers every guard in the three ground-truth specs without hardcoding any
-// one workflow, and degrades safely: an unresolved operand is a non-firing guard,
-// which keeps the machine from advancing on missing data.
-type DefaultGuardEvaluator struct{}
-
-// defaultThresholds supplies a deterministic value for a named threshold operand
-// that the fixture does not carry. These are the rubric constants a real ICP /
-// match / renewal model would hold; the kernel keeps them explicit and stable so
-// generation stays deterministic and the scenarios are self-contained.
-var defaultThresholds = map[string]float64{
-	"icp_threshold":   50,  // a lead at/above 50 fits the ICP
-	"match_threshold": 0.5, // a candidate at/above 0.5 is a confident match
-	"renewal_window":  60,  // renewals within 60 days are in scope
+// The thresholds and aliases are NOT hardcoded in the kernel: they are PER-WORKFLOW
+// domain knowledge carried on the spec's GuardConfig (Config below), seeded by the
+// outside-kernel workflow registry at synthesis. The kernel evaluator therefore
+// stays workflow-agnostic — adding a new workflow's rubric constants edits the
+// registry/spec, never this runtime. The zero value is the agnostic evaluator with
+// no thresholds or aliases; NewRunner wires the running spec's GuardConfig into it.
+// It degrades safely: an unresolved operand is a non-firing guard, which keeps the
+// machine from advancing on missing data.
+type DefaultGuardEvaluator struct {
+	// Config carries the per-workflow thresholds and fixture aliases this evaluator
+	// resolves named operands against. Empty by default; NewRunner populates it from
+	// the spec's GuardConfig so the kernel never holds per-workflow constants.
+	Config GuardConfig
 }
 
-// defaultFixtureAliases maps a guard operand's last path segment to the fixture
-// key that actually carries its value, when the contract's domain wording and the
-// fixture's wording differ (e.g. the guard speaks of "renewal_date - now" while
-// the fixture carries the already-computed "renewal_in_days"). Deterministic and
-// shared by every spec.
-var defaultFixtureAliases = map[string]string{
-	"renewal_date": "renewal_in_days",
+// NewDefaultGuardEvaluator builds a DefaultGuardEvaluator carrying the given
+// per-workflow GuardConfig (thresholds + fixture aliases). It is the explicit
+// constructor a caller uses to evaluate a spec's guards with that spec's config;
+// NewRunner calls it implicitly from the running spec's GuardConfig.
+func NewDefaultGuardEvaluator(cfg GuardConfig) DefaultGuardEvaluator {
+	return DefaultGuardEvaluator{Config: cfg}
 }
 
 // Eval implements GuardEvaluator.
-func (DefaultGuardEvaluator) Eval(g Guard, fields map[string]string) (bool, error) {
+func (e DefaultGuardEvaluator) Eval(g Guard, fields map[string]string) (bool, error) {
 	expr := strings.TrimSpace(g.Expr)
 	if expr == "" {
 		return false, fmt.Errorf("guard %q: empty expression", g.Name)
@@ -390,7 +399,7 @@ func (DefaultGuardEvaluator) Eval(g Guard, fields map[string]string) (bool, erro
 		if derr != nil {
 			return false, fmt.Errorf("guard %q: %w", g.Name, derr)
 		}
-		days, dok := resolveOperand(lhs, fields)
+		days, dok := e.resolveOperand(lhs, fields)
 		if !dok {
 			return false, nil
 		}
@@ -403,11 +412,11 @@ func (DefaultGuardEvaluator) Eval(g Guard, fields map[string]string) (bool, erro
 	}
 	lhs := strings.TrimSpace(expr[:strings.Index(expr, op)])
 
-	left, lok := resolveOperand(lhs, fields)
+	left, lok := e.resolveOperand(lhs, fields)
 	if !lok {
 		return false, nil
 	}
-	right, rok := resolveOperandOrLiteral(rhsStr, fields)
+	right, rok := e.resolveOperandOrLiteral(rhsStr, fields)
 	if !rok {
 		return false, nil
 	}
@@ -440,11 +449,11 @@ func splitOnOperator(expr string) (op string, rhs string, ok bool) {
 }
 
 // resolveOperand resolves an identifier operand (possibly dotted) to a float from
-// the fixture, via the alias map. It does NOT consult literals; use
-// resolveOperandOrLiteral for a side that may be a constant.
-func resolveOperand(ident string, fields map[string]string) (float64, bool) {
+// the fixture, via the spec's GuardConfig.FixtureAliases. It does NOT consult
+// literals; use resolveOperandOrLiteral for a side that may be a constant.
+func (e DefaultGuardEvaluator) resolveOperand(ident string, fields map[string]string) (float64, bool) {
 	key := lastSegment(ident)
-	if alias, ok := defaultFixtureAliases[key]; ok {
+	if alias, ok := e.Config.FixtureAliases[key]; ok {
 		key = alias
 	}
 	if v, ok := fields[key]; ok {
@@ -457,8 +466,9 @@ func resolveOperand(ident string, fields map[string]string) (float64, bool) {
 }
 
 // resolveOperandOrLiteral resolves a right-hand operand that may be a numeric
-// literal (e.g. -0.20), a fixture field, or a named threshold from the registry.
-func resolveOperandOrLiteral(operand string, fields map[string]string) (float64, bool) {
+// literal (e.g. -0.20), a fixture field, or a named threshold from the spec's
+// GuardConfig.Thresholds.
+func (e DefaultGuardEvaluator) resolveOperandOrLiteral(operand string, fields map[string]string) (float64, bool) {
 	operand = strings.TrimSpace(operand)
 	if operand == "" {
 		return 0, false
@@ -466,10 +476,10 @@ func resolveOperandOrLiteral(operand string, fields map[string]string) (float64,
 	if f, err := strconv.ParseFloat(operand, 64); err == nil {
 		return f, true
 	}
-	if f, ok := resolveOperand(operand, fields); ok {
+	if f, ok := e.resolveOperand(operand, fields); ok {
 		return f, true
 	}
-	if f, ok := defaultThresholds[lastSegment(operand)]; ok {
+	if f, ok := e.Config.Thresholds[lastSegment(operand)]; ok {
 		return f, true
 	}
 	return 0, false

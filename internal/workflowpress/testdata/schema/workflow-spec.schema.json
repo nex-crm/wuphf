@@ -528,6 +528,24 @@
         ],
         "additionalProperties": false
       }
+    },
+    "guard_config": {
+      "type": "object",
+      "properties": {
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "fixture_aliases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$id": "https://wuphf.nex.ai/schema/workflow-press/v1/workflow-spec.schema.json",

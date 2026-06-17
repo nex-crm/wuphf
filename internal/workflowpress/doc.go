@@ -33,22 +33,37 @@
 //   - the Generator — deterministic emission of the local workflow from the
 //     spec (interface here; implementation in a later phase);
 //   - the Shipcheck — the mechanical proof gate (interface here; later phase);
+//   - the synthesis MACHINERY — Synthesize plus the carry/degrade logic
+//     (synthesize.go), which fuses evidence with an INJECTED per-workflow
+//     blueprint. The kernel holds the machinery and the BlueprintRegistry seam,
+//     NOT the per-workflow blueprints;
 //   - the runner runtime — executes the generated workflow's actions through the
-//     Executor seam (executor.go; a host-stub backend only, no live execution);
+//     Executor seam (executor.go; a host-stub backend only, no live execution).
+//     Its DefaultGuardEvaluator carries NO per-workflow constants: it resolves
+//     named thresholds and fixture aliases from the spec's GuardConfig, wired in
+//     by NewRunner;
 //   - the OverlayStore — overlay apply/replay/accept machinery (interface here;
 //     later phase).
 //
-// OUTSIDE the kernel (mutable, persisted elsewhere, never the source of truth
-// for generation):
+// OUTSIDE the kernel (mutable or per-workflow, persisted/registered elsewhere,
+// never hardcoded in the kernel):
 //
 //   - the research store — append-only raw WorkflowResearch evidence;
 //   - live run observations and failures;
 //   - operator edits;
-//   - proposed overlays awaiting review.
+//   - proposed overlays awaiting review;
+//   - the PER-WORKFLOW domain knowledge — the synthesis blueprints (the
+//     state-machine skeletons) and the guard thresholds/aliases each carries.
+//     These are injected through the BlueprintRegistry seam (an implementation
+//     such as RevOpsRegistry, defined in revops_workflows.go, holds the data) and
+//     ride onto each contract's GuardConfig. Adding a new workflow registers a
+//     blueprint with a registry and edits NO kernel file.
 //
-// Keep the kernel SMALL. New mutable state belongs outside it; new behaviour
-// belongs behind one of the kernel's interfaces, exercised against the
-// contract, not bolted into a growing engine.
+// Keep the kernel SMALL — and FROZEN per workflow. Per-workflow data lives in an
+// injected registry and on the spec, so the kernel does not grow as workflows are
+// added. New mutable state belongs outside it; new behaviour belongs behind one of
+// the kernel's interfaces, exercised against the contract, not bolted into a
+// growing engine.
 //
 // # Security posture
 //

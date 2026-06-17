@@ -17,7 +17,19 @@ import (
 // data is absent — never advancing the machine on missing data.
 func TestDefaultGuardEvaluator(t *testing.T) {
 	t.Parallel()
-	eval := DefaultGuardEvaluator{}
+	// The thresholds and aliases are per-workflow knowledge carried on the spec's
+	// GuardConfig (no longer hardcoded in the kernel); supply a config covering the
+	// three ground-truth specs' guard constants so this table exercises the same
+	// resolution path the runner uses after NewRunner wires spec.GuardConfig in.
+	eval := NewDefaultGuardEvaluator(GuardConfig{
+		Thresholds: map[string]float64{
+			"icp_threshold":   50,
+			"match_threshold": 0.5,
+		},
+		FixtureAliases: map[string]string{
+			"renewal_date": "renewal_in_days",
+		},
+	})
 	tests := []struct {
 		name   string
 		expr   string

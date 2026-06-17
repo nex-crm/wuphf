@@ -185,5 +185,8 @@
       "watch": "usage_data_unavailable",
       "threshold": "5 per sweep"
     }
-  ]
+  ],
+  "guard_config": {
+    "fixture_aliases": { "renewal_date": "renewal_in_days" }
+  }
 }
