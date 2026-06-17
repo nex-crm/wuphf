@@ -1,0 +1,69 @@
+{
+  "version": "1",
+  "id": "brex-referral-outreach",
+  "goal": "Drive Navan referrals from flagged accounts with reliable, low-touch outreach",
+  "operator": "revops",
+  "entities": [
+    { "name": "opportunity", "fields": ["company", "owner", "priority", "spiff"] }
+  ],
+  "states": [
+    { "id": "identified", "label": "Identified" },
+    { "id": "sent", "label": "Sent to owner" },
+    { "id": "acknowledged", "label": "Acknowledged" },
+    { "id": "referred", "label": "Referred" }
+  ],
+  "initial": "identified",
+  "terminal": ["referred"],
+  "events": [
+    { "id": "process", "label": "Opportunity ready to process" },
+    { "id": "acknowledge", "label": "Owner acknowledged" },
+    { "id": "refer", "label": "Owner referred" }
+  ],
+  "actions": [
+    { "id": "draft_message", "kind": "llm", "description": "Draft a personalized Slack DM to the owner" },
+    { "id": "route_owner", "kind": "deterministic", "description": "Resolve the correct account owner" },
+    { "id": "slack_send", "kind": "external", "description": "Send the DM via Slack (gated, dedupe, throttle)" },
+    { "id": "track", "kind": "deterministic", "description": "Record the referral lifecycle transition" }
+  ],
+  "transitions": [
+    { "from": "identified", "to": "sent", "on": "process", "guard": "owner exists", "actions": ["draft_message", "route_owner", "slack_send", "track"] },
+    { "from": "sent", "to": "acknowledged", "on": "acknowledge", "actions": ["track"] },
+    { "from": "acknowledged", "to": "referred", "on": "refer", "actions": ["track"] }
+  ],
+  "exceptions": [
+    { "id": "missing_owner", "when": "owner cannot be resolved", "handle": "stay in identified; surface to the operator" }
+  ],
+  "slas": [
+    { "state": "sent", "max_age_seconds": 604800 }
+  ],
+  "scenarios": [
+    {
+      "name": "happy_path",
+      "events": [
+        { "event": "process", "data": { "company": "Ramp", "owner": "ada" }, "dedup_key": "opp-1" },
+        { "event": "acknowledge", "dedup_key": "ack-1" },
+        { "event": "refer", "dedup_key": "ref-1" }
+      ],
+      "expect_states": ["identified", "sent", "acknowledged", "referred"],
+      "expect_actions": ["draft_message", "route_owner", "slack_send", "track", "track", "track"]
+    },
+    {
+      "name": "missing_owner_guard",
+      "events": [
+        { "event": "process", "data": { "company": "Deel" }, "dedup_key": "opp-2" }
+      ],
+      "expect_states": ["identified"],
+      "expect_actions": []
+    },
+    {
+      "name": "duplicate_send",
+      "events": [
+        { "event": "process", "data": { "company": "Brex", "owner": "bo" }, "dedup_key": "opp-3" },
+        { "event": "process", "data": { "company": "Brex", "owner": "bo" }, "dedup_key": "opp-3" }
+      ],
+      "expect_states": ["identified", "sent"],
+      "expect_actions": ["draft_message", "route_owner", "slack_send", "track"]
+    }
+  ],
+  "improvement_signals": ["owner_acknowledge_rate", "referral_conversion", "duplicate_send_attempts"]
+}
