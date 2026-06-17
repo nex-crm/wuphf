@@ -37,6 +37,21 @@ export interface FreezeResult {
   created: boolean;
 }
 
-export function freezeWorkflow(fingerprint: string): Promise<FreezeResult> {
-  return post<FreezeResult>("/workflows/freeze", { fingerprint });
+export interface DraftResult {
+  spec: unknown;
+  shipcheck: ShipcheckReport;
+}
+
+export function draftWorkflow(fingerprint: string): Promise<DraftResult> {
+  return post<DraftResult>("/workflows/draft", { fingerprint });
+}
+
+export function freezeWorkflow(
+  fingerprint: string,
+  spec?: unknown,
+): Promise<FreezeResult> {
+  return post<FreezeResult>(
+    "/workflows/freeze",
+    spec === undefined ? { fingerprint } : { fingerprint, spec },
+  );
 }

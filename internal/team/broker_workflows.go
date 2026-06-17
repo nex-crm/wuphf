@@ -111,13 +111,55 @@ func (b *Broker) handleWorkflowsSpotted(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"workflows": out})
 }
 
-func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
+// handleWorkflowsDraft returns the drafted contract + shipcheck for a candidate
+// WITHOUT persisting anything — the review/enrich preview the operator edits
+// before confirming. Freeze then binds the (possibly edited) spec.
+func (b *Broker) handleWorkflowsDraft(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
 	var body struct {
 		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	fp := strings.TrimSpace(body.Fingerprint)
+	if fp == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "fingerprint_required"})
+		return
+	}
+	cands, err := DetectWorkflowsFromSink(EventSinkPath(), DetectOptions{})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "detect_failed"})
+		return
+	}
+	var cand *DetectionCandidate
+	for i := range cands {
+		if cands[i].Fingerprint == fp {
+			cand = &cands[i]
+			break
+		}
+	}
+	if cand == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no_spotted_workflow_for_fingerprint"})
+		return
+	}
+	spec := workflow.DraftSpec(workflowSkillName(*cand), workflowSkillTitle(*cand), cand.Agent, cand.Shape)
+	report := workflow.Shipcheck(&spec)
+	writeJSON(w, http.StatusOK, map[string]any{"spec": spec, "shipcheck": report})
+}
+
+func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var body struct {
+		Fingerprint string         `json:"fingerprint"`
+		Spec        *workflow.Spec `json:"spec,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
@@ -156,10 +198,23 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 	title := workflowSkillTitle(*cand)
 	channel := normalizeChannelSlug("general")
 
-	// Discovery -> contract: draft a workflow-spec from the detected shape and
-	// PROVE it with shipcheck before anything is created. A contract that fails
-	// the mechanical proof never ships.
-	spec := workflow.DraftSpec(name, title, cand.Agent, cand.Shape)
+	// Discovery -> contract. Either bind the operator's reviewed/enriched spec
+	// (when supplied) or auto-draft from the detected shape. Either way the
+	// contract is PROVEN with shipcheck before anything is created; one that
+	// fails the mechanical proof never ships.
+	var spec workflow.Spec
+	if body.Spec != nil {
+		spec = *body.Spec
+		spec.ID = name // always bind to this candidate, regardless of edits
+		if strings.TrimSpace(spec.Goal) == "" {
+			spec.Goal = title
+		}
+		if strings.TrimSpace(spec.Operator) == "" {
+			spec.Operator = cand.Agent
+		}
+	} else {
+		spec = workflow.DraftSpec(name, title, cand.Agent, cand.Shape)
+	}
 	report := workflow.Shipcheck(&spec)
 	if !report.Passed {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
