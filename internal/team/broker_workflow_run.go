@@ -84,6 +84,41 @@ func (b *Broker) RunWorkflowSpec(specID, trigger string) error {
 	return err
 }
 
+// handleWorkflowsProposals closes the self-healing loop: it mines a contract's
+// run records for recurring exceptions and returns drafted overlays the operator
+// can review and accept (via /workflows/improve). Read-only; nothing is applied.
+func (b *Broker) handleWorkflowsProposals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var body struct {
+		SpecID string `json:"spec_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	id := strings.TrimSpace(body.SpecID)
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "spec_id_required"})
+		return
+	}
+	path := workflowSpecPath(id)
+	if path == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no_runtime_home"})
+		return
+	}
+	spec, err := workflow.LoadSpec(path)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "spec_not_found"})
+		return
+	}
+	runs, _ := workflow.ReadRuns(workflowRunsPath(id))
+	proposals := workflow.ProposeOverlays(spec, runs, workflow.ProposeOptions{})
+	writeJSON(w, http.StatusOK, map[string]any{"spec_id": id, "runs": len(runs), "proposals": proposals})
+}
+
 // handleWorkflowsRun is the manual / programmatic trigger. Schedule and event
 // triggers fire the same runtime via RunWorkflowSpec.
 func (b *Broker) handleWorkflowsRun(w http.ResponseWriter, r *http.Request) {
