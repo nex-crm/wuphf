@@ -432,6 +432,76 @@ Phase 2    Freeze + execution + pilot.            (T12-T18) + UI (T1-T9)
 The pilot moves right by Phase 0 + 0.5; detection cannot demo until the corpus
 exists. That is the honest cost of detection-first, now budgeted, not hidden.
 
+## 6C. Architecture sharpened: the workflow press (research 2026-06-17)
+
+Two read-heavy subagent passes (cli-printing-press, browser-harness) converged
+on a sharper architecture and positioning. This SUPERSEDES the "freeze into a
+prose skill" shape of the v0 slice and the "execution = a constrained agent run"
+call in 6B.
+
+### Positioning: a workflow press, not workflow memory
+
+WUPHF is a **workflow press for revenue operators**: discover messy repeated
+work, freeze it into a REVIEWED CONTRACT, GENERATE the internal tool, PROVE it
+works, then keep improving it from live usage. "Predictable workflows that heal
+themselves" becomes literally true: the shipcheck proves predictable; the
+overlays are the healing. The discovery card stays the hook; the press is the
+product.
+
+### The pipeline (discovery does NOT become code directly)
+
+```
+1. workflow-research.json   Raw discovery: session/tool traces, operator notes,
+                            sample records, exceptions, edits. Evidence, not code.
+        v  (human reviews + edits into a contract)
+2. workflow-spec.json       CANONICAL IR / contract: goal, operator, entities,
+                            states, events, guards, actions, exceptions, SLAs,
+                            verification scenarios, improvement signals.
+        v  (deterministic generation FROM the contract)
+3. Generated local tool     runner, types, exceptions, state, inngest adapter,
+                            fixtures, docs, tests. Deterministic code; LLM only
+                            inside specific actions (e.g. draft the message).
+        v
+4. workflow-shipcheck       Mechanical proof: fixture replay, transition
+                            coverage, idempotency, duplicate handling, stale
+                            handling, audit completeness, adapter parity.
+        v
+5. Improvement overlays     Operator edits + recurring exceptions -> proposed
+                            overlays, reviewed -> replayed -> accepted. Prefer
+                            UPDATING the existing workflow over creating a new one.
+```
+
+### Kernel principle (from browser-harness)
+
+The self-improving part does NOT live in a giant workflow engine. Keep a small
+PROTECTED KERNEL (the runner contract + shipcheck). Persist run observations,
+failures, operator edits, and durable playbooks OUTSIDE the kernel. Improvements
+arrive as OVERLAYS / PATCHES, reviewed -> replayed -> accepted, never as live
+mutations to the kernel.
+
+### What this changes vs 6B
+
+- **Freeze output is `workflow-spec.json` (a contract), not a prose teamSkill.**
+  The teamSkill / schedulerJob from 6B becomes the RUNTIME BINDING (how the
+  generated runner is scheduled), not the source of truth.
+- **Execution is a GENERATED deterministic runner, not a constrained agent run.**
+  This resolves the 6B "structural determinism" honesty gap: orchestration,
+  state, guards, and exceptions are generated deterministic code with a shipcheck
+  proof; the LLM is confined to named actions (drafting), gated by the existing
+  approval path. "Deterministic" is now honest at the orchestration layer.
+- **Verification is `workflow-shipcheck`, not just a test plan.** Mechanical,
+  contract-derived, runs on every overlay.
+- **Self-healing = improvement overlays** (review -> replay -> accept), the
+  update-over-create promise made concrete.
+
+### How the shipped v0 slice maps forward
+
+The v0 slice (`event_sink` -> miner -> spotted card -> freeze) is the DISCOVERY +
+research stage (stage 1 and the trigger for stage 2). It stands. The next real
+build is the **spec contract** (`workflow-spec.json`) + the **generator** +
+**shipcheck** + the **overlay** loop. The current freeze-to-teamSkill becomes
+freeze-to-spec, with the teamSkill demoted to the runtime binding.
+
 ## 7. Lexicon (use these words, consistently)
 
 | Concept | Word we use | Words we avoid |
