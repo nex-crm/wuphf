@@ -140,6 +140,11 @@ func newOfficeEvalFixture(dir string) (*officeEvalFixture, error) {
 		launcher:   l,
 		scratchDir: dir,
 		cleanup: func() {
+			// Drain fire-and-forget distillation/promotion goroutines FIRST, while
+			// the wiki worker is still running so they flush successfully, THEN
+			// stop the worker. Otherwise a late distill write races the temp-dir
+			// removal ("directory not empty") and logs "worker is not running".
+			b.WaitBackground()
 			cancel()
 			<-worker.Done()
 		},

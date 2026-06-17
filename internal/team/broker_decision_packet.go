@@ -1247,7 +1247,9 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 	// Run the wiki write off-lock so a slow git commit cannot block
 	// every other broker mutator. The wiki worker has its own
 	// serialisation queue, so concurrent triggers are safe.
+	b.bgWG.Add(1)
 	go func() {
+		defer b.bgWG.Done()
 		_, _, err := worker.Enqueue(ctx, "system", relPath, body, "create", commitMsg)
 		if err != nil {
 			log.Printf("broker: wiki promotion for task %q failed: %v", taskID, err)

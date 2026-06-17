@@ -166,6 +166,10 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
+	// bgWG tracks fire-and-forget broker goroutines that write to disk (task
+	// distillation, wiki promotion). WaitBackground drains them so a shutdown /
+	// test teardown does not race their writes against state removal.
+	bgWG                    sync.WaitGroup
 	wikiInitMu              sync.Mutex
 	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
