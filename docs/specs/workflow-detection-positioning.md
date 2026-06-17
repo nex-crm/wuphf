@@ -502,6 +502,25 @@ build is the **spec contract** (`workflow-spec.json`) + the **generator** +
 **shipcheck** + the **overlay** loop. The current freeze-to-teamSkill becomes
 freeze-to-spec, with the teamSkill demoted to the runtime binding.
 
+### Built so far (2026-06-17): the press kernel
+
+`internal/workflow` ships the contract + runner + shipcheck (stages 2-4 of the
+press):
+- `Spec` (`spec.go`): the canonical `workflow-spec.json` contract + `Validate`.
+- `Run` (`runner.go`): a deterministic state-machine runner with dedup /
+  idempotency and a full audit trail; LLM/external work confined to an
+  `ActionExec` hook so the orchestration is provable.
+- `Shipcheck` (`shipcheck.go`): mechanical proof (structure, scenario replay,
+  audit completeness, transition coverage, terminal reachability, determinism,
+  idempotency).
+- `testdata/referral.workflow-spec.json`: the Brex referral as a hand-authored
+  contract that PASSES shipcheck.
+
+REMAINING: a `workflow-research.json` -> `workflow-spec.json` draft from a
+detection candidate (human reviews it), wiring `freeze` to emit a spec, code
+generation of a typed runner + inngest adapter from the spec, and the
+improvement-overlay loop.
+
 ## 7. Lexicon (use these words, consistently)
 
 | Concept | Word we use | Words we avoid |
