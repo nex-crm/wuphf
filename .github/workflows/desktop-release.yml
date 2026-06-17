@@ -55,16 +55,40 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
 
       - name: Free disk space for DMG packaging
-        # macos-14 runners ship near-full; `hdiutil create` for the universal .app
-        # has twice failed with "No space left on device" (v0.1.0, v0.227.0).
-        # Reclaim the simulator runtimes we never use (~10-20 GB) up front. This
-        # leaves the active Xcode/CLT intact, so codesign + notarytool still work.
+        # macos-14 runners ship near-full; `hdiutil create` for the universal
+        # .app has failed with "No space left on device" (v0.1.0, v0.227.0,
+        # v0.227.2). Reclaim the big tools this Go/Wails build never touches
+        # BEFORE building so packaging has headroom. The *active* Xcode is kept
+        # (codesign, hdiutil, notarytool, stapler all need it) — only the other
+        # installed Xcode versions and unused SDKs are removed.
         run: |
-          df -h /
+          set -uo pipefail
+          echo "Disk before cleanup:"; df -h /
+          # iOS simulator runtimes, caches, and device-support (~10-20 GB).
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
-          sudo rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport/* || true
           sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/* || true
-          df -h /
+          sudo rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport/* || true
+          # Android SDK/NDK — never used by this build (~10+ GB).
+          sudo rm -rf "${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}" ~/Library/Android || true
+          # Extra Xcode installs — keep ONLY the one `xcode-select` points at.
+          # Guard on the active path actually being an /Applications/Xcode*.app so
+          # a CLT-only selection can never delete every Xcode out from under us.
+          active_xcode="$(xcode-select -p 2>/dev/null | sed 's#/Contents/Developer##')"
+          echo "Active Xcode: ${active_xcode:-<none>}"
+          case "$active_xcode" in
+            /Applications/Xcode*.app)
+              for x in /Applications/Xcode*.app; do
+                [ -e "$x" ] || continue
+                [ "$x" = "$active_xcode" ] && continue
+                echo "Removing unused $x"
+                sudo rm -rf "$x" || true
+              done
+              ;;
+            *)
+              echo "Active toolchain is not a removable Xcode.app; skipping Xcode pruning"
+              ;;
+          esac
+          echo "Disk after cleanup:"; df -h /
 
       - name: Resolve version
         id: ver
@@ -98,7 +122,22 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2
 
       - name: Build embedded web bundle
-        run: cd web && bun install && bun run build
+        run: |
+          cd web
+          # Retry `bun install`: the xlsx dep pulls from the sheetjs CDN, which
+          # intermittently 502s and has failed desktop releases (v0.227.2).
+          # `bun run build` is a real build step, so only the network-bound
+          # install is retried.
+          for attempt in 1 2 3; do
+            if bun install; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::bun install failed after 3 attempts (transient registry/CDN error?)"
+              exit 1
+            fi
+            echo "::warning::bun install attempt $attempt failed; retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          bun run build
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
@@ -244,7 +283,22 @@ jobs:
 
       - name: Build embedded web bundle
         shell: bash
-        run: cd web && bun install && bun run build
+        run: |
+          cd web
+          # Retry `bun install`: the xlsx dep pulls from the sheetjs CDN, which
+          # intermittently 502s and failed the v0.227.2 Windows desktop build.
+          # `bun run build` is a real build step, so only the network-bound
+          # install is retried.
+          for attempt in 1 2 3; do
+            if bun install; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::bun install failed after 3 attempts (transient registry/CDN error?)"
+              exit 1
+            fi
+            echo "::warning::bun install attempt $attempt failed; retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          bun run build
 
       - name: Install Wails CLI
         shell: bash
