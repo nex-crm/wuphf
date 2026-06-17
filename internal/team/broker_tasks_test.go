@@ -131,6 +131,80 @@ func TestReconcileOrphanedBlockedTasksLocked_UnblocksCancelledParent(t *testing.
 	b.mu.Unlock()
 }
 
+// TestReconcileSharedTaskChannelsLocked_RehomesSquatters pins the one-shot
+// migration that splits already-shared per-task channels. Reproduces the live
+// OFFICE-22 / OFFICE-28 case: OFFICE-28 (created from inside OFFICE-22's chat)
+// shares OFFICE-22's "task-office-22" channel. After the migration OFFICE-28
+// owns its own "task-office-28"; OFFICE-22 is untouched; #general and
+// non-per-task channels are left alone; and a second pass is a no-op.
+func TestReconcileSharedTaskChannelsLocked_RehomesSquatters(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "eng", "Eng")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// task-office-22 is OFFICE-22's dedicated per-task channel.
+	b.channels = append(b.channels, teamChannel{
+		Slug: "task-office-22", Name: "Daily Digest", TaskID: "OFFICE-22",
+		Members: []string{"eng"}, CreatedBy: "system",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	// A genuinely shared, non-per-task channel (no TaskID) — must be left alone.
+	b.channels = append(b.channels, teamChannel{
+		Slug: "project-loop", Name: "project-loop",
+		Members: []string{"eng"}, CreatedBy: "system",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	b.tasks = []teamTask{
+		{ID: "OFFICE-22", Title: "Daily Digest from email", Owner: "eng", status: "in_progress", Channel: "task-office-22"},
+		{ID: "OFFICE-28", Title: "Outbound email reply agent", Owner: "eng", status: "in_progress", Channel: "task-office-22"},
+		{ID: "OFFICE-30", Title: "Backup", Owner: "eng", status: "open", Channel: "general"},
+		{ID: "OFFICE-31", Title: "Shared project work", Owner: "eng", status: "open", Channel: "project-loop"},
+	}
+
+	b.reconcileSharedTaskChannelsLocked()
+
+	byID := map[string]*teamTask{}
+	for i := range b.tasks {
+		byID[b.tasks[i].ID] = &b.tasks[i]
+	}
+	// The owner keeps its channel.
+	if got := byID["OFFICE-22"].Channel; got != "task-office-22" {
+		t.Fatalf("OFFICE-22 (owner) channel must be unchanged, got %q", got)
+	}
+	// The squatter gets its own channel.
+	wantChild := normalizeChannelSlug("task-OFFICE-28")
+	if got := byID["OFFICE-28"].Channel; got != wantChild {
+		t.Fatalf("OFFICE-28 must be re-homed to %q, got %q", wantChild, got)
+	}
+	if got := byID["OFFICE-28"].Channel; got == byID["OFFICE-22"].Channel {
+		t.Fatalf("OFFICE-28 must not share OFFICE-22's channel %q", got)
+	}
+	// The minted channel exists and links back to the squatter.
+	newCh := b.findChannelLocked(wantChild)
+	if newCh == nil || newCh.TaskID != "OFFICE-28" {
+		t.Fatalf("expected channel %q linked to OFFICE-28, got %+v", wantChild, newCh)
+	}
+	// #general and non-per-task shared channels are untouched.
+	if got := byID["OFFICE-30"].Channel; got != "general" {
+		t.Fatalf("OFFICE-30 in #general must be untouched, got %q", got)
+	}
+	if got := byID["OFFICE-31"].Channel; got != "project-loop" {
+		t.Fatalf("OFFICE-31 in a non-per-task shared channel must be untouched, got %q", got)
+	}
+
+	// Idempotent: a second pass changes nothing.
+	before := map[string]string{}
+	for i := range b.tasks {
+		before[b.tasks[i].ID] = b.tasks[i].Channel + "|" + b.tasks[i].UpdatedAt
+	}
+	b.reconcileSharedTaskChannelsLocked()
+	for i := range b.tasks {
+		if got := b.tasks[i].Channel + "|" + b.tasks[i].UpdatedAt; got != before[b.tasks[i].ID] {
+			t.Errorf("task %s changed on second pass: %q -> %q", b.tasks[i].ID, before[b.tasks[i].ID], got)
+		}
+	}
+}
+
 // TestTaskReuseMatch_HasScopedIdentity pins the precondition for
 // scoped-identity dedupe in findReusableTaskLocked: a match counts as
 // scoped only when SourceSignalID or SourceDecisionID is non-empty.
