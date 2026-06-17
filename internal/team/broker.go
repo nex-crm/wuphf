@@ -701,6 +701,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workflows/spotted", b.requireAuth(b.handleWorkflowsSpotted))
 	mux.HandleFunc("/workflows/draft", b.requireAuth(b.handleWorkflowsDraft))
 	mux.HandleFunc("/workflows/freeze", b.requireAuth(b.handleWorkflowsFreeze))
+	mux.HandleFunc("/workflows/run", b.requireAuth(b.handleWorkflowsRun))
 	mux.HandleFunc("/workflows/improve", b.requireAuth(b.handleWorkflowsImprove))
 	// GET /commands — slash-command registry mirror so the web composer
 	// renders the same command set as the TUI. See broker_commands.go.

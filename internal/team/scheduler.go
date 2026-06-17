@@ -60,6 +60,7 @@ type schedulerBroker interface {
 	ResumeTask(id, by, note string) (teamTask, bool, error)
 	PostAutomationMessage(from, channel, title, body, alertID, source, displayName string, ccSlugs []string, replyTo string) (channelMessage, bool, error)
 	UpdateSkillExecutionByWorkflowKey(key, status string, when time.Time) error
+	RunWorkflowSpec(specID, trigger string) error
 	SetSchedulerJob(job schedulerJob) error
 	// PR 8 Lane G additions for cron registry support.
 	SchedulerJobControl(slug string, defaultInterval time.Duration) (bool, time.Duration)
@@ -232,6 +233,8 @@ func (w *watchdogScheduler) processOnce() {
 			w.processRequestJob(job)
 		case "workflow":
 			w.processWorkflowJob(job)
+		case "workflow_spec":
+			w.processWorkflowSpecJob(job)
 		case "agent":
 			w.processAgentJob(job)
 		default:
@@ -242,6 +245,25 @@ func (w *watchdogScheduler) processOnce() {
 			_ = w.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
 		}
 	}
+}
+
+// processWorkflowSpecJob fires a frozen workflow-spec contract on its schedule
+// through the runtime, then reschedules. The spec id is the job's TargetID (or
+// its payload's spec_id).
+func (w *watchdogScheduler) processWorkflowSpecJob(job schedulerJob) {
+	specID := strings.TrimSpace(job.TargetID)
+	if specID == "" {
+		var p struct {
+			SpecID string `json:"spec_id"`
+		}
+		_ = json.Unmarshal([]byte(job.Payload), &p)
+		specID = strings.TrimSpace(p.SpecID)
+	}
+	if specID != "" {
+		_ = w.broker.RunWorkflowSpec(specID, "schedule")
+	}
+	next := nextRoutineRun(job, w.clock.Now().UTC())
+	_ = w.broker.UpdateSchedulerJobState(job.Slug, next, "scheduled")
 }
 
 func (w *watchdogScheduler) processTaskJob(job schedulerJob) {

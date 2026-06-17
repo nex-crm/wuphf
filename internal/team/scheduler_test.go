@@ -68,6 +68,23 @@ func TestSchedulerProcessOnce_TaskUnclaimedFiresAlert(t *testing.T) {
 	}
 }
 
+func TestSchedulerProcessOnce_WorkflowSpecFiresRun(t *testing.T) {
+	b := newSchedulerFixtureBroker(t)
+	b.dueJobs = []schedulerJob{{
+		Slug: "wf-myspec", TargetType: "workflow_spec", TargetID: "myspec",
+	}}
+
+	sched := &watchdogScheduler{broker: b, clock: newManualClock(time.Now()), deliverTask: func(officeActionLog, teamTask) {}}
+	sched.processOnce()
+
+	if len(b.workflowRuns) != 1 || b.workflowRuns[0] != [2]string{"myspec", "schedule"} {
+		t.Fatalf("expected one workflow run [myspec schedule]; got %+v", b.workflowRuns)
+	}
+	if len(b.jobStateUpdates) == 0 || b.jobStateUpdates[len(b.jobStateUpdates)-1].status != "scheduled" {
+		t.Errorf("expected job rescheduled; got %+v", b.jobStateUpdates)
+	}
+}
+
 func TestSchedulerProcessOnce_TaskOwnedFiresStalled(t *testing.T) {
 	b := newSchedulerFixtureBroker(t)
 	b.tasks = []teamTask{{
@@ -490,6 +507,7 @@ type schedulerFixtureBroker struct {
 	automationPosts  []automationCall
 	deliveredActions []string
 	skillUpdates     []skillUpdateCall
+	workflowRuns     [][2]string
 }
 
 type skillUpdateCall struct {
@@ -580,6 +598,10 @@ func (b *schedulerFixtureBroker) UpdateSkillExecutionByWorkflowKey(key, status s
 }
 
 func (b *schedulerFixtureBroker) SetSchedulerJob(_ schedulerJob) error { return nil }
+func (b *schedulerFixtureBroker) RunWorkflowSpec(specID, trigger string) error {
+	b.workflowRuns = append(b.workflowRuns, [2]string{specID, trigger})
+	return nil
+}
 func (b *schedulerFixtureBroker) SchedulerJobControl(_ string, defaultInterval time.Duration) (bool, time.Duration) {
 	return true, defaultInterval
 }
@@ -630,6 +652,7 @@ func (b *recordingLedgerBroker) UpdateSkillExecutionByWorkflowKey(string, string
 	return nil
 }
 func (b *recordingLedgerBroker) SetSchedulerJob(schedulerJob) error { return nil }
+func (b *recordingLedgerBroker) RunWorkflowSpec(_, _ string) error  { return nil }
 func (b *recordingLedgerBroker) SchedulerJobControl(_ string, defaultInterval time.Duration) (bool, time.Duration) {
 	return true, defaultInterval
 }

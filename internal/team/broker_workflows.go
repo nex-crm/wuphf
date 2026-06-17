@@ -269,6 +269,21 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Created workflow %q from a pattern repeated %d times. Shipcheck passed (%d checks).", title, cand.Count, len(report.Checks)),
 		nil, "")
 
+	// Register the contract as a scheduled workflow so it can fire on its own
+	// (daily by default). Manual /workflows/run and event triggers hit the same
+	// runtime. Best-effort: a failed registration must not fail the freeze.
+	_ = b.SetSchedulerJob(schedulerJob{
+		Slug:            "wf-" + name,
+		Label:           "Run: " + title,
+		TargetType:      "workflow_spec",
+		TargetID:        name,
+		Channel:         channel,
+		IntervalMinutes: 1440,
+		Status:          "scheduled",
+		Enabled:         true,
+		Payload:         `{"spec_id":"` + name + `"}`,
+	})
+
 	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": true})
 }
 
