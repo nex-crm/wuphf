@@ -172,7 +172,7 @@ function WorkflowCard({ wf, busy, onFreeze }: WorkflowCardProps) {
           <span
             style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}
           >
-            ✓ Workflow created
+            ✓ Workflow created · contract shipchecked
           </span>
         ) : (
           <button

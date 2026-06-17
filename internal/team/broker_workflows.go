@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/workflow"
 )
 
 // Workflow-detection HTTP surface (thin vertical slice). Two endpoints back the
@@ -50,17 +54,36 @@ func workflowSkillTitle(c DetectionCandidate) string {
 	return "Workflow: " + strings.Join(c.Shape, " -> ")
 }
 
-func workflowSkillContent(c DetectionCandidate) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n\n", workflowSkillTitle(c))
-	fmt.Fprintf(&b, "Spotted from %d repeated runs by `%s`.\n\n", c.Count, c.Agent)
-	b.WriteString("## Steps\n\n")
-	for i, tool := range c.Shape {
-		fmt.Fprintf(&b, "%d. `%s`\n", i+1, tool)
+// workflowSpecPath is where a frozen workflow's contract is persisted.
+func workflowSpecPath(id string) string {
+	home := strings.TrimSpace(config.RuntimeHomeDir())
+	if home == "" {
+		return ""
 	}
-	b.WriteString("\n## Source tasks\n\n")
-	for _, id := range c.TaskIDs {
-		fmt.Fprintf(&b, "- %s\n", id)
+	return filepath.Join(home, ".wuphf", "office", "workflows", id+".workflow-spec.json")
+}
+
+// bindingSkillContent renders the teamSkill body for a frozen workflow. The
+// skill is now the RUNTIME BINDING to a proven spec, not a prose skill: it
+// points at the contract and records the shipcheck verdict + steps.
+func bindingSkillContent(spec workflow.Spec, rep workflow.ShipcheckReport, specPath string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", spec.Goal)
+	fmt.Fprintf(&b, "Runtime binding for workflow-spec `%s`.\n\n", spec.ID)
+	if specPath != "" {
+		fmt.Fprintf(&b, "Contract: `%s`\n\n", specPath)
+	}
+	b.WriteString("## Shipcheck\n\n")
+	for _, c := range rep.Checks {
+		mark := "FAIL"
+		if c.Pass {
+			mark = "OK"
+		}
+		fmt.Fprintf(&b, "- [%s] %s — %s\n", mark, c.Name, c.Detail)
+	}
+	b.WriteString("\n## Steps\n\n")
+	for i, a := range spec.Actions {
+		fmt.Fprintf(&b, "%d. `%s` (%s)\n", i+1, a.ID, a.Kind)
 	}
 	return b.String()
 }
@@ -133,25 +156,47 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 	title := workflowSkillTitle(*cand)
 	channel := normalizeChannelSlug("general")
 
+	// Discovery -> contract: draft a workflow-spec from the detected shape and
+	// PROVE it with shipcheck before anything is created. A contract that fails
+	// the mechanical proof never ships.
+	spec := workflow.DraftSpec(name, title, cand.Agent, cand.Shape)
+	report := workflow.Shipcheck(&spec)
+	if !report.Passed {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error": "shipcheck_failed", "shipcheck": report,
+		})
+		return
+	}
+	specPath := workflowSpecPath(name)
+	if specPath != "" {
+		if err := workflow.SaveSpec(specPath, &spec); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "spec_persist_failed"})
+			return
+		}
+	}
+
 	b.mu.Lock()
-	// Update-over-create: re-freezing a known shape returns the existing skill.
+	// Update-over-create: re-freezing a known shape returns the existing binding.
 	if existing := b.findSkillByNameLocked(name); existing != nil {
 		sk := *existing
 		b.mu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "created": false})
+		writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": false})
 		return
 	}
+	// The teamSkill is now the RUNTIME BINDING to the proven spec, not a prose
+	// skill: it points at the contract and records the shipcheck verdict.
 	sk := teamSkill{
 		ID:          b.allocateSkillIDLocked(name),
 		Name:        name,
 		Title:       title,
-		Description: fmt.Sprintf("Frozen from a workflow %q repeated %d times.", cand.Agent, cand.Count),
-		Content:     workflowSkillContent(*cand),
+		Description: fmt.Sprintf("Workflow contract for a pattern by %q repeated %d times (shipcheck passed).", cand.Agent, cand.Count),
+		Content:     bindingSkillContent(spec, report, specPath),
 		CreatedBy:   createdBy,
 		OwnerAgents: b.allMemberSlugsLocked(),
 		Channel:     channel,
 		Tags:        []string{"workflow", "spotted"},
 		Trigger:     "manual",
+		WorkflowKey: spec.ID,
 		Status:      "active",
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -166,8 +211,8 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 
 	// Announce in-channel (PostMessage takes its own lock; best-effort).
 	_, _ = b.PostMessage("system", channel,
-		fmt.Sprintf("Created workflow %q from a pattern repeated %d times.", title, cand.Count),
+		fmt.Sprintf("Created workflow %q from a pattern repeated %d times. Shipcheck passed (%d checks).", title, cand.Count, len(report.Checks)),
 		nil, "")
 
-	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "created": true})
+	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": true})
 }

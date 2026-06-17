@@ -18,8 +18,22 @@ export function getSpottedWorkflows(): Promise<{
   return get<{ workflows: SpottedWorkflow[] }>("/workflows/spotted");
 }
 
+export interface ShipcheckCheck {
+  name: string;
+  pass: boolean;
+  detail?: string;
+}
+
+export interface ShipcheckReport {
+  spec_id: string;
+  passed: boolean;
+  checks: ShipcheckCheck[];
+}
+
 export interface FreezeResult {
   skill: { id: string; name: string; title: string };
+  spec_id: string;
+  shipcheck: ShipcheckReport;
   created: boolean;
 }
 
