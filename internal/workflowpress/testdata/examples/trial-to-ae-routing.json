@@ -1,0 +1,168 @@
+{
+  "id": "trial-to-ae-routing",
+  "version": 1,
+  "goal": "Route a new trial signup to the right account executive after enriching and scoring it against the ICP, then post the routing decision to the deal channel.",
+  "operator": "revops",
+  "entities": [
+    {
+      "name": "TrialSignup",
+      "description": "The inbound trial signup event with a work email and company domain.",
+      "fields": ["email", "company_domain", "signup_at"],
+      "provenance": { "trust_tier": "observed", "confidence": 0.95, "evidence": ["trace:signup-webhook-001"] }
+    },
+    {
+      "name": "Company",
+      "description": "The enriched company record (size, industry) the signup belongs to.",
+      "fields": ["domain", "employee_count", "industry", "region"],
+      "provenance": { "trust_tier": "observed", "confidence": 0.9, "evidence": ["sample:clearbit-enrich-007"] }
+    },
+    {
+      "name": "AccountExecutive",
+      "description": "The AE who owns the territory/segment the company maps to.",
+      "fields": ["id", "name", "segment", "territory"],
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "states": [
+    {
+      "name": "received",
+      "description": "A trial signup has arrived but is not yet enriched.",
+      "initial": true,
+      "provenance": { "trust_tier": "observed", "confidence": 0.95 }
+    },
+    {
+      "name": "enriched",
+      "description": "Company size and industry have been resolved.",
+      "provenance": { "trust_tier": "observed", "confidence": 0.9 }
+    },
+    {
+      "name": "scored",
+      "description": "The lead has an ICP fit score from the weighted rubric.",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "routed",
+      "description": "The signup has been assigned to an AE and posted to the deal channel.",
+      "terminal": true,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "events": [
+    {
+      "name": "trial_signed_up",
+      "trigger": "external",
+      "from": "received",
+      "to": "enriched",
+      "provenance": { "trust_tier": "observed", "confidence": 0.95, "evidence": ["trace:signup-webhook-001"] }
+    },
+    {
+      "name": "enrichment_completed",
+      "trigger": "internal",
+      "from": "enriched",
+      "to": "scored",
+      "provenance": { "trust_tier": "observed", "confidence": 0.85 }
+    },
+    {
+      "name": "scoring_completed",
+      "trigger": "internal",
+      "from": "scored",
+      "to": "routed",
+      "guard": "score_meets_icp",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "guards": [
+    {
+      "name": "score_meets_icp",
+      "expr": "icp_score >= icp_threshold",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "actions": [
+    {
+      "name": "enrich_company",
+      "kind": "read",
+      "on": "trial_signed_up",
+      "target": "enrichment-provider",
+      "requires_approval": false,
+      "provenance": { "trust_tier": "observed", "confidence": 0.9, "evidence": ["trace:enrich-call-002"] }
+    },
+    {
+      "name": "score_lead",
+      "kind": "read",
+      "on": "enrichment_completed",
+      "target": "icp-rubric",
+      "requires_approval": false,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "route_to_ae",
+      "kind": "internal-write",
+      "on": "scoring_completed",
+      "target": "crm",
+      "requires_approval": true,
+      "idempotent": true,
+      "provenance": { "trust_tier": "inferred", "confidence": 0.7 }
+    },
+    {
+      "name": "post_to_deal_channel",
+      "kind": "external-write",
+      "on": "scoring_completed",
+      "target": "deal-channel",
+      "requires_approval": true,
+      "provenance": { "trust_tier": "inferred", "confidence": 0.65, "evidence": ["note:operator-posts-by-hand"] }
+    }
+  ],
+  "exceptions": [
+    {
+      "name": "enrichment_miss",
+      "when": "the enrichment provider has no record for the company domain",
+      "handling": "fall back to the email domain heuristic and flag the signup for manual review",
+      "provenance": { "trust_tier": "observed", "confidence": 0.8, "evidence": ["exception:enrich-miss-x12"] }
+    },
+    {
+      "name": "no_matching_ae",
+      "when": "no AE owns the resolved territory/segment",
+      "handling": "route to the round-robin pool and notify the RevOps operator",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "slas": [
+    {
+      "name": "route_freshness",
+      "metric": "time from signup to routed",
+      "threshold": "5m",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.9 }
+    }
+  ],
+  "verification_scenarios": [
+    {
+      "name": "icp_fit_routes_and_posts",
+      "given": { "company_size": "200", "industry": "saas", "icp_score": "82" },
+      "when": "trial_signed_up",
+      "expect_transitions": [
+        { "from": "received", "to": "enriched" },
+        { "from": "enriched", "to": "scored" },
+        { "from": "scored", "to": "routed" }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "below_threshold_does_not_route",
+      "given": { "company_size": "3", "industry": "hobbyist", "icp_score": "20" },
+      "when": "scoring_completed",
+      "expect_transitions": []
+    }
+  ],
+  "improvement_signals": [
+    {
+      "kind": "recurring-exception",
+      "watch": "enrichment_miss",
+      "threshold": "3 per week"
+    },
+    {
+      "kind": "operator-edit",
+      "watch": "actions[route_to_ae].target"
+    }
+  ]
+}

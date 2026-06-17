@@ -1,0 +1,144 @@
+{
+  "workflow_id": "renewal-risk-sweep",
+  "session_context": "Weekly RevOps sweep: select accounts renewing within 60 days, pull the usage trend from the analytics warehouse, flag any account down more than 20 percent, create a CS task and draft outreach. Captured against api.crm.test and warehouse.test. Warehouse token was Bearer eyJhbGciOiJIUzI1NiJ9.eyJ3aCI6InByb2QifQ.aZ9Qd2k.",
+  "operator_notes": [
+    "Runs every Monday 9am. Only accounts with a renewal_date within 60 days.",
+    "If usage delta is worse than -20 percent I flag at-risk, create a CS task for the CSM, and draft outreach.",
+    "Usage data older than 24h is stale; do not trust it. Warehouse password is password=hunter2-do-not-share.",
+    "Skip accounts with no renewal_date and report the data-quality gap."
+  ],
+  "sample_records": [
+    {
+      "entity": "Account",
+      "source": "account-export",
+      "fields": {
+        "id": "acct_1001",
+        "name": "Acme Corp",
+        "renewal_date": "2026-07-05",
+        "csm_id": "csm_3"
+      }
+    },
+    {
+      "entity": "Account",
+      "source": "account-export",
+      "fields": {
+        "id": "acct_1002",
+        "name": "Globex",
+        "renewal_date": "2026-08-20",
+        "csm_id": "csm_7"
+      }
+    },
+    {
+      "entity": "Account",
+      "source": "account-export",
+      "fields": {
+        "id": "acct_1003",
+        "name": "Initech",
+        "csm_id": "csm_3"
+      }
+    },
+    {
+      "entity": "UsageTrend",
+      "source": "analytics-warehouse",
+      "fields": {
+        "account_id": "acct_1001",
+        "current_period": "812",
+        "prior_period": "1290",
+        "delta_pct": "-0.37"
+      }
+    },
+    {
+      "entity": "UsageTrend",
+      "source": "analytics-warehouse",
+      "fields": {
+        "account_id": "acct_1002",
+        "current_period": "1500",
+        "prior_period": "1480",
+        "delta_pct": "0.01"
+      }
+    },
+    {
+      "entity": "CSTask",
+      "source": "crm",
+      "fields": {
+        "account_id": "acct_1001",
+        "owner": "csm_3",
+        "due_date": "2026-06-20",
+        "reason": "usage down 37 percent ahead of renewal"
+      }
+    }
+  ],
+  "observed_exceptions": [
+    {
+      "description": "The analytics warehouse had no usage rows for an account in the period.",
+      "frequency": 5,
+      "handled_as": "skip the trend test, flag for manual review, do not draft outreach"
+    },
+    {
+      "description": "An account had no renewal_date set.",
+      "frequency": 2,
+      "handled_as": "exclude from the sweep and report the data-quality gap"
+    }
+  ],
+  "operator_edits": [
+    {
+      "path": "guards[usage_down_over_20pct].expr",
+      "before": "delta_pct < -0.15",
+      "after": "delta_pct < -0.20",
+      "reason": "tightened threshold after too many false flags"
+    }
+  ],
+  "http_traces": [
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://api.crm.test/accounts?renewal_before=2026-08-16",
+      "headers": {
+        "Authorization": "Bearer sk_live_FAKEren0"
+      },
+      "status": 200,
+      "response_body": "{\"accounts\":[\"acct_1001\",\"acct_1002\",\"acct_1003\"]}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://warehouse.test/usage/accounts/acct_1001/trend?window=14d",
+      "headers": {
+        "X-Api-Key": "whk_live_8f3c9a1b2d4e6f7081923344556677aa"
+      },
+      "status": 200,
+      "response_body": "{\"delta_pct\":-0.37}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://warehouse.test/usage/accounts/acct_1002/trend?window=14d",
+      "headers": {
+        "X-Api-Key": "whk_live_8f3c9a1b2d4e6f7081923344556677aa"
+      },
+      "status": 200,
+      "response_body": "{\"delta_pct\":0.01}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://api.crm.test/accounts/acct_1001/tasks",
+      "headers": {
+        "Authorization": "Bearer sk_live_FAKEren0",
+        "Content-Type": "application/json"
+      },
+      "request_body": "{\"owner\":\"csm_3\",\"reason\":\"at-risk: usage down 37%\"}",
+      "status": 201
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://mail.test/drafts",
+      "headers": {
+        "Authorization": "Bearer ghp_FAKEgithubtok000"
+      },
+      "request_body": "{\"to\":\"csm_3\",\"subject\":\"Acme renewal risk\"}",
+      "status": 200
+    }
+  ]
+}

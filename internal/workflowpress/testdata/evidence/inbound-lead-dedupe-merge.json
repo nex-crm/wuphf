@@ -1,0 +1,147 @@
+{
+  "workflow_id": "inbound-lead-dedupe-merge",
+  "session_context": "RevOps operator de-duplicating inbound leads by hand: for a new form-fill, search the CRM for a matching contact/company; if a confident match exists, merge into it idempotently; otherwise create a new record. The same lead is sometimes delivered twice and must not double-apply. Captured against api.crm.test with Authorization: Basic cm9vdDpodW50ZXIy.",
+  "operator_notes": [
+    "Match on email first, then company_domain. A score at or above the match threshold is a confident match.",
+    "Merge MUST be idempotent: re-running the same merge cannot create a second record. The same is true for create.",
+    "If two candidates tie above the threshold, do not auto-merge: raise a manual-merge decision with both.",
+    "Webhooks sometimes redeliver the same lead event; absorb the duplicate. Shared inbox cookie: cookie=session=abcdef0123456789abcdef0123456789."
+  ],
+  "sample_records": [
+    {
+      "entity": "InboundLead",
+      "source": "form-submit",
+      "fields": {
+        "email": "chris@acme.test",
+        "first_name": "Chris",
+        "last_name": "Lin",
+        "company_domain": "acme.test"
+      }
+    },
+    {
+      "entity": "InboundLead",
+      "source": "form-submit",
+      "fields": {
+        "email": "jordan@globex.test",
+        "first_name": "Jordan",
+        "company_domain": "globex.test"
+      }
+    },
+    {
+      "entity": "InboundLead",
+      "source": "list-import",
+      "fields": {
+        "email": "morgan@initech.test",
+        "first_name": "Morgan",
+        "last_name": "Diaz",
+        "company_domain": "initech.test",
+        "list_id": "imp_42"
+      }
+    },
+    {
+      "entity": "Contact",
+      "source": "crm",
+      "fields": {
+        "id": "con_501",
+        "email": "chris@acme.test",
+        "company_id": "comp_77",
+        "source": "webinar"
+      }
+    },
+    {
+      "entity": "Contact",
+      "source": "crm",
+      "fields": {
+        "id": "con_502",
+        "email": "morgan@initech.test",
+        "company_id": "comp_91"
+      }
+    },
+    {
+      "entity": "MatchCandidate",
+      "source": "match-engine",
+      "fields": {
+        "lead_email": "chris@acme.test",
+        "candidate_id": "con_501",
+        "match_score": "0.96",
+        "match_reason": "exact email"
+      }
+    }
+  ],
+  "observed_exceptions": [
+    {
+      "description": "Two or more candidates tied above the match threshold for one lead.",
+      "frequency": 2,
+      "handled_as": "do not auto-merge; raise a manual-merge decision with both candidates"
+    },
+    {
+      "description": "The same inbound lead event was delivered more than once.",
+      "frequency": 4,
+      "handled_as": "absorb the duplicate; merge/create are idempotent so re-running does not double-apply"
+    }
+  ],
+  "operator_edits": [
+    {
+      "path": "guards[has_confident_match].expr",
+      "before": "match_score >= 0.85",
+      "after": "match_score >= 0.90",
+      "reason": "raised after a few wrong merges"
+    }
+  ],
+  "http_traces": [
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://api.crm.test/contacts/search?email=chris@acme.test",
+      "headers": {
+        "Authorization": "Basic cm9vdDpodW50ZXIy"
+      },
+      "status": 200,
+      "response_body": "{\"matches\":[{\"id\":\"con_501\",\"score\":0.96}]}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://api.crm.test/contacts/search?email=jordan@globex.test",
+      "headers": {
+        "Authorization": "Basic cm9vdDpodW50ZXIy"
+      },
+      "status": 200,
+      "response_body": "{\"matches\":[]}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://api.crm.test/contacts/con_501/merge",
+      "headers": {
+        "Authorization": "Basic cm9vdDpodW50ZXIy",
+        "Idempotency-Key": "lead-chris@acme.test-v1",
+        "Content-Type": "application/json"
+      },
+      "request_body": "{\"merge_from\":\"chris@acme.test\"}",
+      "status": 200
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://api.crm.test/contacts/con_501/merge",
+      "headers": {
+        "Authorization": "Basic cm9vdDpodW50ZXIy",
+        "Idempotency-Key": "lead-chris@acme.test-v1"
+      },
+      "request_body": "{\"merge_from\":\"chris@acme.test\"}",
+      "status": 200
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://api.crm.test/contacts",
+      "headers": {
+        "Authorization": "Basic cm9vdDpodW50ZXIy",
+        "Idempotency-Key": "lead-jordan@globex.test-v1"
+      },
+      "request_body": "{\"email\":\"jordan@globex.test\",\"api_key\":\"sk_live_FAKEjor0\"}",
+      "status": 201
+    }
+  ]
+}

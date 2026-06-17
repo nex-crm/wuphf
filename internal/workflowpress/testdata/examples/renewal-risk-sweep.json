@@ -1,0 +1,188 @@
+{
+  "id": "renewal-risk-sweep",
+  "version": 1,
+  "goal": "Weekly, for each account with a renewal within 60 days, pull the usage trend; if usage is down more than 20 percent, flag the account at-risk, create a CS task, and draft outreach for the CSM.",
+  "operator": "revops",
+  "entities": [
+    {
+      "name": "Account",
+      "description": "A customer account with a renewal date and a usage history.",
+      "fields": ["id", "name", "renewal_date", "csm_id"],
+      "provenance": { "trust_tier": "observed", "confidence": 0.9, "evidence": ["sample:account-export-014"] }
+    },
+    {
+      "name": "UsageTrend",
+      "description": "The week-over-week usage trend pulled from the product analytics warehouse.",
+      "fields": ["account_id", "current_period", "prior_period", "delta_pct"],
+      "provenance": { "trust_tier": "observed", "confidence": 0.85 }
+    },
+    {
+      "name": "CSTask",
+      "description": "A customer-success task created for an at-risk account.",
+      "fields": ["account_id", "owner", "due_date", "reason"],
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "states": [
+    {
+      "name": "idle",
+      "description": "Waiting for the weekly sweep trigger.",
+      "initial": true,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "selecting",
+      "description": "Selecting accounts with a renewal within 60 days.",
+      "provenance": { "trust_tier": "observed", "confidence": 0.9 }
+    },
+    {
+      "name": "analyzing",
+      "description": "Pulling the usage trend for each selected account.",
+      "provenance": { "trust_tier": "observed", "confidence": 0.85 }
+    },
+    {
+      "name": "flagged",
+      "description": "Accounts whose usage dropped more than 20 percent are flagged at-risk; CS task created and outreach drafted.",
+      "terminal": true,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "events": [
+    {
+      "name": "weekly_sweep",
+      "trigger": "scheduled",
+      "schedule": "0 9 * * MON",
+      "from": "idle",
+      "to": "selecting",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "accounts_selected",
+      "trigger": "internal",
+      "from": "selecting",
+      "to": "analyzing",
+      "guard": "renewal_within_60d",
+      "provenance": { "trust_tier": "observed", "confidence": 0.9 }
+    },
+    {
+      "name": "usage_analyzed",
+      "trigger": "internal",
+      "from": "analyzing",
+      "to": "flagged",
+      "guard": "usage_down_over_20pct",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.95 }
+    }
+  ],
+  "guards": [
+    {
+      "name": "renewal_within_60d",
+      "expr": "renewal_date - now <= 60d",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "usage_down_over_20pct",
+      "expr": "usage_trend.delta_pct < -0.20",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.95 }
+    }
+  ],
+  "actions": [
+    {
+      "name": "select_renewing_accounts",
+      "kind": "read",
+      "on": "weekly_sweep",
+      "target": "crm",
+      "requires_approval": false,
+      "provenance": { "trust_tier": "observed", "confidence": 0.9 }
+    },
+    {
+      "name": "pull_usage_trend",
+      "kind": "read",
+      "on": "accounts_selected",
+      "target": "analytics-warehouse",
+      "requires_approval": false,
+      "provenance": { "trust_tier": "observed", "confidence": 0.85 }
+    },
+    {
+      "name": "create_cs_task",
+      "kind": "internal-write",
+      "on": "usage_analyzed",
+      "target": "crm",
+      "requires_approval": true,
+      "idempotent": true,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "draft_outreach",
+      "kind": "external-write",
+      "on": "usage_analyzed",
+      "target": "email-draft",
+      "requires_approval": true,
+      "provenance": { "trust_tier": "inferred", "confidence": 0.6, "evidence": ["note:csm-personalizes-outreach"] }
+    }
+  ],
+  "exceptions": [
+    {
+      "name": "usage_data_unavailable",
+      "when": "the analytics warehouse has no usage rows for an account in the period",
+      "handling": "skip the trend test, flag the account for manual review, and do not draft outreach",
+      "provenance": { "trust_tier": "observed", "confidence": 0.8, "evidence": ["exception:usage-gap-x44"] }
+    },
+    {
+      "name": "renewal_date_missing",
+      "when": "an account has no renewal_date set",
+      "handling": "exclude from the sweep and report the data-quality gap to the operator",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "slas": [
+    {
+      "name": "usage_freshness",
+      "metric": "age of the usage data used for the trend",
+      "threshold": "24h",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.9 }
+    },
+    {
+      "name": "sweep_completion",
+      "metric": "time to complete the weekly sweep after trigger",
+      "threshold": "2h",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.85 }
+    }
+  ],
+  "verification_scenarios": [
+    {
+      "name": "at_risk_account_is_flagged",
+      "given": { "renewal_in_days": "30", "delta_pct": "-0.35" },
+      "when": "weekly_sweep",
+      "expect_transitions": [
+        { "from": "idle", "to": "selecting" },
+        { "from": "selecting", "to": "analyzing" },
+        { "from": "analyzing", "to": "flagged" }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "stable_usage_is_not_flagged",
+      "given": { "renewal_in_days": "30", "delta_pct": "-0.05" },
+      "when": "usage_analyzed",
+      "expect_transitions": []
+    },
+    {
+      "name": "renewal_too_far_out_is_skipped",
+      "given": { "renewal_in_days": "120", "delta_pct": "-0.40" },
+      "when": "accounts_selected",
+      "expect_transitions": []
+    }
+  ],
+  "improvement_signals": [
+    {
+      "kind": "sla-miss",
+      "watch": "usage_freshness",
+      "threshold": "any miss"
+    },
+    {
+      "kind": "recurring-exception",
+      "watch": "usage_data_unavailable",
+      "threshold": "5 per sweep"
+    }
+  ]
+}

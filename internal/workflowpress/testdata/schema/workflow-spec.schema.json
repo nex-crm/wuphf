@@ -1,0 +1,492 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "operator": {
+      "type": "string"
+    },
+    "entities": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "fields": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "states": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "initial": {
+            "type": "boolean"
+          },
+          "terminal": {
+            "type": "boolean"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "events": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "schedule": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "guard": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "trigger",
+          "from",
+          "to",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "guards": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "expr": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "expr",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "actions": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "on": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "requires_approval": {
+            "type": "boolean"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "requires_approval",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "exceptions": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          },
+          "handling": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "when",
+          "handling",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "slas": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "trust_tier": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "trust_tier",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "metric",
+          "threshold",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "verification_scenarios": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "given": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "when": {
+            "type": "string"
+          },
+          "expect_transitions": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "expect_approval": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "when",
+          "expect_transitions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "improvement_signals": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "watch": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "watch"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "goal",
+    "operator",
+    "entities",
+    "states",
+    "events",
+    "actions",
+    "verification_scenarios"
+  ],
+  "additionalProperties": false
+}

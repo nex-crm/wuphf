@@ -1,0 +1,144 @@
+{
+  "workflow_id": "trial-to-ae-routing",
+  "session_context": "RevOps operator routing a new trial signup by hand: enrich the company, score it against the ICP rubric, pick the AE, post the decision to #deals. Captured against api.crm.test and the enrichment provider. Operator pasted a debug curl: curl -H 'Authorization: Bearer sk_live_FAKEdoc0' https://api.crm.test/accounts/123",
+  "operator_notes": [
+    "Always enrich on company_domain first, fall back to the email domain if the provider misses.",
+    "Score uses the weighted ICP rubric: employee_count, industry, region.",
+    "I route to the AE who owns the territory, then post the routing decision to #deals so the team sees it.",
+    "Internal enrichment key is api_key=AKIAFAKEEXAMPLE00, do not commit that."
+  ],
+  "sample_records": [
+    {
+      "entity": "TrialSignup",
+      "source": "signup-webhook",
+      "fields": {
+        "email": "sam@acme.test",
+        "company_domain": "acme.test",
+        "signup_at": "2026-06-10T14:03:00Z",
+        "auth_token": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.s5y3aJ8Qk2"
+      }
+    },
+    {
+      "entity": "TrialSignup",
+      "source": "signup-webhook",
+      "fields": {
+        "email": "dana@globex.test",
+        "company_domain": "globex.test",
+        "signup_at": "2026-06-10T15:21:00Z"
+      }
+    },
+    {
+      "entity": "TrialSignup",
+      "source": "signup-webhook",
+      "fields": {
+        "email": "lee@initech.test",
+        "company_domain": "initech.test",
+        "signup_at": "2026-06-11T09:00:00Z",
+        "utm_source": "webinar"
+      }
+    },
+    {
+      "entity": "Company",
+      "source": "enrichment-provider",
+      "fields": {
+        "domain": "acme.test",
+        "employee_count": "200",
+        "industry": "saas",
+        "region": "us-east"
+      }
+    },
+    {
+      "entity": "Company",
+      "source": "enrichment-provider",
+      "fields": {
+        "domain": "globex.test",
+        "employee_count": "3",
+        "industry": "hobbyist"
+      }
+    },
+    {
+      "entity": "AccountExecutive",
+      "source": "crm",
+      "fields": {
+        "id": "ae_88",
+        "name": "Pat Rivera",
+        "segment": "mid-market",
+        "territory": "us-east"
+      }
+    }
+  ],
+  "observed_exceptions": [
+    {
+      "description": "The enrichment provider had no record for the company domain.",
+      "frequency": 3,
+      "handled_as": "fall back to the email-domain heuristic and flag for manual review"
+    },
+    {
+      "description": "No AE owned the resolved territory/segment.",
+      "frequency": 1,
+      "handled_as": "route to the round-robin pool and notify RevOps"
+    }
+  ],
+  "operator_edits": [
+    {
+      "path": "actions[route_to_ae].target",
+      "before": "crm-v1",
+      "after": "crm-v2",
+      "reason": "we migrated the routing API; new bearer is Bearer sk_test_FAKEold0"
+    }
+  ],
+  "http_traces": [
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://api.crm.test/accounts/123?api_key=sk_live_FAKEdoc0",
+      "headers": {
+        "Authorization": "Bearer sk_live_FAKEdoc0",
+        "Accept": "application/json"
+      },
+      "status": 200,
+      "response_body": "{\"id\":123,\"domain\":\"acme.test\"}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://api.crm.test/accounts/456?api_key=sk_live_FAKEdoc0",
+      "headers": {
+        "Authorization": "Bearer sk_live_FAKEdoc0"
+      },
+      "status": 200,
+      "response_body": "{\"id\":456,\"domain\":\"globex.test\"}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "GET",
+      "url": "https://enrich.provider.test/v1/companies/acme.test",
+      "headers": {
+        "X-Api-Key": "AKIAFAKEEXAMPLE00"
+      },
+      "status": 200,
+      "response_body": "{\"employee_count\":200,\"industry\":\"saas\"}"
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://api.crm.test/accounts/123/owner",
+      "headers": {
+        "Authorization": "Bearer sk_live_FAKEdoc0",
+        "Content-Type": "application/json"
+      },
+      "request_body": "{\"ae_id\":\"ae_88\",\"token\":\"sk_live_FAKEdoc0\"}",
+      "status": 200
+    },
+    {
+      "tool": "browser-harness",
+      "method": "POST",
+      "url": "https://chat.test/channels/deals/messages",
+      "headers": {
+        "Authorization": "Bearer xoxb-FAKEslackbot00"
+      },
+      "request_body": "{\"text\":\"Routed acme.test to Pat Rivera (us-east)\"}",
+      "status": 201
+    }
+  ]
+}

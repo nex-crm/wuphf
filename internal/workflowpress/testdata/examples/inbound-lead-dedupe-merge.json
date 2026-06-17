@@ -1,0 +1,180 @@
+{
+  "id": "inbound-lead-dedupe-merge",
+  "version": 1,
+  "goal": "For each new inbound lead, find a matching contact or company; if a match is found, merge idempotently into the existing record; otherwise create a new one.",
+  "operator": "revops",
+  "entities": [
+    {
+      "name": "InboundLead",
+      "description": "A new inbound lead from a form fill or list import.",
+      "fields": ["email", "first_name", "last_name", "company_domain"],
+      "provenance": { "trust_tier": "observed", "confidence": 0.95, "evidence": ["trace:form-submit-021"] }
+    },
+    {
+      "name": "Contact",
+      "description": "The canonical contact record the lead may already correspond to.",
+      "fields": ["id", "email", "company_id", "source"],
+      "provenance": { "trust_tier": "observed", "confidence": 0.9 }
+    },
+    {
+      "name": "MatchCandidate",
+      "description": "A scored candidate match between the inbound lead and an existing contact/company.",
+      "fields": ["lead_email", "candidate_id", "match_score", "match_reason"],
+      "provenance": { "trust_tier": "inferred", "confidence": 0.7 }
+    }
+  ],
+  "states": [
+    {
+      "name": "received",
+      "description": "A new inbound lead has arrived.",
+      "initial": true,
+      "provenance": { "trust_tier": "observed", "confidence": 0.95 }
+    },
+    {
+      "name": "matched",
+      "description": "Candidate matches have been resolved against existing records.",
+      "provenance": { "trust_tier": "observed", "confidence": 0.85 }
+    },
+    {
+      "name": "merged",
+      "description": "A match was found and the lead was merged idempotently into the existing record.",
+      "terminal": true,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "created",
+      "description": "No match was found and a new record was created.",
+      "terminal": true,
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "events": [
+    {
+      "name": "lead_received",
+      "trigger": "external",
+      "from": "received",
+      "to": "matched",
+      "provenance": { "trust_tier": "observed", "confidence": 0.95, "evidence": ["trace:form-submit-021"] }
+    },
+    {
+      "name": "match_found",
+      "trigger": "internal",
+      "from": "matched",
+      "to": "merged",
+      "guard": "has_confident_match",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    },
+    {
+      "name": "no_match",
+      "trigger": "internal",
+      "from": "matched",
+      "to": "created",
+      "guard": "no_confident_match",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "guards": [
+    {
+      "name": "has_confident_match",
+      "expr": "best_candidate.match_score >= match_threshold",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.95 }
+    },
+    {
+      "name": "no_confident_match",
+      "expr": "best_candidate.match_score < match_threshold",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.95 }
+    }
+  ],
+  "actions": [
+    {
+      "name": "find_matches",
+      "kind": "read",
+      "on": "lead_received",
+      "target": "crm",
+      "requires_approval": false,
+      "provenance": { "trust_tier": "observed", "confidence": 0.9 }
+    },
+    {
+      "name": "merge_into_existing",
+      "kind": "internal-write",
+      "on": "match_found",
+      "target": "crm",
+      "requires_approval": true,
+      "idempotent": true,
+      "provenance": { "trust_tier": "inferred", "confidence": 0.75, "evidence": ["note:merge-must-be-replayable"] }
+    },
+    {
+      "name": "create_new_record",
+      "kind": "internal-write",
+      "on": "no_match",
+      "target": "crm",
+      "requires_approval": true,
+      "idempotent": true,
+      "provenance": { "trust_tier": "inferred", "confidence": 0.7 }
+    }
+  ],
+  "exceptions": [
+    {
+      "name": "ambiguous_match",
+      "when": "two or more candidates tie above the match threshold",
+      "handling": "do not auto-merge; raise a manual-merge decision to the operator with both candidates",
+      "provenance": { "trust_tier": "observed", "confidence": 0.8, "evidence": ["exception:dup-tie-x07"] }
+    },
+    {
+      "name": "duplicate_event",
+      "when": "the same inbound lead event is delivered more than once",
+      "handling": "absorb the duplicate; the merge/create actions are idempotent so re-running does not double-apply",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 1.0 }
+    }
+  ],
+  "slas": [
+    {
+      "name": "dedupe_latency",
+      "metric": "time from lead received to merged/created",
+      "threshold": "2m",
+      "provenance": { "trust_tier": "operator-stated", "confidence": 0.85 }
+    }
+  ],
+  "verification_scenarios": [
+    {
+      "name": "matching_lead_merges_idempotently",
+      "given": { "existing_contact": "true", "match_score": "0.96" },
+      "when": "lead_received",
+      "expect_transitions": [
+        { "from": "received", "to": "matched" },
+        { "from": "matched", "to": "merged" }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "new_lead_creates_record",
+      "given": { "existing_contact": "false", "match_score": "0.10" },
+      "when": "lead_received",
+      "expect_transitions": [
+        { "from": "received", "to": "matched" },
+        { "from": "matched", "to": "created" }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "duplicate_event_does_not_double_apply",
+      "given": { "existing_contact": "true", "match_score": "0.96", "redelivered": "true" },
+      "when": "match_found",
+      "expect_transitions": [
+        { "from": "matched", "to": "merged" }
+      ],
+      "expect_approval": true
+    }
+  ],
+  "improvement_signals": [
+    {
+      "kind": "recurring-exception",
+      "watch": "ambiguous_match",
+      "threshold": "4 per week"
+    },
+    {
+      "kind": "operator-edit",
+      "watch": "guards[has_confident_match].expr"
+    }
+  ]
+}
