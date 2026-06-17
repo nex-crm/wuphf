@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
-
-	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // TestSpecSchemaMatchesType is the drift guard: the committed WorkflowSpec JSON
@@ -25,21 +23,15 @@ func TestResearchSchemaMatchesType(t *testing.T) {
 
 func assertSchemaMatchesType[T any](t *testing.T, committed func() ([]byte, error), id string) {
 	t.Helper()
-	inferred, err := jsonschema.For[T](nil)
+	// InferStampedSchema is the SAME generator the committed files are regenerated
+	// from: infer the Go type, stamp the published $schema/$id, and run the
+	// deterministic enum-injection pass. Driving the guard through it keeps the
+	// published contract, its version stamp, and the enum allowed-set in lockstep —
+	// the committed file cannot drift from the type or from the enum table.
+	want, err := InferStampedSchema[T](id)
 	if err != nil {
-		t.Fatalf("inferring schema: %v", err)
+		t.Fatalf("inferring stamped schema: %v", err)
 	}
-	// Stamp the published identity onto the inferred schema so the committed file
-	// (which carries $schema + $id) matches byte-for-byte. The kernel publishes the
-	// dialect and a versioned URI; the inferred shape carries neither, so the guard
-	// stamps them here rather than letting the committed file drift from the type.
-	inferred.Schema = schemaDialect
-	inferred.ID = id
-	want, err := json.MarshalIndent(inferred, "", "  ")
-	if err != nil {
-		t.Fatalf("marshalling inferred schema: %v", err)
-	}
-	want = append(want, '\n')
 
 	got, err := committed()
 	if err != nil {

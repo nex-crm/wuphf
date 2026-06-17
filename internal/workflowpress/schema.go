@@ -16,26 +16,19 @@ import (
 // without a running process.
 //
 // The schemas are draft-2020-12 (the jsonschema-go default when $schema is
-// absent). They are regenerated from the Go types by the round-trip test, which
-// also asserts the committed files match what the types infer — that guard keeps
-// the Go IR and the published schema from drifting.
+// absent). They are regenerated from the Go types by InferStampedSchema, which
+// stamps the published $schema/$id and runs the deterministic enum-injection pass
+// (schema_enums.go). The round-trip drift guard re-runs the exact same function and
+// asserts the committed files match it byte-for-byte — so the Go IR, the enum
+// allowed-set, and the published schema cannot drift apart.
 //
-// TODO(workflow-press, deferred — MEDIUM before any cross-language consumer): the
-// inferred schema renders enum-typed string fields (ActionKind, EventTrigger,
-// TrustTier) as bare {"type":"string"}, so the published JSON Schema does not
-// constrain them to their allowed values. These enums are SECURITY-LOAD-BEARING:
-// ActionKind gates the write-approval rule (an unknown kind fails open past it) and
-// TrustTier degrades inferred/observed writes to human approval. Go's
-// WorkflowSpec.Validate IS the authoritative enum gate today (ActionKind.Valid,
-// EventTrigger.Valid, TrustTier.Valid), and nothing inside the kernel relies on the
-// JSON Schema for this — so the gap is harmless WHILE every consumer is this Go
-// kernel. It becomes MEDIUM the moment a non-Go consumer validates a spec against
-// the published JSON alone: that consumer would accept a spec whose action kind or
-// trust tier is outside the allowed set, bypassing the security rule the enum
-// encodes. Closing it means teaching jsonschema.For to emit enums for these types
-// AND regenerating the committed files in lockstep with the byte-exact drift guard.
-// Tracked as a follow-up rather than half-done; do NOT ship a cross-language
-// consumer against this schema before closing it.
+// Enum gap CLOSED: jsonschema.For cannot infer an enum from a Go string-const set,
+// so the bare inference rendered ActionKind/EventTrigger/TrustTier/
+// ImprovementSignalKind as {"type":"string"}. injectEnums (schema_enums.go) is the
+// deterministic post-inference pass that constrains them to their allowed values in
+// BOTH the committed schema and the drift guard; the Go Valid() methods remain the
+// authoritative in-kernel gate, and the published enum mirrors that set for
+// cross-language consumers.
 
 //go:embed testdata/schema/workflow-spec.schema.json
 //go:embed testdata/schema/workflow-research.schema.json
@@ -99,6 +92,29 @@ func resolveEmbedded(path string) (*jsonschema.Resolved, error) {
 		return nil, fmt.Errorf("workflowpress: resolving schema %q: %w", path, err)
 	}
 	return resolved, nil
+}
+
+// InferStampedSchema infers the JSON Schema for T, stamps the published dialect and
+// $id, and runs the deterministic enum-injection pass. It is the SINGLE generator
+// for the published contract: both the committed-schema regeneration and the
+// byte-exact drift guard call it, so the published schema, its version stamp, and
+// the enum allowed-set stay in lockstep with the Go type. id is the stamped $id for
+// T (specSchemaID / researchSchemaID).
+func InferStampedSchema[T any](id string) ([]byte, error) {
+	inferred, err := jsonschema.For[T](nil)
+	if err != nil {
+		return nil, fmt.Errorf("workflowpress: inferring schema for %q: %w", id, err)
+	}
+	// Stamp the published identity the bare inference lacks.
+	inferred.Schema = schemaDialect
+	inferred.ID = id
+	// Constrain the enum-typed fields the inference renders as bare strings.
+	injectEnums(inferred)
+	out, err := json.MarshalIndent(inferred, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("workflowpress: marshalling inferred schema for %q: %w", id, err)
+	}
+	return append(out, '\n'), nil
 }
 
 // SpecSchemaBytes returns the raw JSON Schema for WorkflowSpec. Returned as a
