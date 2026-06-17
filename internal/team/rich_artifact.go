@@ -7,14 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"golang.org/x/net/html"
 )
 
 const (
@@ -362,41 +359,11 @@ func validateRichArtifactHTMLPolicy(html string) error {
 }
 
 func validateRichArtifactSandboxPolicy(raw string) error {
-	tokenizer := html.NewTokenizer(strings.NewReader(raw))
-	styleDepth := 0
-	for {
-		tt := tokenizer.Next()
-		switch tt {
-		case html.ErrorToken:
-			if errors.Is(tokenizer.Err(), io.EOF) {
-				return nil
-			}
-			return newRichArtifactCallerError("visual artifact: html parse failed: %v", tokenizer.Err())
-		case html.StartTagToken, html.SelfClosingTagToken:
-			token := tokenizer.Token()
-			tag := strings.ToLower(token.Data)
-			if reason, blocked := richArtifactBlockedElementReason(tag); blocked {
-				return newRichArtifactCallerError("visual artifact: html element <%s> is not allowed: %s", tag, reason)
-			}
-			if tag == "style" && tt == html.StartTagToken {
-				styleDepth++
-			}
-			if err := validateRichArtifactAttributes(tag, token.Attr); err != nil {
-				return err
-			}
-		case html.EndTagToken:
-			token := tokenizer.Token()
-			if strings.EqualFold(token.Data, "style") && styleDepth > 0 {
-				styleDepth--
-			}
-		case html.TextToken:
-			if styleDepth > 0 {
-				if err := validateRichArtifactCSS(tokenizer.Token().Data); err != nil {
-					return err
-				}
-			}
-		}
-	}
+	return validateSandboxHTML(raw, sandboxHTMLPolicy{
+		label:          "visual artifact",
+		blockedElement: richArtifactBlockedElementReason,
+		newErr:         newRichArtifactCallerError,
+	})
 }
 
 func richArtifactBlockedElementReason(tag string) (string, bool) {
@@ -411,85 +378,6 @@ func richArtifactBlockedElementReason(tag string) (string, bool) {
 		return "external stylesheets and preloads are not allowed", true
 	default:
 		return "", false
-	}
-}
-
-func validateRichArtifactAttributes(tag string, attrs []html.Attribute) error {
-	metaRefresh := false
-	for _, attr := range attrs {
-		key := strings.ToLower(strings.TrimSpace(attr.Key))
-		value := strings.TrimSpace(attr.Val)
-		if strings.HasPrefix(key, "on") && len(key) > 2 {
-			return newRichArtifactCallerError("visual artifact: html attribute %s on <%s> is not allowed", key, tag)
-		}
-		switch key {
-		case "srcset":
-			return newRichArtifactCallerError("visual artifact: html attribute %s on <%s> is not allowed", key, tag)
-		case "style":
-			if err := validateRichArtifactCSS(value); err != nil {
-				return err
-			}
-		case "http-equiv":
-			metaRefresh = tag == "meta" && strings.EqualFold(value, "refresh")
-		}
-		if tag == "script" && key == "src" {
-			return newRichArtifactCallerError("visual artifact: external script src is not allowed")
-		}
-		if richArtifactURLAttribute(key) {
-			if err := validateRichArtifactURL(tag, key, value); err != nil {
-				return err
-			}
-		}
-	}
-	if metaRefresh {
-		return newRichArtifactCallerError("visual artifact: meta refresh is not allowed")
-	}
-	return nil
-}
-
-func richArtifactURLAttribute(attr string) bool {
-	switch attr {
-	case "action", "formaction", "href", "poster", "src", "xlink:href":
-		return true
-	default:
-		return false
-	}
-}
-
-func validateRichArtifactURL(tag, attr, value string) error {
-	if value == "" || strings.HasPrefix(value, "#") {
-		return nil
-	}
-	lower := strings.ToLower(value)
-	if strings.HasPrefix(lower, "data:") || strings.HasPrefix(lower, "blob:") {
-		return nil
-	}
-	return newRichArtifactCallerError("visual artifact: <%s> %s must use a data/blob URL or fragment reference", tag, attr)
-}
-
-func validateRichArtifactCSS(css string) error {
-	if containsASCIIFold(css, "@import") {
-		return newRichArtifactCallerError("visual artifact: css @import is not allowed (including empty data: URLs); use system fonts like Georgia, Times, Cambria, or Courier directly in font-family")
-	}
-	if containsASCIIFold(css, "expression(") {
-		return newRichArtifactCallerError("visual artifact: css expression() is not allowed")
-	}
-	for offset := 0; ; {
-		idx := indexASCIIFold(css[offset:], "url(")
-		if idx < 0 {
-			return nil
-		}
-		start := offset + idx + len("url(")
-		endRel := strings.Index(css[start:], ")")
-		if endRel < 0 {
-			return newRichArtifactCallerError("visual artifact: css url() is malformed")
-		}
-		end := start + endRel
-		value := strings.Trim(strings.TrimSpace(css[start:end]), `"'`)
-		if err := validateRichArtifactURL("style", "url()", value); err != nil {
-			return err
-		}
-		offset = end + 1
 	}
 }
 

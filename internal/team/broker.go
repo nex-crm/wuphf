@@ -163,6 +163,10 @@ type Broker struct {
 	wikiWorker              *WikiWorker
 	wikiInitMu              sync.Mutex
 	wikiInitErr             error
+	customApps              *customAppStore
+	customAppOnce           sync.Once
+	appDev                  *appDevManager
+	appDevOnce              sync.Once
 	autoNotebookWriter      *AutoNotebookWriter
 	humanWikiWriter         *HumanWikiIntentWriter
 	obsidianWatcher         *ObsidianWatcher
@@ -639,6 +643,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	// Apps: agent-generated internal tools. Reached only via the /api proxy, so
+	// these never shadow the SPA's client-side /apps/<id> route.
+	mux.HandleFunc("/apps", b.requireAuth(b.handleApps))
+	mux.HandleFunc("/apps/", b.requireAuth(b.handleAppByID))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
@@ -800,9 +808,15 @@ func (b *Broker) Stop() {
 	// pending WaitGroup, so this is the only correct order.
 	b.mu.Lock()
 	obsidianWatcher := b.obsidianWatcher
+	appDev := b.appDev
 	b.mu.Unlock()
 	if obsidianWatcher != nil {
 		_ = obsidianWatcher.Stop()
+	}
+	// Tear down any live app-preview dev servers (bun processes + proxies) so
+	// they don't outlive the broker.
+	if appDev != nil {
+		appDev.StopAll()
 	}
 
 	if b.lifecycleCancel != nil {

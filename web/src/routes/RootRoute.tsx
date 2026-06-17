@@ -22,6 +22,8 @@ import {
   getInjectedAnalyticsConfig,
   initApi,
 } from "../api/client";
+import { CreateAppDialog } from "../components/apps/CreateAppDialog";
+import { CustomAppView } from "../components/apps/CustomAppView";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
@@ -677,6 +679,11 @@ function MainContent() {
         return <FirstClassAppRedirect appId={route.appId} />;
       }
       if (!isAppPanelId(route.appId)) {
+        // Agent-generated Apps live at /apps/app_<hash>. Anything else under
+        // /apps that is neither a built-in panel nor a custom app id is unknown.
+        if (route.appId.startsWith("app_")) {
+          return <CustomAppView appId={route.appId} />;
+        }
         return <UnknownAppPanel appId={route.appId} />;
       }
       return <AppPanel appId={route.appId} />;
@@ -1178,6 +1185,7 @@ export default function RootRoute() {
       <ConfirmHost />
       <ProviderSwitcherHost />
       <TelegramConnectHost />
+      <CreateAppDialog />
     </ErrorBoundary>
   );
 }

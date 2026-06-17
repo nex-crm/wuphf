@@ -25,8 +25,11 @@ import {
   type TaskVerificationResult,
   taskToLifecycleState,
 } from "../../api/tasks";
+import { APP_BUILDER_SLUG } from "../../lib/constants";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
+import { AppBuildPreview } from "../apps/AppBuildPreview";
+import { ResizableSplit } from "../ui/ResizableSplit";
 import {
   isAwaitingStaffing,
   LifecycleStatePill,
@@ -596,6 +599,9 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
   const doc = query.data;
   const isDrafting = doc?.lifecycleState === "drafting";
   const awaitingStaffing = isAwaitingStaffing(doc);
+  // App Builder tasks get a live preview pane beside the chat: the human
+  // watches the app being built and resizes chat vs preview to taste.
+  const isAppBuilderTask = doc?.ownerSlug === APP_BUILDER_SLUG;
 
   if (query.isPending && !initialDocument) {
     return <TaskDocumentSkeleton />;
@@ -692,26 +698,43 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
         </div>
       </header>
 
-      {/* Body: chat-primary. The task's channel (the conversation where the
-       *  owner, CEO, and Librarian collaborate) owns the main column at full
-       *  scale; the secondary context — participants, description, activity,
-       *  sub-tasks — lives in the right rail a glance away. */}
-      <div className="issue-doc-body issue-doc-body--split">
-        <main className="issue-doc-chat" aria-label="Chat">
-          <div className="issue-doc-chat-header">Chat</div>
-          <TaskChannelChat channel={doc.channel} />
-        </main>
+      {/* Body. For an App Builder task the right side is a LIVE PREVIEW of the
+       *  app being built, with a draggable divider so the human can give chat
+       *  or preview as much room as they want. Every other task keeps the
+       *  chat-primary layout with the context rail (participants, description,
+       *  activity, sub-tasks) a glance away. */}
+      {isAppBuilderTask ? (
+        <div className="issue-doc-body issue-doc-body--app-build">
+          <ResizableSplit
+            storageKey="app-build-preview-ratio"
+            ariaLabel="Resize chat and app preview"
+            left={
+              <main className="issue-doc-chat" aria-label="Chat">
+                <div className="issue-doc-chat-header">Chat</div>
+                <TaskChannelChat channel={doc.channel} />
+              </main>
+            }
+            right={<AppBuildPreview taskTitle={doc.title} taskId={taskId} />}
+          />
+        </div>
+      ) : (
+        <div className="issue-doc-body issue-doc-body--split">
+          <main className="issue-doc-chat" aria-label="Chat">
+            <div className="issue-doc-chat-header">Chat</div>
+            <TaskChannelChat channel={doc.channel} />
+          </main>
 
-        <TaskContextRail
-          taskId={taskId}
-          channel={doc.channel}
-          description={doc.description}
-          isDrafting={isDrafting}
-          showSubTasks={!doc.parentTaskId}
-          verification={doc.verification}
-          definition={doc.definition}
-        />
-      </div>
+          <TaskContextRail
+            taskId={taskId}
+            channel={doc.channel}
+            description={doc.description}
+            isDrafting={isDrafting}
+            showSubTasks={!doc.parentTaskId}
+            verification={doc.verification}
+            definition={doc.definition}
+          />
+        </div>
+      )}
     </div>
   );
 }

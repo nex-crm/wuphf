@@ -332,6 +332,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	), handleTeamSkillRun)
 	registerSkillTools(server)
 	registerRoutineTools(server)
+	// Apps: every agent can discover (list_apps) and propose (propose_app); the
+	// build/publish tools (get_app, register_app) are gated to the App Builder.
+	registerAppTools(server, slug)
 
 	// Gate external-action tools behind a configured provider. Registering 14
 	// empty action tools inflates the MCP tool schema and pushes the total

@@ -71,7 +71,13 @@ export type StreamPhase = "replay" | "live";
 export function useAgentStream(
   slug: string | null,
   taskId: string | null = null,
+  opts: { keepAlive?: boolean } = {},
 ) {
+  // keepAlive keeps the SSE source open across turn boundaries (idle events).
+  // A single-turn view (the agent's Live Stream tab) wants the connection to
+  // close when the turn goes idle; a long-running build feed wants to keep
+  // receiving the NEXT turn's tool activity without a remount.
+  const keepAlive = opts.keepAlive ?? false;
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
@@ -145,6 +151,7 @@ export function useAgentStream(
       //      mcp_tool_event audit lines, pane-capture noise) may carry
       //      unrelated `status` strings and must not trigger close.
       if (
+        !keepAlive &&
         phaseRef.current === "live" &&
         parsed?.kind === "headless_event" &&
         parsed?.status === "idle"
@@ -168,7 +175,7 @@ export function useAgentStream(
       sourceRef.current = null;
       setConnected(false);
     };
-  }, [slug, taskId]);
+  }, [slug, taskId, keepAlive]);
 
   return { lines, connected };
 }
