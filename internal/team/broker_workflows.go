@@ -216,3 +216,60 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": true})
 }
+
+// handleWorkflowsImprove is stage 5: apply an improvement overlay to a stored
+// contract. The overlay is reviewed (patched spec must shipcheck and every
+// original scenario must still replay); on accept the contract is updated in
+// place (update-over-create, version bumped) and the binding skill refreshed.
+func (b *Broker) handleWorkflowsImprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var body struct {
+		SpecID  string           `json:"spec_id"`
+		Overlay workflow.Overlay `json:"overlay"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	id := strings.TrimSpace(body.SpecID)
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "spec_id_required"})
+		return
+	}
+	path := workflowSpecPath(id)
+	if path == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no_runtime_home"})
+		return
+	}
+	spec, err := workflow.LoadSpec(path)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "spec_not_found"})
+		return
+	}
+
+	patched, review, err := workflow.AcceptOverlay(spec, body.Overlay)
+	if err != nil {
+		// Rejected: the contract is unchanged. Return why.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "overlay_rejected", "review": review})
+		return
+	}
+	if err := workflow.SaveSpec(path, patched); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "spec_persist_failed"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	rep := workflow.Shipcheck(patched)
+	b.mu.Lock()
+	if sk := b.findSkillByNameLocked(id); sk != nil {
+		sk.Content = bindingSkillContent(*patched, rep, path)
+		sk.UpdatedAt = now
+	}
+	_ = b.saveLocked()
+	b.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"spec_id": id, "version": patched.Version, "review": review})
+}

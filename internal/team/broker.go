@@ -700,6 +700,7 @@ func (b *Broker) StartOnPort(port int) error {
 	// Workflow detection: spot repeated workflows + freeze one into a skill.
 	mux.HandleFunc("/workflows/spotted", b.requireAuth(b.handleWorkflowsSpotted))
 	mux.HandleFunc("/workflows/freeze", b.requireAuth(b.handleWorkflowsFreeze))
+	mux.HandleFunc("/workflows/improve", b.requireAuth(b.handleWorkflowsImprove))
 	// GET /commands — slash-command registry mirror so the web composer
 	// renders the same command set as the TUI. See broker_commands.go.
 	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))
