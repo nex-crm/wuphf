@@ -123,6 +123,24 @@ func Shipcheck(s *Spec) ShipcheckReport {
 		add("idempotency", idemPass, fmt.Sprintf("%d scenario(s): re-sent events are no-ops", idemTested))
 	}
 
+	// 7. Adapter parity: the generated Go runner and the inngest adapter must
+	// encode the spec's transitions exactly. Re-parse the embedded table out of
+	// each emitted source — proving the generated artifacts never drift from the
+	// contract.
+	if gen, err := Generate(s); err != nil {
+		add("adapter_parity", false, err.Error())
+	} else {
+		goT, e1 := extractTransitionsJSON(gen.GoSource)
+		tsT, e2 := extractTransitionsJSON(gen.InngestSource)
+		ok := e1 == nil && e2 == nil &&
+			transitionsEqual(goT, s.Transitions) && transitionsEqual(tsT, s.Transitions)
+		detail := "generated Go + inngest adapter encode the contract's transitions"
+		if !ok {
+			detail = "generated artifacts drifted from the spec transitions"
+		}
+		add("adapter_parity", ok, detail)
+	}
+
 	r.Passed = true
 	for _, c := range r.Checks {
 		if !c.Pass {
