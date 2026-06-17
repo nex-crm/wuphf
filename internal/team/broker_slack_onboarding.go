@@ -46,10 +46,11 @@ type officeSlackManifest struct {
 type officeManifestFeatures struct {
 	BotUser slackManifestBotUser  `json:"bot_user"`
 	AppHome officeManifestAppHome `json:"app_home"`
-	// AssistantView enables Slack's Agents & AI Apps surface. It is what lets the
-	// office set the native "is thinking…" status (assistant.threads.setStatus)
-	// on task threads — a zero-message working indicator — instead of posting
-	// status lines. Without this feature the status call silently no-ops.
+	// AssistantView enables Slack's Agents & AI Apps surface — the 1:1 Assistant
+	// pane. It is what lets the office act as a native agent there: the
+	// "is thinking…" status (assistant.threads.setStatus, a zero-message working
+	// indicator), tappable suggested prompts on open, and a conversation title.
+	// Without this feature those calls silently no-op.
 	AssistantView officeManifestAssistantView `json:"assistant_view"`
 }
 

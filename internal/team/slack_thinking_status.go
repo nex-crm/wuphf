@@ -12,20 +12,23 @@ import (
 )
 
 // slack_thinking_status.go surfaces WUPHF's internal "agent is working" signal in
-// Slack, so a reader sees "Scout is thinking…" in a task thread while a turn runs
-// instead of dead air until the reply.
+// Slack, so a reader sees "Scout is thinking…" while a turn runs instead of dead
+// air until the reply.
 //
-// Mechanism: a posted-then-deleted in-thread message. Slack's NATIVE AI status
-// (assistant.threads.setStatus) only renders inside the 1:1 Assistant container
-// (the dedicated assistant pane/DM), NOT a shared channel thread — and the office
-// lives in a shared channel. So when an agent goes active we POST a transient
-// "💭 <name> is thinking…" message into that agent's running task threads, and
-// DELETE it when the agent goes idle (the real reply posts separately). This
-// reproduces the native "working → answer" feel where the office actually lives.
+// Mechanism: Slack's NATIVE AI status (assistant.threads.setStatus), which costs
+// ZERO channel messages — it renders in the thread composer footer and clears the
+// instant the agent goes idle, so it never pings followers or eats the rate
+// budget the way a posted-then-deleted status line would. The catch is WHERE it
+// renders: native status shows inside the 1:1 Assistant pane (a DM), and — for an
+// app with the Assistant feature — on the app's own threads. So we set it on two
+// surfaces per active turn: the owner's most-recent task thread (where shared
+// task work lives) AND, for the office lead, the open Assistant pane (where a
+// user chatting 1:1 with the office expects to see it). Either may be absent; we
+// set whichever exist and clear them together on idle.
 //
 // It subscribes to the broker activity stream (the same signal the web UI shows
-// as "planning next step"). Best-effort: a post/delete failure is logged, never
-// fatal, so the rest of the bridge is unaffected.
+// as "planning next step"). Best-effort: a status failure is logged, never fatal,
+// so the rest of the bridge is unaffected.
 
 // slackTaskThreadRef locates a task's Slack thread root.
 type slackTaskThreadRef struct {
@@ -105,12 +108,12 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 	activity, unsub := t.Broker.SubscribeActivity(256)
 	defer unsub()
 
-	// shown tracks the single thread (per OWNER) the status is currently set on,
-	// so we set/clear exactly once per turn. Scoping per-owner (the most-recently-
-	// updated active thread) keeps us from setting status on every task an owner
-	// still holds.
+	// shown tracks the status surfaces currently lit for each OWNER, so we set on
+	// a turn's start and clear them all on its end. We light at most two per turn:
+	// the owner's most-recently-updated task thread and (for the lead) the open
+	// Assistant pane — never every task an owner still holds.
 	type statusRef struct{ channelID, threadTS string }
-	shown := map[string]statusRef{}
+	shown := map[string][]statusRef{}
 	setStatus := func(channelID, threadTS, text string) error {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -119,13 +122,14 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 		})
 	}
 	clear := func(slug string) {
-		ref, up := shown[slug]
+		refs, up := shown[slug]
 		if !up {
 			return
 		}
-		if err := setStatus(ref.channelID, ref.threadTS, ""); err != nil {
-			log.Printf("[slack] thinking status clear for %s: %v", slug, err)
-			return
+		for _, ref := range refs {
+			if err := setStatus(ref.channelID, ref.threadTS, ""); err != nil {
+				log.Printf("[slack] thinking status clear for %s: %v", slug, err)
+			}
 		}
 		delete(shown, slug)
 	}
@@ -134,10 +138,12 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			// Clear any lingering status on shutdown (best-effort, detached ctx).
-			for _, ref := range shown {
-				_ = t.api.SetAssistantThreadsStatusContext(context.Background(), slack.AssistantThreadsSetStatusParameters{
-					ChannelID: ref.channelID, ThreadTS: ref.threadTS, Status: "",
-				})
+			for _, refs := range shown {
+				for _, ref := range refs {
+					_ = t.api.SetAssistantThreadsStatusContext(context.Background(), slack.AssistantThreadsSetStatusParameters{
+						ChannelID: ref.channelID, ThreadTS: ref.threadTS, Status: "",
+					})
+				}
 			}
 			return ctx.Err()
 		case snap, ok := <-activity:
@@ -149,21 +155,35 @@ func (t *SlackTransport) runAgentThinkingStatus(ctx context.Context) error {
 				clear(slug)
 				continue
 			}
-			// Active. Set the status on the owner's most-recently-updated task
-			// thread (refs[0]); if it's already set for this owner, do nothing.
+			// Active. Light status once per turn; if already lit for this owner,
+			// do nothing.
 			if _, already := shown[slug]; already {
 				continue
 			}
-			refs := t.Broker.ActiveSlackTaskThreadsForOwner(slug)
-			if len(refs) == 0 {
-				continue
+			text := t.thinkingStatusText(slug)
+			var lit []statusRef
+			// The owner's most-recently-updated task thread (shared channel work).
+			if refs := t.Broker.ActiveSlackTaskThreadsForOwner(slug); len(refs) > 0 {
+				ref := refs[0]
+				if err := setStatus(ref.ChannelID, ref.ThreadTS, text); err != nil {
+					log.Printf("[slack] thinking status for %s: %v", ref.TaskID, err)
+				} else {
+					lit = append(lit, statusRef{channelID: ref.ChannelID, threadTS: ref.ThreadTS})
+				}
 			}
-			ref := refs[0]
-			if err := setStatus(ref.ChannelID, ref.ThreadTS, t.thinkingStatusText(slug)); err != nil {
-				log.Printf("[slack] thinking status for %s: %v", ref.TaskID, err)
-				continue
+			// The open Assistant pane (1:1 DM) bound to this owner — where native
+			// status renders for a user chatting with the office. Only the lead
+			// has one; everyone else returns ok=false.
+			if channelID, threadTS, ok := t.Broker.AssistantPaneRef(slug); ok {
+				if err := setStatus(channelID, threadTS, text); err != nil {
+					log.Printf("[slack] thinking status (pane) for %s: %v", slug, err)
+				} else {
+					lit = append(lit, statusRef{channelID: channelID, threadTS: threadTS})
+				}
 			}
-			shown[slug] = statusRef{channelID: ref.ChannelID, threadTS: ref.ThreadTS}
+			if len(lit) > 0 {
+				shown[slug] = lit
+			}
 		}
 	}
 }

@@ -145,3 +145,79 @@ func TestRunAgentThinkingStatus_SetsAndClears(t *testing.T) {
 		t.Fatalf("expected the status cleared on idle, got %+v", api.statuses)
 	}
 }
+
+// TestRunAgentThinkingStatus_LightsPane verifies the lead's thinking status also
+// renders in the open Assistant pane (the 1:1 DM) — the surface where native
+// status actually shows for a user chatting with the office — and clears on idle.
+func TestRunAgentThinkingStatus_LightsPane(t *testing.T) {
+	api := newFakeSlackAPI()
+	tr, b := newTestSlackTransport(t, "C0123", api)
+	lead := b.OfficeLeadSlug()
+	ensureTestMemberAccess(b, "slack-general", lead, "Lead")
+	// Open the lead's Assistant pane (binds the IM channel D900 + records the
+	// conversation root) so AssistantPaneRef(lead) resolves.
+	tr.seedAssistantThread(context.Background(), "D900", "900.1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = tr.runAgentThinkingStatus(ctx) }()
+
+	for i := 0; i < 300; i++ {
+		b.mu.Lock()
+		n := len(b.activitySubscribers)
+		b.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	waitFor := func(pred func() bool) bool {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			api.mu.Lock()
+			ok := pred()
+			api.mu.Unlock()
+			if ok {
+				return true
+			}
+			time.Sleep(15 * time.Millisecond)
+		}
+		return false
+	}
+	pushActivity := func(snap agentActivitySnapshot) {
+		b.mu.Lock()
+		b.publishActivityLocked(snap)
+		b.mu.Unlock()
+	}
+
+	// Lead active → status lit on the pane root (900.1 on IM channel D900).
+	pushActivity(agentActivitySnapshot{Slug: lead, Status: "active", Activity: "thinking"})
+	if !waitFor(func() bool {
+		for _, s := range api.statuses {
+			if s.ChannelID == "D900" && s.ThreadTS == "900.1" && s.Status != "" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("expected a thinking status in the pane (D900/900.1), got %+v", api.statuses)
+	}
+	if len(api.posts) != 0 {
+		t.Fatalf("the pane indicator must NOT post a message, got %+v", api.posts)
+	}
+
+	// Idle → the pane status is cleared.
+	pushActivity(agentActivitySnapshot{Slug: lead, Status: "idle", Activity: "idle"})
+	if !waitFor(func() bool {
+		last, seen := "", false
+		for _, s := range api.statuses {
+			if s.ChannelID == "D900" && s.ThreadTS == "900.1" {
+				last, seen = s.Status, true
+			}
+		}
+		return seen && last == ""
+	}) {
+		t.Fatalf("expected the pane status cleared on idle, got %+v", api.statuses)
+	}
+}

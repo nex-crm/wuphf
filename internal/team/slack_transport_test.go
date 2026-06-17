@@ -103,12 +103,31 @@ type fakeSlackAPI struct {
 
 	statuses  []fakeStatus
 	statusErr error
+
+	suggestedPrompts []fakeSuggestedPrompts
+	suggestErr       error
+
+	titles   []fakeTitle
+	titleErr error
 }
 
 type fakeStatus struct {
 	ChannelID string
 	ThreadTS  string
 	Status    string
+}
+
+type fakeSuggestedPrompts struct {
+	ChannelID string
+	ThreadTS  string
+	Title     string
+	Prompts   []slack.AssistantThreadsPrompt
+}
+
+type fakeTitle struct {
+	ChannelID string
+	ThreadTS  string
+	Title     string
 }
 
 type fakePin struct {
@@ -177,6 +196,35 @@ func (f *fakeSlackAPI) SetAssistantThreadsStatusContext(_ context.Context, param
 		return f.statusErr
 	}
 	f.statuses = append(f.statuses, fakeStatus{ChannelID: params.ChannelID, ThreadTS: params.ThreadTS, Status: params.Status})
+	return nil
+}
+
+func (f *fakeSlackAPI) SetAssistantThreadsSuggestedPromptsContext(_ context.Context, params slack.AssistantThreadsSetSuggestedPromptsParameters) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.suggestErr != nil {
+		return f.suggestErr
+	}
+	f.suggestedPrompts = append(f.suggestedPrompts, fakeSuggestedPrompts{
+		ChannelID: params.ChannelID,
+		ThreadTS:  params.ThreadTS,
+		Title:     params.Title,
+		Prompts:   params.Prompts,
+	})
+	return nil
+}
+
+func (f *fakeSlackAPI) SetAssistantThreadsTitleContext(_ context.Context, params slack.AssistantThreadsSetTitleParameters) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.titleErr != nil {
+		return f.titleErr
+	}
+	f.titles = append(f.titles, fakeTitle{
+		ChannelID: params.ChannelID,
+		ThreadTS:  params.ThreadTS,
+		Title:     params.Title,
+	})
 	return nil
 }
 

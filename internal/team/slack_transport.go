@@ -74,6 +74,16 @@ type slackAPI interface {
 	// followers or eats the rate budget the way a posted status line would. Needs
 	// the app's Assistant feature + assistant:write; degrades silently otherwise.
 	SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error
+	// SetAssistantThreadsSuggestedPromptsContext seeds the Assistant pane with up
+	// to four tappable starter prompts (assistant.threads.setSuggestedPrompts)
+	// when a user opens the office's pane — the native "what can I do here"
+	// affordance Slack recommends for an agent's entry point. Same Assistant
+	// feature + assistant:write requirement; degrades silently otherwise.
+	SetAssistantThreadsSuggestedPromptsContext(ctx context.Context, params slack.AssistantThreadsSetSuggestedPromptsParameters) error
+	// SetAssistantThreadsTitleContext names the Assistant conversation
+	// (assistant.threads.setTitle) so it is findable in the user's pane history.
+	// Set once from the first user message. Same requirement; degrades silently.
+	SetAssistantThreadsTitleContext(ctx context.Context, params slack.AssistantThreadsSetTitleParameters) error
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -135,6 +145,14 @@ func (c *slackClient) GetPermalinkContext(ctx context.Context, params *slack.Per
 
 func (c *slackClient) SetAssistantThreadsStatusContext(ctx context.Context, params slack.AssistantThreadsSetStatusParameters) error {
 	return c.api.SetAssistantThreadsStatusContext(ctx, params)
+}
+
+func (c *slackClient) SetAssistantThreadsSuggestedPromptsContext(ctx context.Context, params slack.AssistantThreadsSetSuggestedPromptsParameters) error {
+	return c.api.SetAssistantThreadsSuggestedPromptsContext(ctx, params)
+}
+
+func (c *slackClient) SetAssistantThreadsTitleContext(ctx context.Context, params slack.AssistantThreadsSetTitleParameters) error {
+	return c.api.SetAssistantThreadsTitleContext(ctx, params)
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and
@@ -466,11 +484,11 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 		// lead's DM so the user can chat with the office natively. The DM messages
 		// themselves arrive as ordinary MessageEvents (message.im) below.
 		if started, isStart := apiEvent.InnerEvent.Data.(*slackevents.AssistantThreadStartedEvent); isStart {
-			t.seedAssistantThread(started.AssistantThread.ChannelID, started.AssistantThread.ThreadTimeStamp)
+			t.seedAssistantThread(ctx, started.AssistantThread.ChannelID, started.AssistantThread.ThreadTimeStamp)
 			return true
 		}
 		if changed, isChanged := apiEvent.InnerEvent.Data.(*slackevents.AssistantThreadContextChangedEvent); isChanged {
-			t.seedAssistantThread(changed.AssistantThread.ChannelID, changed.AssistantThread.ThreadTimeStamp)
+			t.seedAssistantThread(ctx, changed.AssistantThread.ChannelID, changed.AssistantThread.ThreadTimeStamp)
 			return true
 		}
 		msg, ok := apiEvent.InnerEvent.Data.(*slackevents.MessageEvent)
@@ -541,13 +559,15 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 
 	// Assistant pane (a DM): remember the conversation's thread root so the
 	// office's reply threads under it. thread_ts identifies the pane thread; the
-	// first message has none, so its own ts IS the root.
+	// first message has none, so its own ts IS the root. Name the conversation
+	// from this first message (once per thread) so it is findable in pane history.
 	if t.Broker != nil && IsDMSlug(channel) {
 		root := strings.TrimSpace(msg.ThreadTimeStamp)
 		if root == "" {
 			root = strings.TrimSpace(msg.TimeStamp)
 		}
 		t.Broker.RecordAssistantThread(channel, root)
+		t.maybeSetAssistantTitle(ctx, msg.Channel, root, msg.Text)
 	}
 
 	// Resolve the sender. A registered foreign agent is attributed to its
