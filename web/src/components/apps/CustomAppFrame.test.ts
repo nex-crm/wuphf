@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get, post } from "../../api/client";
 import { confirm } from "../ui/ConfirmDialog";
 import {
+  appBrokerPath,
   isAllowedGetPath,
   parseErrorPayload,
   parseSelectPayload,
@@ -142,6 +143,26 @@ describe("parseSelectPayload", () => {
     });
     expect(sel?.file.length).toBe(256);
     expect(sel?.tag.length).toBe(32);
+  });
+});
+
+describe("appBrokerPath", () => {
+  it("upgrades a bare /tasks to the whole office task list", () => {
+    expect(appBrokerPath("/tasks")).toBe(
+      "/tasks?all_channels=true&viewer_slug=human",
+    );
+  });
+  it("leaves an explicit task query untouched", () => {
+    expect(appBrokerPath("/tasks?channel=general")).toBe(
+      "/tasks?channel=general",
+    );
+    expect(appBrokerPath("/tasks?all_channels=true")).toBe(
+      "/tasks?all_channels=true",
+    );
+  });
+  it("leaves other allowlisted paths untouched", () => {
+    expect(appBrokerPath("/office-members")).toBe("/office-members");
+    expect(appBrokerPath("/wiki/list")).toBe("/wiki/list");
   });
 });
 
@@ -362,7 +383,10 @@ describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
       { current: vi.fn() },
       { current: vi.fn() },
     );
-    expect(get).toHaveBeenCalledWith("/tasks");
+    // A bare /tasks is upgraded host-side to the whole office task list.
+    expect(get).toHaveBeenCalledWith(
+      "/tasks?all_channels=true&viewer_slug=human",
+    );
   });
 
   it("rejects a non-GET broker request before any broker call", () => {
