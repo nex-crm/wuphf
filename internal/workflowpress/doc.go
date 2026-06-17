@@ -29,6 +29,13 @@
 //     wire-format SchemaVersion (distinct from the content Version counter);
 //     Validate fails closed on an unknown/newer version and DecodeSpecStrict is
 //     the loud strict loader the generated tool uses;
+//   - the coupling policy — KernelVersion and RequireKernelCompat (version.go).
+//     A generated tool is coupled to the kernel on TWO axes (it imports the
+//     runtime AND embeds a spec); each is stamped into the tool and asserted at
+//     load. The policy is regenerate-on-bump: one supported (KernelVersion,
+//     SchemaVersionWorkflowSpec) pair, the committed generated golden regenerated
+//     whenever either bumps, and a byte-level drift guard
+//     (TestGeneratedOutputMatchesCommitted) failing CI on un-regenerated drift;
 //   - validation of the contract — WorkflowSpec.Validate (validate.go);
 //   - the Generator — deterministic emission of the local workflow from the
 //     spec (interface here; implementation in a later phase);

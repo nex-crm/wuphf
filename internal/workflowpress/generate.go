@@ -66,20 +66,9 @@ func Generate(spec *WorkflowSpec) (*GeneratedWorkflow, error) {
 	files := make(map[string][]byte, len(generatedTemplates)+1)
 
 	for _, gt := range generatedTemplates {
-		var buf bytes.Buffer
-		if err := gt.tmpl.Execute(&buf, view); err != nil {
-			return nil, fmt.Errorf("workflowpress: executing template %q: %w", gt.suffix, err)
-		}
-		out := buf.Bytes()
-		// gofmt every emitted Go file so the generated source is canonical and
-		// byte-stable regardless of template whitespace. go/format is deterministic,
-		// so this preserves the "same spec, same bytes" guarantee.
-		if strings.HasSuffix(gt.suffix, ".go") {
-			formatted, err := format.Source(out)
-			if err != nil {
-				return nil, fmt.Errorf("workflowpress: gofmt of generated %q failed: %w", gt.suffix, err)
-			}
-			out = formatted
+		out, err := renderTemplate(gt.tmpl, view, strings.HasSuffix(gt.suffix, ".go"))
+		if err != nil {
+			return nil, fmt.Errorf("workflowpress: rendering template %q: %w", gt.suffix, err)
 		}
 		files[resolvePath(view.Dir, gt.suffix)] = out
 	}
@@ -97,6 +86,27 @@ func Generate(spec *WorkflowSpec) (*GeneratedWorkflow, error) {
 		Version:    spec.Version,
 		Files:      files,
 	}, nil
+}
+
+// renderTemplate executes one template against the view and, for Go files,
+// gofmt-canonicalises the output. It is the single render step Generate uses for
+// every templated file, so the production path and any test that re-renders a
+// template (e.g. the simulated-drift guard) produce bytes the same way — gofmt
+// is deterministic, preserving the "same spec, same bytes" guarantee.
+func renderTemplate(tmpl *template.Template, view specView, gofmt bool) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, view); err != nil {
+		return nil, fmt.Errorf("executing template: %w", err)
+	}
+	out := buf.Bytes()
+	if gofmt {
+		formatted, err := format.Source(out)
+		if err != nil {
+			return nil, fmt.Errorf("gofmt of generated source failed: %w", err)
+		}
+		out = formatted
+	}
+	return out, nil
 }
 
 // TemplateGenerator is the kernel Generator implemented over Generate. It lets a
@@ -138,6 +148,14 @@ type specView struct {
 	Steps           []InngestStep
 	StateNames      []string
 	TerminalSet     map[string]bool
+	// KernelVersion and SchemaVersion are the two coupling axes stamped into the
+	// generated tool: the version of the kernel it was generated against and the
+	// spec wire-format version it was generated for. The generated loadSpec asserts
+	// both against the kernel it links via wp.RequireKernelCompat, so a kernel or
+	// wire-format bump that would break the tool fails loudly at load instead of
+	// running on a mismatched runtime. See version.go.
+	KernelVersion int
+	SchemaVersion int
 }
 
 // scenarioView is one verification scenario flattened for template/test emission,
@@ -158,11 +176,16 @@ type scenarioView struct {
 func newSpecView(spec *WorkflowSpec) (specView, error) {
 	pkg := packageName(spec.ID)
 	v := specView{
-		Spec:        spec,
-		Dir:         spec.ID,
-		Package:     pkg,
-		Steps:       PlanInngestSteps(spec),
-		TerminalSet: make(map[string]bool, len(spec.States)),
+		Spec:    spec,
+		Dir:     spec.ID,
+		Package: pkg,
+		Steps:   PlanInngestSteps(spec),
+		// Stamp both coupling axes at generation time. KernelVersion ties the tool
+		// to the kernel runtime/templates it was generated against; SchemaVersion is
+		// the generator's view of the spec wire shape. loadSpec asserts both.
+		KernelVersion: KernelVersion,
+		SchemaVersion: SchemaVersionWorkflowSpec,
+		TerminalSet:   make(map[string]bool, len(spec.States)),
 	}
 	for _, st := range spec.States {
 		v.StateNames = append(v.StateNames, st.Name)

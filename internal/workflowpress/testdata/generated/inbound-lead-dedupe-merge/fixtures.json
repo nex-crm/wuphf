@@ -1,0 +1,81 @@
+{
+  "workflow_id": "inbound-lead-dedupe-merge",
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "matching_lead_merges_idempotently",
+      "when": "lead_received",
+      "given": [
+        {
+          "key": "existing_contact",
+          "value": "true"
+        },
+        {
+          "key": "match_score",
+          "value": "0.96"
+        }
+      ],
+      "expect_transitions": [
+        {
+          "from": "received",
+          "to": "matched"
+        },
+        {
+          "from": "matched",
+          "to": "merged"
+        }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "new_lead_creates_record",
+      "when": "lead_received",
+      "given": [
+        {
+          "key": "existing_contact",
+          "value": "false"
+        },
+        {
+          "key": "match_score",
+          "value": "0.10"
+        }
+      ],
+      "expect_transitions": [
+        {
+          "from": "received",
+          "to": "matched"
+        },
+        {
+          "from": "matched",
+          "to": "created"
+        }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "duplicate_event_does_not_double_apply",
+      "when": "match_found",
+      "given": [
+        {
+          "key": "existing_contact",
+          "value": "true"
+        },
+        {
+          "key": "match_score",
+          "value": "0.96"
+        },
+        {
+          "key": "redelivered",
+          "value": "true"
+        }
+      ],
+      "expect_transitions": [
+        {
+          "from": "matched",
+          "to": "merged"
+        }
+      ],
+      "expect_approval": true
+    }
+  ]
+}

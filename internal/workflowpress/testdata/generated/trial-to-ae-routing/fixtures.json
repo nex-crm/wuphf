@@ -1,0 +1,59 @@
+{
+  "workflow_id": "trial-to-ae-routing",
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "icp_fit_routes_and_posts",
+      "when": "trial_signed_up",
+      "given": [
+        {
+          "key": "company_size",
+          "value": "200"
+        },
+        {
+          "key": "icp_score",
+          "value": "82"
+        },
+        {
+          "key": "industry",
+          "value": "saas"
+        }
+      ],
+      "expect_transitions": [
+        {
+          "from": "received",
+          "to": "enriched"
+        },
+        {
+          "from": "enriched",
+          "to": "scored"
+        },
+        {
+          "from": "scored",
+          "to": "routed"
+        }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "below_threshold_does_not_route",
+      "when": "scoring_completed",
+      "given": [
+        {
+          "key": "company_size",
+          "value": "3"
+        },
+        {
+          "key": "icp_score",
+          "value": "20"
+        },
+        {
+          "key": "industry",
+          "value": "hobbyist"
+        }
+      ],
+      "expect_transitions": [],
+      "expect_approval": false
+    }
+  ]
+}

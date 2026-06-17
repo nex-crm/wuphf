@@ -43,14 +43,34 @@ import (
 // generated Go. The quoted form survives any byte and decodes identically.
 const specJSON = {{.SpecJSONLiteral}}
 
-// loadSpec decodes the embedded contract through the kernel's STRICT loader
-// (wp.DecodeSpecStrict): a json.Decoder with DisallowUnknownFields plus a
-// schema_version assertion and the full state-machine Validate. This fails LOUDLY
-// if the embedded contract ever drifts from the kernel's wire shape — a removed or
-// renamed field, or a schema_version mismatch, surfaces as an error here instead
-// of a lenient json.Unmarshal silently zero-valuing a guard or a RequiresApproval
-// flag.
+// generatedKernelVersion and generatedSchemaVersion stamp the two coupling axes
+// this tool was generated against: the workflowpress KERNEL version (runner
+// runtime, strict loader, templates) and the spec WIRE-format version. loadSpec
+// asserts both against the kernel this tool actually links via
+// wp.RequireKernelCompat, so a kernel or wire-format bump that would break this
+// generated tool fails LOUDLY at load instead of running on a mismatched runtime.
+// The policy is regenerate-on-bump: regenerate this tool whenever the kernel does
+// not match. See docs/specs/workflow-press.md.
+const (
+	generatedKernelVersion = {{.KernelVersion}}
+	generatedSchemaVersion = {{.SchemaVersion}}
+)
+
+// loadSpec asserts kernel compatibility, then decodes the embedded contract
+// through the kernel's STRICT loader (wp.DecodeSpecStrict): a json.Decoder with
+// DisallowUnknownFields plus a schema_version assertion and the full
+// state-machine Validate. Two fail-closed gates, both surfacing LOUDLY here:
+//
+//   - wp.RequireKernelCompat rejects a tool generated against a different kernel
+//     or spec wire-format version than the one it is linked into — the
+//     coupling-axis assertion (version.go);
+//   - wp.DecodeSpecStrict rejects a removed/renamed field or a schema_version
+//     mismatch in the embedded contract instead of a lenient json.Unmarshal
+//     silently zero-valuing a guard or a RequiresApproval flag.
 func loadSpec() (*wp.WorkflowSpec, error) {
+	if err := wp.RequireKernelCompat(generatedKernelVersion, generatedSchemaVersion); err != nil {
+		return nil, fmt.Errorf("{{.Spec.ID}}: %w", err)
+	}
 	spec, err := wp.DecodeSpecStrict([]byte(specJSON))
 	if err != nil {
 		return nil, fmt.Errorf("{{.Spec.ID}}: decoding embedded spec: %w", err)

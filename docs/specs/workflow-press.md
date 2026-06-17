@@ -237,6 +237,66 @@ contract, its version stamp, and the kernel type cannot drift apart.
   a silent breaking change under the same major would be rejected, not
   mis-decoded — which is the safe failure, but still a bug to avoid.
 
+## Generated-tool ↔ kernel coupling policy
+
+A generated tool is coupled to this kernel on **two** axes, and each gets an
+asserted version. Triangulation architect #2 flagged this: the generated tool
+both **imports the kernel** (the runner runtime, `DecodeSpecStrict`, the Executor
+seam) *and* **embeds the spec**, and those two were unversioned with respect to
+each other — a kernel change could silently break a committed generated tool with
+nothing asserting the two still agree.
+
+**The two axes, both stamped into every generated tool:**
+
+- **Spec wire-format axis — `schema_version`.** Already covered above: the
+  embedded spec carries `schema_version`, and the generated `loadSpec` →
+  `DecodeSpecStrict` fails closed on an unknown/newer one.
+- **Kernel axis — `KernelVersion`.** New. `KernelVersion` (a package constant in
+  `version.go`) versions the *kernel itself*: the runner runtime, the strict
+  loader, the Executor seam, and the **generator templates**. It is distinct from
+  `schema_version` (the spec wire shape) and from a spec's content `version`. It
+  bumps on any change that could alter generated output or the runtime contract a
+  generated tool depends on — a template edit, a runner behaviour change, a new
+  generated file, a guard-evaluation change.
+
+**The stamp + the load-time assertion.** The generator emits two constants into
+each tool's `workflow.go` — `generatedKernelVersion` and `generatedSchemaVersion`
+— recording the kernel and wire-format versions it generated against. The
+generated `loadSpec` calls `wp.RequireKernelCompat(generatedKernelVersion,
+generatedSchemaVersion)` against the kernel it actually links. Both must match
+**exactly** (not `>=`): the kernel cannot prove forward *or* backward
+compatibility across a bump, so any difference fails closed with
+`ErrKernelIncompatible` — the same fail-closed posture as the `schema_version`
+gate. The assertion logic lives in the reviewed kernel (`RequireKernelCompat`),
+not in per-workflow generated code, so every tool inherits it.
+
+**Policy: regenerate-on-bump, NOT pin.** There is exactly one supported
+`(KernelVersion, SchemaVersionWorkflowSpec)` pair at a time. WUPHF does **not**
+keep old kernels around to run old tools (no version-pinning, no compatibility
+shims). Instead, whenever either version bumps, **every generated tool is
+regenerated** from its frozen spec against the new kernel — convergence, not a
+fan-out of pinned variants. This matches the press's "prefer update over a new
+workflow" stance: one kernel, one set of regenerated tools.
+
+**The CI hook that enforces it.** The committed golden tree under
+`internal/workflowpress/testdata/generated/<id>/` is the *exact* output the
+current kernel emits for the three ground-truth example specs.
+`TestGeneratedOutputMatchesCommitted` regenerates all three and asserts the bytes
+are **byte-identical** to the committed golden (and that no committed file is
+stale). A kernel/template/spec change that alters generated output — or would
+break a committed tool — makes this test **fail**, forcing the author to:
+
+```sh
+go test ./internal/workflowpress -run TestGeneratedOutputMatchesCommitted -update
+```
+
+then review and commit the regenerated diff. CI runs **without** `-update`, so an
+un-regenerated change fails the build. `TestDriftGuardCatchesTemplateTweak` is the
+safety net for the safety net: it proves a perturbed template produces output that
+differs from the committed golden, so the guard can never be silently satisfied by
+drifted output. This is the regenerate-on-change enforcement — the kernel and
+every generated tool stay in lockstep, by construction.
+
 ## Risks & open questions
 
 - **Sandbox choice** (container / micro-VM / `sandbox-runtime`) — Phase 0 must

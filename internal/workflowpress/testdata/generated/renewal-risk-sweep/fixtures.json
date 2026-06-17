@@ -1,0 +1,67 @@
+{
+  "workflow_id": "renewal-risk-sweep",
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "at_risk_account_is_flagged",
+      "when": "weekly_sweep",
+      "given": [
+        {
+          "key": "delta_pct",
+          "value": "-0.35"
+        },
+        {
+          "key": "renewal_in_days",
+          "value": "30"
+        }
+      ],
+      "expect_transitions": [
+        {
+          "from": "idle",
+          "to": "selecting"
+        },
+        {
+          "from": "selecting",
+          "to": "analyzing"
+        },
+        {
+          "from": "analyzing",
+          "to": "flagged"
+        }
+      ],
+      "expect_approval": true
+    },
+    {
+      "name": "stable_usage_is_not_flagged",
+      "when": "usage_analyzed",
+      "given": [
+        {
+          "key": "delta_pct",
+          "value": "-0.05"
+        },
+        {
+          "key": "renewal_in_days",
+          "value": "30"
+        }
+      ],
+      "expect_transitions": [],
+      "expect_approval": false
+    },
+    {
+      "name": "renewal_too_far_out_is_skipped",
+      "when": "accounts_selected",
+      "given": [
+        {
+          "key": "delta_pct",
+          "value": "-0.40"
+        },
+        {
+          "key": "renewal_in_days",
+          "value": "120"
+        }
+      ],
+      "expect_transitions": [],
+      "expect_approval": false
+    }
+  ]
+}
