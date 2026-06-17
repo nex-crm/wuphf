@@ -339,7 +339,57 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		_ = b.syncTaskWorktreeLocked(&b.tasks[i])
 	}
 	b.reconcileOrphanedBlockedTasksLocked()
+	b.reconcileSharedTaskChannelsLocked()
 	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+// reconcileSharedTaskChannelsLocked re-homes tasks that are squatting in
+// another task's dedicated per-task channel. Before the channel-minting fix,
+// a top-level Issue created from inside an existing Issue's chat inherited that
+// chat's channel, so several tasks could share one task-<id> channel (e.g.
+// OFFICE-28 sitting in OFFICE-22's "task-office-22"). This one-shot migration
+// gives each squatter its own task-<childID> channel going forward.
+//
+// A channel "belongs" to the task whose ID equals its linked TaskID. A task
+// whose Channel is a per-task channel owned by a DIFFERENT task is re-homed;
+// the task that legitimately owns the channel, tasks in #general, and tasks in
+// non-per-task shared channels (no TaskID — project/bridged channels) are left
+// alone. System and incident tasks legitimately live in #general and are
+// skipped. Historical messages stay in the old channel — only the task→channel
+// link moves, so new activity lands in the task's own chat.
+//
+// Idempotent: after the first pass each re-homed task owns its new channel
+// (TaskID == its own ID), so a second pass finds nothing to move. Caller must
+// hold b.mu. Runs once per broker boot from normalizeLoadedStateLocked.
+func (b *Broker) reconcileSharedTaskChannelsLocked() {
+	for i := range b.tasks {
+		t := &b.tasks[i]
+		if t.System || strings.TrimSpace(t.PipelineID) == "incident" {
+			continue
+		}
+		ch := b.findChannelLocked(t.Channel)
+		if ch == nil {
+			continue
+		}
+		owner := strings.TrimSpace(ch.TaskID)
+		// Not a per-task channel (general / project / bridged), or this task
+		// already owns it — nothing to do.
+		if owner == "" || owner == strings.TrimSpace(t.ID) {
+			continue
+		}
+		// Squatting in another task's channel — mint its own and move the link.
+		newCh := b.createPerTaskChannelLocked(t.ID, t.Title, t.Owner, "system")
+		if newCh == nil {
+			// createPerTaskChannelLocked logs the failure; leave the task in the
+			// shared channel rather than dropping it somewhere worse.
+			continue
+		}
+		old := t.Channel
+		t.Channel = newCh.Slug
+		t.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		b.appendActionLocked("task_rehomed", "office", newCh.Slug, "system",
+			truncateSummary("Moved out of shared channel "+old+" into its own", 140), t.ID)
+	}
 }
 
 // reconcileOrphanedBlockedTasksLocked unblocks tasks whose dependencies
