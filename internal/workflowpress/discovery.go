@@ -100,6 +100,7 @@ func Discover(inputs RawEvidence) (WorkflowResearch, error) {
 	}
 
 	research := WorkflowResearch{
+		SchemaVersion:      SchemaVersionWorkflowResearch,
 		WorkflowID:         inputs.WorkflowID,
 		SessionContext:     inputs.SessionContext,
 		OperatorNotes:      cloneStrings(inputs.OperatorNotes),

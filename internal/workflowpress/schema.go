@@ -46,6 +46,22 @@ const (
 	researchSchemaPath = "testdata/schema/workflow-research.schema.json"
 )
 
+// Stamped identity for the published JSON Schemas. $schema pins the dialect so a
+// cross-language validator does not have to guess; $id versions the schema URI so
+// a consumer can tell which wire-format major it is validating against. The "/v1"
+// path component tracks SchemaVersionWorkflowSpec / SchemaVersionWorkflowResearch:
+// a breaking wire-shape change bumps both the schema_version const and this URI.
+const (
+	// schemaDialect is the JSON Schema draft the committed schemas are written in;
+	// it is the jsonschema-go default for an inferred schema.
+	schemaDialect = "https://json-schema.org/draft/2020-12/schema"
+	// specSchemaID and researchSchemaID are the stamped $id of each published
+	// schema. The /v1 segment is the wire-format major; bump it in lockstep with the
+	// schema_version consts on a breaking change.
+	specSchemaID     = "https://wuphf.nex.ai/schema/workflow-press/v1/workflow-spec.schema.json"
+	researchSchemaID = "https://wuphf.nex.ai/schema/workflow-press/v1/workflow-research.schema.json"
+)
+
 // resolved holds the two schemas resolved once and reused. Resolution is
 // non-trivial (meta-schema check + ref resolution), so we cache it.
 var (

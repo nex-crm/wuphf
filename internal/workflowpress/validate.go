@@ -1,8 +1,11 @@
 package workflowpress
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 )
 
@@ -75,6 +78,12 @@ var (
 	// verbatim as a path component during generation, so a value with slashes,
 	// dots, or traversal sequences is a path-traversal risk and is rejected here.
 	ErrInvalidID = errors.New("workflow id is not a safe slug")
+	// ErrUnsupportedSchemaVersion is returned when an artifact's schema_version is
+	// not the current supported wire-format version. Validate fails CLOSED on any
+	// unknown/newer version: a producer on a wire format this kernel does not
+	// recognise must be rejected, never decoded best-effort (which would risk
+	// silently zero-valuing a guard or a RequiresApproval flag).
+	ErrUnsupportedSchemaVersion = errors.New("unsupported schema_version")
 )
 
 // Validate enforces the contract invariants on a WorkflowSpec. It returns the
@@ -83,6 +92,16 @@ var (
 func (s *WorkflowSpec) Validate() error {
 	if s == nil {
 		return fmt.Errorf("%w: %w: spec is nil", ErrInvalidSpec, ErrEmptyField)
+	}
+	// Wire-format gate FIRST, and fail closed: a spec whose schema_version is not
+	// the current supported version speaks a wire shape this kernel cannot be sure
+	// it understands. Reject it before any field-level check so an unknown/newer
+	// version cannot reach code that would interpret it best-effort.
+	if s.SchemaVersion != SchemaVersionWorkflowSpec {
+		return fmt.Errorf(
+			"%w: %w: spec schema_version is %d, want %d",
+			ErrInvalidSpec, ErrUnsupportedSchemaVersion, s.SchemaVersion, SchemaVersionWorkflowSpec,
+		)
 	}
 	if s.ID == "" {
 		return fmt.Errorf("%w: %w: id", ErrInvalidSpec, ErrEmptyField)
@@ -219,6 +238,46 @@ func (s *WorkflowSpec) Validate() error {
 	}
 
 	return nil
+}
+
+// ErrStrictDecode is returned when a spec fails strict JSON decoding: an unknown
+// (removed/renamed) field, trailing data, or malformed JSON. It is the loud
+// failure the generated tool's loadSpec relies on — a removed or renamed field
+// that a lenient json.Unmarshal would silently zero-value (dropping a guard or a
+// RequiresApproval flag) instead surfaces here.
+var ErrStrictDecode = errors.New("strict spec decode failed")
+
+// DecodeSpecStrict decodes a WorkflowSpec from JSON with a STRICT decoder
+// (DisallowUnknownFields), asserts its schema_version is the current supported
+// version, and runs the full state-machine Validate. It is the kernel's loud
+// loader: a removed/renamed field, a schema_version mismatch, or any contract
+// violation fails here rather than silently zero-valuing a guard or a
+// RequiresApproval flag in the decoded spec.
+//
+// The generated tool's loadSpec delegates to this so the security-load-bearing
+// strict-decode + version assertion lives in the reviewed kernel, not in
+// per-workflow generated code.
+func DecodeSpecStrict(data []byte) (*WorkflowSpec, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var spec WorkflowSpec
+	if err := dec.Decode(&spec); err != nil {
+		return nil, fmt.Errorf("%w: %w: %w", ErrInvalidSpec, ErrStrictDecode, err)
+	}
+	// Reject trailing data after the JSON value so a concatenated second document
+	// (which the first Decode would ignore) cannot slip past.
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("%w: %w: unexpected trailing data after spec", ErrInvalidSpec, ErrStrictDecode)
+		}
+		return nil, fmt.Errorf("%w: %w: %w", ErrInvalidSpec, ErrStrictDecode, err)
+	}
+	// Validate runs the schema_version gate (fail-closed) plus the full
+	// state-machine invariants.
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
+	return &spec, nil
 }
 
 // validateProvenance enforces that an inferable element carries a valid trust

@@ -77,10 +77,11 @@ func TestNewRunnerRejectsInvalidSpec(t *testing.T) {
 	prov := Provenance{TrustTier: TrustOperatorStated, Confidence: 1.0}
 	base := func() *WorkflowSpec {
 		return &WorkflowSpec{
-			ID:       "wf",
-			Version:  1,
-			Goal:     "do the thing",
-			Operator: "revops",
+			SchemaVersion: SchemaVersionWorkflowSpec,
+			ID:            "wf",
+			Version:       1,
+			Goal:          "do the thing",
+			Operator:      "revops",
 			States: []State{
 				{Name: "start", Initial: true, Provenance: prov},
 				{Name: "done", Terminal: true, Provenance: prov},
@@ -179,10 +180,11 @@ func TestGenerateRejectsInvalidSpec(t *testing.T) {
 	// A spec with a write-action that skips approval is invalid (write-needs-
 	// approval rule); Generate must refuse it.
 	bad := &WorkflowSpec{
-		ID:       "broken",
-		Version:  1,
-		Goal:     "g",
-		Operator: "revops",
+		SchemaVersion: SchemaVersionWorkflowSpec,
+		ID:            "broken",
+		Version:       1,
+		Goal:          "g",
+		Operator:      "revops",
 		States: []State{
 			{Name: "a", Initial: true, Provenance: Provenance{TrustTier: TrustObserved, Confidence: 1}},
 			{Name: "b", Terminal: true, Provenance: Provenance{TrustTier: TrustObserved, Confidence: 1}},

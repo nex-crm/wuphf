@@ -42,6 +42,13 @@ func TestExamplesLoadAndValidate(t *testing.T) {
 			if spec.ID != name {
 				t.Errorf("fixture id = %q, want %q (filename must match spec id)", spec.ID, name)
 			}
+			// Every committed fixture must carry the current wire-format version, so a
+			// fixture written before the field existed (schema_version 0) is caught here
+			// rather than silently failing the fail-closed Validate gate for the wrong
+			// reason.
+			if spec.SchemaVersion != SchemaVersionWorkflowSpec {
+				t.Errorf("fixture schema_version = %d, want %d", spec.SchemaVersion, SchemaVersionWorkflowSpec)
+			}
 			if err := spec.Validate(); err != nil {
 				t.Fatalf("semantic Validate() failed: %v", err)
 			}

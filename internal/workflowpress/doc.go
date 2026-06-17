@@ -25,7 +25,10 @@
 // INSIDE the kernel (this package, frozen + reviewed + versioned):
 //
 //   - the contract schema — WorkflowResearch, WorkflowSpec and their JSON
-//     Schema (contract.go, schema.go);
+//     Schema (contract.go, schema.go). Both artifacts carry an asserted
+//     wire-format SchemaVersion (distinct from the content Version counter);
+//     Validate fails closed on an unknown/newer version and DecodeSpecStrict is
+//     the loud strict loader the generated tool uses;
 //   - validation of the contract — WorkflowSpec.Validate (validate.go);
 //   - the Generator — deterministic emission of the local workflow from the
 //     spec (interface here; implementation in a later phase);

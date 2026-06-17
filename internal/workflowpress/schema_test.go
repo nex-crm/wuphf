@@ -9,25 +9,32 @@ import (
 )
 
 // TestSpecSchemaMatchesType is the drift guard: the committed WorkflowSpec JSON
-// Schema must equal what jsonschema.For infers from the Go type today. If the IR
-// changes without regenerating the schema, this fails — keeping the published
-// contract and the kernel type in lockstep.
+// Schema must equal what jsonschema.For infers from the Go type today, stamped
+// with the published $schema dialect and $id. If the IR changes without
+// regenerating the schema — or the stamped identity drifts — this fails, keeping
+// the published contract, its version stamp, and the kernel type in lockstep.
 func TestSpecSchemaMatchesType(t *testing.T) {
 	t.Parallel()
-	assertSchemaMatchesType[WorkflowSpec](t, SpecSchemaBytes)
+	assertSchemaMatchesType[WorkflowSpec](t, SpecSchemaBytes, specSchemaID)
 }
 
 func TestResearchSchemaMatchesType(t *testing.T) {
 	t.Parallel()
-	assertSchemaMatchesType[WorkflowResearch](t, ResearchSchemaBytes)
+	assertSchemaMatchesType[WorkflowResearch](t, ResearchSchemaBytes, researchSchemaID)
 }
 
-func assertSchemaMatchesType[T any](t *testing.T, committed func() ([]byte, error)) {
+func assertSchemaMatchesType[T any](t *testing.T, committed func() ([]byte, error), id string) {
 	t.Helper()
 	inferred, err := jsonschema.For[T](nil)
 	if err != nil {
 		t.Fatalf("inferring schema: %v", err)
 	}
+	// Stamp the published identity onto the inferred schema so the committed file
+	// (which carries $schema + $id) matches byte-for-byte. The kernel publishes the
+	// dialect and a versioned URI; the inferred shape carries neither, so the guard
+	// stamps them here rather than letting the committed file drift from the type.
+	inferred.Schema = schemaDialect
+	inferred.ID = id
 	want, err := json.MarshalIndent(inferred, "", "  ")
 	if err != nil {
 		t.Fatalf("marshalling inferred schema: %v", err)
@@ -80,6 +87,7 @@ func TestSpecRoundTripsThroughSchema(t *testing.T) {
 func TestResearchRoundTripsThroughSchema(t *testing.T) {
 	t.Parallel()
 	research := WorkflowResearch{
+		SchemaVersion:  SchemaVersionWorkflowResearch,
 		WorkflowID:     "trial-to-ae-routing",
 		SessionContext: "operator routing a trial signup by hand across CRM + Slack",
 		OperatorNotes:  []string{"always posts the routing decision to #deals"},

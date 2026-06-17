@@ -158,7 +158,7 @@ func Freeze(draft WorkflowSpec, req FreezeRequest) (FrozenSpec, error) {
 // versa). Validate is called on the clone, not the original, so a caller's draft
 // is never touched by the freeze attempt.
 func cloneSpec(s WorkflowSpec) *WorkflowSpec {
-	out := s // copy scalars (ID, Version, Goal, Operator)
+	out := s // copy scalars (SchemaVersion, ID, Version, Goal, Operator)
 	out.Entities = cloneEntities(s.Entities)
 	out.States = cloneStates(s.States)
 	out.Events = cloneEvents(s.Events)

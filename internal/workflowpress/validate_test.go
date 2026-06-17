@@ -10,10 +10,11 @@ import (
 func minimalValidSpec() *WorkflowSpec {
 	prov := Provenance{TrustTier: TrustOperatorStated, Confidence: 1.0}
 	return &WorkflowSpec{
-		ID:       "wf",
-		Version:  1,
-		Goal:     "do the thing",
-		Operator: "revops",
+		SchemaVersion: SchemaVersionWorkflowSpec,
+		ID:            "wf",
+		Version:       1,
+		Goal:          "do the thing",
+		Operator:      "revops",
 		States: []State{
 			{Name: "start", Initial: true, Provenance: prov},
 			{Name: "done", Terminal: true, Provenance: prov},

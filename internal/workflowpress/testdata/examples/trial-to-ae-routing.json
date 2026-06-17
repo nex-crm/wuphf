@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "trial-to-ae-routing",
   "version": 1,
   "goal": "Route a new trial signup to the right account executive after enriching and scoring it against the ICP, then post the routing decision to the deal channel.",

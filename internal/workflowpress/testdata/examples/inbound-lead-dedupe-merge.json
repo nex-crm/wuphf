@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "inbound-lead-dedupe-merge",
   "version": 1,
   "goal": "For each new inbound lead, find a matching contact or company; if a match is found, merge idempotently into the existing record; otherwise create a new one.",

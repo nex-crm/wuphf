@@ -178,6 +178,65 @@ this boundary is proven.**
 - **Overlays never touch the kernel** — they patch the per-workflow spec and are
   replayed against fixtures before acceptance.
 
+## Wire-format versioning & compatibility
+
+The two contract artifacts (`workflow-spec.json` and `workflow-research.json`)
+are wire shapes other code reads — the generated tool decodes the spec it was
+generated from, the published JSON Schema describes it to cross-language
+consumers, and overlays patch it. A wire shape that can change silently is a
+foot-gun: a removed or renamed field that a lenient decoder zero-values can drop
+a `guard` or flip a `RequiresApproval` flag to `false` without anyone noticing.
+So both artifacts carry an explicit, asserted **wire-format version**.
+
+**`schema_version` is distinct from the content `version`.**
+
+- `schema_version` versions the *serialized shape* of the artifact. It is a
+  package constant (`SchemaVersionWorkflowSpec`, `SchemaVersionWorkflowResearch`,
+  both currently `1`) serialized as the JSON key `"schema_version"`.
+- `version` is the per-spec *content counter* — it bumps when an overlay is
+  accepted (`v3 → v4`), and says nothing about the wire shape.
+
+A spec can sit at content `version: 7` while still on `schema_version: 1`; an
+overlay bumps `version` and leaves `schema_version` untouched.
+
+**Fail closed on unknown/newer.** `WorkflowSpec.Validate` checks
+`schema_version == SchemaVersionWorkflowSpec` *before any field-level check* and
+rejects anything else (`ErrUnsupportedSchemaVersion`), including a newer version
+a producer ahead of this kernel might emit. An unknown wire format is never
+decoded best-effort — the kernel cannot prove it understands it, so it refuses.
+
+**The generated tool loads its embedded spec strictly.** The generated
+`loadSpec` delegates to the kernel's `DecodeSpecStrict`: a `json.Decoder` with
+`DisallowUnknownFields`, plus the `schema_version` assertion and the full
+state-machine `Validate`. A removed/renamed field, a version mismatch, or
+trailing data fails **loudly** at load instead of a lenient `json.Unmarshal`
+silently zero-valuing a guard or an approval flag. The strict-decode logic lives
+in the reviewed kernel, not in per-workflow generated code, so every generated
+tool inherits it.
+
+**The published JSON Schema is stamped and versioned.** The committed
+`testdata/schema/*.json` carry a `$schema` dialect pin and a versioned `$id`
+(`…/workflow-press/v1/…`). The `/v1` path segment tracks the `schema_version`
+major; the byte-exact drift guard (`TestSpecSchemaMatchesType`) stamps the same
+`$schema`/`$id` onto the schema it infers from the Go type, so the published
+contract, its version stamp, and the kernel type cannot drift apart.
+
+**Compatibility policy.**
+
+- **Additive within a major is non-breaking.** Adding a new *optional* field (an
+  `omitempty` Go field with a safe zero value) does NOT bump `schema_version`:
+  an older reader tolerates it (the schema allows it; strict readers in the same
+  major are regenerated in lockstep), and a newer reader fills the zero value.
+- **Breaking changes bump the major.** Removing or renaming a field, changing a
+  field's type, making an optional field required, or tightening an invariant in
+  a way an old payload would fail — bump the `schema_version` const **and** the
+  `/vN` segment of the schema `$id` in the same change, and regenerate the
+  committed schema (the drift guard enforces this).
+- **Never reuse a major for a breaking change.** Because `Validate` fails closed
+  on a non-current version, a producer and this kernel must agree on the major;
+  a silent breaking change under the same major would be rejected, not
+  mis-decoded — which is the safe failure, but still a bug to avoid.
+
 ## Risks & open questions
 
 - **Sandbox choice** (container / micro-VM / `sandbox-runtime`) — Phase 0 must

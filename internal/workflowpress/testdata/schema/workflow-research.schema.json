@@ -1,6 +1,9 @@
 {
   "type": "object",
   "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
     "workflow_id": {
       "type": "string"
     },
@@ -201,7 +204,10 @@
       }
     }
   },
+  "$id": "https://wuphf.nex.ai/schema/workflow-press/v1/workflow-research.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "required": [
+    "schema_version",
     "workflow_id"
   ],
   "additionalProperties": false

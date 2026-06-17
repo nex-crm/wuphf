@@ -131,15 +131,16 @@ func Synthesize(research WorkflowResearch) (WorkflowSpec, error) {
 	}
 
 	draft := WorkflowSpec{
-		ID:       id,
-		Version:  draftVersion,
-		Goal:     bp.Goal,
-		Operator: operator,
-		Entities: synthEntities(research, bp),
-		States:   cloneStates(bp.States),
-		Events:   cloneEvents(bp.Events),
-		Guards:   cloneGuards(bp.Guards),
-		Actions:  synthActions(bp.Actions),
+		SchemaVersion: SchemaVersionWorkflowSpec,
+		ID:            id,
+		Version:       draftVersion,
+		Goal:          bp.Goal,
+		Operator:      operator,
+		Entities:      synthEntities(research, bp),
+		States:        cloneStates(bp.States),
+		Events:        cloneEvents(bp.Events),
+		Guards:        cloneGuards(bp.Guards),
+		Actions:       synthActions(bp.Actions),
 		// Exceptions and improvement signals are derived from the evidence, not the
 		// blueprint: they are the live signals discovery captured.
 		Exceptions:            synthExceptions(research),

@@ -12,6 +12,28 @@ package workflowpress
 // confidence) so an inferred write degrades to a human-approved one. The freeze
 // step is the human gate: the operator reviews and accepts the contract.
 
+// Wire-format (schema) versions for the two contract artifacts. These are the
+// version of the SERIALIZED SHAPE of the artifact — distinct from the per-spec
+// content Version counter (which bumps when an overlay is accepted). The schema
+// version bumps only on a BREAKING change to the wire shape (a removed or renamed
+// field, a changed type, or a tightened invariant); additive changes within a
+// major version do not bump it. See docs/specs/workflow-press.md for the compat
+// policy.
+//
+// Validate fails CLOSED on any schema_version it does not recognise: an unknown
+// or newer version means the producer speaks a wire format this kernel cannot be
+// sure it understands, so it is rejected rather than decoded best-effort (which
+// would risk silently zero-valuing a guard or a RequiresApproval flag).
+const (
+	// SchemaVersionWorkflowSpec is the current supported wire-format version of a
+	// WorkflowSpec. Start at 1; bump on a breaking change to the spec wire shape.
+	SchemaVersionWorkflowSpec = 1
+	// SchemaVersionWorkflowResearch is the current supported wire-format version of
+	// a WorkflowResearch. Start at 1; bump on a breaking change to the research wire
+	// shape.
+	SchemaVersionWorkflowResearch = 1
+)
+
 // TrustTier is the load-bearing provenance dimension borrowed from
 // cli-printing-press. It drives caution: an inferred or merely observed
 // write-action requires human approval, while an operator-stated one may be
@@ -64,6 +86,11 @@ func (p Provenance) IsOperatorStated() bool {
 // the outside-the-kernel evidence store, never the source of truth for
 // generation. Distinct from WorkflowSpec, which is the frozen contract.
 type WorkflowResearch struct {
+	// SchemaVersion is the wire-format version of this research artifact (NOT a
+	// content counter). It must equal SchemaVersionWorkflowResearch; a strict
+	// decoder asserts it so a removed/renamed field or a version mismatch fails
+	// loudly instead of silently zero-valuing evidence.
+	SchemaVersion int `json:"schema_version"`
 	// WorkflowID ties research to the spec it informs (a stable slug like
 	// "trial-to-ae-routing"). Multiple research records may share one id as
 	// evidence accumulates.
@@ -136,6 +163,14 @@ type ToolTrace struct {
 // STATE MACHINE: states, events, guards and actions, plus exceptions, SLAs,
 // verification scenarios and improvement signals.
 type WorkflowSpec struct {
+	// SchemaVersion is the wire-format version of this spec artifact. It is
+	// DISTINCT from Version: SchemaVersion versions the serialized SHAPE of the
+	// contract (it bumps only on a breaking wire-shape change), while Version is the
+	// per-spec content counter that bumps when an overlay is accepted. It must equal
+	// SchemaVersionWorkflowSpec; Validate and the generated tool's strict loader
+	// assert it so a removed/renamed field or a version mismatch fails loudly rather
+	// than silently zero-valuing a guard or a RequiresApproval flag.
+	SchemaVersion int `json:"schema_version"`
 	// ID is the stable workflow slug (e.g. "trial-to-ae-routing").
 	ID string `json:"id"`
 	// Version is the spec version, bumped when an overlay is accepted.
