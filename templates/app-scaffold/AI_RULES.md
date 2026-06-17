@@ -26,9 +26,15 @@ sandbox enforce most of them, so breaking one means a broken or rejected app.
    signed-in user's session. Do not invent API keys or login flows.
 4. **Keep it one app.** Single SPA, no router needed for a focused tool. Don't add
    server code, databases, or build steps beyond Vite.
-5. **Protected files.** Do not change the bridge wire contract in
-   `src/wuphf-bridge.ts` (the `wuphf-app` / `wuphf-host` message shape) or
-   `vite.config.ts`'s singlefile setup — they must match the WUPHF host.
+5. **Protected files — use, don't rewrite.** Do NOT reimplement or simplify
+   `src/wuphf-bridge.ts`. Its helpers (`callBroker`, `getTasks`,
+   `getOfficeMembers`, `createTask`) are already correct — `getTasks()` returns
+   ALL office tasks across every channel, not just the default one. Import and
+   call them as-is. Rewriting them silently loses fixes: e.g. replacing
+   `getTasks()` with a bare `callBroker("/tasks")` reads only the empty "general"
+   channel and your app shows no data. Likewise don't touch `vite.config.ts`'s
+   singlefile setup or the `wuphf-app`/`wuphf-host` message shape — they must
+   match the WUPHF host.
 
 ## Style
 
