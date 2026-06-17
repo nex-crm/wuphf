@@ -149,7 +149,7 @@ describe("parseSelectPayload", () => {
 describe("appBrokerPath", () => {
   it("upgrades a bare /tasks to the whole office task list", () => {
     expect(appBrokerPath("/tasks")).toBe(
-      "/tasks?all_channels=true&viewer_slug=human",
+      "/tasks?all_channels=true&include_done=true&viewer_slug=human",
     );
   });
   it("leaves an explicit task query untouched", () => {
@@ -385,7 +385,7 @@ describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
     );
     // A bare /tasks is upgraded host-side to the whole office task list.
     expect(get).toHaveBeenCalledWith(
-      "/tasks?all_channels=true&viewer_slug=human",
+      "/tasks?all_channels=true&include_done=true&viewer_slug=human",
     );
   });
 

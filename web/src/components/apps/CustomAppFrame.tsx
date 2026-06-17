@@ -233,13 +233,15 @@ async function serviceBrokerGet(
 
 // appBrokerPath upgrades a bare `/tasks` to the whole office task list. A plain
 // `/tasks` is channel-scoped and returns only the (usually empty) "general"
-// channel, but an app virtually always wants every task — and an agent often
-// rewrites the bridge's getTasks() down to a bare `/tasks`, dropping the query.
-// Upgrading here (host-side) makes apps see real data regardless of how their
-// bridge phrased the call. An explicit query (a specific channel) is left as-is.
+// channel and excludes done tasks, but an app virtually always wants EVERY task
+// — including completed work, which is the point of a "what we did" digest — and
+// an agent often rewrites the bridge's getTasks() down to a bare `/tasks`,
+// dropping the query. Upgrading here (host-side) makes apps see real data
+// regardless of how their bridge phrased the call. An explicit query (a specific
+// channel) is left as-is.
 export function appBrokerPath(path: string): string {
   return path === "/tasks"
-    ? "/tasks?all_channels=true&viewer_slug=human"
+    ? "/tasks?all_channels=true&include_done=true&viewer_slug=human"
     : path;
 }
 
