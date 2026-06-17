@@ -1,13 +1,16 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/workflow"
 )
@@ -25,22 +28,79 @@ func workflowRunsPath(id string) string {
 	return filepath.Join(home, ".wuphf", "office", "workflows", id+".runs.jsonl")
 }
 
-// workflowActionExec dispatches one contract action by kind. Deterministic
-// actions complete inline; llm and external actions are the seams where the
-// scoped agent draft and the approval gate plug in. For now they record intent
-// (OK) so the orchestration is exercised end-to-end; the live agent/Composio
-// wiring is the next runtime slice.
-func (b *Broker) workflowActionExec(action workflow.Action, _ map[string]any) workflow.ActionOutcome {
-	switch action.Kind {
-	case workflow.ActionLLM:
-		// TODO: route to the scoped agent to draft the message.
-		return workflow.ActionOutcome{OK: true, Output: map[string]any{"drafted": true}}
-	case workflow.ActionExternal:
-		// TODO: route through ExternalActionApprovalCard (gate, dedupe, throttle).
-		return workflow.ActionOutcome{OK: true, Output: map[string]any{"gated": true}}
-	default:
-		return workflow.ActionOutcome{OK: true}
+// workflowGate decides (and, on proceed, executes) one external action. The
+// production gate is externalGateDecision; tests inject a fake.
+type workflowGate func(ctx context.Context, agent, platform, actionID string, data map[string]any) workflow.ActionOutcome
+
+// makeWorkflowActionExec builds the ActionExec the runtime executes the spec
+// with, bound to the operating agent + the real external gate.
+func (b *Broker) makeWorkflowActionExec(ctx context.Context, agent string) workflow.ActionExec {
+	return b.makeWorkflowActionExecWithGate(ctx, agent, b.externalGateDecision)
+}
+
+// makeWorkflowActionExecWithGate is the testable core: it routes actions by kind
+// and delegates external actions to the supplied gate.
+func (b *Broker) makeWorkflowActionExecWithGate(ctx context.Context, agent string, gate workflowGate) workflow.ActionExec {
+	return func(a workflow.Action, data map[string]any) workflow.ActionOutcome {
+		switch a.Kind {
+		case workflow.ActionLLM:
+			// Real agent-draft seam. WUPHF agents are headless (async), so a
+			// synchronous in-process draft uses a deterministic baseline until the
+			// agent-dispatch seam lands; the drafted text flows to the send action.
+			return workflow.ActionOutcome{OK: true, Output: map[string]any{"draft": draftMessage(a, data)}}
+		case workflow.ActionExternal:
+			if strings.TrimSpace(a.Platform) == "" || strings.TrimSpace(a.ActionID) == "" {
+				// No integration target declared yet (auto-draft): record intent.
+				return workflow.ActionOutcome{OK: true, Output: map[string]any{"gated": true, "note": "no integration target"}}
+			}
+			return gate(ctx, agent, a.Platform, a.ActionID, data)
+		default:
+			return workflow.ActionOutcome{OK: true}
+		}
 	}
+}
+
+// externalGateDecision runs the real deterministic-integrations gate: classify
+// the action against the live connection state + scoped grants. On "proceed"
+// (connected + granted, or read-only) it executes the send via Composio; any
+// other decision blocks the send and records that a human must act.
+func (b *Broker) externalGateDecision(ctx context.Context, agent, platform, actionID string, data map[string]any) workflow.ActionOutcome {
+	resp := b.resolveExternalAction(ctx, integrationResolveRequest{
+		Provider: "composio", Platform: platform, ActionID: actionID, Agent: agent, Data: data,
+	})
+	if resp.Decision != string(action.DecisionProceed) {
+		// The gate requires human action (connect / approve / wait). The send
+		// does not fire; the run records the stop so the workflow can resume
+		// once the human resolves it.
+		return workflow.ActionOutcome{OK: false, Output: map[string]any{
+			"decision": resp.Decision, "needs_approval": true, "request_id": resp.RequestID,
+		}}
+	}
+	composio := action.NewComposioFromEnv()
+	if !composio.Configured() || resp.Account == nil {
+		return workflow.ActionOutcome{OK: true, Output: map[string]any{"sent": false, "note": "no connected account"}}
+	}
+	if _, err := composio.ExecuteAction(ctx, action.ExecuteRequest{
+		Platform: platform, ActionID: actionID, ConnectionKey: resp.Account.Key, Data: data,
+	}); err != nil {
+		return workflow.ActionOutcome{OK: false, Err: err.Error()}
+	}
+	return workflow.ActionOutcome{OK: true, Output: map[string]any{"sent": true}}
+}
+
+// draftMessage is the deterministic baseline draft (sorted for stability). The
+// real LLM agent-draft replaces this body once the headless-agent draft seam is
+// wired; the rest of the runtime is unchanged.
+func draftMessage(a workflow.Action, data map[string]any) string {
+	if len(data) == 0 {
+		return fmt.Sprintf("Draft for %q", a.ID)
+	}
+	parts := make([]string, 0, len(data))
+	for k, v := range data {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	sort.Strings(parts)
+	return fmt.Sprintf("Draft for %q (%s)", a.ID, strings.Join(parts, ", "))
 }
 
 // runWorkflowSpec loads a stored contract, executes it over the events, persists
@@ -63,7 +123,8 @@ func (b *Broker) runWorkflowSpec(specID, trigger string, events []workflow.Scena
 		events = []workflow.ScenarioEvent{{Event: ev}}
 	}
 
-	rec := workflow.Execute(spec, trigger, events, b.workflowActionExec)
+	exec := b.makeWorkflowActionExec(context.Background(), strings.TrimSpace(spec.Operator))
+	rec := workflow.Execute(spec, trigger, events, exec)
 	rec.At = time.Now().UTC().Format(time.RFC3339)
 	_ = workflow.AppendRun(workflowRunsPath(specID), rec)
 

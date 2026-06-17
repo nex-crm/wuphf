@@ -80,6 +80,12 @@ type Action struct {
 	ID          string     `json:"id"`
 	Kind        ActionKind `json:"kind"`
 	Description string     `json:"description,omitempty"`
+	// Platform + ActionID target a real external integration (e.g. slack +
+	// SLACK_SEND_MESSAGE). Set on external actions during review; the runtime
+	// gates the send through them (classify -> grant -> Composio execute). Empty
+	// on an auto-drafted action, which the runtime records as intent only.
+	Platform string `json:"platform,omitempty"`
+	ActionID string `json:"action_id,omitempty"`
 }
 
 type Exception struct {
