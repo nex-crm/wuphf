@@ -260,6 +260,12 @@ func (t *SlackTransport) handleInteractive(ctx context.Context, callback slack.I
 		if action == nil {
 			continue
 		}
+		// Feedback buttons (👍/👎 on a pane reply) are not a gate decision — record
+		// the verdict and thank the clicker, no human-only / channel-binding checks.
+		if action.BlockID == slackFeedbackActionBlock {
+			t.handleFeedbackClick(ctx, channelID, messageTS, callback.User.ID, action.Value)
+			return true
+		}
 		isConnect := action.BlockID == slackConnectActionBlock
 		if action.BlockID != slackGateActionBlock && !isConnect {
 			continue

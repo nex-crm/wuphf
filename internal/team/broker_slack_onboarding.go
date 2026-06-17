@@ -114,6 +114,10 @@ func officeSlackAppManifest(appName string) officeSlackManifest {
 				"im:read",
 				"im:write",
 				"pins:write",
+				// reactions:read lets a 👍/👎 emoji on an office reply register as
+				// quality feedback (reaction_added), the native alternative to the
+				// inline feedback buttons.
+				"reactions:read",
 				"search:read.public",
 				"users:read",
 			}},
@@ -128,6 +132,8 @@ func officeSlackAppManifest(appName string) officeSlackManifest {
 				"message.channels",
 				"message.groups",
 				"message.im",
+				// 👍/👎 reactions on office replies → quality feedback signal.
+				"reaction_added",
 			}},
 			Interactivity:     officeManifestInteractivity{IsEnabled: true},
 			SocketModeEnabled: true,

@@ -491,6 +491,12 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 			t.seedAssistantThread(ctx, changed.AssistantThread.ChannelID, changed.AssistantThread.ThreadTimeStamp)
 			return true
 		}
+		// A 👍/👎-style reaction on one of the office's pane messages is captured as
+		// quality feedback (the lighter, native alternative to the inline buttons).
+		if reaction, isReaction := apiEvent.InnerEvent.Data.(*slackevents.ReactionAddedEvent); isReaction {
+			t.handleReactionAdded(reaction.Item.Channel, reaction.ItemUser, reaction.User, reaction.Reaction, reaction.Item.Timestamp)
+			return true
+		}
 		msg, ok := apiEvent.InnerEvent.Data.(*slackevents.MessageEvent)
 		if !ok {
 			return true
@@ -735,6 +741,13 @@ func (t *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 		if decision, ok := t.activeDecisionForChannel(msg.Binding.ChannelSlug); ok {
 			decision.From = t.displayNameForOffice(decision.From)
 			opts = append(opts, slack.MsgOptionBlocks(t.decisionBlocks(decision)...))
+		}
+	} else if t.isAssistantPaneReply(msg) {
+		// A 1:1 pane reply renders with a quiet LLM disclaimer and 👍/👎 feedback
+		// buttons (Slack agent best practice). msg.Text stays as the notification
+		// fallback. A reply too long for a section block falls through as plain text.
+		if blocks, ok := slackPaneReplyBlocks(msg.Text); ok {
+			opts = append(opts, slack.MsgOptionBlocks(blocks...))
 		}
 	}
 	// Thread anchoring: a task message threads under its task's single root

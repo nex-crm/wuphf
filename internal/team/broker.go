@@ -148,6 +148,7 @@ type Broker struct {
 	slackTagOrigins   map[string]slackTagOrigin      // slack channel id → where the office was last @-tagged (in-memory; for task-thread backlinks)
 	assistantThreads  map[string]string              // DM slug → current Slack Assistant thread root ts (in-memory; threads the office's pane replies)
 	assistantTitled   map[string]bool                // Slack Assistant thread root ts → title already set (in-memory; set once from the first user message)
+	slackFeedback     []slackFeedbackEvent           // bounded ring of recent 👍/👎 verdicts on office pane replies (in-memory)
 	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
 	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
 	// nil means the real Slack Web API. Tests inject a fake.

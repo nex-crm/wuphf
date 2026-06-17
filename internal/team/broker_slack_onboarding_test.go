@@ -73,6 +73,8 @@ func TestSlackAppManifestEndpoint(t *testing.T) {
 		"assistant_view", "assistant_description", "assistant:write",
 		"assistant_thread_started", "assistant_thread_context_changed",
 		"message.im", "im:history", "im:read", "im:write",
+		// Quality-feedback signal on office replies.
+		"reaction_added", "reactions:read",
 	} {
 		if !strings.Contains(mj, want) {
 			t.Errorf("office manifest missing %q:\n%s", want, mj)
