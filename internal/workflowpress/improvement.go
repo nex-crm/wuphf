@@ -31,10 +31,20 @@ import (
 // (OverlayPatch) carried as JSON in Overlay.Patch. It is deliberately narrow:
 // overlays may tune the contract (guards, SLAs, exceptions, improvement signals,
 // thresholds) and add verification scenarios, but may NOT restructure the state
-// machine wholesale — a structural rewrite is a new contract, reviewed from
-// scratch, not an overlay. Apply validates and re-Validates the candidate; an
-// overlay that produces an unsound state machine is rejected before it ever
-// reaches replay.
+// machine — the op set has no add-state / add-event / add-action op. Apply
+// validates and re-Validates the candidate; an overlay that produces an unsound
+// state machine is rejected before it ever reaches replay.
+//
+// LEAF change -> Overlay; STRUCTURAL change -> Refreeze (same id). This file is the
+// LEAF path. A structural change (a new state/event/action) does NOT come through
+// an overlay and does NOT mint a new workflow id; it comes through Refreeze
+// (refreeze.go), which produces a new FROZEN version of the SAME workflow id from a
+// reworked draft (re-stamped to prev+1, re-reviewed through the freeze gate, and
+// re-proven by shipcheck). Both paths therefore converge on a stable id at a higher
+// content version — leaf via Overlay, structural via Refreeze — so the press updates
+// a workflow toward correctness instead of fanning out variants. See
+// docs/specs/workflow-press.md "Leaf change -> Overlay; structural change ->
+// Refreeze".
 
 // Overlay errors. Wrapped with %w so callers classify the failure class while
 // still reading the offending detail.
@@ -59,7 +69,8 @@ var (
 // OverlayOpKind classifies one declarative operation within an OverlayPatch. The
 // set is intentionally small: tune the contract's gating/handling/signals, adjust
 // a named threshold, or add a verification scenario. It cannot add or remove
-// states/events — a structural change is a new contract, not an overlay.
+// states/events/actions — a structural change goes through Refreeze (refreeze.go),
+// which reworks the contract under the SAME id, not through an overlay.
 type OverlayOpKind string
 
 const (

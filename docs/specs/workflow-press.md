@@ -117,6 +117,46 @@ accepted (folded into the spec, version-bumped). **WUPHF prefers updating the
 existing workflow over creating a new one** — convergence, not proliferation.
 The kernel never changes; only the per-workflow spec + overlays do.
 
+#### Leaf change → Overlay; structural change → Refreeze (same id)
+
+The improvement loop has **two** update paths, and the boundary between them is
+the load-bearing decision (triangulation architect #3): how does
+prefer-update-do-not-proliferate hold when a workflow needs a *structural*
+change — a new state, event, or action — that a leaf overlay cannot express?
+
+| Change | Path | Mechanism |
+|---|---|---|
+| **Leaf** — tune a guard/SLA, add an exception/signal/verification scenario | **Overlay** (`improvement.go`) | A small, typed, declarative patch (`OverlayPatch`). Same id, version+1, replayed by shipcheck, accepted. |
+| **Structural** — add/remove a state, event, or action; rework the machine | **Refreeze** (`refreeze.go`) | A new *frozen* version of the **same** workflow id from a reworked draft. |
+
+The overlay vocabulary is deliberately **narrow and closed to structural edits**:
+its op set tunes the contract and appends leaf elements, but it has **no
+add-state / add-event / add-action op**. Letting overlays restructure the state
+machine would degenerate the typed patch into a general-purpose spec rewriter,
+which is no longer a small, reviewable patch — so a structural rewrite is *not*
+an overlay.
+
+`Refreeze(prev FrozenSpec, draft, approval)` is the structural path. It does
+**not** mint a new workflow id — that is the whole point. It enforces:
+
+1. **Convergence.** The reworked draft must keep `prev`'s id
+   (`ErrRefreezeIDMismatch` otherwise). A *different* id is a brand-new contract,
+   reviewed from scratch via `Freeze` — never a refreeze.
+2. **Re-stamp to prev+1.** The candidate's content `version` is bumped to
+   `prev.Version + 1` (prefer-update), and the operator's approval is scoped to
+   exactly that `(id, version)` pair.
+3. **The full freeze gate + shipcheck replay.** Structural change re-enters
+   through the **same** human gate the original contract did (`Freeze` →
+   operator review + structural `Validate`), then the candidate is generated and
+   replayed through shipcheck. A non-approving decision, an unsound machine, or a
+   failing replay all reject the rework and leave `prev` standing.
+
+So both paths converge on a **stable workflow id at a higher content version**:
+leaf changes via Overlay, structural changes via Refreeze. Neither ever spawns
+`trial-to-ae-routing-v2` — the press converges a workflow toward correctness, it
+does not fan out variants. Refreeze is distinct from the leaf-overlay machinery
+and, like Overlay, never touches the kernel.
+
 ## Mapping onto WUPHF — reuse, not rebuild
 
 | Layer | Build on / borrow | Note |

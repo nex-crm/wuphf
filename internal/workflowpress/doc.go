@@ -50,7 +50,14 @@
 //     named thresholds and fixture aliases from the spec's GuardConfig, wired in
 //     by NewRunner;
 //   - the OverlayStore — overlay apply/replay/accept machinery (interface here;
-//     later phase).
+//     later phase). Overlays are the LEAF update path (tune a guard/SLA, append an
+//     exception/signal/scenario); their op set is closed to structural edits;
+//   - Refreeze — the STRUCTURAL update path (refreeze.go). A new/removed
+//     state/event/action does not come through an overlay and does not mint a new
+//     workflow id; Refreeze reworks the contract under the SAME id (re-stamped to
+//     prev+1, re-reviewed through the freeze gate, re-proven by shipcheck). Both
+//     paths converge on a stable id at a higher content version — leaf via Overlay,
+//     structural via Refreeze.
 //
 // OUTSIDE the kernel (mutable or per-workflow, persisted/registered elsewhere,
 // never hardcoded in the kernel):
