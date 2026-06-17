@@ -4,9 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   draftWorkflow,
   freezeWorkflow,
+  getProposals,
   getSpottedWorkflows,
+  improveWorkflow,
   type ShipcheckReport,
   type SpottedWorkflow,
+  type WorkflowProposal,
 } from "../../api/workflows";
 
 /**
@@ -246,9 +249,14 @@ function WorkflowCard({
       </div>
 
       {wf.frozen ? (
-        <span style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}>
-          ✓ Workflow created · contract shipchecked
-        </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <span
+            style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}
+          >
+            ✓ Workflow created · contract shipchecked
+          </span>
+          <Improvements specId={wf.spec_id} />
+        </div>
       ) : reviewing ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div
@@ -308,6 +316,96 @@ function WorkflowCard({
           {reviewBusy ? "Drafting…" : "Review draft"}
         </button>
       )}
+    </div>
+  );
+}
+
+function Improvements({ specId }: { specId: string }) {
+  const queryClient = useQueryClient();
+  const [checked, setChecked] = useState(false);
+
+  const proposals = useMutation({
+    mutationFn: () => getProposals(specId),
+    onSuccess: () => setChecked(true),
+  });
+  const heal = useMutation({
+    mutationFn: (overlay: WorkflowProposal) => improveWorkflow(specId, overlay),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["skills", "all"] });
+      proposals.mutate();
+    },
+  });
+
+  const list = proposals.data?.proposals ?? [];
+  const healedVersion = heal.data?.version;
+
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--border)",
+        paddingTop: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 700,
+            letterSpacing: ".06em",
+            textTransform: "uppercase",
+            color: "var(--text-secondary)",
+          }}
+        >
+          Self-healing
+        </span>
+        <button
+          type="button"
+          onClick={() => proposals.mutate()}
+          disabled={proposals.isPending}
+          style={ghostBtn}
+        >
+          {proposals.isPending ? "Checking…" : "Check for improvements"}
+        </button>
+        {healedVersion && (
+          <span
+            style={{ fontSize: 12.5, color: "var(--green)", fontWeight: 600 }}
+          >
+            ✓ Healed to v{healedVersion}
+          </span>
+        )}
+      </div>
+      {checked && list.length === 0 && (
+        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+          No improvements proposed — the contract handles every run so far.
+        </span>
+      )}
+      {list.map((p) => (
+        <div
+          key={p.id}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontSize: 12.5,
+            color: "var(--text-secondary)",
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            <span style={{ color: "var(--accent)" }}>⟳</span> {p.reason ?? p.id}
+          </span>
+          <button
+            type="button"
+            onClick={() => heal.mutate(p)}
+            disabled={heal.isPending}
+            style={primaryBtn(heal.isPending)}
+          >
+            Accept &amp; heal
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

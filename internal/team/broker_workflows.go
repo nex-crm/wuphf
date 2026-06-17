@@ -28,6 +28,7 @@ import (
 // a human-readable title and a frozen flag.
 type spottedWorkflow struct {
 	DetectionCandidate
+	SpecID string `json:"spec_id"`
 	Title  string `json:"title"`
 	Frozen bool   `json:"frozen"`
 }
@@ -101,10 +102,12 @@ func (b *Broker) handleWorkflowsSpotted(w http.ResponseWriter, r *http.Request) 
 	b.mu.Lock()
 	out := make([]spottedWorkflow, 0, len(cands))
 	for _, c := range cands {
+		name := workflowSkillName(c)
 		out = append(out, spottedWorkflow{
 			DetectionCandidate: c,
+			SpecID:             name,
 			Title:              workflowSkillTitle(c),
-			Frozen:             b.findSkillByNameLocked(workflowSkillName(c)) != nil,
+			Frozen:             b.findSkillByNameLocked(name) != nil,
 		})
 	}
 	b.mu.Unlock()

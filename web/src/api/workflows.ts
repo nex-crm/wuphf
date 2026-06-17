@@ -8,8 +8,40 @@ export interface SpottedWorkflow {
   agent: string;
   task_ids: string[];
   count: number;
+  spec_id: string;
   title: string;
   frozen: boolean;
+}
+
+/** An auto-drafted improvement overlay. id + reason are surfaced; the whole
+ * object is passed back verbatim to improveWorkflow. */
+export type WorkflowProposal = { id: string; reason?: string } & Record<
+  string,
+  unknown
+>;
+
+export function getProposals(
+  specId: string,
+): Promise<{ runs: number; proposals: WorkflowProposal[] }> {
+  return post<{ runs: number; proposals: WorkflowProposal[] }>(
+    "/workflows/proposals",
+    { spec_id: specId },
+  );
+}
+
+export interface ImproveResult {
+  version: string;
+  review: { accepted: boolean; shipcheck: { passed: boolean } };
+}
+
+export function improveWorkflow(
+  specId: string,
+  overlay: unknown,
+): Promise<ImproveResult> {
+  return post<ImproveResult>("/workflows/improve", {
+    spec_id: specId,
+    overlay,
+  });
 }
 
 export function getSpottedWorkflows(): Promise<{
