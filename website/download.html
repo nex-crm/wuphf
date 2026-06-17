@@ -128,7 +128,7 @@
     <article class="card" id="card-mac">
       <h2>macOS <span class="badge-you" id="you-mac" hidden>YOU</span></h2>
       <p class="meta">Universal — Apple Silicon &amp; Intel · macOS 11+ · signed &amp; notarized by Apple</p>
-      <a class="btn-dl" href="https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-mac.dmg">Download .dmg</a>
+      <a class="btn-dl" id="dlMac" href="https://github.com/nex-crm/wuphf/releases">Download .dmg</a>
       <ol class="steps">
         <li>Open the downloaded <code>WUPHF-mac.dmg</code>.</li>
         <li>Drag <strong>WUPHF</strong> into your <strong>Applications</strong> folder.</li>
@@ -144,7 +144,7 @@
     <article class="card" id="card-win">
       <h2>Windows <span class="badge-you" id="you-win" hidden>YOU</span></h2>
       <p class="meta">Windows 10/11 · 64-bit · WebView2 (built in to Windows)</p>
-      <a class="btn-dl" href="https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-windows-setup.exe">Download installer</a>
+      <a class="btn-dl" id="dlWin" href="https://github.com/nex-crm/wuphf/releases">Download installer</a>
       <ol class="steps">
         <li>Run the downloaded <code>WUPHF-windows-setup.exe</code>.</li>
         <li>Follow the installer, then launch <strong>WUPHF</strong> from the Start menu.</li>
@@ -181,26 +181,84 @@
 
 <script>
   (function () {
-    // Detect OS and highlight the matching card + relabel the hero button.
+    var REPO = "nex-crm/wuphf";
+    var MAC_ASSET = "WUPHF-mac.dmg";
+    var WIN_ASSET = "WUPHF-windows-setup.exe";
+
+    // Detect OS to highlight the matching card + relabel the hero button.
     var ua = navigator.userAgent || "";
     var plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
     var isMac = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
     var isWin = /Win/i.test(plat) || /Windows/i.test(ua);
-    var MAC = "https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-mac.dmg";
-    var WIN = "https://github.com/nex-crm/wuphf/releases/latest/download/WUPHF-windows-setup.exe";
-    var btn = document.getElementById("primaryDownload");
-    var sub = document.getElementById("primarySub");
+
+    var primaryBtn = document.getElementById("primaryDownload");
+    var primarySub = document.getElementById("primarySub");
+    var macBtn = document.getElementById("dlMac");
+    var winBtn = document.getElementById("dlWin");
+
+    // Highlight the detected platform card immediately — this never depends on
+    // the asset URLs resolving, so it works even offline.
     if (isMac) {
-      btn.href = MAC; btn.textContent = "Download for macOS";
-      sub.textContent = "Universal .dmg · Apple Silicon & Intel";
       document.getElementById("card-mac").classList.add("detected");
       document.getElementById("you-mac").hidden = false;
     } else if (isWin) {
-      btn.href = WIN; btn.textContent = "Download for Windows";
-      sub.textContent = "Installer .exe · Windows 10/11 64-bit";
       document.getElementById("card-win").classList.add("detected");
       document.getElementById("you-win").hidden = false;
     }
+
+    // Resolve the newest release that ACTUALLY carries each installer.
+    //
+    // We deliberately avoid `releases/latest/download/<asset>`: GitHub's
+    // "latest" is the most recent release overall, which is a CLI/goreleaser
+    // tag. The desktop installers are appended to that release by a separate
+    // build job that can fail on its own (runner disk space, a flaky CDN) —
+    // when it does, the stable alias is missing from "latest" and the link
+    // 404s even though a perfectly good installer sits on the prior release.
+    // Scanning the releases list and picking the newest one that has the asset
+    // is self-healing: a single failed desktop build can't break this page.
+    function newestAssetUrl(releases, name) {
+      var sorted = releases
+        .filter(function (r) { return r && !r.draft; })
+        .sort(function (a, b) {
+          return new Date(b.published_at || b.created_at || 0) -
+                 new Date(a.published_at || a.created_at || 0);
+        });
+      for (var i = 0; i < sorted.length; i++) {
+        var assets = sorted[i].assets || [];
+        for (var j = 0; j < assets.length; j++) {
+          if (assets[j].name === name) return assets[j].browser_download_url;
+        }
+      }
+      return null;
+    }
+
+    function applyUrls(macUrl, winUrl) {
+      if (macUrl) macBtn.href = macUrl;
+      if (winUrl) winBtn.href = winUrl;
+      if (isMac && macUrl) {
+        primaryBtn.href = macUrl;
+        primaryBtn.textContent = "Download for macOS";
+        primarySub.textContent = "Universal .dmg · Apple Silicon & Intel";
+      } else if (isWin && winUrl) {
+        primaryBtn.href = winUrl;
+        primaryBtn.textContent = "Download for Windows";
+        primarySub.textContent = "Installer .exe · Windows 10/11 64-bit";
+      }
+    }
+
+    fetch("https://api.github.com/repos/" + REPO + "/releases?per_page=30", {
+      headers: { Accept: "application/vnd.github+json" }
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (releases) {
+        if (!Array.isArray(releases)) return;
+        applyUrls(newestAssetUrl(releases, MAC_ASSET), newestAssetUrl(releases, WIN_ASSET));
+      })
+      .catch(function () {
+        // Network/rate-limit failure: keep the evergreen /releases fallback
+        // hrefs already in the markup so the buttons still go somewhere real.
+      });
+
     // Copy buttons
     document.querySelectorAll("[data-copy]").forEach(function (b) {
       b.addEventListener("click", function () {
