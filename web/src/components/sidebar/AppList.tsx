@@ -13,6 +13,7 @@ import {
   Repeat,
   Search,
   Settings,
+  Sparks,
   ShareAndroid,
   Shield,
   TaskList,
@@ -43,6 +44,7 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   policies: Shield,
   routines: Repeat,
   skills: Flash,
+  workflows: Sparks,
   activity: Package,
   "health-check": Search,
   settings: Settings,
@@ -69,7 +71,14 @@ const NAV_SECTIONS: ReadonlyArray<{
   { label: "Knowledge", items: ["wiki", "graph"] },
   {
     label: "Config",
-    items: ["agents", "policies", "skills", "integrations", "health-check"],
+    items: [
+      "agents",
+      "policies",
+      "skills",
+      "workflows",
+      "integrations",
+      "health-check",
+    ],
   },
 ];
 
