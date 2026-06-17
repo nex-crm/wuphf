@@ -697,6 +697,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/skills/compile", b.requireAuth(b.handlePostSkillCompile))
 	mux.HandleFunc("/skills/compile/stats", b.requireAuth(b.handleGetSkillCompileStats))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
+	// Workflow detection: spot repeated workflows + freeze one into a skill.
+	mux.HandleFunc("/workflows/spotted", b.requireAuth(b.handleWorkflowsSpotted))
+	mux.HandleFunc("/workflows/freeze", b.requireAuth(b.handleWorkflowsFreeze))
 	// GET /commands — slash-command registry mirror so the web composer
 	// renders the same command set as the TUI. See broker_commands.go.
 	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))

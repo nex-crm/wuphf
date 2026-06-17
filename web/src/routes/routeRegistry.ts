@@ -8,6 +8,7 @@ export const APP_PANEL_IDS = [
   "routines",
   "settings",
   "skills",
+  "workflows",
 ] as const;
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];
@@ -66,6 +67,7 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   routines: "Scheduled Tasks",
   settings: "Settings",
   skills: "Skills",
+  workflows: "Workflows",
 };
 
 /**
@@ -84,6 +86,7 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
   policies: "🛡",
   routines: "🔁",
   skills: "⚡",
+  workflows: "🔎",
   "health-check": "📶",
   integrations: "🔌",
   settings: "⚙",
@@ -120,6 +123,7 @@ export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
   { id: "policies", kind: "app-panel" },
   { id: "routines", kind: "app-panel" },
   { id: "skills", kind: "app-panel" },
+  { id: "workflows", kind: "app-panel" },
   { id: "health-check", kind: "app-panel" },
   { id: "integrations", kind: "app-panel" },
   { id: "settings", kind: "app-panel" },

@@ -127,6 +127,7 @@ const IntegrationsApp = lazy(() =>
     default: m.IntegrationsApp,
   })),
 );
+const WorkflowsApp = lazy(() => import("../components/apps/WorkflowsApp"));
 const SkillsApp = lazy(() =>
   import("../components/apps/SkillsApp").then((m) => ({
     default: m.SkillsApp,
@@ -361,6 +362,7 @@ const APP_PANELS = {
   policies: PoliciesApp,
   routines: RoutinesApp,
   skills: SkillsApp,
+  workflows: WorkflowsApp,
   activity: ArtifactsApp,
   "health-check": HealthCheckApp,
   integrations: IntegrationsApp,
