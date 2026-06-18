@@ -456,6 +456,11 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			}
 			switch {
 			case err == nil:
+				// Turn succeeded and is durable (or the durability guard
+				// doesn't apply). If a real person prompted this chat reply and
+				// the agent still posted nothing anywhere, surface one honest
+				// line so a human DM never vanishes into silence.
+				l.noteChatTurnNoReply(slug, turn, startedAt)
 			case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", timeout))
 				l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", timeout), headlessProgressMetrics{})
