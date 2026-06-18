@@ -263,17 +263,38 @@ func (s *appDevServer) run() {
 	s.markExited()
 }
 
-// installIfNeeded runs `bun install` when node_modules is absent, streaming to
-// the boot log. No-ops on a warm tree (the scaffold commits bun.lock so this is
-// fast/cache-resolved).
+// installIfNeeded runs `bun install` when the installed tree is missing or stale
+// (the dependency set changed since the last install), streaming to the boot
+// log. On a warm, current tree it no-ops (the scaffold commits bun.lock so the
+// install is fast/cache-resolved).
 func (s *appDevServer) installIfNeeded() error {
-	if _, err := os.Stat(filepath.Join(s.srcDir, "node_modules")); err == nil {
+	if devTreeFresh(s.srcDir) {
 		return nil
 	}
 	cmd := exec.Command("bun", "install")
 	cmd.Dir = s.srcDir
 	configureHeadlessProcess(cmd)
 	return s.pipeAndWait(cmd, nil)
+}
+
+// devTreeFresh reports whether node_modules exists AND is no older than the
+// lockfile. A republish rewrites the source — including bun.lock — with a fresh
+// mtime; when that is newer than the installed node_modules the dependency set
+// changed (e.g. a plain-React app republished onto the refine + Mantine stack),
+// so the tree MUST be reinstalled. Otherwise the dev server boots against the
+// previous version's deps and the app fails to import its packages, surfacing as
+// a blank live preview. An absent node_modules is never fresh; a missing
+// lockfile leaves the existing tree usable.
+func devTreeFresh(srcDir string) bool {
+	nm, err := os.Stat(filepath.Join(srcDir, "node_modules"))
+	if err != nil {
+		return false
+	}
+	lock, err := os.Stat(filepath.Join(srcDir, "bun.lock"))
+	if err != nil {
+		return true
+	}
+	return !lock.ModTime().After(nm.ModTime())
 }
 
 // runDev spawns `bun run dev`, scrapes the Vite origin (flips ready), and waits.

@@ -66,6 +66,14 @@ func (b *Broker) handleApps(w http.ResponseWriter, r *http.Request) {
 			writeAppError(w, err)
 			return
 		}
+		// A republish rewrites the source and may change the dependency set, so
+		// any running live-preview server is now stale. Stop it and pre-warm a
+		// fresh one in the background: the new deps (e.g. the refine stack)
+		// install off the request path, so the Live tab is ready instead of a
+		// blank cold boot when the human opens it.
+		mgr := b.appDevManager()
+		mgr.Stop(app.ID)
+		go func(id string) { _, _ = mgr.Ensure(id) }(app.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"app": app})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
