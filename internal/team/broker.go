@@ -148,46 +148,48 @@ type Broker struct {
 	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
 	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
 	// nil means the real Slack Web API. Tests inject a fake.
-	slackSpawnAuthTest      slackSpawnAuthTestFunc
-	messageSubscribers      map[int]chan channelMessage
-	actionSubscribers       map[int]chan officeActionLog
-	activity                map[string]agentActivitySnapshot
-	activitySubscribers     map[int]chan agentActivitySnapshot
-	officeSubscribers       map[int]chan officeChangeEvent
-	wikiSubscribers         map[int]chan wikiWriteEvent
-	notebookSubscribers     map[int]chan notebookWriteEvent
-	reviewSubscribers       map[int]chan ReviewStateChangeEvent
-	entitySubscribers       map[int]chan EntityBriefSynthesizedEvent
-	factSubscribers         map[int]chan EntityFactRecordedEvent
-	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
-	wikiWorker              *WikiWorker
-	wikiInitMu              sync.Mutex
-	wikiInitErr             error
-	autoNotebookWriter      *AutoNotebookWriter
-	humanWikiWriter         *HumanWikiIntentWriter
-	obsidianWatcher         *ObsidianWatcher
-	demandIndex             *NotebookDemandIndex
-	channelIntentDispatcher *ChannelIntentDispatcher
-	promotionSweep          *PromotionSweep
-	wikiIndex               *WikiIndex
-	wikiExtractor           *Extractor
-	wikiDLQ                 *DLQ
-	wikiSectionsCache       *wikiSectionsCache
-	reviewLog               *ReviewLog
-	reviewResolver          ReviewerResolver
-	inboxCursorMu           sync.RWMutex
-	userInboxCursors        map[string]InboxCursor
-	factLog                 *FactLog
-	readLog                 *ReadLog
-	entityGraph             *EntityGraph
-	entitySynthesizer       *EntitySynthesizer
-	wikiCompressor          *WikiCompressor
-	teamLearningLog         *LearningLog
-	playbookSynthesizer     *PlaybookSynthesizer
-	pamDispatcher           *PamDispatcher
-	scanTracker             *scanStatusTracker
-	nextSubscriberID        int
-	agentStreams            map[string]*agentStreamBuffer
+	slackSpawnAuthTest        slackSpawnAuthTestFunc
+	messageSubscribers        map[int]chan channelMessage
+	actionSubscribers         map[int]chan officeActionLog
+	activity                  map[string]agentActivitySnapshot
+	activitySubscribers       map[int]chan agentActivitySnapshot
+	officeSubscribers         map[int]chan officeChangeEvent
+	wikiSubscribers           map[int]chan wikiWriteEvent
+	notebookSubscribers       map[int]chan notebookWriteEvent
+	reviewSubscribers         map[int]chan ReviewStateChangeEvent
+	entitySubscribers         map[int]chan EntityBriefSynthesizedEvent
+	factSubscribers           map[int]chan EntityFactRecordedEvent
+	wikiSectionsSubscribers   map[int]chan WikiSectionsUpdatedEvent
+	wikiCategoriesSubscribers map[int]chan WikiCategoriesUpdatedEvent
+	wikiWorker                *WikiWorker
+	wikiInitMu                sync.Mutex
+	wikiInitErr               error
+	autoNotebookWriter        *AutoNotebookWriter
+	humanWikiWriter           *HumanWikiIntentWriter
+	obsidianWatcher           *ObsidianWatcher
+	demandIndex               *NotebookDemandIndex
+	channelIntentDispatcher   *ChannelIntentDispatcher
+	promotionSweep            *PromotionSweep
+	wikiIndex                 *WikiIndex
+	wikiExtractor             *Extractor
+	wikiDLQ                   *DLQ
+	wikiSectionsCache         *wikiSectionsCache
+	wikiCategoriesCache       *wikiCategoriesCache
+	reviewLog                 *ReviewLog
+	reviewResolver            ReviewerResolver
+	inboxCursorMu             sync.RWMutex
+	userInboxCursors          map[string]InboxCursor
+	factLog                   *FactLog
+	readLog                   *ReadLog
+	entityGraph               *EntityGraph
+	entitySynthesizer         *EntitySynthesizer
+	wikiCompressor            *WikiCompressor
+	teamLearningLog           *LearningLog
+	playbookSynthesizer       *PlaybookSynthesizer
+	pamDispatcher             *PamDispatcher
+	scanTracker               *scanStatusTracker
+	nextSubscriberID          int
+	agentStreams              map[string]*agentStreamBuffer
 	// mu is the broker's single big lock. contendedMutex == sync.Mutex
 	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
 	// long holder wedging every endpoint is visible in the log.
@@ -497,6 +499,7 @@ func (b *Broker) Start() error {
 	b.mu.Unlock()
 
 	b.ensureWikiSectionsCache()
+	b.ensureWikiCategoriesCache()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.ensureWikiCompressor()
@@ -614,6 +617,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/visual", b.requireAuth(b.handleWikiVisualArtifact))
 	mux.HandleFunc("/wiki/archive/sweep", b.requireAuth(b.handleWikiArchiveSweep))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
+	mux.HandleFunc("/wiki/categories", b.requireAuth(b.handleWikiCategories))
+	mux.HandleFunc("/wiki/categories/", b.requireAuth(b.handleWikiCategory))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
 	mux.HandleFunc("/wiki/maintenance/suggest", b.requireAuth(b.handleWikiMaintenanceSuggest))

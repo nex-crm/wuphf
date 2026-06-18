@@ -134,7 +134,10 @@ category/link/backlink — so knowledge compounds and stays findable, like Wikip
    tree) edges moved to Phase 3 — their only data source is category pages, which Phase 3
    authors; an always-empty parent table here would be speculative plumbing, and
    `CREATE TABLE IF NOT EXISTS` keeps the Phase 3 addition non-breaking.
-2. **Category API** — `GET /wiki/categories[/{slug}]` mirroring `/wiki/sections` (cache + SSE).
+2. **Category API** (✅ done) — `GET /wiki/categories` (cached list, slug+title+count) and
+   `GET /wiki/categories/{slug}` (live member articles) mirroring `/wiki/sections`: debounced
+   in-memory cache fed by wiki:write, `wiki:categories_updated` SSE, reads the derived index.
+   Frontend stubs (`fetchCategories`/`fetchCategory`/`subscribeCategoriesUpdated`) in `web/src/api/wiki.ts`.
 3. **Flip nav to categories** (the visible win) — re-point `WikiCategoryPage`/`CategoriesFooter`/
    `Wiki.tsx` from folder `group` to real categories; introduce **category pages** (with
    `parent_categories:`) + the category→parent derived edges and render the **subcategory tree**;

@@ -476,6 +476,19 @@ func (w *WikiIndex) ListFactsByTriplet(ctx context.Context, subject, predicate, 
 	return w.store.ListFactsByTriplet(ctx, subject, predicate, objectPrefix)
 }
 
+// ListAllCategories returns every category slug with its article count, sorted
+// by slug. Passthrough to the FactStore; backs GET /wiki/categories.
+func (w *WikiIndex) ListAllCategories(ctx context.Context) ([]CategoryCount, error) {
+	return w.store.ListAllCategories(ctx)
+}
+
+// ListArticlesInCategory returns the wiki-root-relative paths of every article
+// filed under a category slug, sorted. Passthrough to the FactStore; backs
+// GET /wiki/categories/{slug}.
+func (w *WikiIndex) ListArticlesInCategory(ctx context.Context, category string) ([]string, error) {
+	return w.store.ListArticlesInCategory(ctx, category)
+}
+
 // ListEdgesForEntity returns graph.log edges incident on an entity.
 func (w *WikiIndex) ListEdgesForEntity(ctx context.Context, slug string) ([]IndexEdge, error) {
 	resolved, redirected, err := w.store.ResolveRedirect(ctx, slug)
