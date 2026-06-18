@@ -127,13 +127,18 @@ category/link/backlink — so knowledge compounds and stays findable, like Wikip
 0. **Schema amendment** (✅ done) — `type`, `categories`, `team/concepts/`, `redirect_to`,
    redirects.md writer, §7.2 re-file, §12 changelog. Follow-up: add `parent_categories`, the
    WP:LAYOUT order, the Category-page model, disambiguation, and the §10 agent-authoring rules.
-1. **Category derived index** — `article_categories` (+ category→parent edges) on both stores,
-   reconcile hook in `reconcileEntityBrief`, fold into `CanonicalHashAll`, populate the dead
-   `meta.Categories`; `rm -rf index` rebuild-equality test.
+1. **Category derived index** (✅ done) — `article_categories` on both stores (sqlite +
+   in-memory), reconcile hook in `reconcileEntityBrief`, folded into `CanonicalHashAll`
+   (backend-agnostic), `meta.Categories` populated from frontmatter; `rm -rf index`
+   rebuild-equality + backend-parity tests. **Re-sequence:** the category→parent (subcategory
+   tree) edges moved to Phase 3 — their only data source is category pages, which Phase 3
+   authors; an always-empty parent table here would be speculative plumbing, and
+   `CREATE TABLE IF NOT EXISTS` keeps the Phase 3 addition non-breaking.
 2. **Category API** — `GET /wiki/categories[/{slug}]` mirroring `/wiki/sections` (cache + SSE).
 3. **Flip nav to categories** (the visible win) — re-point `WikiCategoryPage`/`CategoriesFooter`/
-   `Wiki.tsx` from folder `group` to real categories; render the **subcategory tree**; backfill so
-   nav is never empty.
+   `Wiki.tsx` from folder `group` to real categories; introduce **category pages** (with
+   `parent_categories:`) + the category→parent derived edges and render the **subcategory tree**;
+   backfill so nav is never empty.
 4. **Concept articles + agent authoring** — `EntityKindConcepts`; `concept_article.go` mirroring
    `entity_article.go` in **WP:LAYOUT order**; extraction recognizes concepts; librarian/synthesis
    prompts + §10 updated; `## Associated` → `## See also`; categories at foot.

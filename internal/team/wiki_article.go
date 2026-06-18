@@ -384,6 +384,13 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog
 		Ghost:             parseGhostFrontmatter(string(content)),
 		AttachedArtifacts: []RichArtifact{},
 	}
+	// Categories are markdown-authoritative (the article's own `categories:`
+	// frontmatter); the index is a derived mirror. Parse them straight from the
+	// content so the article view is self-contained. Keep the [] default when
+	// the article declares none.
+	if cats := parseCategoriesFrontmatter(string(content)); len(cats) > 0 {
+		meta.Categories = cats
+	}
 
 	// Revision history and last-edit info (via git log).
 	if refs, err := r.Log(ctx, relPath); err == nil && len(refs) > 0 {

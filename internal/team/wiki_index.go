@@ -161,6 +161,26 @@ type FactStore interface {
 	CountFacts(ctx context.Context) (int, error)
 	ResolveRedirect(ctx context.Context, slug string) (string, bool, error)
 
+	// --- article_categories (Wikipedia-style category layer) ----------------
+	//
+	// Markdown is authoritative (an article's `categories:` frontmatter); these
+	// rows are a rebuildable derived cache that folds into CanonicalHashAll.
+
+	// UpsertArticleCategories REPLACES the full set of category memberships for
+	// articlePath with `categories` (normalized slugs). An empty/nil slice
+	// clears the article's rows. This set-replace semantic keeps the derived
+	// index in lockstep with the article's frontmatter on every reconcile.
+	UpsertArticleCategories(ctx context.Context, articlePath string, categories []string) error
+	// ListArticlesInCategory returns the wiki-root-relative paths of every
+	// article filed under the given category slug, sorted ascending.
+	ListArticlesInCategory(ctx context.Context, category string) ([]string, error)
+	// ListCategoriesForArticle returns the category slugs an article belongs to,
+	// sorted ascending.
+	ListCategoriesForArticle(ctx context.Context, articlePath string) ([]string, error)
+	// ListAllCategories returns every category slug with its article count,
+	// sorted by slug ascending. Backs the category nav/API.
+	ListAllCategories(ctx context.Context) ([]CategoryCount, error)
+
 	// ListFactsByPredicateObject returns every fact whose triplet matches
 	// (predicate, object) exactly. Used by the typed-predicate graph walk
 	// for multi_hop queries (Slice 2 Thread A).
@@ -652,7 +672,8 @@ func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath strin
 		CanonicalSlug: slug,
 		Kind:          kind,
 	}
-	if fm := extractFrontmatter(string(data)); fm != "" {
+	fm := extractFrontmatter(string(data))
+	if fm != "" {
 		if v := frontmatterValue(fm, "canonical_slug"); v != "" {
 			entity.CanonicalSlug = v
 		}
@@ -673,6 +694,13 @@ func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath strin
 		if aliases := frontmatterList(fm, "aliases"); len(aliases) > 0 {
 			entity.Aliases = aliases
 		}
+	}
+	// Derived article→category memberships. Authoritative source is the
+	// article's `categories:` frontmatter; nil clears stale rows so removing a
+	// category is reflected on reconcile. Runs for every team/X/Y.md article
+	// (entity briefs, playbooks, decisions, concepts), not just entities.
+	if err := w.store.UpsertArticleCategories(ctx, rel, categoriesFromFrontmatter(fm)); err != nil {
+		return fmt.Errorf("upsert categories %s: %w", rel, err)
 	}
 	if entity.CanonicalSlug != entity.Slug {
 		if err := w.store.UpsertRedirect(ctx, Redirect{
@@ -924,14 +952,19 @@ type inMemoryFactStore struct {
 	entities  map[string]IndexEntity
 	edgesBy   map[string][]IndexEdge // keyed by subject slug AND object slug
 	redirects map[string]Redirect
+	// articleCats maps an article's wiki-root-relative path to its set of
+	// normalized category slugs. Empty sets are pruned (the key is deleted) so
+	// the canonical hash never sees a phantom empty membership.
+	articleCats map[string]map[string]bool
 }
 
 func newInMemoryFactStore() *inMemoryFactStore {
 	return &inMemoryFactStore{
-		facts:     map[string]TypedFact{},
-		entities:  map[string]IndexEntity{},
-		edgesBy:   map[string][]IndexEdge{},
-		redirects: map[string]Redirect{},
+		facts:       map[string]TypedFact{},
+		entities:    map[string]IndexEntity{},
+		edgesBy:     map[string][]IndexEdge{},
+		redirects:   map[string]Redirect{},
+		articleCats: map[string]map[string]bool{},
 	}
 }
 
@@ -1152,6 +1185,72 @@ func (s *inMemoryFactStore) ResolveRedirect(_ context.Context, slug string) (str
 	return slug, false, nil
 }
 
+func (s *inMemoryFactStore) UpsertArticleCategories(_ context.Context, articlePath string, categories []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(categories) == 0 {
+		delete(s.articleCats, articlePath)
+		return nil
+	}
+	set := make(map[string]bool, len(categories))
+	for _, c := range categories {
+		if c != "" {
+			set[c] = true
+		}
+	}
+	if len(set) == 0 {
+		delete(s.articleCats, articlePath)
+		return nil
+	}
+	s.articleCats[articlePath] = set
+	return nil
+}
+
+func (s *inMemoryFactStore) ListArticlesInCategory(_ context.Context, category string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []string
+	for path, set := range s.articleCats {
+		if set[category] {
+			out = append(out, path)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *inMemoryFactStore) ListCategoriesForArticle(_ context.Context, articlePath string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	set := s.articleCats[articlePath]
+	if len(set) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(set))
+	for c := range set {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *inMemoryFactStore) ListAllCategories(_ context.Context) ([]CategoryCount, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := map[string]int{}
+	for _, set := range s.articleCats {
+		for c := range set {
+			counts[c]++
+		}
+	}
+	out := make([]CategoryCount, 0, len(counts))
+	for slug, n := range counts {
+		out = append(out, CategoryCount{Slug: slug, Count: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out, nil
+}
+
 func (s *inMemoryFactStore) CanonicalHashFacts(_ context.Context) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1252,6 +1351,29 @@ func (s *inMemoryFactStore) CanonicalHashAll(_ context.Context) (string, error) 
 	sort.Strings(redirectFroms)
 	for _, from := range redirectFroms {
 		b, err := json.Marshal(s.redirects[from])
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// Article categories (sorted by article_path, then category). Serialised as
+	// ArticleCategory rows so the bytes match the SQLite backend exactly.
+	var cats []ArticleCategory
+	for path, set := range s.articleCats {
+		for c := range set {
+			cats = append(cats, ArticleCategory{ArticlePath: path, Category: c})
+		}
+	}
+	sort.Slice(cats, func(i, j int) bool {
+		if cats[i].ArticlePath != cats[j].ArticlePath {
+			return cats[i].ArticlePath < cats[j].ArticlePath
+		}
+		return cats[i].Category < cats[j].Category
+	})
+	for _, ac := range cats {
+		b, err := json.Marshal(ac)
 		if err != nil {
 			return "", err
 		}
