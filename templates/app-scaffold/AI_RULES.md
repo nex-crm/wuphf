@@ -185,6 +185,23 @@ loudly — apps are read-mostly by design. Don't try to work around this.
 
    You MAY freely rewrite `src/App.tsx` (your tool) and `src/main.tsx` (provider
    wiring) — but keep the provider shape above.
+6. **Request only what you need.** Fetch lean payloads. `getEmails()` already
+   asks the broker for metadata + snippet only (`verbose:false`,
+   `include_payload:false`) — it returns kilobytes, not megabytes — so use its
+   `snippet`, and do NOT re-fetch full message bodies with a heavier action. For
+   `callIntegration()`, pass params that bound the result (a `limit`, a query, a
+   lean/metadata flag). Don't rely on the platform to trim your data: the broker
+   passes the integration result through and ERRORS on an oversized read rather
+   than truncating it, so an over-fetch comes back as a failure, not shrunk data.
+7. **Handle failures gracefully.** Every bridge call — `getEmails()`,
+   `callIntegration()`, `ai()` — can fail or return an error/empty result. Wrap
+   each in `try`/`catch` (or `.catch`) AND check the typed outcome before using
+   it: `getEmails()` returns `{ connected, emails, error? }` (never throws on a
+   normal error); `callIntegration()` returns `{ connected, status, result?,
+   error? }`; `ai()` returns `{ text?, object?, error? }` (e.g.
+   `"ai_unavailable"`). Render a real connect-state / error-state / empty-state.
+   NEVER run an unguarded `JSON.parse` on a bridge reply and never let a bad
+   response crash the app into a white screen.
 
 ## Style
 

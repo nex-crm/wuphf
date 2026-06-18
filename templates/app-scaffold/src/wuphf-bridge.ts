@@ -125,9 +125,13 @@ function postToHost<T = unknown>(
  * The business outcome of a callIntegration() call. The broker classifies the
  * action server-side:
  *   - read, connected   -> { connected:true, status:"ok", result }
+ *   - read failed        -> { connected:true, error }   (e.g. upstream error)
  *   - mutating          -> { connected:true, status:"needs_approval", request_id }
  *                          (NOT executed; a human must approve the raised card)
- *   - not connected     -> { connected:false }
+ *   - not connected     -> { connected:false, error }
+ *
+ * Always check `error` and `connected` before using `result`; `result` is only
+ * present on a successful read.
  */
 export interface IntegrationCallResult {
   connected: boolean;
@@ -145,6 +149,18 @@ export interface IntegrationCallResult {
  * the result; a mutating action is NOT executed and instead raises a human
  * approval card (status:"needs_approval"). Use read actions (GET/LIST/SEARCH/
  * FETCH) freely; expect a mutating call to come back needing approval.
+ *
+ * REQUEST ONLY WHAT YOU NEED. Pass params that bound the result (a limit, a
+ * lean/metadata flag, a query). The broker errors on an oversized upstream read
+ * rather than truncating it — it does not trim your payload for you, so an
+ * over-fetch comes back as an error, not silently-shrunk data.
+ *
+ * FAILURE HANDLING. Business outcomes resolve (not-connected, needs-approval,
+ * and even a read that failed upstream — the latter as `{ error }`). A transport
+ * / host failure REJECTS the promise. ALWAYS await this in a try/catch (or
+ * `.catch`) AND inspect `result.error` / `result.connected`; never assume
+ * `result.result` is present. The host reply is untrusted — do not run an
+ * unguarded `JSON.parse` on it.
  */
 export function callIntegration<T = unknown>(
   platform: string,
@@ -187,8 +203,14 @@ export function listIntegrations(): Promise<{
  * broker caps prompt + input size.
  *
  * With opts.json the model is asked for a single JSON value and the parsed
- * object is returned; otherwise plain text is returned. If the provider is not
- * available the result is `{ error: "ai_unavailable" }` — render a fallback.
+ * object is returned; otherwise plain text is returned.
+ *
+ * FAILURE HANDLING. Expected product states resolve as `{ error }`:
+ * `"ai_unavailable"` (no provider configured) or `"not_json"` (json:true but the
+ * model returned prose — `text` carries it). A transport / host failure REJECTS
+ * the promise. ALWAYS await this in a try/catch (or `.catch`) AND check
+ * `result.error` before using `result.object` / `result.text`; render a fallback
+ * rather than crashing. Never run an unguarded `JSON.parse` on the reply.
  */
 export interface AIResult<T = unknown> {
   /** Plain-text answer (or, under json:true, the prose if it wasn't valid JSON). */
@@ -269,6 +291,20 @@ export interface EmailItem {
   labels: string[];
 }
 
+/** The outcome of getEmails(): a state the app renders, never a thrown error. */
+export interface GetEmailsResult {
+  /** False when Gmail is not connected — render a connect-state, not an error. */
+  connected: boolean;
+  /** Up to `limit` recent messages (metadata + snippet only). */
+  emails: EmailItem[];
+  /**
+   * Set when the read failed (bridge error, or the broker returned an error
+   * state). Render this as an error state; `emails` is empty. `connected` may
+   * still be true (the integration is connected but the read failed).
+   */
+  error?: string;
+}
+
 /**
  * getEmails reads the operator's most recent Gmail messages. It is a THIN
  * WRAPPER over callIntegration('gmail', 'GMAIL_FETCH_EMAILS', …) — kept as a
@@ -276,14 +312,21 @@ export interface EmailItem {
  * bespoke endpoint. READ-ONLY: GMAIL_FETCH_EMAILS is a read, so the broker
  * executes it and returns the result (no approval card).
  *
- * `connected` is false when Gmail is not connected; render a connect-state in
- * that case rather than an error. When connected, `emails` holds up to `limit`
- * recent messages (default 25). Build your own reads the same way: pick a READ
- * action id and call callIntegration directly.
+ * REQUESTS A LEAN PAYLOAD. It passes `verbose:false` (drop full message bodies)
+ * and `include_payload:false` (drop raw MIME headers) so the response is
+ * kilobytes, not megabytes — at limit 25 the body shrinks ~25x (≈430 KB → ≈18
+ * KB) while every EmailItem field (subject, from, snippet, date, labels, unread)
+ * stays intact. The app uses only the snippet, never the full body, so fetching
+ * full bodies would just be discarded bandwidth. Don't re-fetch full bodies.
+ *
+ * NEVER THROWS on a normal error. `connected` is false when Gmail is not
+ * connected (render a connect-state). `error` is set when the read itself failed
+ * (render an error state); in both cases `emails` is empty. Build your own reads
+ * the same way: pick a READ action id, bound its params, and handle failures.
  */
 export function getEmails(opts?: {
   limit?: number;
-}): Promise<{ connected: boolean; emails: EmailItem[] }> {
+}): Promise<GetEmailsResult> {
   const limit =
     typeof opts?.limit === "number" &&
     Number.isFinite(opts.limit) &&
@@ -292,10 +335,21 @@ export function getEmails(opts?: {
       : 25;
   return callIntegration("gmail", "GMAIL_FETCH_EMAILS", {
     max_results: limit,
-  }).then((res) => ({
-    connected: res.connected,
-    emails: mapGmailMessages(res.result),
-  }));
+    // Lean payload: metadata + snippet only. See the doc comment above.
+    verbose: false,
+    include_payload: false,
+  })
+    .then((res) => {
+      if (res.error) {
+        return { connected: res.connected, emails: [], error: res.error };
+      }
+      return { connected: res.connected, emails: mapGmailMessages(res.result) };
+    })
+    .catch((err: unknown) => ({
+      connected: false,
+      emails: [],
+      error: err instanceof Error ? err.message : "Could not read Gmail.",
+    }));
 }
 
 /**

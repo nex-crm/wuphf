@@ -54,11 +54,17 @@ const readers: Record<string, Reader> = {
   members: async () =>
     (await getOfficeMembers()).members as unknown as BaseRecord[],
   emails: async () => {
-    const { connected, emails } = await getEmails({ limit: 50 });
+    const { connected, emails, error } = await getEmails({ limit: 50 });
     if (!connected) {
       // Surface a connect-state, not a crash. The app should render a
       // "connect Gmail" panel; an empty list keeps useTable happy meanwhile.
       return [];
+    }
+    if (error) {
+      // Connected but the read failed: throw so refine's tableQuery.error
+      // populates and the app renders a real error state (not a silent empty
+      // list). getEmails never throws on its own — it returns this {error}.
+      throw new Error(error);
     }
     return emails as unknown as BaseRecord[];
   },
