@@ -50,7 +50,10 @@ Layer 1 — Raw sources (immutable)
   These files are the factual record. The LLM reads them but NEVER modifies them.
 
 Layer 2 — The wiki (LLM-owned markdown)
-  team/{kind}/{slug}.md                  # entity briefs (person, company, project)
+  team/{kind}/{slug}.md                  # entity briefs (person, company, customer)
+  team/concepts/{slug}.md                # concept articles (topics/ideas, not a
+                                         # specific person/company) — same article
+                                         # shape as a brief, type: concept
   wiki/facts/{kind}/{slug}.jsonl         # append-only fact log per entity
   wiki/insights/entity/{slug}.jsonl      # append-only typed insight log per entity
   wiki/insights/knowledge/{slug}.md      # workspace-wide facts/decisions/preferences
@@ -84,7 +87,14 @@ YAML frontmatter fields used across wiki files. Every field has a default; legac
 ---
 canonical_slug: sarah-jones          # authoritative slug. If this is a redirect,
                                       # the value is the real slug this file points to
-kind: person                          # person | company | project | team | workspace
+type: entity                          # entity | concept  (default entity). A concept
+                                      # article (team/concepts/{slug}.md) is type: concept.
+kind: person                          # person | company | customer | concept
+categories:                           # many-to-many nav categories (Wikipedia-style).
+  - Sales                             # OPTIONAL, default []. Drives the category nav;
+  - RevOps                            # derived-indexed but markdown is authoritative.
+redirect_to:                          # OPTIONAL. Set on a re-filed stub to the survivor
+                                      # path (see §7.2). Absent on a normal article.
 aliases:                              # other names this entity is known by
   - Sarah J.
   - sjones
@@ -101,6 +111,21 @@ created_at: 2026-01-16T09:14:00Z
 created_by: nazz                      # the human who caused this entity to exist
 ---
 ```
+
+**New fields (Wikipedia-IA layer):**
+- `type` — `entity` (default) or `concept`. Concept articles live at
+  `team/concepts/{slug}.md` and describe a topic/idea rather than a specific
+  person/company. Everything else (the article shape, sentinels, synthesis
+  bookkeeping) is identical to an entity brief.
+- `categories` — a many-to-many list that drives the **category navigation**
+  (Wikipedia-style: an article can sit under several categories, and the
+  sidebar tree is built on demand from these, not from the folder it lives in).
+  Optional, default `[]`. The category index is **derived** (rebuilt from this
+  frontmatter on `rm -rf index/` + restart) — markdown stays authoritative
+  (§7.4). Category slugs never collide with article slugs (they are surfaced
+  through `_category/<slug>` pseudo-paths, not `[[wikilinks]]`).
+- `redirect_to` — present only on a **re-filed stub** (§7.2). Its value is the
+  survivor path the stub redirects to.
 
 ### 4.2 Fact — line in `wiki/facts/{kind}/{slug}.jsonl`
 
@@ -296,6 +321,24 @@ Algorithm:
 5. Update graph edges.
 
 Merging is a human-confirmed operation, surfaced through lint → `ResolveContradictionModal`.
+
+**Re-filing a mis-placed article** (e.g. a concept article that was written into
+`team/companies/` because the extractor only had entity folders) uses the SAME
+redirect mechanism — never a rename (§11.4):
+
+1. Write the article at its correct survivor path (e.g. `team/concepts/{slug}.md`)
+   with `type: concept` + `categories:`, carrying the old body and git history.
+2. REPLACE the old path with a redirect stub: frontmatter `canonical_slug: <survivor>`
+   + `redirect_to: <survivor-path>`, body `This page redirects to [[concepts/{slug}]].
+   Prior content preserved in git history.` Existing `[[companies/{slug}]]` links keep
+   resolving via the stub.
+3. Append the mapping to `wiki/redirects.md` — the human-readable redirect index. This
+   file is a **written mirror** of the redirect set, regenerated from stub frontmatter
+   by the broker's redirect writer under the `archivist` identity. It is NOT a second
+   source of truth: redirects are derived from `canonical_slug`/`redirect_to` frontmatter
+   during reconcile, so `rm -rf index/` + restart reproduces them.
+
+Re-filing is human/librarian-confirmed, exactly like a slug merge.
 
 ### 7.3 Fact ID determinism
 
@@ -514,6 +557,7 @@ and a full DLQ entry is written to `permanent-failures.jsonl`.
 | Date | Change | Rationale |
 |---|---|---|
 | 2026-04-22 | Initial draft | Karpathy schema layer for Slice 1 of wiki-intelligence port. Covers three-layer architecture, frontmatter vocabulary, canonical slug rules, decay formula, lint rules, prompt guidance, anti-patterns. |
+| 2026-06-18 | Wikipedia-IA layer | Added `type: entity\|concept`, many-to-many `categories:` (derived-indexed, markdown-authoritative) as the category-nav layer, the `team/concepts/{slug}.md` concept-article location, `redirect_to:` on re-filed stubs, and the `wiki/redirects.md` written-mirror writer (§7.2). On-disk folder layout unchanged — folders become an implementation detail; categories drive nav. |
 
 Update this log on every substantive revision. Small wording tweaks don't require a log entry; new fields, new file locations, and changed algorithms do.
 
