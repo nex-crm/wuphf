@@ -5,7 +5,9 @@ import { confirm } from "../ui/ConfirmDialog";
 import {
   appBrokerPath,
   isAllowedGetPath,
+  parseAIArgs,
   parseErrorPayload,
+  parseIntegrationArgs,
   parseSelectPayload,
   routeInboundMessage,
   withAppCsp,
@@ -20,12 +22,11 @@ vi.mock("../ui/Toast", () => ({ showNotice: vi.fn() }));
 
 describe("isAllowedGetPath", () => {
   it("allows whitelisted read-only office data paths", () => {
-    expect(isAllowedGetPath("/apps")).toBe(true);
+    expect(isAllowedGetPath("/apps/integrations/catalog")).toBe(true);
     expect(isAllowedGetPath("/tasks")).toBe(true);
     expect(isAllowedGetPath("/tasks?status=open")).toBe(true);
     expect(isAllowedGetPath("/office-members")).toBe(true);
     expect(isAllowedGetPath("/wiki/list")).toBe(true);
-    expect(isAllowedGetPath("/apps/app_0123456789abcdef")).toBe(true);
   });
 
   it("rejects non-whitelisted, mutating, or off-broker paths", () => {
@@ -33,6 +34,10 @@ describe("isAllowedGetPath", () => {
     expect(isAllowedGetPath("/config")).toBe(false);
     expect(isAllowedGetPath("/web-token")).toBe(false);
     expect(isAllowedGetPath("/memory")).toBe(false);
+    // L2: an app must NOT read another app's source bundle via GET /apps/<id>;
+    // the bare "/apps" prefix is intentionally not allowlisted.
+    expect(isAllowedGetPath("/apps")).toBe(false);
+    expect(isAllowedGetPath("/apps/app_0123456789abcdef")).toBe(false);
     // Prefix-spoofing must not pass (/tasksomething is not /tasks/*).
     expect(isAllowedGetPath("/tasks-secret")).toBe(false);
     expect(isAllowedGetPath("/wiki/write")).toBe(false);
@@ -428,6 +433,186 @@ describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
     );
     expect(onSelect).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseIntegrationArgs (Bridge v2 host validation)", () => {
+  it("accepts a well-formed integration call and trims fields", () => {
+    const args = parseIntegrationArgs({
+      platform: "  gmail ",
+      action: " GMAIL_FETCH_EMAILS ",
+      params: { max_results: 5 },
+    });
+    expect(args).toEqual({
+      platform: "gmail",
+      action: "GMAIL_FETCH_EMAILS",
+      params: { max_results: 5 },
+    });
+  });
+
+  it("allows a params-less call", () => {
+    expect(
+      parseIntegrationArgs({ platform: "slack", action: "SLACK_LIST" }),
+    ).toEqual({ platform: "slack", action: "SLACK_LIST" });
+  });
+
+  it("rejects a call missing platform or action", () => {
+    expect(parseIntegrationArgs({ platform: "gmail" })).toBeNull();
+    expect(parseIntegrationArgs({ action: "GMAIL_FETCH_EMAILS" })).toBeNull();
+    expect(parseIntegrationArgs({ platform: "", action: "x" })).toBeNull();
+    expect(parseIntegrationArgs(null)).toBeNull();
+    expect(parseIntegrationArgs("nope")).toBeNull();
+  });
+
+  it("rejects params that are not a plain object", () => {
+    expect(
+      parseIntegrationArgs({ platform: "g", action: "a", params: [1, 2] }),
+    ).toBeNull();
+    expect(
+      parseIntegrationArgs({ platform: "g", action: "a", params: "str" }),
+    ).toBeNull();
+  });
+
+  it("rejects an over-cap params payload", () => {
+    const big = { blob: "x".repeat(17 * 1024) };
+    expect(
+      parseIntegrationArgs({ platform: "g", action: "a", params: big }),
+    ).toBeNull();
+  });
+});
+
+describe("parseAIArgs (Bridge v2 host validation)", () => {
+  it("accepts a prompt and trims it", () => {
+    expect(parseAIArgs({ prompt: "  hi  " })).toEqual({
+      prompt: "hi",
+      json: false,
+    });
+  });
+
+  it("carries input and the json flag", () => {
+    expect(
+      parseAIArgs({ prompt: "score", input: { a: 1 }, json: true }),
+    ).toEqual({ prompt: "score", input: { a: 1 }, json: true });
+  });
+
+  it("rejects an empty or over-cap prompt", () => {
+    expect(parseAIArgs({ prompt: "   " })).toBeNull();
+    expect(parseAIArgs({ prompt: "p".repeat(9 * 1024) })).toBeNull();
+    expect(parseAIArgs(null)).toBeNull();
+  });
+
+  it("rejects over-cap input", () => {
+    expect(
+      parseAIArgs({ prompt: "ok", input: "i".repeat(201 * 1024) }),
+    ).toBeNull();
+  });
+});
+
+describe("routeInboundMessage — Bridge v2 forwarding", () => {
+  function makeFrame(): {
+    frame: HTMLIFrameElement;
+    win: { postMessage: ReturnType<typeof vi.fn> };
+  } {
+    const win = { postMessage: vi.fn() };
+    const frame = { contentWindow: win } as unknown as HTMLIFrameElement;
+    return { frame, win };
+  }
+  function event(source: unknown, data: unknown): MessageEvent {
+    return { source, data } as unknown as MessageEvent;
+  }
+
+  beforeEach(() => {
+    vi.mocked(post).mockReset();
+    vi.mocked(post).mockResolvedValue({ ok: true });
+    vi.mocked(get).mockReset();
+    vi.mocked(get).mockResolvedValue({});
+  });
+
+  it("forwards a valid integration call to POST /apps/integrations/call", async () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "integration",
+        id: 1,
+        platform: "gmail",
+        action: "GMAIL_FETCH_EMAILS",
+        params: { max_results: 3 },
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledWith("/apps/integrations/call", {
+      platform: "gmail",
+      action: "GMAIL_FETCH_EMAILS",
+      params: { max_results: 3 },
+    });
+  });
+
+  it("rejects an invalid integration call WITHOUT touching the broker", () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "integration",
+        id: 2,
+        platform: "gmail", // missing action
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(post).not.toHaveBeenCalled();
+    expect(win.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false }),
+      "*",
+    );
+  });
+
+  it("forwards a valid ai call to POST /apps/ai", async () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "ai",
+        id: 3,
+        prompt: "summarize",
+        input: [{ x: 1 }],
+        json: true,
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledWith("/apps/ai", {
+      prompt: "summarize",
+      input: [{ x: 1 }],
+      json: true,
+    });
+  });
+
+  it("rejects an empty ai prompt WITHOUT touching the broker", () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, { source: "wuphf-app", type: "ai", id: 4, prompt: "  " }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+    expect(post).not.toHaveBeenCalled();
+    expect(win.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false }),
+      "*",
+    );
   });
 });
 

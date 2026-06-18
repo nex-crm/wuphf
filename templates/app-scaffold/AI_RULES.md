@@ -19,16 +19,29 @@ sandbox enforce most of them, so breaking one means a broken or rejected app.
    NEVER use `fetch`, `XMLHttpRequest`, or `WebSocket`. Read workspace data ONLY
    through `src/wuphf-bridge.ts` (`callBroker` / `getOfficeMembers` / `getTasks`),
    which is read-only and limited to an allowlist of broker GET paths. The ONE
-   write is `createTask({ title, details })` — the host confirms with the human,
-   then creates a normal office task. Wire it to a button (e.g. "Start a follow-up
-   task"); never call it on load.
+   office write is `createTask({ title, details })` — the host confirms with the
+   human, then creates a normal office task. Wire it to a button (e.g. "Start a
+   follow-up task"); never call it on load.
+   - **Integration-backed apps.** `listIntegrations()` lists the user's connected
+     tools and their READ actions; `callIntegration(platform, action, params)`
+     runs one. A READ action (GET/LIST/SEARCH/FETCH) returns its result; a
+     MUTATING action is never executed by the app — it comes back
+     `{ status: "needs_approval", request_id }` and the host raises a human
+     approval card. `getEmails()` is a thin wrapper over
+     `callIntegration('gmail', 'GMAIL_FETCH_EMAILS', …)` showing the pattern.
+   - **AI-powered apps.** `ai(prompt, input?, { json? })` runs a bounded one-shot
+     LLM step over data you already fetched through the bridge (summarize/score/
+     classify). It is read-only reasoning, not a network call. With `{ json: true }`
+     you get a parsed object back. If no provider is configured you get
+     `{ error: "ai_unavailable" }` — render a fallback.
 3. **No secrets, no auth.** The app never holds a token; the host bridge uses the
    signed-in user's session. Do not invent API keys or login flows.
 4. **Keep it one app.** Single SPA, no router needed for a focused tool. Don't add
    server code, databases, or build steps beyond Vite.
 5. **Protected files — use, don't rewrite.** Do NOT reimplement or simplify
    `src/wuphf-bridge.ts`. Its helpers (`callBroker`, `getTasks`,
-   `getOfficeMembers`, `createTask`) are already correct — `getTasks()` returns
+   `getOfficeMembers`, `createTask`, `callIntegration`, `listIntegrations`,
+   `ai`, `getEmails`) are already correct — `getTasks()` returns
    ALL office tasks across every channel, not just the default one. Import and
    call them as-is. Rewriting them silently loses fixes: e.g. replacing
    `getTasks()` with a bare `callBroker("/tasks")` reads only the empty "general"

@@ -261,6 +261,12 @@ type Broker struct {
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 
+	// App ai() buckets — the broker token exempts the web host from the IP
+	// bucket, so a hostile App could otherwise loop POST /apps/ai and burn LLM
+	// credits unthrottled (security review H2). Keyed per actor/session,
+	// lazily-initialized in consumeAppAIRateLimit.
+	appAIRateLimitBuckets map[string]ipRateLimitBucket
+
 	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
 	// transport is started in-process — at boot by RegisterTransports and at
 	// runtime by handleSlackConnect — so connecting a channel from the web app
@@ -646,11 +652,14 @@ func (b *Broker) StartOnPort(port int) error {
 	// Apps: agent-generated internal tools. Reached only via the /api proxy, so
 	// these never shadow the SPA's client-side /apps/<id> route.
 	mux.HandleFunc("/apps", b.requireAuth(b.handleApps))
-	// Read-only, sanitized Gmail feed for Apps. Registered as a longer, more
-	// specific pattern than "/apps/" so ServeMux routes it here rather than to
-	// handleAppByID (which would mis-read "gmail" as an app id). Metadata +
-	// snippet only by design — see broker_apps_gmail.go.
-	mux.HandleFunc("/apps/gmail/recent", b.requireAuth(b.handleAppGmailRecent))
+	// Bridge v2: GENERIC integration + LLM surface for sandboxed Apps. Registered
+	// as longer, more specific patterns than "/apps/" so ServeMux routes them
+	// here rather than to handleAppByID (which would mis-read "integrations" or
+	// "ai" as an app id). These replace the bespoke per-feature Gmail endpoint —
+	// see broker_apps_integrations.go for the widened-surface security notes.
+	mux.HandleFunc("/apps/integrations/call", b.requireAuth(b.handleAppsIntegrationsCall))
+	mux.HandleFunc("/apps/integrations/catalog", b.requireAuth(b.handleAppsIntegrationsCatalog))
+	mux.HandleFunc("/apps/ai", b.requireAuth(b.handleAppsAI))
 	mux.HandleFunc("/apps/", b.requireAuth(b.handleAppByID))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))

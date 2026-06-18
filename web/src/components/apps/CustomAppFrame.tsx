@@ -22,6 +22,29 @@ import { showNotice } from "../ui/Toast";
  *     user's own session (the app never holds a token), PLUS a single narrow
  *     write — `create_task` — that the host fully parameterizes and gates behind
  *     a human confirmation. Arbitrary writes (any other path/method) are rejected.
+ *
+ * ─────────────────────────── BRIDGE v2: WIDENED SURFACE ─────────────────────
+ * SECURITY — needs a security-reviewer sign-off before shipping broadly.
+ * Two new sanctioned shapes widen what an app can reach. Both are HOST-VALIDATED
+ * here (the app is hostile by assumption) and re-validated server-side:
+ *
+ *   - "integration" → POST /apps/integrations/call {platform, action, params}.
+ *     The HOST forwards; the BROKER decides read-vs-mutate via the same
+ *     deterministic verb table the agent gate uses. A read returns the user's
+ *     own data into their own sandboxed app (ok). A MUTATING action is NEVER
+ *     executed by this path — the broker raises the human ExternalActionApproval
+ *     card and returns {status:"needs_approval", request_id}. The app cannot
+ *     smuggle a write: read-only classification is enforced server-side, not
+ *     trusted from the app, and only a human click can execute a mutation.
+ *
+ *   - "ai" → POST /apps/ai {prompt, input?, json?}. A bounded one-shot LLM
+ *     completion over data the app ALREADY fetched through this bridge. It is
+ *     not a network escape hatch (the frame still has connect-src 'none'); the
+ *     broker bounds prompt + input size so it cannot become an exfil/cost
+ *     channel. Read-only reasoning, never a tool loop.
+ *
+ * Neither new shape touches the broker GET allowlist or the create_task write —
+ * they are distinct POST endpoints with their own server-side gates.
  */
 
 const APP_CSP = [
@@ -41,11 +64,11 @@ const APP_CSP = [
 // the path (query string ignored). Deliberately small: live office data an
 // internal tool would display. Mutations are NOT exposed in this version.
 const ALLOWED_GET_PREFIXES: readonly string[] = [
-  "/apps",
-  // Read-only, sanitized Gmail feed (metadata + snippet only). Covered by the
-  // "/apps" prefix already, but listed explicitly to document that this
-  // sensitive-data read is intentionally exposed to Apps.
-  "/apps/gmail",
+  // Bridge v2: the connected-integrations catalog (listIntegrations). NOTE the
+  // bare "/apps" prefix is deliberately NOT here — it would let an app read any
+  // other app's full HTML source via GET /apps/<id> (security review L2). Apps
+  // reach their own data through the dedicated bridge endpoints, not /apps/<id>.
+  "/apps/integrations/catalog",
   "/tasks",
   "/office-members",
   "/channels",
@@ -71,6 +94,16 @@ const APP_ERROR_MAX = 600;
 const ACTION_TITLE_MAX = 200;
 const ACTION_DETAILS_MAX = 4000;
 
+// Bridge v2 host-side caps. The broker re-enforces the real bounds; these are a
+// first, cheap line so an obviously-abusive message never leaves the host.
+const INTEGRATION_PLATFORM_MAX = 64;
+const INTEGRATION_ACTION_MAX = 128;
+// Serialized params / ai payload caps. Mirror the broker's bounds loosely; the
+// broker is the authority. JSON.stringify length is a byte-ish proxy.
+const INTEGRATION_PARAMS_MAX = 16 * 1024;
+const AI_PROMPT_MAX = 8 * 1024;
+const AI_INPUT_MAX = 200 * 1024;
+
 interface BrokerBridgeMessage {
   source: typeof APP_SOURCE;
   type: "broker";
@@ -85,6 +118,40 @@ interface AppActionMessage {
   id: string | number;
   action?: string;
   payload?: unknown;
+}
+
+/** Bridge v2: an app's generic integration call. */
+interface AppIntegrationMessage {
+  source: typeof APP_SOURCE;
+  type: "integration";
+  id: string | number;
+  platform?: unknown;
+  action?: unknown;
+  params?: unknown;
+}
+
+/** Bridge v2: an app's one-shot ai() reasoning call. */
+interface AppAIMessage {
+  source: typeof APP_SOURCE;
+  type: "ai";
+  id: string | number;
+  prompt?: unknown;
+  input?: unknown;
+  json?: unknown;
+}
+
+/** Validated, host-trusted shape of an integration call. */
+export interface IntegrationCallArgs {
+  platform: string;
+  action: string;
+  params?: Record<string, unknown>;
+}
+
+/** Validated, host-trusted shape of an ai() call. */
+export interface AICallArgs {
+  prompt: string;
+  input?: unknown;
+  json: boolean;
 }
 
 /**
@@ -146,6 +213,68 @@ export function parseErrorPayload(data: unknown): AppErrorPayload {
     message: capString(d.message, APP_ERROR_MAX),
     stack: capString(d.stack, APP_ERROR_MAX),
   };
+}
+
+/**
+ * Validate + normalize an inbound "integration" message into the host's
+ * trusted IntegrationCallArgs. Pure so it can be unit-tested without a frame.
+ * Returns null when the message is unusable (missing platform/action, params
+ * not a plain object, or over the size cap). The HOST is the trust boundary:
+ * the broker still re-validates and re-classifies read-vs-mutate.
+ */
+export function parseIntegrationArgs(
+  data: unknown,
+): IntegrationCallArgs | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  const platform =
+    typeof d.platform === "string"
+      ? d.platform.trim().slice(0, INTEGRATION_PLATFORM_MAX)
+      : "";
+  const action =
+    typeof d.action === "string"
+      ? d.action.trim().slice(0, INTEGRATION_ACTION_MAX)
+      : "";
+  if (!(platform && action)) return null;
+  let params: Record<string, unknown> | undefined;
+  if (d.params !== undefined && d.params !== null) {
+    // Must be a plain object (not an array, not a primitive) — the broker
+    // expects a params map.
+    if (
+      typeof d.params !== "object" ||
+      Array.isArray(d.params) ||
+      JSON.stringify(d.params).length > INTEGRATION_PARAMS_MAX
+    ) {
+      return null;
+    }
+    params = d.params as Record<string, unknown>;
+  }
+  return params ? { platform, action, params } : { platform, action };
+}
+
+/**
+ * Validate + normalize an inbound "ai" message into AICallArgs. Pure for unit
+ * tests. Returns null when prompt is missing/empty or prompt/input exceeds the
+ * size cap. The broker re-enforces the real bounds and timeout.
+ */
+export function parseAIArgs(data: unknown): AICallArgs | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  const prompt = typeof d.prompt === "string" ? d.prompt.trim() : "";
+  if (!prompt || prompt.length > AI_PROMPT_MAX) return null;
+  if (d.input !== undefined && d.input !== null) {
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(d.input);
+    } catch {
+      return null;
+    }
+    if (serialized.length > AI_INPUT_MAX) return null;
+  }
+  const json = d.json === true;
+  return d.input === undefined || d.input === null
+    ? { prompt, json }
+    : { prompt, input: d.input, json };
 }
 
 export function isAllowedGetPath(path: string): boolean {
@@ -333,6 +462,92 @@ function serviceCreateTask(
   });
 }
 
+/**
+ * Service a Bridge v2 "integration" call: validate the {platform, action,
+ * params} shape, forward to POST /apps/integrations/call, and reply to the
+ * frame. The host does NOT decide read-vs-mutate — the broker does, server-side,
+ * and a mutating action returns {status:"needs_approval"} instead of executing.
+ * The host's job is to gate the message shape and never let the app reach the
+ * broker except through this one sanctioned endpoint.
+ */
+async function serviceIntegrationCall(
+  message: AppIntegrationMessage,
+  target: Window,
+  replyOrigin: string,
+): Promise<void> {
+  const reply = (payload: {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  }): void => {
+    target.postMessage(
+      { source: HOST_SOURCE, id: message.id, ...payload },
+      replyOrigin,
+    );
+  };
+  const args = parseIntegrationArgs(message);
+  if (!args) {
+    reply({
+      ok: false,
+      error:
+        "An integration call needs a platform + action; params must be a small object.",
+    });
+    return;
+  }
+  try {
+    const data = await post("/apps/integrations/call", {
+      platform: args.platform,
+      action: args.action,
+      params: args.params ?? {},
+    });
+    reply({ ok: true, data });
+  } catch (err) {
+    reply({ ok: false, error: errorMessage(err) });
+  }
+}
+
+/**
+ * Service a Bridge v2 "ai" call: validate {prompt, input, json}, forward to
+ * POST /apps/ai, and reply. The broker runs a BOUNDED one-shot completion over
+ * data the app already holds. Not a network escape hatch — the frame still has
+ * connect-src 'none'; this is read-only reasoning routed through the host.
+ */
+async function serviceAICall(
+  message: AppAIMessage,
+  target: Window,
+  replyOrigin: string,
+): Promise<void> {
+  const reply = (payload: {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  }): void => {
+    target.postMessage(
+      { source: HOST_SOURCE, id: message.id, ...payload },
+      replyOrigin,
+    );
+  };
+  const args = parseAIArgs(message);
+  if (!args) {
+    reply({
+      ok: false,
+      error:
+        "ai() needs a non-empty prompt (and prompt/input within size limits).",
+    });
+    return;
+  }
+  try {
+    const data = await post("/apps/ai", {
+      prompt: args.prompt,
+      input: args.input,
+      json: args.json,
+    });
+    reply({ ok: true, data });
+  } catch (err) {
+    reply({ ok: false, error: errorMessage(err) });
+  }
+}
+
 type SelectHandlerRef = {
   current: ((sel: AppSelectPayload) => void) | undefined;
 };
@@ -374,23 +589,50 @@ export function routeInboundMessage(
     onAppErrorRef.current?.(parseErrorPayload(data));
     return;
   }
-  // The one safe write: a human-confirmed, host-parameterized create_task.
-  if (data.type === "action") {
-    if (data.id === undefined || event.source === null) return;
-    serviceCreateTask(
-      data as AppActionMessage,
-      event.source as Window,
-      replyOrigin,
-    );
-    return;
-  }
-  if (data.type !== "broker") return;
+  // Every remaining type is a request that needs a reply: it MUST carry an id
+  // and a real sender window. Gate that once here so each handler can assume it.
   if (data.id === undefined || event.source === null) return;
-  void serviceBrokerGet(
-    data as BrokerBridgeMessage,
-    event.source as Window,
-    replyOrigin,
-  );
+  routeAppRequest(data, event.source as Window, replyOrigin);
+}
+
+/**
+ * routeAppRequest dispatches the reply-bearing app→host requests AFTER the
+ * identity + display-only checks in routeInboundMessage have passed. Split out
+ * so the security-ordering function above stays flat; the contract is unchanged
+ * (inspector types still return before anything here runs). Each branch forwards
+ * exactly one sanctioned shape and nothing else.
+ */
+function routeAppRequest(
+  data: { type?: string; id?: string | number },
+  source: Window,
+  replyOrigin: string,
+): void {
+  switch (data.type) {
+    // The one safe office write: a human-confirmed, host-parameterized task.
+    case "action":
+      serviceCreateTask(data as AppActionMessage, source, replyOrigin);
+      return;
+    // Bridge v2: a generic integration call. The host forwards the validated
+    // shape; the broker decides read-vs-mutate and gates mutations behind the
+    // human approval card. Reads return the user's own data; the app never
+    // executes a write without a human click.
+    case "integration":
+      void serviceIntegrationCall(
+        data as AppIntegrationMessage,
+        source,
+        replyOrigin,
+      );
+      return;
+    // Bridge v2: a bounded one-shot ai() completion over data the app holds.
+    case "ai":
+      void serviceAICall(data as AppAIMessage, source, replyOrigin);
+      return;
+    case "broker":
+      void serviceBrokerGet(data as BrokerBridgeMessage, source, replyOrigin);
+      return;
+    default:
+      return;
+  }
 }
 
 /**
