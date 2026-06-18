@@ -772,75 +772,12 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
-		// Force task_type=issue when parent_issue_id is set so every
-		// sub-issue is renderable on the Issue detail surface (same
-		// lifecycle, same packet, same components). Agents may pass
-		// task_type=research/feature on sub-issues; we override here
-		// so the FE doesn't have to special-case those.
-		if task.ParentIssueID != "" {
-			task.TaskType = "issue"
-			// Sub-issues nest one level deep only. If the proposed
-			// parent is itself a sub-issue (has its own parent),
-			// reject the create so we don't get sub-sub-sub-issue
-			// cascades the UI can't render legibly. Agents can
-			// always rescope a sub-issue under the top-level parent
-			// instead. The check stays inside the locked section
-			// since we're reading other tasks' state.
-			if parent := b.findTaskByIDLocked(task.ParentIssueID); parent != nil {
-				if strings.TrimSpace(parent.ParentIssueID) != "" {
-					rollbackTask()
-					return TaskResponse{}, taskMutationError(
-						TaskMutationConflict,
-						"sub-issues can only be one level deep; pick the top-level parent instead",
-						nil,
-					)
-				}
-				// Plan-gate: the parent is still in structured planning, so its
-				// plan has not been approved. Creating sub-issues now is exactly
-				// the premature decomposition the planning phase exists to stop —
-				// refuse until the human approves the plan (Planning→Running).
-				// Internal recovery actors are exempt (migration / fold-in).
-				if parent.LifecycleState == LifecycleStatePlanning && !isInternalTaskActor(actor) {
-					rollbackTask()
-					return TaskResponse{}, taskMutationError(
-						TaskMutationConflict,
-						fmt.Sprintf("parent %s is still in planning — its plan has not been approved yet. Finish the plan and wait for the human to approve it before creating sub-tasks.", parent.ID),
-						nil,
-					)
-				}
-				// Shallow-subtask guard: a sub-issue that merely restates its
-				// parent ("Ship the MVP" → "Ship the MVP") adds a board row but
-				// no decomposition. Reject it (internal actors exempt).
-				if !isInternalTaskActor(actor) && titlesAreSimilar(task.Title, parent.Title) {
-					rollbackTask()
-					return TaskResponse{}, taskMutationError(
-						TaskMutationConflict,
-						fmt.Sprintf("sub-task %q just restates parent %s — break the parent into distinct, non-overlapping pieces instead of duplicating it.", strings.TrimSpace(task.Title), parent.ID),
-						nil,
-					)
-				}
-				// Sibling-dedup guard: refuse a sub-issue whose title duplicates
-				// an existing, non-terminal sibling under the same parent.
-				if !isInternalTaskActor(actor) {
-					for j := range b.tasks {
-						sib := &b.tasks[j]
-						if strings.TrimSpace(sib.ParentIssueID) != task.ParentIssueID {
-							continue
-						}
-						if isTerminalTeamTaskStatus(sib.status) {
-							continue
-						}
-						if titlesAreSimilar(task.Title, sib.Title) {
-							rollbackTask()
-							return TaskResponse{}, taskMutationError(
-								TaskMutationConflict,
-								fmt.Sprintf("sub-task %q duplicates existing sibling %s (%q) under parent %s — comment on it or pick a distinct slice instead.", strings.TrimSpace(task.Title), sib.ID, strings.TrimSpace(sib.Title), parent.ID),
-								nil,
-							)
-						}
-					}
-				}
-			}
+		// Sub-issue create rules (force issue type, one-level-deep nesting,
+		// plan-gate, shallow + sibling-dedup guards) live in
+		// applySubIssueCreateRulesLocked to keep this file under the size budget.
+		if err := b.applySubIssueCreateRulesLocked(&task, actor); err != nil {
+			rollbackTask()
+			return TaskResponse{}, err
 		}
 		if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
 			task.blocked = true
