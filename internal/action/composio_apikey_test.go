@@ -223,6 +223,13 @@ func TestCompleteAPIKeyConnection_SendsCustomAuthAndKey(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&accountBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ca_instantly", "status": "ACTIVE"})
 	})
+	// The credential is verified via the refresh endpoint before we claim
+	// "connected"; a live key comes back ACTIVE.
+	var refreshBody map[string]any
+	mux.HandleFunc("/connected_accounts/ca_instantly/refresh", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&refreshBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ca_instantly", "status": "ACTIVE"})
+	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
@@ -233,6 +240,9 @@ func TestCompleteAPIKeyConnection_SendsCustomAuthAndKey(t *testing.T) {
 	}
 	if res.Status != "connected" {
 		t.Fatalf("expected connected, got %q (%+v)", res.Status, res)
+	}
+	if refreshBody["validate_credentials"] != true {
+		t.Fatalf("connect must ask Composio to validate the credential, got refresh body %v", refreshBody)
 	}
 	if res.ConnectionKey != "ca_instantly" {
 		t.Fatalf("expected connection key ca_instantly, got %q", res.ConnectionKey)
@@ -263,5 +273,99 @@ func TestCompleteAPIKeyConnection_SendsCustomAuthAndKey(t *testing.T) {
 	acRef, _ := accountBody["auth_config"].(map[string]any)
 	if acRef["id"] != "ac_custom" {
 		t.Fatalf("connected account must reference the created auth config, got %v", accountBody)
+	}
+}
+
+// apiKeyConnectMux builds the create-path mux (toolkit detail + auth config +
+// connected account create) shared by the verification tests. The caller
+// registers a /connected_accounts/ca_instantly/refresh handler to drive the
+// validation outcome and may inspect *deleted to assert cleanup.
+func apiKeyConnectMux(deleted *bool) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/toolkits/instantly", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(instantlyToolkitDetail())
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"auth_config": map[string]any{"id": "ac_custom"}})
+	})
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ca_instantly", "status": "ACTIVE"})
+	})
+	// DELETE /connected_accounts/ca_instantly — orphan cleanup after a rejection.
+	mux.HandleFunc("/connected_accounts/ca_instantly", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && deleted != nil {
+			*deleted = true
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+	return mux
+}
+
+// A credential Composio rejects (refresh reports a non-live status) must NOT be
+// reported as connected: the connect call errors and the orphan account is
+// deleted so a retry starts clean. This is the core "random key says connected"
+// bug fix.
+func TestCompleteAPIKeyConnection_RejectsBadKey(t *testing.T) {
+	deleted := false
+	mux := apiKeyConnectMux(&deleted)
+	mux.HandleFunc("/connected_accounts/ca_instantly/refresh", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ca_instantly", "status": "FAILED"})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	_, err := client.CompleteAPIKeyConnection(context.Background(), "Instantly", map[string]string{"generic_api_key": "bogus"})
+	if err == nil {
+		t.Fatalf("a rejected credential must surface an error, not a connection")
+	}
+	if !deleted {
+		t.Fatalf("a rejected credential must delete the orphan connected account")
+	}
+}
+
+// Composio can signal a rejected credential with a 401/403/422 from the refresh
+// endpoint rather than a status body — that path must also fail closed.
+func TestCompleteAPIKeyConnection_RejectsBadKeyOnAuthError(t *testing.T) {
+	deleted := false
+	mux := apiKeyConnectMux(&deleted)
+	mux.HandleFunc("/connected_accounts/ca_instantly/refresh", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	_, err := client.CompleteAPIKeyConnection(context.Background(), "Instantly", map[string]string{"generic_api_key": "bogus"})
+	if err == nil {
+		t.Fatalf("a 401 from validation must surface an error, not a connection")
+	}
+	if !deleted {
+		t.Fatalf("a rejected credential must delete the orphan connected account")
+	}
+}
+
+// When the experimental validation path is unavailable (404 / 5xx / network),
+// we must not block the connection: fall back to the create-time status so a
+// real key still connects on plans/toolkits without the validate endpoint.
+func TestCompleteAPIKeyConnection_UnverifiedFallsBackToConnected(t *testing.T) {
+	deleted := false
+	mux := apiKeyConnectMux(&deleted)
+	mux.HandleFunc("/connected_accounts/ca_instantly/refresh", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	res, err := client.CompleteAPIKeyConnection(context.Background(), "Instantly", map[string]string{"generic_api_key": "ik_secret"})
+	if err != nil {
+		t.Fatalf("an unverifiable connection must not be blocked: %v", err)
+	}
+	if res.Status != "connected" {
+		t.Fatalf("expected connected fallback, got %q", res.Status)
+	}
+	if deleted {
+		t.Fatalf("an unverified (not rejected) credential must NOT be deleted")
 	}
 }
