@@ -92,6 +92,7 @@ func TestScaffoldIsIdempotent(t *testing.T) {
 // new source.
 func TestPublishFlipsDraftToReadyAndPreservesNodeModules(t *testing.T) {
 	store := newCustomAppStore(t.TempDir())
+	store.buildBundle = stubBuildBundle
 	now := time.Unix(1_700_000_000, 0).UTC()
 	id := customAppID("lead-scorer", "Lead Scorer", "general")
 

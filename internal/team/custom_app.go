@@ -142,10 +142,26 @@ func CustomAppsRootDir() string {
 type customAppStore struct {
 	root string
 	mu   sync.Mutex
+	// buildBundle compiles the persisted source dir into the sealed single-file
+	// bundle bytes. Defaults to the real bun-driven buildAppBundle; tests inject a
+	// hermetic stub so they need neither bun nor the network. Always set —
+	// newCustomAppStore wires the default.
+	buildBundle func(srcDir string) ([]byte, error)
+	// publishMu serializes concurrent publishes OF THE SAME app id. The server-side
+	// build runs WITHOUT the store-wide mu (so reads/listings aren't starved for
+	// the multi-second build), so this per-app gate is what stops two builds from
+	// racing in the same src/ dir. Keyed by app id; entries are created on demand.
+	publishMu sync.Map // map[string]*sync.Mutex
 }
 
 func newCustomAppStore(root string) *customAppStore {
-	return &customAppStore{root: root}
+	return &customAppStore{root: root, buildBundle: buildAppBundle}
+}
+
+// publishLock returns the per-app publish mutex, creating it on first use.
+func (s *customAppStore) publishLock(id string) *sync.Mutex {
+	m, _ := s.publishMu.LoadOrStore(id, &sync.Mutex{})
+	return m.(*sync.Mutex)
 }
 
 func validateCustomAppID(id string) error {
@@ -245,9 +261,18 @@ func (s *customAppStore) readManifestLocked(id string) (CustomApp, error) {
 	return app, nil
 }
 
-// Save creates a new app (empty req.ID) or updates an existing one. It
-// validates the HTML against the app sandbox policy, writes the manifest +
-// entry bundle, and returns the stored manifest.
+// Save creates a new app (empty req.ID) or updates an existing one.
+//
+// When the request carries source Files (the normal App Builder path), the HOST
+// owns the bundle: it overwrites the protected host-contract files with their
+// canonical embedded bytes, writes the source, builds it server-side
+// (`bun install` + `bun run build`), and stores the BROKER-built
+// dist/index.html — the agent-submitted html is ignored, so a generated app can
+// never ship a tampered bridge or an unverified bundle. A build failure does NOT
+// publish; it returns a caller error carrying the build output tail.
+//
+// When there are no source Files (an html-only registration, e.g. a built-in or
+// simple app), it falls back to the submitted html as before.
 func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomApp, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -259,10 +284,6 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 	if strings.ContainsRune(name, '\x00') {
 		return CustomApp{}, newCustomAppCallerError("app: name must not contain NUL bytes")
 	}
-	htmlBody := req.HTML
-	if err := validateCustomAppHTML(htmlBody); err != nil {
-		return CustomApp{}, err
-	}
 	actor := strings.TrimSpace(req.Actor)
 	if actor == "" {
 		actor = "app-builder"
@@ -273,9 +294,69 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 	}
 	stamp := now.UTC().Format(time.RFC3339Nano)
 
+	// Phase 1 (store lock): resolve the target manifest + ensure the dir. Held
+	// briefly — the multi-second build does NOT run under this lock, so listings
+	// and reads are never starved by a publish.
+	s.mu.Lock()
+	app, err := s.resolveSaveManifestLocked(req, name, actor, icon, stamp)
+	if err != nil {
+		s.mu.Unlock()
+		return CustomApp{}, err
+	}
+	dir := s.appDir(app.ID)
+	if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+		s.mu.Unlock()
+		return CustomApp{}, fmt.Errorf("app: mkdir: %w", mkErr)
+	}
+	s.mu.Unlock()
+
+	// Serialize concurrent publishes of the SAME app so two builds don't race in
+	// one src/ dir. Different apps publish in parallel.
+	pl := s.publishLock(app.ID)
+	pl.Lock()
+	defer pl.Unlock()
+
+	// Phase 2 (no store lock): produce the html to publish. With source Files this
+	// stages the source, overwrites the protected host-contract files with
+	// canonical bytes, and builds server-side — restoring the prior source on a
+	// build failure so a deliberately-broken publish can't leave tampered source
+	// running in the live preview. Without Files it returns the submitted html.
+	htmlBody, err := s.resolvePublishHTML(dir, req)
+	if err != nil {
+		return CustomApp{}, err
+	}
+	if err := validateCustomAppHTML(htmlBody); err != nil {
+		return CustomApp{}, err
+	}
+	app.ContentHash = customAppContentHash(htmlBody)
+
+	// Phase 3 (store lock): commit the published bytes + manifest + version
+	// snapshot atomically with respect to other store operations.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := writeFileAtomic(filepath.Join(dir, customAppEntry), []byte(htmlBody), 0o600); err != nil {
+		return CustomApp{}, fmt.Errorf("app: write entry: %w", err)
+	}
+	manifestBytes, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return CustomApp{}, fmt.Errorf("app: marshal manifest: %w", err)
+	}
+	manifestBytes = append(manifestBytes, '\n')
+	if err := writeFileAtomic(filepath.Join(dir, customAppManifestFile), manifestBytes, 0o600); err != nil {
+		return CustomApp{}, fmt.Errorf("app: write manifest: %w", err)
+	}
+	// Retain this version's built bytes (append-only history) so a later edit
+	// can roll back to a known-good build. Without this the version counter is
+	// a false affordance — it promises an undo that cannot happen.
+	if err := s.snapshotVersionLocked(dir, app, htmlBody); err != nil {
+		return CustomApp{}, err
+	}
+	return app, nil
+}
 
+// resolveSaveManifestLocked builds the target manifest for a Save: an update
+// reads + bumps the existing one, a create mints a fresh one. Must hold s.mu.
+func (s *customAppStore) resolveSaveManifestLocked(req CustomAppWriteRequest, name, actor, icon, stamp string) (CustomApp, error) {
 	var app CustomApp
 	if id := strings.TrimSpace(req.ID); id != "" {
 		if err := validateCustomAppID(id); err != nil {
@@ -295,7 +376,6 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 		app.Version = existing.Version + 1
 		app.UpdatedBy = actor
 		app.UpdatedAt = stamp
-		app.ContentHash = customAppContentHash(htmlBody)
 	} else {
 		slug := slugifyNotebookEntry(name)
 		if slug == "" {
@@ -314,40 +394,67 @@ func (s *customAppStore) Save(req CustomAppWriteRequest, now time.Time) (CustomA
 			UpdatedBy:   actor,
 			CreatedAt:   stamp,
 			UpdatedAt:   stamp,
-			ContentHash: customAppContentHash(htmlBody),
 		}
 	}
 	app.Entry = customAppEntry
 	// A register_app is always a real published build, so it clears the
 	// "building" draft status a pre-scaffolded app carries.
 	app.Status = customAppStatusReady
-
-	dir := s.appDir(app.ID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return CustomApp{}, fmt.Errorf("app: mkdir: %w", err)
-	}
-	if err := writeFileAtomic(filepath.Join(dir, customAppEntry), []byte(htmlBody), 0o600); err != nil {
-		return CustomApp{}, fmt.Errorf("app: write entry: %w", err)
-	}
-	manifestBytes, err := json.MarshalIndent(app, "", "  ")
-	if err != nil {
-		return CustomApp{}, fmt.Errorf("app: marshal manifest: %w", err)
-	}
-	manifestBytes = append(manifestBytes, '\n')
-	if err := writeFileAtomic(filepath.Join(dir, customAppManifestFile), manifestBytes, 0o600); err != nil {
-		return CustomApp{}, fmt.Errorf("app: write manifest: %w", err)
-	}
-	// Retain this version's built bytes (append-only history) so a later edit
-	// can roll back to a known-good build. Without this the version counter is
-	// a false affordance — it promises an undo that cannot happen.
-	if err := s.snapshotVersionLocked(dir, app, htmlBody); err != nil {
-		return CustomApp{}, err
-	}
-	// Persist the source project when provided so edits modify real files.
-	if err := s.writeAppSourceLocked(dir, req.Files); err != nil {
-		return CustomApp{}, err
-	}
 	return app, nil
+}
+
+// resolvePublishHTML produces the bytes to store as the app's html. When req
+// carries source Files it is the HOST-built bundle: protected host-contract files
+// are overwritten with canonical embedded bytes, the source is persisted, and
+// `bun install` + `bun run build` produces dist/index.html — the agent's req.HTML
+// is discarded. Without Files it returns req.HTML unchanged (html-only fallback).
+//
+// It is called WITHOUT the store mutex (so the build never starves reads) but
+// UNDER the per-app publish lock (so the src/ dir has a single writer). On a
+// build failure it RESTORES the prior source, so a deliberately-broken publish
+// cannot leave tampered source running in the live dev preview.
+func (s *customAppStore) resolvePublishHTML(dir string, req CustomAppWriteRequest) (string, error) {
+	if len(req.Files) == 0 {
+		// html-only registration: no source project, trust the submitted html
+		// (the sandbox policy still gates it in the caller).
+		return req.HTML, nil
+	}
+	// The host owns the contract: discard the agent's protected files and replace
+	// them with the canonical embedded versions before anything is persisted or
+	// built.
+	files, err := overwriteProtectedFiles(req.Files)
+	if err != nil {
+		return "", err
+	}
+
+	srcRoot := filepath.Join(dir, customAppSourceDir)
+	// Snapshot the prior app-source so a failed build rolls back to it (the live
+	// preview keeps running the last good source, not the tampered one).
+	restore, cleanup, err := snapshotAppSource(srcRoot)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+
+	if err := s.writeAppSource(srcRoot, files); err != nil {
+		return "", err
+	}
+
+	build := s.buildBundle
+	if build == nil {
+		build = buildAppBundle
+	}
+	built, buildErr := build(srcRoot)
+	if buildErr != nil {
+		// Roll the source back to the last good state before surfacing the error.
+		// Wrap both so the build failure stays a caller error (4xx) while the
+		// restore failure rides along in the chain.
+		if rerr := restore(); rerr != nil {
+			return "", fmt.Errorf("%w (and restoring prior source failed: %w)", buildErr, rerr)
+		}
+		return "", buildErr
+	}
+	return string(built), nil
 }
 
 // scaffoldPlaceholderHTML is the sealed entry written for a not-yet-built app so
@@ -494,18 +601,19 @@ func (s *customAppStore) snapshotVersionLocked(dir string, app CustomApp, htmlBo
 	return nil
 }
 
-// writeAppSourceLocked replaces src/ with the provided files (so deletes
-// propagate). Each path is sanitized against traversal; build artifacts are
-// rejected. A nil/empty map leaves any existing source untouched.
-func (s *customAppStore) writeAppSourceLocked(dir string, files map[string]string) error {
+// writeAppSource replaces src/ with the provided files (so deletes propagate).
+// Each path is sanitized against traversal and build-tool config injection;
+// build artifacts are rejected. A nil/empty map leaves any existing source
+// untouched. Runs under the per-app publish lock (single writer of srcRoot), not
+// the store mutex.
+func (s *customAppStore) writeAppSource(srcRoot string, files map[string]string) error {
 	if len(files) == 0 {
 		return nil
 	}
 	if len(files) > customAppMaxSourceFiles {
 		return newCustomAppCallerError("app: too many source files (%d > %d)", len(files), customAppMaxSourceFiles)
 	}
-	srcRoot := filepath.Join(dir, customAppSourceDir)
-	if err := clearSourceExceptArtifactsLocked(srcRoot); err != nil {
+	if err := clearSourceExceptArtifacts(srcRoot); err != nil {
 		return fmt.Errorf("app: clear source: %w", err)
 	}
 	for rel, content := range files {
@@ -527,7 +635,7 @@ func (s *customAppStore) writeAppSourceLocked(dir string, files map[string]strin
 	return nil
 }
 
-// clearSourceExceptArtifactsLocked removes every top-level entry under src/
+// clearSourceExceptArtifacts removes every top-level entry under src/
 // EXCEPT the preserved build/install artifacts (node_modules/, dist/, .vite/).
 // Replacing the source this way (instead of os.RemoveAll on the whole tree)
 // lets a publish land new source while a live dev server keeps running on the
@@ -535,7 +643,7 @@ func (s *customAppStore) writeAppSourceLocked(dir string, files map[string]strin
 // a deleted dependency tree. Source deletes still propagate because every
 // non-preserved entry (including the app's own nested src/ dir) is removed and
 // rewritten from the new file set.
-func clearSourceExceptArtifactsLocked(srcRoot string) error {
+func clearSourceExceptArtifacts(srcRoot string) error {
 	entries, err := os.ReadDir(srcRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -554,8 +662,26 @@ func clearSourceExceptArtifactsLocked(srcRoot string) error {
 	return nil
 }
 
+// blockedAppSourceBasenames are build-tool config files an app must never carry.
+// They change the SERVER-SIDE build environment, not the app: .npmrc/.bunfig.toml
+// redirect the registry the host's `bun install` resolves from (a supply-chain
+// vector), and .env* files are read by Vite and inlined into the bundle as
+// import.meta.env.VITE_*. The host owns the build config; the agent ships app
+// source only.
+var blockedAppSourceBasenames = map[string]bool{
+	".npmrc":           true,
+	".bunfig.toml":     true,
+	".yarnrc":          true,
+	".yarnrc.yml":      true,
+	".env":             true,
+	".env.local":       true,
+	".env.development": true,
+	".env.production":  true,
+}
+
 // sanitizeAppSourcePath returns a cleaned relative path under src/, or a caller
-// error if it would escape the app dir or names a build artifact.
+// error if it would escape the app dir, names a build artifact, or names a
+// build-tool config file that would tamper with the server-side build.
 func sanitizeAppSourcePath(rel string) (string, error) {
 	rel = filepath.ToSlash(strings.TrimSpace(rel))
 	if rel == "" {
@@ -569,8 +695,14 @@ func sanitizeAppSourcePath(rel string) (string, error) {
 		return "", newCustomAppCallerError("app: invalid source path %q", rel)
 	}
 	switch first := strings.SplitN(filepath.ToSlash(clean), "/", 2)[0]; first {
-	case "node_modules", "dist":
-		return "", newCustomAppCallerError("app: source path %q is a build artifact; exclude node_modules and dist", rel)
+	case "node_modules", "dist", ".vite":
+		return "", newCustomAppCallerError("app: source path %q is a build artifact; exclude node_modules, dist, and .vite", rel)
+	}
+	// Reject build-tool config by basename ANYWHERE in the tree — an .npmrc nested
+	// under a subdir still affects the install run from the project root.
+	base := strings.ToLower(filepath.Base(clean))
+	if blockedAppSourceBasenames[base] || strings.HasPrefix(base, ".env.") {
+		return "", newCustomAppCallerError("app: source path %q is a build-tool config; the host owns the build environment", rel)
 	}
 	return clean, nil
 }

@@ -252,6 +252,7 @@ func TestCustomAppGetVersionNonDestructive(t *testing.T) {
 
 func TestCustomAppSourcePersistence(t *testing.T) {
 	store := newCustomAppStore(t.TempDir())
+	store.buildBundle = stubBuildBundle
 	now := time.Unix(1_700_000_000, 0).UTC()
 	a, err := store.Save(CustomAppWriteRequest{
 		Name: "Tool", HTML: validAppHTML, Actor: "app-builder",
@@ -267,7 +268,15 @@ func TestCustomAppSourcePersistence(t *testing.T) {
 	if src["src/App.tsx"] == "" || src["package.json"] != "{}" {
 		t.Fatalf("source not persisted: %v", src)
 	}
-	// Update replaces the source set wholesale (deletes propagate).
+	// The host always writes the protected contract files into the persisted
+	// source, even when the agent omitted them, so a later edit + build has them.
+	for _, p := range []string{"src/wuphf-bridge.ts", "src/wuphf-inspector.ts", "vite.config.ts"} {
+		if src[p] == "" {
+			t.Fatalf("protected file %q not persisted: have %v", p, keysOf(src))
+		}
+	}
+	// Update replaces the app's own source set wholesale (deletes propagate); the
+	// host-owned protected files persist across the replace.
 	if _, err := store.Save(CustomAppWriteRequest{
 		ID: a.ID, Name: "Tool", HTML: validAppHTML, Actor: "app-builder",
 		Files: map[string]string{"src/App.tsx": "v2"},
@@ -275,19 +284,33 @@ func TestCustomAppSourcePersistence(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 	src2, _ := store.Source(a.ID)
-	if src2["src/App.tsx"] != "v2" || len(src2) != 1 {
+	if src2["src/App.tsx"] != "v2" {
 		t.Fatalf("source not replaced: %v", src2)
+	}
+	// package.json was dropped from the new file set, so it is gone (delete
+	// propagated); only the new app file + the 3 protected files remain.
+	if _, ok := src2["package.json"]; ok {
+		t.Fatalf("dropped file package.json not deleted: %v", keysOf(src2))
+	}
+	if len(src2) != 4 {
+		t.Fatalf("source set = %v, want src/App.tsx + 3 protected files", keysOf(src2))
 	}
 }
 
 func TestCustomAppSourcePathRejection(t *testing.T) {
 	store := newCustomAppStore(t.TempDir())
-	for _, bad := range []string{"../escape.txt", "/abs.txt", "node_modules/x", "dist/index.html", "a/../../b"} {
+	bad := []string{
+		"../escape.txt", "/abs.txt", "node_modules/x", "dist/index.html", "a/../../b",
+		".vite/deps/foo.js", // build cache: the host owns it
+		// build-tool config that would tamper with the SERVER-SIDE build env:
+		".npmrc", ".bunfig.toml", "nested/.npmrc", ".env", ".env.local", ".env.production",
+	}
+	for _, p := range bad {
 		_, err := store.Save(CustomAppWriteRequest{
-			Name: "T", HTML: validAppHTML, Files: map[string]string{bad: "x"},
+			Name: "T", HTML: validAppHTML, Files: map[string]string{p: "x"},
 		}, time.Now())
 		if err == nil || !isCustomAppCallerError(err) {
-			t.Fatalf("path %q: expected caller error, got %v", bad, err)
+			t.Fatalf("path %q: expected caller error, got %v", p, err)
 		}
 	}
 }
