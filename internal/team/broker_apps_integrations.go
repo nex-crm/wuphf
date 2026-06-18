@@ -34,6 +34,7 @@ package team
 // assumption. These handlers re-validate again — defense in depth.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -216,12 +217,81 @@ func (b *Broker) handleAppsIntegrationsCall(w http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
+	// Re-encode the upstream result defensively before returning. Passing the
+	// raw Composio bytes straight through (json.RawMessage) let an oversized or
+	// otherwise unencodable payload — e.g. a 25-message Gmail read carrying full
+	// bodies — make writeJSON emit a 200 header and then fail to write the body,
+	// which the App parsed as an empty string ("Unexpected end of JSON input").
+	bounded, ok := boundIntegrationResult(res.Response)
+	if !ok {
+		writeJSON(w, http.StatusOK, appIntegrationCallResponse{
+			Connected: true,
+			Status:    "error",
+			ReadOnly:  true,
+			Error:     "The " + action.DisplayPlatformName(platform) + " response could not be displayed.",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, appIntegrationCallResponse{
 		Connected: true,
 		Status:    "ok",
 		ReadOnly:  true,
-		Result:    res.Response,
+		Result:    bounded,
 	})
+}
+
+// appIntegrationMaxFieldChars bounds any single string field in an integration
+// result. Full message bodies are the common offender — apps display a snippet,
+// not the raw body — so trimming them keeps the response small (and parseable)
+// without losing what a digest needs.
+const appIntegrationMaxFieldChars = 4096
+
+// boundIntegrationResult parses the upstream result, truncates oversized string
+// fields, and re-marshals to guaranteed-valid, size-bounded JSON. Re-marshaling
+// from a decoded value (rather than streaming the raw upstream bytes) means the
+// output is always well-formed — control chars escaped, invalid UTF-8 replaced —
+// so the encoder cannot fail mid-response and leave the App with an empty body.
+// ok=false only when the upstream is not parseable JSON at all.
+func boundIntegrationResult(raw json.RawMessage) (json.RawMessage, bool) {
+	if len(raw) == 0 {
+		return raw, true
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber() // preserve large integer IDs at full fidelity
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, false
+	}
+	out, err := json.Marshal(boundJSONValue(v))
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// boundJSONValue walks a decoded JSON value in place, truncating any string
+// longer than appIntegrationMaxFieldChars (truncation happens on a byte index;
+// json.Marshal repairs any split UTF-8 rune).
+func boundJSONValue(v any) any {
+	switch t := v.(type) {
+	case string:
+		if len(t) > appIntegrationMaxFieldChars {
+			return t[:appIntegrationMaxFieldChars] + "…[truncated]"
+		}
+		return t
+	case []any:
+		for i := range t {
+			t[i] = boundJSONValue(t[i])
+		}
+		return t
+	case map[string]any:
+		for k, val := range t {
+			t[k] = boundJSONValue(val)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // appIntegrationParamsWithinBounds reports whether the params object serializes
