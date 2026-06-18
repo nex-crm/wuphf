@@ -41,4 +41,11 @@ describe("routineOwner", () => {
     const job: SchedulerJob = { slug: "wiki-lint", system_managed: true };
     expect(routineOwner(job)).toEqual({ slug: null, kind: "system" });
   });
+
+  it("falls back to a non-vendor provider as an agent slug for legacy jobs", () => {
+    // Older jobs stored the owning agent slug in `provider`. A non-vendor value
+    // there should still resolve as that agent.
+    const job: SchedulerJob = { slug: "old-job", provider: "my-legacy-bot" };
+    expect(routineOwner(job)).toEqual({ slug: "my-legacy-bot", kind: "agent" });
+  });
 });

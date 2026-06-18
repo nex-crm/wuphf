@@ -79,6 +79,14 @@ func (l *Launcher) raisePlanApprovalAfterTurn(taskID, slug, plan string) {
 	if l == nil || l.broker == nil || strings.TrimSpace(taskID) == "" {
 		return
 	}
+	// A planning turn that produced no plan (timed out, crashed, or was blocked
+	// before writing anything) must NOT raise a vacuous "approve this empty
+	// plan" gate the human could click through. Skip it; the task stays in
+	// Planning and the stall watchdog surfaces the silent owner. Re-raise
+	// happens on the next dispatch once a real plan exists (idempotent).
+	if strings.TrimSpace(plan) == "" {
+		return
+	}
 	l.broker.RaisePlanApproval(taskID, slug, plan)
 }
 

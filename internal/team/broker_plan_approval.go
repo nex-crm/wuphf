@@ -40,7 +40,7 @@ func (b *Broker) issueShouldPlanFirstLocked(task *teamTask, actor string) bool {
 	if isInternalTaskActor(actor) {
 		return false
 	}
-	if b != nil && b.disablePlanFirstDefault {
+	if b.disablePlanFirstDefault {
 		return false
 	}
 	return true
@@ -145,6 +145,15 @@ func (b *Broker) startApprovedPlanTaskLocked(task *teamTask, actor string) {
 	if b == nil || task == nil || task.LifecycleState != LifecycleStatePlanning {
 		return
 	}
+	// Sync the worktree BEFORE flipping to Running so a failed sync never lands a
+	// dispatched task on an unsynced tree (the mutation-service start path rolls
+	// back on the same error). On failure leave the task in Planning — the
+	// answered interview means the owner re-plans + re-raises on the next
+	// dispatch — rather than dispatching execution against a broken worktree.
+	if err := b.syncTaskWorktreeLocked(task); err != nil {
+		log.Printf("broker: worktree sync for approved plan %q failed, staying in planning: %v", task.ID, err)
+		return
+	}
 	if err := b.applyLifecycleStateLocked(task, LifecycleStateRunning); err != nil {
 		log.Printf("broker: start approved plan %q: %v", task.ID, err)
 		return
@@ -154,9 +163,6 @@ func (b *Broker) startApprovedPlanTaskLocked(task *teamTask, actor string) {
 	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 	b.queueTaskBehindActiveOwnerLaneLocked(task)
 	b.scheduleTaskLifecycleLocked(task)
-	if err := b.syncTaskWorktreeLocked(task); err != nil {
-		log.Printf("broker: worktree sync for approved plan %q: %v", task.ID, err)
-	}
 	b.appendActionLocked("task_updated", "office", channel, actor,
 		truncateSummary(task.Title+" [plan approved]", 140), task.ID)
 }

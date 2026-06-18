@@ -49,7 +49,10 @@ func normalizeTitleTokens(title string) []string {
 // trailing "s" from tokens longer than three letters; anything fancier risks
 // over-merging distinct words, and this is only a dedup heuristic.
 func stemTitleToken(tok string) string {
-	if len(tok) > 3 && strings.HasSuffix(tok, "s") && !strings.HasSuffix(tok, "ss") {
+	// Skip "ss" (address) and "us" (focus, status, nexus) endings — stripping
+	// their trailing "s" produces non-words and never reflects a real plural.
+	if len(tok) > 3 && strings.HasSuffix(tok, "s") &&
+		!strings.HasSuffix(tok, "ss") && !strings.HasSuffix(tok, "us") {
 		return tok[:len(tok)-1]
 	}
 	return tok
@@ -97,7 +100,11 @@ func titleTokenSimilarity(a, b string) float64 {
 // treated as the same intent. Set conservatively high: dedup with title+owner
 // only already risks over-merging (see findReusableTaskLocked), so the fuzzy
 // widening must stay tight enough that genuinely-distinct work is not collapsed.
-const titleSimilarityThreshold = 0.8
+// 0.85 specifically clears the subset trap — a 4-token title that is a strict
+// subset of a 5-token title scores 4/5=0.8, which must NOT merge (those are a
+// scope refinement, not a duplicate). Exact restatements still match via the
+// normalized-key equality check, which is independent of this threshold.
+const titleSimilarityThreshold = 0.85
 
 // titlesAreSimilar reports whether two titles name the same work for dedup /
 // shallow-subtask purposes. True when their normalized keys match exactly OR

@@ -45,6 +45,11 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		return err
 	}
 
+	// Resolve plan posture ONCE for the whole turn. The task could transition
+	// out of Planning (e.g. a concurrent human plan-approval) while this
+	// subprocess runs; capturing it here keeps the sandbox flags and the
+	// end-of-turn plan harvest consistent instead of re-reading mid-flight.
+	planning := l.resolveTurnPosture(ctx, slug) == posturePlan
 	args := make([]string, 0, 16+len(overrides)*2)
 	// Sandbox posture for this turn:
 	//   - plan posture (task in LifecycleStatePlanning): -s read-only — Codex's
@@ -59,7 +64,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	//     edits.
 	//   - office / non-editing execute turn: workspace-write.
 	switch {
-	case l.resolveTurnPosture(ctx, slug) == posturePlan:
+	case planning:
 		args = append(args, "-a", "never", "-s", "read-only")
 	case l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug):
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
@@ -347,7 +352,6 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(ctx, slug), result.Usage)
 	}
 	relay.Flush()
-	planning := l.resolveTurnPosture(ctx, slug) == posturePlan
 	planText := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))
 	if text := planText; text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)

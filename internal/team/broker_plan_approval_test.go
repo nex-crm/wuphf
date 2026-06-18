@@ -117,6 +117,81 @@ func TestShallowSubtaskRestatingParentRejected(t *testing.T) {
 	}
 }
 
+// RaisePlanApproval is idempotent: a second call for the same planning task
+// reuses the existing interview instead of stacking a duplicate.
+func TestRaisePlanApprovalIdempotent(t *testing.T) {
+	b := newPlanApprovalBroker(t)
+	created, err := b.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Build the billing system",
+		Owner: "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id1 := b.RaisePlanApproval(created.Task.ID, "eng", "the plan")
+	id2 := b.RaisePlanApproval(created.Task.ID, "eng", "the plan again")
+	if id1 == "" || id1 != id2 {
+		t.Fatalf("expected idempotent reuse, got id1=%q id2=%q", id1, id2)
+	}
+	b.mu.Lock()
+	n := 0
+	for i := range b.requests {
+		if requestIsPlanApproval(b.requests[i]) && b.requests[i].IssueID == created.Task.ID {
+			n++
+		}
+	}
+	b.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("expected exactly one plan-approval interview, got %d", n)
+	}
+}
+
+// Answering the plan-approval interview with anything other than approve leaves
+// the task in Planning so the owner can revise.
+func TestRejectPlanLeavesTaskInPlanning(t *testing.T) {
+	b := newPlanApprovalBroker(t)
+	created, err := b.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Ship the redesign",
+		Owner: "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	reqID := b.RaisePlanApproval(created.Task.ID, "eng", "the plan")
+	if reqID == "" {
+		t.Fatal("expected a plan-approval interview")
+	}
+	if code, msg := b.answerRequestFromActor("human", reqID, "reject", "", ""); code != 200 {
+		t.Fatalf("answer reject: code=%d msg=%q", code, msg)
+	}
+	if task := b.TaskByID(created.Task.ID); task == nil || task.LifecycleState != LifecycleStatePlanning {
+		t.Fatalf("rejected plan must leave task in Planning, got %v", task)
+	}
+}
+
+// Completing a task that is still in Planning is refused — there is no delivered
+// work, only a plan awaiting approval.
+func TestCompleteFromPlanningRefused(t *testing.T) {
+	b := newPlanApprovalBroker(t)
+	created, err := b.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Write the launch post",
+		Owner: "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Give the owner access to the task's minted channel so the complete reaches
+	// the planning gate rather than the channel-access guard.
+	ensureTestMemberAccess(b, created.Task.Channel, "eng", "Eng")
+	_, err = b.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: created.Task.Channel, CreatedBy: "eng"})
+	if err == nil {
+		t.Fatal("expected complete on a planning task to be refused")
+	}
+	if !strings.Contains(err.Error(), "planning") {
+		t.Fatalf("error should explain the planning gate, got %v", err)
+	}
+}
+
 // A sub-issue duplicating an existing sibling is rejected.
 func TestDuplicateSiblingSubtaskRejected(t *testing.T) {
 	b := newPlanApprovalBroker(t)
