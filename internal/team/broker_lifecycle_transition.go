@@ -44,15 +44,19 @@ import (
 var ErrIssueNotApproved = errors.New("issue not approved for dispatch")
 
 // isExecutableTeamTaskStatus reports whether a LifecycleState permits dispatch
-// of a turn to the owner. Running and Approved dispatch EXECUTION turns.
+// of a turn to the owner. Running and Approved dispatch EXECUTION turns;
+// Planning dispatches a PLAN-ONLY turn (the owner writes a plan, does not change
+// the repo — enforced by the provider's native read-only/plan permission mode,
+// see resolveTurnPosture, plus the plan-only work packet, see planModeDirective).
 // All other states — Drafting, Intake, Review, ChangesRequested, etc. — must NOT
 // trigger any owner turn.
 //
 // This is the single chokepoint: every dispatch entry point in the broker must
 // call isExecutableTeamTaskStatus before enqueuing work. Comments are always
-// allowed in any state.
+// allowed in any state. Callers that must distinguish "plan only" from "execute"
+// check the state directly (Planning vs Running/Approved).
 func isExecutableTeamTaskStatus(s LifecycleState) bool {
-	return s == LifecycleStateRunning || s == LifecycleStateApproved
+	return s == LifecycleStateRunning || s == LifecycleStateApproved || s == LifecycleStatePlanning
 }
 
 // isPreExecutionLifecycleState reports whether a task has not yet entered
@@ -63,7 +67,13 @@ func isExecutableTeamTaskStatus(s LifecycleState) bool {
 // `approved` on zero-work tasks ([19:04], shot 28).
 func isPreExecutionLifecycleState(s LifecycleState) bool {
 	switch s {
-	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady, LifecycleStateQueuedBehindOwner:
+	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady, LifecycleStateQueuedBehindOwner,
+		LifecycleStatePlanning:
+		// Planning is pre-execution: the owner is writing a plan read-only, no
+		// work product exists yet. Approving a planning task is "start the work"
+		// (Planning→Running), never a done-claim — so the verification/DoD gate
+		// and the parked-complete gate treat it the same as other pre-execution
+		// states.
 		return true
 	}
 	return false
@@ -129,6 +139,21 @@ const (
 	// label via STATE_PILL_TOKENS on the frontend).
 	LifecycleStateDrafting LifecycleState = "drafting"
 
+	// LifecycleStatePlanning is the autonomous-planning phase of "Plan mode".
+	// A plan-first task enters Planning so the owner is DISPATCHED to write a
+	// plan (into its own notebook) before any execution — the turn runs in the
+	// provider's NATIVE read-only/plan permission mode (Claude --permission-mode
+	// plan, Codex -s read-only; see resolveTurnPosture) and the work packet is
+	// plan-only (explore, ask the human any genuine questions via
+	// human_interview, write the plan, then stop). It is executable (the owner
+	// must be woken to plan), Status="in_progress" so it shows as actively
+	// worked, and maps to the in_progress display stage. Approving the plan
+	// (via the plan-approval human_interview, or a human task approve) transitions
+	// Planning→Running, after which the owner executes against its own plan and
+	// may create the sub-tasks the plan called for. A task that skips Plan mode
+	// goes straight to Running.
+	LifecycleStatePlanning LifecycleState = "planning"
+
 	// LifecycleStateArchived marks work that has been intentionally moved
 	// off the active board. Archived tasks are terminal and are excluded
 	// from default active listings (same gate as done/approved), but are
@@ -145,10 +170,6 @@ const (
 //
 //   - "merged" -> "approved" (per the artifact-and-approve vocabulary
 //     alignment from /plan-design-review + /plan-eng-review on 2026-05-11).
-//   - "planning" -> "running" (core-loop R3 removed Plan mode and its
-//     LifecycleStatePlanning state; a persisted Planning task was an owner
-//     mid-plan with status=in_progress, so it resumes as a live Running
-//     task — the same state a plan-first-OFF task landed in).
 //   - "blocked_on_pr_merge" -> "blocked" (the PR-style review/merge model is
 //     retired; the state was always the generic recoverable-blocked state, so
 //     it keeps its behavior under the honest name. Existing prod snapshots
@@ -164,8 +185,6 @@ func normalizeLegacyLifecycleStateName(s LifecycleState) LifecycleState {
 	switch strings.ToLower(strings.TrimSpace(string(s))) {
 	case "merged":
 		return LifecycleStateApproved
-	case "planning":
-		return LifecycleStateRunning
 	case "blocked_on_pr_merge":
 		return LifecycleStateBlocked
 	}
@@ -180,6 +199,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateDrafting,
 		LifecycleStateIntake,
 		LifecycleStateReady,
+		LifecycleStatePlanning,
 		LifecycleStateRunning,
 		LifecycleStateReview,
 		LifecycleStateDecision,
@@ -227,7 +247,10 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	// not confused with a waiting-on-upstream state. isExecutableTeamTaskStatus
 	// (above) is the dispatch guard that refuses execution turns for tasks in
 	// this state.
-	LifecycleStateDrafting:          {PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false},
+	LifecycleStateDrafting: {PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false},
+	// Planning: owner is dispatched to write a plan. Status="in_progress" +
+	// executable so the planning turn fires; PipelineStage="plan".
+	LifecycleStatePlanning:          {PipelineStage: "plan", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
 	LifecycleStateIntake:            {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateReady:             {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateRunning:           {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
@@ -282,7 +305,7 @@ const (
 // lifecycleStageFor maps a LifecycleState to its display LifecycleStage.
 // The mapping is:
 //   - backlog     ← drafting, intake, ready, unknown
-//   - in_progress ← running, review, changes_requested
+//   - in_progress ← planning, running, review, changes_requested
 //   - blocked     ← blocked, queued_behind_owner
 //   - needs_human ← decision
 //   - done        ← approved
@@ -294,7 +317,7 @@ func lifecycleStageFor(s LifecycleState) LifecycleStage {
 	switch s {
 	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady, LifecycleStateUnknown:
 		return StageBacklog
-	case LifecycleStateRunning, LifecycleStateReview, LifecycleStateChangesRequested:
+	case LifecycleStatePlanning, LifecycleStateRunning, LifecycleStateReview, LifecycleStateChangesRequested:
 		return StageInProgress
 	case LifecycleStateBlocked, LifecycleStateQueuedBehindOwner:
 		return StageBlocked
@@ -337,12 +360,10 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true}:            LifecycleStateQueuedBehindOwner,
 	{PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false}:                   LifecycleStateApproved,
 	{PipelineStage: "review", ReviewState: "rejected", Status: "rejected", Blocked: true}:              LifecycleStateRejected,
-	// Plan mode (removed, core-loop R3) wrote {plan, pending_review,
-	// in_progress} while a task's owner was planning. Resolve to Running so
-	// old persisted Planning tasks resume as live work (same landing state
-	// as the "planning" lifecycle-state shim in
-	// normalizeLegacyLifecycleStateName).
-	{PipelineStage: "plan", ReviewState: "pending_review", Status: "in_progress", Blocked: false}: LifecycleStateRunning,
+	// Plan mode writes {plan, pending_review, in_progress} while a task's
+	// owner is planning. Back-derive to Planning so persisted planning tasks
+	// resume in the planning phase (read-only, awaiting plan approval).
+	{PipelineStage: "plan", ReviewState: "pending_review", Status: "in_progress", Blocked: false}: LifecycleStatePlanning,
 
 	// changes_requested back-derivation. Same legacy tuple as Running
 	// EXCEPT for the reviewState marker, so the inverse map distinguishes
@@ -472,6 +493,18 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 			derived = LifecycleStateRunning
 		default:
 			derived = LifecycleStateReady
+		}
+	}
+	// Plan mode: legacy fields can't distinguish Planning (status=in_progress,
+	// stage=plan) from Running, so once a task is in Planning keep it there
+	// across legacy reindexes while it is still pre-execution. Only the explicit
+	// plan-approval transition (Planning→Running) or a submit/terminal action —
+	// which change the legacy status away from in_progress/open — move it out of
+	// Planning.
+	if task.LifecycleState == LifecycleStatePlanning {
+		switch strings.ToLower(strings.TrimSpace(task.status)) {
+		case "", "open", "in_progress":
+			derived = LifecycleStatePlanning
 		}
 	}
 	// This helper is used after legacy mutation paths have deliberately

@@ -123,6 +123,12 @@ func newOfficeEvalFixture(dir string) (*officeEvalFixture, error) {
 
 	b.mu.Lock()
 	b.wikiWorker = worker
+	// The eval exercises post-execution mechanics (intake, lifecycle, verification,
+	// review). Structured planning is the production default but has its own
+	// dedicated coverage (broker_plan_approval_test.go); disable it here so each
+	// scenario does not have to thread a human plan-approval through every create.
+	// TODO: wire planning through the eval scenarios as first-class coverage.
+	b.disablePlanFirstDefault = true
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
 		{Slug: "eng", Name: "Engineer"},

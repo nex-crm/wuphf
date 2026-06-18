@@ -44,6 +44,9 @@ func completionHookCreateDefinedTask(t *testing.T, b *Broker) string {
 	}); err != nil {
 		t.Fatalf("define: %v", err)
 	}
+	// New top-level issues land in Planning (structured planning); approve the
+	// plan so this fixture is a running task ready for completion-gate testing.
+	startPlanning(t, b, created.Task.ID)
 	return created.Task.ID
 }
 
@@ -146,6 +149,7 @@ func TestArtifactGate_LegacyTaskWithoutDefinitionUnaffected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	startPlanning(t, b, created.Task.ID)
 	if err := finishTask(t, b, created.Task.ID, ""); err != nil {
 		t.Fatalf("legacy task must complete without artifact: %v", err)
 	}
@@ -183,6 +187,7 @@ func TestReopen_OwnedTaskReturnsToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	startPlanning(t, b, created.Task.ID)
 	if err := finishTask(t, b, created.Task.ID, ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}

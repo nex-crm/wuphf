@@ -142,6 +142,7 @@ export function TaskActivityStream({
 function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
   switch (state) {
     case "running":
+    case "planning":
     case "intake":
       return "running";
     case "blocked":

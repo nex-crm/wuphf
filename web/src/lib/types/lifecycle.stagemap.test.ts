@@ -14,6 +14,7 @@ import stageMap from "./lifecycleStageMap.json";
 // the Go oracle when a wire state is added.
 const EXPECTED_WIRE_STATES = [
   "drafting",
+  "planning",
   "intake",
   "ready",
   "running",

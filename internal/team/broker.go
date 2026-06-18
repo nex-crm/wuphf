@@ -72,7 +72,14 @@ type Broker struct {
 	sessionMode       string
 	oneOnOneAgent     string
 	focusMode         bool
-	tasks             []teamTask
+	// disablePlanFirstDefault turns OFF the structured-planning default
+	// (issueShouldPlanFirstLocked) so new top-level issues land Running instead
+	// of Planning. Zero value (false) keeps planning ON in production. The
+	// office-eval fixture sets it true so its post-execution mechanic checks are
+	// not gated behind plan approval — planning has dedicated coverage in
+	// broker_plan_approval_test.go. Guarded by mu.
+	disablePlanFirstDefault bool
+	tasks                   []teamTask
 	// lifecycleIndex is the inverse-index map maintained by the
 	// broker_lifecycle_transition.go layer. Inbox queries for "all tasks
 	// in state X" are O(1) lookups against this map instead of O(N) scans

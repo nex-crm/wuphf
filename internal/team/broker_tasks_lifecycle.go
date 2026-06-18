@@ -635,7 +635,11 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		if isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
-		sameTitle := title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title)
+		// Title match is fuzzy (normalized + token-set similar), not byte-exact:
+		// near-duplicate restatements of the same goal ("Ship the MVP" vs "Build
+		// the first MVP slice") must collapse onto the existing task instead of
+		// spawning a duplicate. See titlesAreSimilar.
+		sameTitle := title != "" && titlesAreSimilar(task.Title, title)
 		if threadID != "" && strings.TrimSpace(task.ThreadID) == threadID {
 			if sameTitle && taskOwnerMatches(task, owner) {
 				taskHasScopedIdentity := taskCanMatchScopedIdentity(task, match)

@@ -32,6 +32,7 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		{LifecycleStateDrafting, "draft", "pending_review", "open", false},
 		{LifecycleStateIntake, "triage", "pending_review", "open", false},
 		{LifecycleStateReady, "triage", "pending_review", "open", false},
+		{LifecycleStatePlanning, "plan", "pending_review", "in_progress", false},
 		{LifecycleStateRunning, "implement", "pending_review", "in_progress", false},
 		{LifecycleStateReview, "review", "ready_for_review", "in_progress", false},
 		{LifecycleStateDecision, "review", "ready_for_review", "in_progress", false},

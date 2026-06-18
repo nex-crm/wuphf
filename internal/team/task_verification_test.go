@@ -99,8 +99,9 @@ func createVerifiedTask(t *testing.T, b *Broker, spec string) string {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Creation is the authorization: the owner-set issue lands running
-	// immediately, with the DoD check binding on completion.
+	// New top-level issues land in Planning; approve the plan so the task is
+	// running with the DoD check binding on completion.
+	startPlanning(t, b, resp.Task.ID)
 	return resp.Task.ID
 }
 

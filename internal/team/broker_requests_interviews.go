@@ -955,6 +955,9 @@ func (b *Broker) applyRequestAnswerLocked(req *humanInterview, answer *interview
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	pendingCascade = append(pendingCascade, b.unblockTasksForAnsweredRequestLocked(*req)...)
 	b.maybeCreateApprovedSelfHealTaskLocked(*req)
+	// Plan-approval gate: approving a planning task's plan starts it
+	// (Planning→Running + dispatch). Any other answer leaves it in Planning.
+	b.applyPlanApprovalAnswerLocked(*req, answer, actor)
 	b.appendActionLocked("request_answered", "office", req.Channel, actor,
 		truncateSummary(formatRequestAnswerMessage(*req, *answer), 140), req.ID)
 	return pendingCascade

@@ -634,15 +634,24 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		rollbackTask := func() {
 			mutationSnapshot.restore(b)
 		}
-		if existing := b.findReusableTaskLocked(taskReuseMatch{
-			Channel:          channel,
-			Title:            strings.TrimSpace(body.Title),
-			ThreadID:         strings.TrimSpace(body.ThreadID),
-			Owner:            strings.TrimSpace(body.Owner),
-			PipelineID:       strings.TrimSpace(body.PipelineID),
-			SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
-			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
-		}); existing != nil {
+		// Sub-issue creates skip the channel-agnostic reuse-merge: with fuzzy
+		// title matching it could otherwise merge a sub-issue into its own
+		// (similarly-titled) parent or a sibling, silently dropping the
+		// parent_issue_id. Sub-issue dedup is owned by the sibling / shallow
+		// guards below, which return a clear rejection instead of a silent merge.
+		var existing *teamTask
+		if strings.TrimSpace(body.ParentIssueID) == "" {
+			existing = b.findReusableTaskLocked(taskReuseMatch{
+				Channel:          channel,
+				Title:            strings.TrimSpace(body.Title),
+				ThreadID:         strings.TrimSpace(body.ThreadID),
+				Owner:            strings.TrimSpace(body.Owner),
+				PipelineID:       strings.TrimSpace(body.PipelineID),
+				SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
+				SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
+			})
+		}
+		if existing != nil {
 			beforeStatus := existing.status
 			if details := strings.TrimSpace(body.Details); details != "" {
 				existing.Details = details
@@ -786,6 +795,51 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 						nil,
 					)
 				}
+				// Plan-gate: the parent is still in structured planning, so its
+				// plan has not been approved. Creating sub-issues now is exactly
+				// the premature decomposition the planning phase exists to stop —
+				// refuse until the human approves the plan (Planning→Running).
+				// Internal recovery actors are exempt (migration / fold-in).
+				if parent.LifecycleState == LifecycleStatePlanning && !isInternalTaskActor(actor) {
+					rollbackTask()
+					return TaskResponse{}, taskMutationError(
+						TaskMutationConflict,
+						fmt.Sprintf("parent %s is still in planning — its plan has not been approved yet. Finish the plan and wait for the human to approve it before creating sub-tasks.", parent.ID),
+						nil,
+					)
+				}
+				// Shallow-subtask guard: a sub-issue that merely restates its
+				// parent ("Ship the MVP" → "Ship the MVP") adds a board row but
+				// no decomposition. Reject it (internal actors exempt).
+				if !isInternalTaskActor(actor) && titlesAreSimilar(task.Title, parent.Title) {
+					rollbackTask()
+					return TaskResponse{}, taskMutationError(
+						TaskMutationConflict,
+						fmt.Sprintf("sub-task %q just restates parent %s — break the parent into distinct, non-overlapping pieces instead of duplicating it.", strings.TrimSpace(task.Title), parent.ID),
+						nil,
+					)
+				}
+				// Sibling-dedup guard: refuse a sub-issue whose title duplicates
+				// an existing, non-terminal sibling under the same parent.
+				if !isInternalTaskActor(actor) {
+					for j := range b.tasks {
+						sib := &b.tasks[j]
+						if strings.TrimSpace(sib.ParentIssueID) != task.ParentIssueID {
+							continue
+						}
+						if isTerminalTeamTaskStatus(sib.status) {
+							continue
+						}
+						if titlesAreSimilar(task.Title, sib.Title) {
+							rollbackTask()
+							return TaskResponse{}, taskMutationError(
+								TaskMutationConflict,
+								fmt.Sprintf("sub-task %q duplicates existing sibling %s (%q) under parent %s — comment on it or pick a distinct slice instead.", strings.TrimSpace(task.Title), sib.ID, strings.TrimSpace(sib.Title), parent.ID),
+								nil,
+							)
+						}
+					}
+				}
 			}
 		}
 		if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
@@ -828,7 +882,16 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			case created.blocked:
 				target = LifecycleStateQueuedBehindOwner
 			case strings.TrimSpace(created.Owner) != "" && !isAutoOwner(created.Owner):
-				target = LifecycleStateRunning
+				// Structured-planning default: a top-level work Issue with a
+				// real owner enters Planning so the owner plans (read-only) and
+				// the human approves before execution / sub-task creation; only
+				// then does it run. Sub-issues and internal recovery actors skip
+				// planning (issueShouldPlanFirstLocked) and land Running.
+				if b.issueShouldPlanFirstLocked(created, actor) {
+					target = LifecycleStatePlanning
+				} else {
+					target = LifecycleStateRunning
+				}
 			}
 			// Blank the legacy-derived LifecycleState before applying the
 			// landing state so the prev=="" guard in applyLifecycleStateLocked
@@ -948,6 +1011,16 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 					nil,
 				)
 			}
+			// A planning task has produced a plan, not delivered work — it cannot
+			// be completed/submitted until its plan is approved and it starts
+			// running. Internal actors are exempt (recovery paths).
+			if task.LifecycleState == LifecycleStatePlanning && !isInternalTaskActor(actor) {
+				return TaskResponse{}, taskMutationError(
+					TaskMutationConflict,
+					fmt.Sprintf("task %s is still in planning — its plan must be approved before work can be %sd.", task.ID, strings.ReplaceAll(action, "_", " ")),
+					nil,
+				)
+			}
 		}
 		// Approve on a parked task means "start the work", never "accept
 		// delivered work" — there is no work. A HUMAN approve starts the
@@ -955,7 +1028,12 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		// parked tasks); an agent approve is refused because un-parking a
 		// deliberately parked task belongs to the human (v3 J2 [19:04]:
 		// zero-work tasks closed terminally at the click).
-		if action == "approve" && task.LifecycleState == LifecycleStateDrafting {
+		// Planning shares the "approve = start the work" semantics: approving a
+		// task's plan is the human's go-ahead to execute (Planning→Running). It
+		// is human-only for the same reason parked starts are — an agent must
+		// not green-light its own plan. The plan-approval human_interview drives
+		// this too (applyPlanApprovalAnswerLocked); this is the direct-action path.
+		if action == "approve" && (task.LifecycleState == LifecycleStateDrafting || task.LifecycleState == LifecycleStatePlanning) {
 			if !isHumanMessageSender(actor) && !isInternalTaskActor(actor) {
 				return TaskResponse{}, taskMutationError(
 					TaskMutationForbidden,

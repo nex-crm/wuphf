@@ -71,6 +71,17 @@ func (l *Launcher) turnTaskForCtx(ctx context.Context, slug string) *teamTask {
 	return l.agentActiveTask(slug)
 }
 
+// raisePlanApprovalAfterTurn surfaces a finished planning turn's plan for human
+// approval via the broker. No-op when the task is no longer in Planning (already
+// approved/changed) or the broker is unavailable. plan is the harvested plan
+// text used as the approval question's context.
+func (l *Launcher) raisePlanApprovalAfterTurn(taskID, slug, plan string) {
+	if l == nil || l.broker == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	l.broker.RaisePlanApproval(taskID, slug, plan)
+}
+
 // turnTaskIDForCtx returns the running turn's task id, preferring the id carried
 // on ctx over the legacy agentActiveTaskID(slug) lookup. Used for stream/event
 // labelling so each parallel instance's output is tagged with its own task.

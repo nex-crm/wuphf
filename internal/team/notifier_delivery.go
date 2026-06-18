@@ -180,6 +180,13 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		channel = "general"
 	}
 	notification, contextUsed := l.notifyCtx().BuildTaskExecutionPacketWithContext(target.Slug, action, task, content)
+	// Plan mode: a task in Planning gets a plan-only directive in front of the
+	// packet so the owner asks the human its open questions, writes a plan, and
+	// stops before executing or decomposing. The provider's native read-only
+	// mode (resolveTurnPosture) is the hard enforcement; this is the prompt half.
+	if task.LifecycleState == LifecycleStatePlanning {
+		notification = planModeDirective(task) + notification
+	}
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
 		prompt := headlessSandboxNote() + notification
 		l.enqueueHeadlessCodexTurnRecord(target.Slug, headlessCodexTurn{
