@@ -131,6 +131,16 @@ CREATE TABLE IF NOT EXISTS article_categories (
   PRIMARY KEY (article_path, category_slug)
 );
 CREATE INDEX IF NOT EXISTS idx_article_categories_cat ON article_categories(category_slug);
+
+-- category_parents: derived category-to-parent edges (the subcategory tree).
+-- Source of truth is a category page's parent_categories frontmatter at
+-- team/.categories/{slug}.md. Rebuildable cache; folds into CanonicalHashAll.
+CREATE TABLE IF NOT EXISTS category_parents (
+  category_slug TEXT NOT NULL,
+  parent_slug   TEXT NOT NULL,
+  PRIMARY KEY (category_slug, parent_slug)
+);
+CREATE INDEX IF NOT EXISTS idx_category_parents_parent ON category_parents(parent_slug);
 `
 
 func (s *SQLiteFactStore) applySchema(ctx context.Context) error {
@@ -616,6 +626,75 @@ func (s *SQLiteFactStore) ListAllCategories(ctx context.Context) ([]CategoryCoun
 	return out, rows.Err()
 }
 
+// UpsertCategoryParents replaces a category's parent edges in one transaction
+// (delete-then-insert). An empty/nil slice clears them.
+func (s *SQLiteFactStore) UpsertCategoryParents(ctx context.Context, category string, parents []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite: begin category_parents tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful Commit
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM category_parents WHERE category_slug = ?`, category); err != nil {
+		return fmt.Errorf("sqlite: clear parents for %s: %w", category, err)
+	}
+	seen := make(map[string]bool, len(parents))
+	for _, p := range parents {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO category_parents (category_slug, parent_slug) VALUES (?, ?)`,
+			category, p); err != nil {
+			return fmt.Errorf("sqlite: insert parent %s for %s: %w", p, category, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: commit category_parents for %s: %w", category, err)
+	}
+	return nil
+}
+
+func (s *SQLiteFactStore) ListCategoryParents(ctx context.Context, category string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT parent_slug FROM category_parents
+		 WHERE category_slug = ? ORDER BY parent_slug ASC`, category)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list parents for %s: %w", category, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteFactStore) ListAllCategoryParents(ctx context.Context) ([]CategoryParent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT category_slug, parent_slug FROM category_parents
+		 ORDER BY category_slug ASC, parent_slug ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list all category parents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CategoryParent
+	for rows.Next() {
+		var cp CategoryParent
+		if err := rows.Scan(&cp.Category, &cp.Parent); err != nil {
+			return nil, err
+		}
+		out = append(out, cp)
+	}
+	return out, rows.Err()
+}
+
 // CanonicalHashFacts implements §7.4: sha256 over all fact rows sorted by ID.
 // Serialisation is identical to inMemoryFactStore so the contract test passes
 // against both backends from the same markdown corpus. ReinforcedAt is
@@ -845,6 +924,31 @@ func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) 
 		h.Write([]byte{'\n'})
 	}
 	if err := catRows.Err(); err != nil {
+		return "", err
+	}
+
+	// --- category parents (sorted by category_slug, parent_slug) ---
+	// Same CategoryParent serialisation as the in-memory backend.
+	cpRows, err := s.db.QueryContext(ctx,
+		`SELECT category_slug, parent_slug FROM category_parents
+		 ORDER BY category_slug ASC, parent_slug ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll category_parents: %w", err)
+	}
+	defer func() { _ = cpRows.Close() }()
+	for cpRows.Next() {
+		var cp CategoryParent
+		if err := cpRows.Scan(&cp.Category, &cp.Parent); err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(cp)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	if err := cpRows.Err(); err != nil {
 		return "", err
 	}
 

@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { WikiCatalogEntry } from "../../api/wiki";
+import type { DiscoveredCategory, WikiCatalogEntry } from "../../api/wiki";
 import WikiCategoryPage, { categoryLabel } from "./WikiCategoryPage";
 
 const CATALOG: WikiCatalogEntry[] = [
@@ -127,6 +127,52 @@ describe("<WikiCategoryPage>", () => {
     expect(
       screen.getByRole("link", { name: "Onboarding" }),
     ).toBeInTheDocument();
+  });
+
+  it("renders the subcategory tree — parents and children", () => {
+    // sales ← (children) and sales → revenue (parent).
+    const categories: DiscoveredCategory[] = [
+      { slug: "sales", title: "Sales", article_count: 0, parents: ["revenue"] },
+      {
+        slug: "enterprise-sales",
+        title: "Enterprise Sales",
+        article_count: 0,
+        parents: ["sales"],
+      },
+      { slug: "revenue", title: "Revenue", article_count: 0, parents: [] },
+    ];
+    const onNavigate = vi.fn();
+    render(
+      <WikiCategoryPage
+        slug="sales"
+        catalog={CATALOG}
+        categories={categories}
+        onNavigate={onNavigate}
+      />,
+    );
+    // Parent link: "Part of: Revenue".
+    const parentBox = screen.getByLabelText("Parent categories");
+    fireEvent.click(within(parentBox).getByRole("link", { name: "Revenue" }));
+    expect(onNavigate).toHaveBeenCalledWith("_category/revenue");
+
+    // Subcategories section lists the child "Enterprise Sales".
+    const subcats = screen.getByLabelText("Subcategories");
+    fireEvent.click(
+      within(subcats).getByRole("link", { name: "Enterprise Sales" }),
+    );
+    expect(onNavigate).toHaveBeenCalledWith("_category/enterprise-sales");
+  });
+
+  it("hides the tree sections when no category data is provided", () => {
+    render(
+      <WikiCategoryPage
+        slug="people"
+        catalog={CATALOG}
+        onNavigate={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("Parent categories")).toBeNull();
+    expect(screen.queryByLabelText("Subcategories")).toBeNull();
   });
 
   it("lists sibling categories that exist only via explicit categories", () => {

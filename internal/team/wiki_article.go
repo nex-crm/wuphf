@@ -167,7 +167,9 @@ func (r *Repo) walkCatalogArticles(includeArchived bool, fn func(rel string, con
 			rel, relErr := filepath.Rel(r.Root(), path)
 			if relErr == nil {
 				slash := filepath.ToSlash(rel)
-				if slash == "team/inbox" || slash == "team/skills" {
+				// team/.categories/ holds category-definition pages (the
+				// subcategory tree), not articles — keep them out of the catalog.
+				if slash == "team/inbox" || slash == "team/skills" || slash == "team/.categories" {
 					return filepath.SkipDir
 				}
 			}

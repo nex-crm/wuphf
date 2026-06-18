@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -66,16 +67,11 @@ func TestWikiCategoriesCacheRefresh(t *testing.T) {
 
 	got := cache.Categories()
 	want := []DiscoveredCategory{
-		{Slug: "ai-agents", Title: "Ai Agents", ArticleCount: 2},
-		{Slug: "revenue-operations", Title: "Revenue Operations", ArticleCount: 1},
+		{Slug: "ai-agents", Title: "Ai Agents", ArticleCount: 2, Parents: []string{}},
+		{Slug: "revenue-operations", Title: "Revenue Operations", ArticleCount: 1, Parents: []string{}},
 	}
-	if len(got) != len(want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Categories() = %+v, want %+v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Categories()[%d] = %+v, want %+v", i, got[i], want[i])
-		}
 	}
 
 	// The empty→non-empty transition must have emitted exactly one event.
@@ -83,6 +79,35 @@ func TestWikiCategoriesCacheRefresh(t *testing.T) {
 		t.Error("expected a categories_updated event on first populate, got none")
 	} else if len(evts[len(evts)-1].Categories) != 2 {
 		t.Errorf("last event carried %d categories, want 2", len(evts[len(evts)-1].Categories))
+	}
+}
+
+func TestWikiCategoriesCacheTree(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeBrief(t, root, "team/.categories/sales.md",
+		"---\nparent_categories: [revenue]\n---\n# Sales\n")
+	writeBrief(t, root, "team/companies/acme.md",
+		"---\nkind: company\ncategories: [sales]\n---\n# Acme\n")
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+	if err := idx.ReconcileFromMarkdown(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	cache := newWikiCategoriesCache(func() *WikiIndex { return idx }, nil)
+	cache.Start(ctx)
+	defer cache.Stop()
+
+	got := cache.Categories()
+	// "revenue" is parent-only (no articles) but appears in the tree universe;
+	// "sales" has one article and lists revenue as a parent.
+	want := []DiscoveredCategory{
+		{Slug: "revenue", Title: "Revenue", ArticleCount: 0, Parents: []string{}},
+		{Slug: "sales", Title: "Sales", ArticleCount: 1, Parents: []string{"revenue"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Categories() = %+v, want %+v", got, want)
 	}
 }
 

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { WikiCatalogEntry } from "../../api/wiki";
+import type { DiscoveredCategory, WikiCatalogEntry } from "../../api/wiki";
 import { pluralize } from "../../lib/format";
 import { categoryPath } from "./wikiPaths";
 
@@ -18,6 +18,13 @@ interface WikiCategoryPageProps {
   /** Category slug, e.g. "people", "companies", "playbooks". */
   slug: string;
   catalog: WikiCatalogEntry[];
+  /**
+   * The full category list (with parent edges) from /wiki/categories. Drives
+   * the subcategory tree — parent categories of this page, and its children
+   * (categories whose `parents` include this slug). Optional; an empty list
+   * just hides the tree sections.
+   */
+  categories?: DiscoveredCategory[];
   onNavigate: (path: string) => void;
 }
 
@@ -40,9 +47,23 @@ function firstLetter(title: string): string {
 export default function WikiCategoryPage({
   slug,
   catalog,
+  categories = [],
   onNavigate,
 }: WikiCategoryPageProps) {
   const normalized = slug.toLowerCase();
+  const { parents, subcategories } = useMemo(() => {
+    const self = categories.find((c) => c.slug.toLowerCase() === normalized);
+    const parentSlugs = [...(self?.parents ?? [])].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    const children = categories
+      .filter((c) =>
+        (c.parents ?? []).some((p) => p.toLowerCase() === normalized),
+      )
+      .map((c) => c.slug)
+      .sort((a, b) => a.localeCompare(b));
+    return { parents: parentSlugs, subcategories: children };
+  }, [categories, normalized]);
   const { letters, count, siblings } = useMemo(() => {
     // An article is in this category when its `categories:` frontmatter names
     // the slug, OR (fallback) its folder group matches — so links stay
@@ -98,6 +119,43 @@ export default function WikiCategoryPage({
         </div>
         <h1 className="wk-article-title">Category: {label}</h1>
         <hr className="wk-title-rule" />
+        {parents.length > 0 ? (
+          <div className="wk-categories" aria-label="Parent categories">
+            <span className="wk-label">Part of:</span>
+            {parents.map((p) => (
+              <a
+                key={p}
+                href={`#/wiki/${categoryPath(p)}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onNavigate(categoryPath(p));
+                }}
+              >
+                {categoryLabel(p)}
+              </a>
+            ))}
+          </div>
+        ) : null}
+        {subcategories.length > 0 ? (
+          <section className="wk-category-subcats" aria-label="Subcategories">
+            <h2>Subcategories</h2>
+            <ul>
+              {subcategories.map((s) => (
+                <li key={s}>
+                  <a
+                    href={`#/wiki/${categoryPath(s)}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onNavigate(categoryPath(s));
+                    }}
+                  >
+                    {categoryLabel(s)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <p className="wk-category-summary">
           The following {count} {pluralize(count, "page")}{" "}
           {count === 1 ? "is" : "are"} in this category.

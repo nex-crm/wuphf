@@ -589,6 +589,12 @@ export interface DiscoveredCategory {
   slug: string;
   title: string;
   article_count: number;
+  /**
+   * Parent category slugs (the subcategory tree). Always present from the
+   * broker (possibly empty); optional here for older fixtures. A category's
+   * children are the categories whose `parents` include its slug.
+   */
+  parents?: string[];
 }
 
 /** A member article of a category. Maps to Go's `team.CategoryArticle`. */

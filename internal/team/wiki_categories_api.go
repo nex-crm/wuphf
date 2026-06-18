@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,11 +39,13 @@ const CategoryRefreshTimeout = 10 * time.Second
 const wikiCategoriesEventName = "wiki:categories_updated"
 
 // DiscoveredCategory is one category in the nav list: a slug, a display title
-// derived from it, and how many articles are filed under it.
+// derived from it, how many articles are filed under it, and its parent
+// categories (the subcategory tree). Parents is always present (possibly empty).
 type DiscoveredCategory struct {
-	Slug         string `json:"slug"`
-	Title        string `json:"title"`
-	ArticleCount int    `json:"article_count"`
+	Slug         string   `json:"slug"`
+	Title        string   `json:"title"`
+	ArticleCount int      `json:"article_count"`
+	Parents      []string `json:"parents"`
 }
 
 // CategoryArticle is one member of a category: its wiki-root-relative path plus
@@ -205,12 +208,44 @@ func (c *wikiCategoriesCache) refresh(ctx context.Context) {
 		log.Printf("wiki categories: list failed: %v", err)
 		return
 	}
-	cats := make([]DiscoveredCategory, 0, len(counts))
+	edges, err := idx.ListAllCategoryParents(callCtx)
+	if err != nil {
+		log.Printf("wiki categories: parents failed: %v", err)
+		return
+	}
+
+	// The category universe is every slug that has articles OR participates in a
+	// parent edge — so parent categories appear in the tree even before any
+	// article is filed under them.
+	countBySlug := make(map[string]int, len(counts))
+	universe := make(map[string]struct{}, len(counts))
 	for _, cc := range counts {
+		countBySlug[cc.Slug] = cc.Count
+		universe[cc.Slug] = struct{}{}
+	}
+	parentsBySlug := make(map[string][]string)
+	for _, e := range edges {
+		parentsBySlug[e.Category] = append(parentsBySlug[e.Category], e.Parent)
+		universe[e.Category] = struct{}{}
+		universe[e.Parent] = struct{}{}
+	}
+	slugs := make([]string, 0, len(universe))
+	for slug := range universe {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+
+	cats := make([]DiscoveredCategory, 0, len(slugs))
+	for _, slug := range slugs {
+		parents := parentsBySlug[slug] // already parent-sorted (edges come sorted)
+		if parents == nil {
+			parents = []string{}
+		}
 		cats = append(cats, DiscoveredCategory{
-			Slug:         cc.Slug,
-			Title:        categoryTitleFromSlug(cc.Slug),
-			ArticleCount: cc.Count,
+			Slug:         slug,
+			Title:        categoryTitleFromSlug(slug),
+			ArticleCount: countBySlug[slug],
+			Parents:      parents,
 		})
 	}
 
@@ -241,7 +276,7 @@ func (c *wikiCategoriesCache) resolveIndex() *WikiIndex {
 func categoriesSignature(cats []DiscoveredCategory) string {
 	parts := make([]string, 0, len(cats))
 	for _, c := range cats {
-		parts = append(parts, fmt.Sprintf("%s:%d", c.Slug, c.ArticleCount))
+		parts = append(parts, fmt.Sprintf("%s:%d:%s", c.Slug, c.ArticleCount, strings.Join(c.Parents, ",")))
 	}
 	return strings.Join(parts, "|")
 }

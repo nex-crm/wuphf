@@ -4,8 +4,9 @@
 //
 //   1. An article (a hiring-loop playbook) showing its real category line —
 //      it is filed in People + Revenue Operations, not its own folder.
-//   2. Category: People — folder members PLUS that cross-folder playbook,
-//      reached by clicking the category line (real in-app navigation).
+//   2. Category: People — the subcategory tree ("Part of: Org",
+//      "Subcategories: Engineering") plus folder members AND that cross-folder
+//      playbook, reached by clicking the category line (real in-app navigation).
 //
 // Navigation is via clicking the in-app category link rather than setting
 // location.hash directly: the router round-trips the `_category/<slug>`
@@ -58,6 +59,25 @@ const CATALOG = [
   ]),
 ];
 
+// The subcategory tree (Phase 3b): People is a child of Org and the parent of
+// Engineering. Drives the "Part of:" + "Subcategories" sections on the page.
+const CATEGORIES = [
+  { slug: "org", title: "Org", article_count: 0, parents: [] },
+  { slug: "people", title: "People", article_count: 5, parents: ["org"] },
+  {
+    slug: "engineering",
+    title: "Engineering",
+    article_count: 0,
+    parents: ["people"],
+  },
+  {
+    slug: "revenue-operations",
+    title: "Revenue Operations",
+    article_count: 1,
+    parents: [],
+  },
+];
+
 const ARTICLE = {
   path: "team/playbooks/hiring-loop.md",
   title: "Hiring Loop",
@@ -87,7 +107,7 @@ async function mockWiki(ctx) {
   await ctx.route("**/api/wiki/catalog*", json({ articles: CATALOG }));
   await ctx.route("**/api/wiki/tree*", json({ nodes: [] }));
   await ctx.route("**/api/wiki/sections*", json({ sections: [] }));
-  await ctx.route("**/api/wiki/categories*", json({ categories: [] }));
+  await ctx.route("**/api/wiki/categories*", json({ categories: CATEGORIES }));
   await ctx.route("**/api/wiki/article*", json(ARTICLE));
   await ctx.route("**/api/wiki/history*", json({ commits: [] }));
   await ctx.route("**/api/wiki/visual-artifact*", (r) =>
@@ -133,11 +153,13 @@ await page.waitForSelector('[data-testid="wk-category-page"]', {
 await page.waitForFunction(() =>
   document.body.textContent?.includes("Hiring Loop"),
 );
+// Wait for the subcategory tree (Phase 3b) to render too.
+await page.waitForSelector('[aria-label="Subcategories"]', { timeout: 4_000 });
 await shotElement(
   page,
   '[data-testid="wk-category-page"]',
   OUT,
-  "02-category-people-cross-folder",
+  "02-category-people-tree-and-cross-folder",
 );
 
 console.log(`captured 2 screenshots to ${OUT}`);

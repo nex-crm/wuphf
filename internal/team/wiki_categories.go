@@ -17,7 +17,11 @@ package team
 // be speculative plumbing, and CREATE TABLE IF NOT EXISTS keeps that addition
 // non-breaking.
 
-import "sort"
+import (
+	"regexp"
+	"sort"
+	"strings"
+)
 
 // ArticleCategory is one (article, category) membership row in the derived
 // article_categories index. ArticlePath is the wiki-root-relative markdown path
@@ -32,6 +36,43 @@ type ArticleCategory struct {
 type CategoryCount struct {
 	Slug  string `json:"slug"`
 	Count int    `json:"count"`
+}
+
+// CategoryParent is one (category → parent) edge in the derived
+// category_parents index — the subcategory tree (DAG). Both are normalized
+// category slugs. Source of truth is a category page's `parent_categories:`
+// frontmatter at team/.categories/{slug}.md.
+type CategoryParent struct {
+	Category string `json:"category"`
+	Parent   string `json:"parent"`
+}
+
+// categoryPagePathRe matches a category page: team/.categories/{slug}.md, a
+// dot-prefixed directory so the pages stay out of the normal article tree.
+var categoryPagePathRe = regexp.MustCompile(`^team/\.categories/[^/]+\.md$`)
+
+// isCategoryPagePath reports whether relPath is a category-definition page.
+func isCategoryPagePath(relPath string) bool {
+	return categoryPagePathRe.MatchString(strings.TrimPrefix(relPath, "./"))
+}
+
+// categoryPageSlug extracts the normalized category slug from a category-page
+// path (team/.categories/sales.md → "sales").
+func categoryPageSlug(relPath string) string {
+	rel := strings.TrimPrefix(relPath, "./")
+	rel = strings.TrimPrefix(rel, "team/.categories/")
+	return categorySlug(strings.TrimSuffix(rel, ".md"))
+}
+
+// parseParentCategoriesFrontmatter extracts a category page's `parent_categories:`
+// list, normalized to stable, deduped, sorted slugs. Returns nil when absent —
+// callers treat nil as "this category has no parents" (a root).
+func parseParentCategoriesFrontmatter(body string) []string {
+	fm := extractFrontmatter(body)
+	if fm == "" {
+		return nil
+	}
+	return normalizeCategories(frontmatterList(fm, "parent_categories"))
 }
 
 // parseCategoriesFrontmatter extracts the `categories:` list from an article's
