@@ -57,7 +57,7 @@ function ensureListener(): void {
 /**
  * callBroker issues a read-only GET against the WUPHF broker through the host
  * bridge. `path` must be one of the allowlisted prefixes (see the host):
- *   /apps  /tasks  /office-members  /channels  /requests
+ *   /apps  /apps/gmail  /tasks  /office-members  /channels  /requests
  *   /wiki/list  /wiki/catalog  /wiki/read  /wiki/tree
  */
 export function callBroker<T = unknown>(path: string): Promise<T> {
@@ -108,6 +108,55 @@ export function getTasks(): Promise<{ tasks: OfficeTask[] }> {
   return callBroker<{ tasks: OfficeTask[] }>(
     "/tasks?all_channels=true&viewer_slug=human",
   );
+}
+
+// ── Read-only Gmail (metadata + snippet only) ───────────────────────────────
+
+/**
+ * One Gmail message, SANITIZED by the host: metadata + a short snippet only.
+ * There is no full body, no MIME headers, and no attachments — by design, this
+ * is a read-only, minimal view of the operator's mail. Use it to build inbox
+ * digests, "what needs a reply" lists, etc.
+ */
+export interface EmailItem {
+  /** Gmail message id. */
+  id: string;
+  /** Gmail thread id (groups a conversation). */
+  threadId: string;
+  /** Sender email address, e.g. "noreply@getsentry.com". */
+  from: string;
+  /** Sender display name, e.g. "Sentry" (may be empty). */
+  fromName: string;
+  subject: string;
+  /** Short preview snippet — NOT the full body. */
+  snippet: string;
+  /** ISO-8601 / RFC3339 timestamp, e.g. "2026-06-18T11:49:42Z". */
+  date: string;
+  /** True when the message still carries Gmail's UNREAD label. */
+  unread: boolean;
+  /** Gmail label names, e.g. ["UNREAD","IMPORTANT","INBOX"]. */
+  labels: string[];
+}
+
+/**
+ * getEmails reads the operator's most recent Gmail messages through the host
+ * bridge. READ-ONLY: it can only ever read, never send or modify. Each message
+ * is metadata + snippet only (no full body or attachments).
+ *
+ * `connected` is false when Gmail is not connected (or is temporarily
+ * unavailable); render a connect-state in that case rather than an error. When
+ * connected, `emails` holds up to `limit` recent messages (default 25, capped
+ * at 50 by the host).
+ */
+export function getEmails(opts?: {
+  limit?: number;
+}): Promise<{ connected: boolean; emails: EmailItem[] }> {
+  const limit = opts?.limit;
+  const path =
+    typeof limit === "number" && Number.isFinite(limit) && limit > 0
+      ? `/apps/gmail/recent?limit=${Math.floor(limit)}`
+      : "/apps/gmail/recent";
+  return callBroker<{ connected: boolean; emails: EmailItem[] }>(path);
 }
 
 // ── The one safe write: create a follow-up task ─────────────────────────────

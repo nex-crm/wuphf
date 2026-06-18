@@ -42,6 +42,10 @@ const APP_CSP = [
 // internal tool would display. Mutations are NOT exposed in this version.
 const ALLOWED_GET_PREFIXES: readonly string[] = [
   "/apps",
+  // Read-only, sanitized Gmail feed (metadata + snippet only). Covered by the
+  // "/apps" prefix already, but listed explicitly to document that this
+  // sensitive-data read is intentionally exposed to Apps.
+  "/apps/gmail",
   "/tasks",
   "/office-members",
   "/channels",

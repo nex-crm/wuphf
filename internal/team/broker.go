@@ -646,6 +646,11 @@ func (b *Broker) StartOnPort(port int) error {
 	// Apps: agent-generated internal tools. Reached only via the /api proxy, so
 	// these never shadow the SPA's client-side /apps/<id> route.
 	mux.HandleFunc("/apps", b.requireAuth(b.handleApps))
+	// Read-only, sanitized Gmail feed for Apps. Registered as a longer, more
+	// specific pattern than "/apps/" so ServeMux routes it here rather than to
+	// handleAppByID (which would mis-read "gmail" as an app id). Metadata +
+	// snippet only by design — see broker_apps_gmail.go.
+	mux.HandleFunc("/apps/gmail/recent", b.requireAuth(b.handleAppGmailRecent))
 	mux.HandleFunc("/apps/", b.requireAuth(b.handleAppByID))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
