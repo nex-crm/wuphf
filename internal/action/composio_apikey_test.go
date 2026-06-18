@@ -56,6 +56,94 @@ func TestToolkitAuthInfo_DetectsAPIKey(t *testing.T) {
 	}
 }
 
+// toolkitDetailJSON builds a GET /toolkits/{slug} body with the given managed
+// schemes and an ordered list of auth_config_details modes (each carrying one
+// required generic_api_key field).
+func toolkitDetailJSON(managedSchemes []string, modes ...string) map[string]any {
+	details := make([]map[string]any, 0, len(modes))
+	for _, m := range modes {
+		details = append(details, map[string]any{
+			"mode": m,
+			"fields": map[string]any{
+				"connected_account_initiation": map[string]any{
+					"required": []map[string]any{{"name": "generic_api_key", "displayName": "API Key", "required": true}},
+				},
+			},
+		})
+	}
+	return map[string]any{
+		"slug":                          "multi",
+		"composio_managed_auth_schemes": managedSchemes,
+		"auth_config_details":           details,
+	}
+}
+
+// TestToolkitAuthInfo_MixedModes locks the precedence rules so the connect-path
+// choice never becomes payload-order-dependent:
+//   - a managed scheme (composio_managed_auth_schemes) always wins;
+//   - otherwise the first non-OAuth mode is selected regardless of where OAuth
+//     rows sit, and empty-mode rows are skipped;
+//   - only-unmanaged-OAuth falls back to managed.
+func TestToolkitAuthInfo_MixedModes(t *testing.T) {
+	cases := []struct {
+		name           string
+		managedSchemes []string
+		modes          []string
+		wantManaged    bool
+		wantMode       string
+	}{
+		{"oauth-before-apikey", nil, []string{"OAUTH2", "API_KEY"}, false, "API_KEY"},
+		{"apikey-before-oauth", nil, []string{"API_KEY", "OAUTH2"}, false, "API_KEY"},
+		{"empty-mode-row-skipped", nil, []string{"", "API_KEY"}, false, "API_KEY"},
+		{"managed-schemes-win", []string{"OAUTH2"}, []string{"API_KEY"}, true, ""},
+		{"only-unmanaged-oauth", nil, []string{"OAUTH2"}, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/toolkits/multi", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(toolkitDetailJSON(tc.managedSchemes, tc.modes...))
+			})
+			server := httptest.NewServer(mux)
+			defer server.Close()
+			client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+			info := client.toolkitAuthInfo(context.Background(), "multi")
+			if info.Managed != tc.wantManaged {
+				t.Fatalf("Managed=%v want %v (%+v)", info.Managed, tc.wantManaged, info)
+			}
+			if info.Mode != tc.wantMode {
+				t.Fatalf("Mode=%q want %q", info.Mode, tc.wantMode)
+			}
+		})
+	}
+}
+
+// A blank required credential must be rejected BEFORE any Composio write, so we
+// never leave an orphan auth config behind.
+func TestCompleteAPIKeyConnection_RejectsMissingRequired(t *testing.T) {
+	authConfigCalled := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/toolkits/instantly", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(instantlyToolkitDetail())
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, _ *http.Request) {
+		authConfigCalled = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"auth_config": map[string]any{"id": "ac_x"}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	_, err := client.CompleteAPIKeyConnection(context.Background(), "instantly", map[string]string{"generic_api_key": "   "})
+	if err == nil {
+		t.Fatalf("expected an error when the required credential is blank")
+	}
+	if authConfigCalled {
+		t.Fatalf("must not create an auth config when a required credential is blank")
+	}
+}
+
 func TestToolkitAuthInfo_ManagedOAuthFallsBack(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/toolkits/gmail", func(w http.ResponseWriter, _ *http.Request) {

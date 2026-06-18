@@ -558,7 +558,11 @@ func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot 
 			if mins < 1 {
 				mins = 1
 			}
-			snap.Detail = fmt.Sprintf("Went idle after no progress for %d min — send a new message to bring it back.", mins)
+			unit := "minutes"
+			if mins == 1 {
+				unit = "minute"
+			}
+			snap.Detail = fmt.Sprintf("Went idle after no progress for %d %s — send a new message to bring it back.", mins, unit)
 			snap.LastTime = now.UTC().Format(time.RFC3339)
 			// Reaping back to idle clears any prior stuck flag — the
 			// agent is no longer claiming to be working.

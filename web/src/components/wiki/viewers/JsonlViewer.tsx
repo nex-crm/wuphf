@@ -101,6 +101,9 @@ function decideLayout(records: ParsedRecord[]): Layout {
     }
     if (keys.length > MAX_TABLE_COLUMNS) return { mode: "cards" };
   }
+  // Records that are all empty objects ({}) yield no columns — a 0-column table
+  // is useless, so show the cards instead.
+  if (keys.length === 0) return { mode: "cards" };
   return { mode: "table", keys };
 }
 

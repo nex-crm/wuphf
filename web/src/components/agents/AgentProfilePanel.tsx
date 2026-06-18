@@ -260,6 +260,11 @@ function RecentArtifactsSection({ agentSlug, tasks }: RecentTasksSectionProps) {
       updateTaskStatus(task.id, "resume", task.channel ?? "", "human"),
     onSuccess: (_data, task) => {
       showNotice(`Resuming ${agentSlug} on “${task.title}”.`, "success");
+      // This panel renders its task rows from ["office-tasks-profile"]; invalidate
+      // that first so the Resume row refreshes instead of staying clickable.
+      void queryClient.invalidateQueries({
+        queryKey: ["office-tasks-profile"],
+      });
       void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },

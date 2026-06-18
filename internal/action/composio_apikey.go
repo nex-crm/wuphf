@@ -94,14 +94,14 @@ func (c *ComposioREST) toolkitAuthInfo(ctx context.Context, platform string) too
 		}
 	}
 
-	// No managed OAuth scheme — find the first non-OAuth mode and surface its
-	// credential fields. If a mode is itself an OAuth scheme (and Composio just
-	// didn't list it as managed) we still prefer treating it as managed, since
-	// the user has no client credentials to paste.
+	// No managed OAuth scheme — scan the modes for the first non-OAuth one and
+	// surface its credential fields. OAuth-ish (or empty) modes are skipped:
+	// the user has no client credentials to paste for an OAuth app Composio
+	// doesn't host, so those fall through to the managed fallback below.
 	for _, ad := range detail.AuthConfigDetails {
 		mode := strings.ToUpper(strings.TrimSpace(ad.Mode))
 		if mode == "" || composioManagedAuthSchemes[mode] {
-			return toolkitAuthInfo{Managed: true}
+			continue
 		}
 		return toolkitAuthInfo{
 			Mode:   mode,
@@ -109,7 +109,7 @@ func (c *ComposioREST) toolkitAuthInfo(ctx context.Context, platform string) too
 		}
 	}
 
-	// Nothing introspectable — fall back to managed so we don't regress.
+	// No actionable non-OAuth mode — fall back to managed so we don't regress.
 	return toolkitAuthInfo{Managed: true}
 }
 
@@ -204,6 +204,27 @@ func (c *ComposioREST) CompleteAPIKeyConnection(ctx context.Context, platform st
 		mode = "API_KEY"
 	}
 
+	// Drop blank values and confirm every required credential is present BEFORE
+	// touching Composio. A missing/blank required field would otherwise create
+	// an auth config that then fails at /connected_accounts, leaving an orphan
+	// auth config behind.
+	cleaned := make(map[string]string, len(fields))
+	for k, v := range fields {
+		if tv := strings.TrimSpace(v); tv != "" {
+			cleaned[k] = tv
+		}
+	}
+	for _, f := range info.Fields {
+		if f.Required {
+			if _, ok := cleaned[f.Name]; !ok {
+				return IntegrationConnectResult{}, fmt.Errorf("missing required credential: %s", f.Name)
+			}
+		}
+	}
+	if len(cleaned) == 0 {
+		return IntegrationConnectResult{}, fmt.Errorf("no credentials supplied")
+	}
+
 	authConfigID, err := c.createCustomAuthConfig(ctx, platform, mode)
 	if err != nil {
 		return IntegrationConnectResult{}, fmt.Errorf("create custom auth config: %w", err)
@@ -218,7 +239,7 @@ func (c *ComposioREST) CompleteAPIKeyConnection(ctx context.Context, platform st
 			"user_id": strings.TrimSpace(c.UserID),
 			"state": map[string]any{
 				"authScheme": mode,
-				"val":        stringMapToAny(fields),
+				"val":        stringMapToAny(cleaned),
 			},
 		},
 	}

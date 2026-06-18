@@ -555,7 +555,7 @@
   line-height: 1.55;
   tab-size: 2;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   background: var(--wk-code-bg);
   color: var(--wk-text);
 }

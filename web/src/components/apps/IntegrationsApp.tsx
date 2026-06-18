@@ -603,12 +603,14 @@ function ToolkitDetail({
     onSuccess: (result) => {
       setPending(null);
       setCredValues({});
-      showNotice(`${item.name} connected.`, "success");
-      void queryClient.invalidateQueries({ queryKey: ["integrations"] });
-      void queryClient.invalidateQueries({ queryKey: ["integrations-audit"] });
-      if (result.status !== "connected") {
+      if (result.status === "connected") {
+        showNotice(`${item.name} connected.`, "success");
+      } else {
+        // e.g. "pending"/"failed" — don't claim success for a non-live result.
         showNotice(`${item.name} connection is ${result.status}.`, "info");
       }
+      void queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      void queryClient.invalidateQueries({ queryKey: ["integrations-audit"] });
     },
     onError: (err) => {
       showNotice(
