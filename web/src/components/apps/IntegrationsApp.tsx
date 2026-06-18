@@ -20,6 +20,7 @@ import {
   type IntegrationsResponse,
   listIntegrations,
   startIntegrationConnection,
+  submitIntegrationCredentials,
 } from "../../api/integrations";
 import { showNotice } from "../ui/Toast";
 import { ActionGrantsPanel } from "./integrations/ActionGrantsPanel";
@@ -437,6 +438,85 @@ function IntegrationErrorState({
   );
 }
 
+/**
+ * Credential form for a non-OAuth toolkit (API key / token). Shown when
+ * startIntegrationConnection returned status "needs_fields" — e.g. Instantly,
+ * which cannot use Composio-managed OAuth. Submitting POSTs the values to
+ * /integrations/connect-credentials.
+ */
+function ApiKeyConnectForm({
+  toolkitName,
+  result,
+  values,
+  onChange,
+  onSubmit,
+  onCancel,
+  pending,
+}: {
+  toolkitName: string;
+  result: IntegrationConnectResult;
+  values: Record<string, string>;
+  onChange: (name: string, value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  pending: boolean;
+}) {
+  const fields = result.required_fields ?? [];
+  const filled = fields
+    .filter((f) => f.required)
+    .every((f) => (values[f.name] ?? "").trim() !== "");
+  return (
+    <form
+      className="op-credential-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (filled && !pending) onSubmit();
+      }}
+    >
+      <p className="op-credential-intro">
+        {result.instructions ||
+          `Enter your ${toolkitName} credentials to connect.`}
+      </p>
+      {fields.map((field) => (
+        <label key={field.name} className="op-credential-field">
+          <span className="op-credential-label">
+            {field.label}
+            {field.required ? <span aria-hidden="true"> *</span> : null}
+          </span>
+          <input
+            className="op-credential-input"
+            type={field.secret ? "password" : "text"}
+            value={values[field.name] ?? ""}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => onChange(field.name, e.target.value)}
+          />
+          {field.description ? (
+            <span className="op-credential-help">{field.description}</span>
+          ) : null}
+        </label>
+      ))}
+      <div className="op-credential-actions">
+        <button
+          type="submit"
+          className="btn btn-primary btn-sm"
+          disabled={!filled || pending}
+        >
+          {pending ? "Connecting…" : "Connect"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={onCancel}
+          disabled={pending}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function ToolkitDetail({
   item,
   onBack,
@@ -446,6 +526,7 @@ function ToolkitDetail({
 }) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<IntegrationConnectResult | null>(null);
+  const [credValues, setCredValues] = useState<Record<string, string>>({});
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const connectionKey = item.connection_key || item.connections?.[0]?.key || "";
   const auditQuery = useQuery({
@@ -496,11 +577,38 @@ function ToolkitDetail({
     mutationFn: () => startIntegrationConnection(item.provider, item.platform),
     onSuccess: (result) => {
       setPending(result);
+      setCredValues({});
       if (result.auth_url) {
         window.open(result.auth_url, "_blank", "noopener,noreferrer");
+        showNotice(`Started ${item.name} connection.`, "success");
+      } else if (result.status === "needs_fields") {
+        // API-key/token toolkit (e.g. Instantly): no OAuth redirect — the form
+        // below collects the credentials. Don't claim we "started" anything.
+        showNotice(`Enter your ${item.name} credentials to connect.`, "info");
+      } else {
+        showNotice(`Started ${item.name} connection.`, "success");
       }
-      showNotice(`Started ${item.name} connection.`, "success");
       void queryClient.invalidateQueries({ queryKey: ["integrations-audit"] });
+    },
+    onError: (err) => {
+      showNotice(
+        err instanceof Error ? err.message : `Failed to connect ${item.name}`,
+        "error",
+      );
+    },
+  });
+  const credentialsMutation = useMutation({
+    mutationFn: () =>
+      submitIntegrationCredentials(item.provider, item.platform, credValues),
+    onSuccess: (result) => {
+      setPending(null);
+      setCredValues({});
+      showNotice(`${item.name} connected.`, "success");
+      void queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      void queryClient.invalidateQueries({ queryKey: ["integrations-audit"] });
+      if (result.status !== "connected") {
+        showNotice(`${item.name} connection is ${result.status}.`, "info");
+      }
     },
     onError: (err) => {
       showNotice(
@@ -600,6 +708,22 @@ function ToolkitDetail({
             </button>
           </div>
         </section>
+        {pending?.status === "needs_fields" ? (
+          <ApiKeyConnectForm
+            toolkitName={item.name}
+            result={pending}
+            values={credValues}
+            onChange={(name, value) =>
+              setCredValues((prev) => ({ ...prev, [name]: value }))
+            }
+            onSubmit={() => credentialsMutation.mutate()}
+            onCancel={() => {
+              setPending(null);
+              setCredValues({});
+            }}
+            pending={credentialsMutation.isPending}
+          />
+        ) : null}
         {confirmDisconnect ? (
           <div className="op-confirm-row">
             <span>Disconnect {item.name}?</span>
@@ -620,7 +744,7 @@ function ToolkitDetail({
             </button>
           </div>
         ) : null}
-        {latestStatus ? (
+        {latestStatus && latestStatus !== "needs_fields" ? (
           <p className="op-runtime-note">
             Connection status: <strong>{latestStatus}</strong>
           </p>

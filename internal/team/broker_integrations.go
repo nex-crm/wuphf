@@ -144,6 +144,61 @@ func (b *Broker) handleIntegrationConnect(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(result)
 }
 
+// handleIntegrationConnectCredentials completes a connection for a non-OAuth
+// toolkit (API key / token) using the credentials the UI collected after
+// /integrations/connect returned status "needs_fields". The raw credentials are
+// handed straight to Composio and never logged or persisted by the broker.
+func (b *Broker) handleIntegrationConnectCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req action.IntegrationConnectCredentialsRequest
+	if !decodeIntegrationRequest(w, r, &req) {
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if provider == "" {
+		provider = "composio"
+	}
+	if provider != "composio" {
+		http.Error(w, "only composio supports web-managed connect", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Platform) == "" || len(req.Fields) == 0 {
+		http.Error(w, "platform and fields are required", http.StatusBadRequest)
+		return
+	}
+	composio := action.NewComposioFromEnv()
+	result, err := composio.CompleteAPIKeyConnection(r.Context(), req.Platform, req.Fields)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("connect composio toolkit: %v", err), http.StatusBadGateway)
+		return
+	}
+	actor := integrationRequestActor(r)
+	if result.Status == "connected" && strings.TrimSpace(result.ConnectionKey) != "" {
+		_ = b.RecordActionWithMetadata(
+			"integration_connected",
+			"composio",
+			"general",
+			actor,
+			fmt.Sprintf("Connected %s via Composio (API key)", action.DisplayPlatformName(result.Platform)),
+			result.ConnectionKey,
+			nil,
+			"",
+			map[string]string{
+				"provider":       "composio",
+				"platform":       result.Platform,
+				"connection_key": result.ConnectionKey,
+				"status":         "connected",
+			},
+		)
+		b.fanOutConnected(result.Platform, result.ConnectionKey, "", actor)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
 func (b *Broker) handleIntegrationConnectStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

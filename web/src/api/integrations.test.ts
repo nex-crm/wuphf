@@ -9,6 +9,7 @@ import {
   listIntegrations,
   startComposioSignin,
   startIntegrationConnection,
+  submitIntegrationCredentials,
 } from "./integrations";
 
 describe("integrations api client", () => {
@@ -119,6 +120,27 @@ describe("integrations api client", () => {
       provider: "composio",
       platform: "gmail",
       connection_key: "ca_123",
+    });
+  });
+
+  it("submits API-key credentials for a non-OAuth toolkit", async () => {
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue({
+      provider: "composio",
+      platform: "instantly",
+      status: "connected",
+      connection_key: "ca_instantly",
+    });
+
+    await expect(
+      submitIntegrationCredentials("composio", "instantly", {
+        generic_api_key: "ik_secret",
+      }),
+    ).resolves.toMatchObject({ status: "connected" });
+
+    expect(postSpy).toHaveBeenCalledWith("/integrations/connect-credentials", {
+      provider: "composio",
+      platform: "instantly",
+      fields: { generic_api_key: "ik_secret" },
     });
   });
 

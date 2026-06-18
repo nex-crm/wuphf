@@ -240,6 +240,20 @@ func (c *ComposioREST) StartIntegrationConnection(ctx context.Context, req Integ
 	if platform == "" {
 		return IntegrationConnectResult{}, fmt.Errorf("platform is required")
 	}
+	// Toolkits Composio cannot host an OAuth app for (API-key / token auth, e.g.
+	// Instantly) cannot use the managed-auth flow — that path returns a bare
+	// "400 POST /auth_configs". Detect them up front and ask the UI to collect
+	// the user's credentials instead of failing opaquely.
+	if info := c.toolkitAuthInfo(ctx, platform); !info.Managed {
+		return IntegrationConnectResult{
+			Provider:       c.Name(),
+			Platform:       platform,
+			Status:         "needs_fields",
+			AuthMode:       strings.ToLower(info.Mode),
+			RequiredFields: info.Fields,
+			Instructions:   "Enter your " + DisplayPlatformName(platform) + " credentials to connect.",
+		}, nil
+	}
 	authConfigID, err := c.composioManagedAuthConfigID(ctx, platform)
 	if err != nil {
 		return IntegrationConnectResult{}, err

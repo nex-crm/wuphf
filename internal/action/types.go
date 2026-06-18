@@ -163,6 +163,38 @@ type IntegrationConnectResult struct {
 	ConnectionKey string `json:"connection_key,omitempty"`
 	ExpiresAt     string `json:"expires_at,omitempty"`
 	Instructions  string `json:"instructions,omitempty"`
+	// AuthMode classifies how this toolkit authenticates: "oauth" (the
+	// hosted redirect flow), or "api_key"/"bearer"/"basic" (the user supplies
+	// their own credentials — Composio cannot mint a managed OAuth app).
+	AuthMode string `json:"auth_mode,omitempty"`
+	// RequiredFields is non-empty when Status == "needs_fields": the frontend
+	// must collect these values and POST them back to /integrations/connect/
+	// credentials. Drives the API-key entry card so toolkits like Instantly
+	// (which 400 on use_composio_managed_auth) get a real connect path instead
+	// of an opaque error.
+	RequiredFields []IntegrationConnectField `json:"required_fields,omitempty"`
+}
+
+// IntegrationConnectField describes one credential input the user must supply
+// for a non-OAuth toolkit (e.g. an API key). Mirrors the field metadata
+// Composio exposes for a toolkit's connected-account initiation.
+type IntegrationConnectField struct {
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	// Secret marks credential fields the UI should render as a password input
+	// (API keys, tokens) so they are masked on screen.
+	Secret   bool `json:"secret,omitempty"`
+	Required bool `json:"required,omitempty"`
+}
+
+// IntegrationConnectCredentialsRequest carries the user-supplied credentials
+// for a non-OAuth toolkit back to the broker, which hands them to Composio to
+// create a custom-auth config + connected account.
+type IntegrationConnectCredentialsRequest struct {
+	Provider string            `json:"provider,omitempty"`
+	Platform string            `json:"platform"`
+	Fields   map[string]string `json:"fields"`
 }
 
 type IntegrationDisconnectRequest struct {

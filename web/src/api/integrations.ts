@@ -50,15 +50,29 @@ export interface ListIntegrationsParams {
   cursor?: string;
 }
 
+/** One credential input for a non-OAuth toolkit (API key / token / password). */
+export interface IntegrationConnectField {
+  name: string;
+  label: string;
+  description?: string;
+  /** Render as a masked password input. */
+  secret?: boolean;
+  required?: boolean;
+}
+
 export interface IntegrationConnectResult {
   provider: IntegrationProvider;
   platform: string;
+  /** "needs_fields" means the UI must collect required_fields and POST them to
+   * submitIntegrationCredentials before the toolkit is connected. */
   status: string;
   auth_url?: string;
   connect_id?: string;
   connection_key?: string;
   expires_at?: string;
   instructions?: string;
+  auth_mode?: string;
+  required_fields?: IntegrationConnectField[];
 }
 
 export interface IntegrationDisconnectResult {
@@ -104,6 +118,23 @@ export async function startIntegrationConnection(
   return post<IntegrationConnectResult>("/integrations/connect", {
     provider,
     platform,
+  });
+}
+
+/**
+ * Complete a non-OAuth (API-key/token) connection by submitting the credentials
+ * the user typed into the fields returned by `startIntegrationConnection` when
+ * its status was "needs_fields".
+ */
+export async function submitIntegrationCredentials(
+  provider: IntegrationProvider,
+  platform: string,
+  fields: Record<string, string>,
+): Promise<IntegrationConnectResult> {
+  return post<IntegrationConnectResult>("/integrations/connect-credentials", {
+    provider,
+    platform,
+    fields,
   });
 }
 

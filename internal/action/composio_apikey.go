@@ -1,0 +1,289 @@
+package action
+
+// composio_apikey.go — connect path for toolkits that authenticate with a
+// user-supplied API key / token rather than Composio-managed OAuth.
+//
+// Background: StartIntegrationConnection used to ALWAYS create an auth config
+// of type "use_composio_managed_auth". That only works for toolkits where
+// Composio hosts its own OAuth app (Gmail, Slack, …). For an API-key toolkit
+// like Instantly, Composio has no managed app, so POST /auth_configs returns a
+// bare 400 ("400 POST /auth_configs") with no guidance — the exact customer
+// bug this module fixes.
+//
+// The flow is now: detect the toolkit's auth mode (GET /toolkits/{slug}); if
+// Composio can manage it, keep the OAuth path; otherwise surface the required
+// credential fields so the UI can collect them, then create a custom-auth
+// config + connected account with the user's key.
+//
+// NOTE: the Composio v3 request/response shapes below follow the documented
+// API but have not been exercised against a live API-key toolkit in this
+// change. The shapes are isolated here and unit-tested for what WE send so a
+// field-name tweak after live verification is a one-line change.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strings"
+)
+
+// composioManagedAuthSchemes are the schemes Composio can host an app for, so
+// the existing zero-touch OAuth path applies. Everything else needs the user
+// to bring their own credential.
+var composioManagedAuthSchemes = map[string]bool{
+	"OAUTH2":  true,
+	"OAUTH1":  true,
+	"OAUTH1A": true,
+}
+
+// toolkitAuthInfo is the distilled auth shape for one toolkit.
+type toolkitAuthInfo struct {
+	// Managed is true when Composio hosts an OAuth app for this toolkit, so the
+	// existing use_composio_managed_auth + hosted-link flow works.
+	Managed bool
+	// Mode is the primary non-managed auth scheme (e.g. "API_KEY", "BEARER_TOKEN",
+	// "BASIC"). Empty when the toolkit is managed or exposes no scheme.
+	Mode string
+	// Fields are the credentials the user must supply for Mode.
+	Fields []IntegrationConnectField
+}
+
+// composioToolkitDetail mirrors the slice of GET /toolkits/{slug} we read.
+type composioToolkitDetail struct {
+	Slug                       string   `json:"slug"`
+	Name                       string   `json:"name"`
+	ComposioManagedAuthSchemes []string `json:"composio_managed_auth_schemes"`
+	AuthConfigDetails          []struct {
+		Mode   string `json:"mode"`
+		Fields struct {
+			ConnectedAccountInitiation composioFieldSet `json:"connected_account_initiation"`
+		} `json:"fields"`
+	} `json:"auth_config_details"`
+}
+
+type composioFieldSet struct {
+	Required []composioAuthField `json:"required"`
+	Optional []composioAuthField `json:"optional"`
+}
+
+type composioAuthField struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required"`
+}
+
+// toolkitAuthInfo fetches a toolkit's auth detail and distills it. On any error
+// it returns Managed=true so callers fall back to the existing OAuth attempt
+// rather than blocking a toolkit we simply could not introspect.
+func (c *ComposioREST) toolkitAuthInfo(ctx context.Context, platform string) toolkitAuthInfo {
+	raw, err := c.get(ctx, "/toolkits/"+url.PathEscape(platform), nil)
+	if err != nil {
+		return toolkitAuthInfo{Managed: true}
+	}
+	var detail composioToolkitDetail
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return toolkitAuthInfo{Managed: true}
+	}
+
+	for _, scheme := range detail.ComposioManagedAuthSchemes {
+		if composioManagedAuthSchemes[strings.ToUpper(strings.TrimSpace(scheme))] {
+			return toolkitAuthInfo{Managed: true}
+		}
+	}
+
+	// No managed OAuth scheme — find the first non-OAuth mode and surface its
+	// credential fields. If a mode is itself an OAuth scheme (and Composio just
+	// didn't list it as managed) we still prefer treating it as managed, since
+	// the user has no client credentials to paste.
+	for _, ad := range detail.AuthConfigDetails {
+		mode := strings.ToUpper(strings.TrimSpace(ad.Mode))
+		if mode == "" || composioManagedAuthSchemes[mode] {
+			return toolkitAuthInfo{Managed: true}
+		}
+		return toolkitAuthInfo{
+			Mode:   mode,
+			Fields: connectFieldsFrom(ad.Fields.ConnectedAccountInitiation, mode),
+		}
+	}
+
+	// Nothing introspectable — fall back to managed so we don't regress.
+	return toolkitAuthInfo{Managed: true}
+}
+
+// connectFieldsFrom maps Composio's field metadata to our wire shape. When the
+// toolkit advertises no initiation fields we synthesise a single API-key field
+// so the user still gets a usable form for the common API_KEY case.
+func connectFieldsFrom(set composioFieldSet, mode string) []IntegrationConnectField {
+	all := append(append([]composioAuthField{}, set.Required...), set.Optional...)
+	out := make([]IntegrationConnectField, 0, len(all))
+	for _, f := range all {
+		name := strings.TrimSpace(f.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, IntegrationConnectField{
+			Name:        name,
+			Label:       firstNonEmpty(f.DisplayName, humanizeFieldName(name)),
+			Description: strings.TrimSpace(f.Description),
+			Secret:      isSecretField(name, f.Type),
+			Required:    f.Required || containsField(set.Required, name),
+		})
+	}
+	if len(out) == 0 {
+		out = append(out, defaultCredentialField(mode))
+	}
+	return out
+}
+
+func containsField(fields []composioAuthField, name string) bool {
+	for _, f := range fields {
+		if strings.EqualFold(strings.TrimSpace(f.Name), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultCredentialField is the fallback input when a toolkit exposes no
+// initiation field metadata — almost always a single API key / token.
+func defaultCredentialField(mode string) IntegrationConnectField {
+	switch mode {
+	case "BEARER_TOKEN":
+		return IntegrationConnectField{Name: "token", Label: "Access token", Secret: true, Required: true}
+	case "BASIC":
+		return IntegrationConnectField{Name: "password", Label: "Password", Secret: true, Required: true}
+	default:
+		return IntegrationConnectField{Name: "generic_api_key", Label: "API key", Secret: true, Required: true}
+	}
+}
+
+func isSecretField(name, fieldType string) bool {
+	n := strings.ToLower(name)
+	if strings.Contains(strings.ToLower(fieldType), "password") {
+		return true
+	}
+	for _, hint := range []string{"key", "token", "secret", "password"} {
+		if strings.Contains(n, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func humanizeFieldName(name string) string {
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '_' || r == '-' })
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	if len(parts) == 0 {
+		return name
+	}
+	return strings.Join(parts, " ")
+}
+
+// CompleteAPIKeyConnection creates a custom-auth config and a connected account
+// for an API-key/token toolkit using the user-supplied credentials. Returns a
+// connected (or pending) result the UI can poll like the OAuth path.
+func (c *ComposioREST) CompleteAPIKeyConnection(ctx context.Context, platform string, fields map[string]string) (IntegrationConnectResult, error) {
+	platform = normalizeComposioPlatform(platform)
+	if platform == "" {
+		return IntegrationConnectResult{}, fmt.Errorf("platform is required")
+	}
+	if len(fields) == 0 {
+		return IntegrationConnectResult{}, fmt.Errorf("no credentials supplied")
+	}
+	info := c.toolkitAuthInfo(ctx, platform)
+	mode := info.Mode
+	if mode == "" {
+		mode = "API_KEY"
+	}
+
+	authConfigID, err := c.createCustomAuthConfig(ctx, platform, mode)
+	if err != nil {
+		return IntegrationConnectResult{}, fmt.Errorf("create custom auth config: %w", err)
+	}
+
+	// Connected account carries the user's credentials in the scheme-specific
+	// `val` map. Field names come from the toolkit's initiation metadata, so
+	// whatever Composio asked for is exactly what we send back.
+	body := map[string]any{
+		"auth_config": map[string]any{"id": authConfigID},
+		"connection": map[string]any{
+			"user_id": strings.TrimSpace(c.UserID),
+			"state": map[string]any{
+				"authScheme": mode,
+				"val":        stringMapToAny(fields),
+			},
+		},
+	}
+	raw, err := c.post(ctx, "/connected_accounts", body)
+	if err != nil {
+		return IntegrationConnectResult{}, fmt.Errorf("create connected account: %w", err)
+	}
+	var result struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return IntegrationConnectResult{}, fmt.Errorf("parse connected account: %w", err)
+	}
+	status := connectionState(result.Status)
+	if status == "available" {
+		// A freshly created API-key account with no explicit status is active.
+		status = "connected"
+	}
+	return IntegrationConnectResult{
+		Provider:      c.Name(),
+		Platform:      platform,
+		Status:        status,
+		ConnectID:     strings.TrimSpace(result.ID),
+		ConnectionKey: strings.TrimSpace(result.ID),
+		AuthMode:      strings.ToLower(mode),
+	}, nil
+}
+
+// createCustomAuthConfig creates a use_custom_auth config for a non-OAuth
+// toolkit. The user's credential lands on the connected account, not here, so
+// this just declares "this toolkit will be connected with a custom scheme".
+func (c *ComposioREST) createCustomAuthConfig(ctx context.Context, platform, mode string) (string, error) {
+	body := map[string]any{
+		"toolkit": map[string]any{"slug": platform},
+		"auth_config": map[string]any{
+			"type":        "use_custom_auth",
+			"authScheme":  mode,
+			"name":        "WUPHF " + DisplayPlatformName(platform),
+			"credentials": map[string]any{},
+		},
+	}
+	raw, err := c.post(ctx, "/auth_configs", body)
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		ID         string             `json:"id"`
+		AuthConfig composioAuthConfig `json:"auth_config"`
+		Item       composioAuthConfig `json:"item"`
+		Data       composioAuthConfig `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("parse custom auth config: %w", err)
+	}
+	if id := strings.TrimSpace(firstNonEmpty(result.ID, result.AuthConfig.ID, result.Item.ID, result.Data.ID)); id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("custom auth config response did not include id")
+}
+
+func stringMapToAny(in map[string]string) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}

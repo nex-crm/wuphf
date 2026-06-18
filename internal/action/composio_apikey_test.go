@@ -1,0 +1,179 @@
+package action
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+// instantlyToolkitDetail is the GET /toolkits/instantly response for an
+// API-key toolkit: no Composio-managed OAuth scheme, one API_KEY mode with a
+// single required credential field.
+func instantlyToolkitDetail() map[string]any {
+	return map[string]any{
+		"slug":                          "instantly",
+		"name":                          "Instantly",
+		"composio_managed_auth_schemes": []string{},
+		"auth_config_details": []map[string]any{{
+			"mode": "API_KEY",
+			"fields": map[string]any{
+				"connected_account_initiation": map[string]any{
+					"required": []map[string]any{{
+						"name":        "generic_api_key",
+						"displayName": "API Key",
+						"type":        "string",
+						"required":    true,
+					}},
+				},
+			},
+		}},
+	}
+}
+
+func TestToolkitAuthInfo_DetectsAPIKey(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/toolkits/instantly", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(instantlyToolkitDetail())
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	info := client.toolkitAuthInfo(context.Background(), "instantly")
+	if info.Managed {
+		t.Fatalf("API-key toolkit must not be treated as managed: %+v", info)
+	}
+	if info.Mode != "API_KEY" {
+		t.Fatalf("expected Mode=API_KEY, got %q", info.Mode)
+	}
+	if len(info.Fields) != 1 || info.Fields[0].Name != "generic_api_key" {
+		t.Fatalf("expected one generic_api_key field, got %+v", info.Fields)
+	}
+	if !info.Fields[0].Secret {
+		t.Fatalf("an api key field must be marked secret: %+v", info.Fields[0])
+	}
+}
+
+func TestToolkitAuthInfo_ManagedOAuthFallsBack(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/toolkits/gmail", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"slug":                          "gmail",
+			"composio_managed_auth_schemes": []string{"OAUTH2"},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	if info := client.toolkitAuthInfo(context.Background(), "gmail"); !info.Managed {
+		t.Fatalf("OAuth toolkit must be managed, got %+v", info)
+	}
+}
+
+// An unintrospectable toolkit (404 / network error) must fall back to managed
+// so we never block a toolkit we simply couldn't read.
+func TestToolkitAuthInfo_UnknownFallsBackToManaged(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	if info := client.toolkitAuthInfo(context.Background(), "mystery"); !info.Managed {
+		t.Fatalf("unknown toolkit must fall back to managed, got %+v", info)
+	}
+}
+
+// StartIntegrationConnection must short-circuit to needs_fields for an API-key
+// toolkit instead of POSTing use_composio_managed_auth (which 400s).
+func TestStartIntegrationConnection_NeedsFieldsForAPIKey(t *testing.T) {
+	authConfigCalled := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/toolkits/instantly", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(instantlyToolkitDetail())
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, _ *http.Request) {
+		authConfigCalled = true
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	res, err := client.StartIntegrationConnection(context.Background(), IntegrationConnectRequest{Platform: "Instantly"})
+	if err != nil {
+		t.Fatalf("connect should not error for an API-key toolkit: %v", err)
+	}
+	if res.Status != "needs_fields" {
+		t.Fatalf("expected status needs_fields, got %q", res.Status)
+	}
+	if res.AuthMode != "api_key" {
+		t.Fatalf("expected auth_mode api_key, got %q", res.AuthMode)
+	}
+	if len(res.RequiredFields) == 0 {
+		t.Fatalf("expected required fields for the key entry form")
+	}
+	if authConfigCalled {
+		t.Fatalf("must NOT attempt the managed /auth_configs path for an API-key toolkit")
+	}
+}
+
+// CompleteAPIKeyConnection must create a use_custom_auth config then a
+// connected account carrying the user's key in the scheme-specific val map.
+func TestCompleteAPIKeyConnection_SendsCustomAuthAndKey(t *testing.T) {
+	var authBody, accountBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/toolkits/instantly", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(instantlyToolkitDetail())
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&authBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"auth_config": map[string]any{"id": "ac_custom"}})
+	})
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&accountBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ca_instantly", "status": "ACTIVE"})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &ComposioREST{APIKey: "cmp_test", UserID: "ceo@example.com", BaseURL: server.URL, Client: server.Client()}
+
+	res, err := client.CompleteAPIKeyConnection(context.Background(), "Instantly", map[string]string{"generic_api_key": "ik_secret"})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if res.Status != "connected" {
+		t.Fatalf("expected connected, got %q (%+v)", res.Status, res)
+	}
+	if res.ConnectionKey != "ca_instantly" {
+		t.Fatalf("expected connection key ca_instantly, got %q", res.ConnectionKey)
+	}
+
+	// Auth config request shape.
+	ac, _ := authBody["auth_config"].(map[string]any)
+	if ac["type"] != "use_custom_auth" {
+		t.Fatalf("auth_config.type must be use_custom_auth, got %v", authBody)
+	}
+	if ac["authScheme"] != "API_KEY" {
+		t.Fatalf("auth_config.authScheme must be API_KEY, got %v", authBody)
+	}
+
+	// Connected account request shape: the user's key in connection.state.val.
+	conn, _ := accountBody["connection"].(map[string]any)
+	if conn["user_id"] != "ceo@example.com" {
+		t.Fatalf("connected account must carry the user id, got %v", accountBody)
+	}
+	state, _ := conn["state"].(map[string]any)
+	if state["authScheme"] != "API_KEY" {
+		t.Fatalf("connection.state.authScheme must be API_KEY, got %v", state)
+	}
+	val, _ := state["val"].(map[string]any)
+	if val["generic_api_key"] != "ik_secret" {
+		t.Fatalf("the user's api key must be sent in state.val, got %v", val)
+	}
+	acRef, _ := accountBody["auth_config"].(map[string]any)
+	if acRef["id"] != "ac_custom" {
+		t.Fatalf("connected account must reference the created auth config, got %v", accountBody)
+	}
+}
