@@ -459,6 +459,7 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", timeout))
 				l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", timeout), headlessProgressMetrics{})
+				l.noteChatTurnStall(slug, turn, fmt.Sprintf("the reply timed out after %s", timeout))
 				l.recoverTimedOutHeadlessTurn(slug, turn, startedAt, timeout)
 			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
@@ -481,6 +482,13 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 					// to parse raw `signal: killed` exhaust (Wave F2).
 					detail = turnKilledHumanDetail(slug)
 					l.postTurnKilledNote(slug, turn.Channel)
+				} else {
+					// Non-killed failure on a plain chat/DM reply (no task):
+					// surface one honest line so the user isn't left with
+					// silence. Task turns are skipped inside the helper —
+					// their failure already surfaces via BlockTask. The killed
+					// branch above posts its own note, so it's excluded here.
+					l.noteChatTurnStall(slug, turn, "the reply hit an error")
 				}
 				l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), headlessProgressMetrics{})
 				l.recoverFailedHeadlessTurn(slug, turn, startedAt, detail)

@@ -49,3 +49,29 @@ func (l *Launcher) postTurnKilledNote(slug, channel string) {
 		"error",
 	)
 }
+
+// noteChatTurnStall posts one honest system note when a turn that is NOT
+// attached to a task — a plain chat or DM reply — ends without a reply because
+// it timed out or errored. Task turns are skipped: their failure already
+// surfaces through BlockTask + self-healing in the decision inbox, so this
+// helper reuses timedOutTaskForTurn (the same task/taskless split the recovery
+// layer uses) and only speaks up when there is genuinely no task behind the
+// turn. Without it, a chat reply that times out or errors leaves the user
+// staring at silence — the agent "stalled and never replied" with no visible
+// reason. Best-effort: a nil broker (tests) is a no-op.
+func (l *Launcher) noteChatTurnStall(slug string, turn headlessCodexTurn, reason string) {
+	if l == nil || l.broker == nil {
+		return
+	}
+	if task := l.timedOutTaskForTurn(slug, turn); task != nil && strings.TrimSpace(task.ID) != "" {
+		return
+	}
+	target := strings.TrimSpace(turn.Channel)
+	if target == "" {
+		target = "general"
+	}
+	l.broker.PostSystemMessage(target,
+		fmt.Sprintf("@%s couldn't finish replying — %s. Try asking again.", slug, strings.TrimSpace(reason)),
+		"error",
+	)
+}
