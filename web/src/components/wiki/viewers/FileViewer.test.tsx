@@ -30,6 +30,7 @@ vi.mock("./PptxViewer", () => sentinel("pptx"));
 vi.mock("./NotebookViewer", () => sentinel("notebook"));
 vi.mock("./MermaidViewer", () => sentinel("mermaid"));
 vi.mock("./SourceViewer", () => sentinel("source"));
+vi.mock("./JsonlViewer", () => sentinel("jsonl"));
 
 import FileViewer, {
   fileKindForPath,
@@ -58,6 +59,11 @@ describe("fileKindForPath", () => {
     ["team/code/app.tsx", "source"],
     ["team/notes/todo.txt", "source"],
     ["team/data/matrix.tsv", "source"],
+    // JSON Lines routes to its own structured record viewer, not source.
+    ["team/data/facts.jsonl", "jsonl"],
+    ["team/logs/events.ndjson", "jsonl"],
+    // A plain `.json` is still source (single document, not line-delimited).
+    ["team/config/settings.json", "source"],
     // Unknown / binary → fallback
     ["team/assets/font.woff2", "fallback"],
     ["team/archives/backup.zip", "fallback"],
@@ -140,6 +146,17 @@ describe("<FileViewer> routing", () => {
     render(<FileViewer path="team/code/server.go" />);
     await waitFor(() =>
       expect(screen.getByTestId("viewer-source")).toBeInTheDocument(),
+    );
+  });
+
+  it("renders the jsonl viewer for a .jsonl path", async () => {
+    render(<FileViewer path="team/data/facts.jsonl" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("viewer-jsonl")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("viewer-jsonl")).toHaveAttribute(
+      "data-path",
+      "team/data/facts.jsonl",
     );
   });
 

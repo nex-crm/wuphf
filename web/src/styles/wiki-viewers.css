@@ -504,6 +504,65 @@
   background: var(--wk-code-bg);
 }
 
+/* ─── JSONL record viewer ────────────────────────────────────────────────── */
+
+/* Table mode reuses the shared `.wk-viewer table` styles above; the body just
+   drops its padding so the grid reaches the pane edges like csv/xlsx. */
+.wk-viewer--jsonl .wk-viewer__body {
+  padding: 0;
+}
+/* A row whose source line failed to parse — surfaced verbatim rather than
+   dropped — reads as a quiet warning so the reader knows that line is raw. */
+.wk-viewer__row--error td {
+  color: var(--wk-text-muted);
+  font-style: italic;
+}
+/* Card (record-list) fallback for heterogeneous / deeply-nested JSONL where a
+   table would be unreadable: one pretty-printed record per row. */
+.wk-viewer__records {
+  margin: 0;
+  padding: 12px 16px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  counter-reset: wk-record;
+}
+.wk-viewer__record {
+  position: relative;
+  counter-increment: wk-record;
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-md, 8px);
+  background: var(--wk-surface);
+  overflow: hidden;
+}
+.wk-viewer__record::before {
+  content: counter(wk-record);
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-family: var(--wk-mono);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+  user-select: none;
+}
+.wk-viewer__record-json {
+  margin: 0;
+  padding: 12px 16px;
+  overflow-x: auto;
+  font-family: var(--wk-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--wk-code-bg);
+  color: var(--wk-text);
+}
+.wk-viewer__record-json--error {
+  color: var(--red, #c0392b);
+}
+
 /* xlsx sheet tabs */
 .wk-viewer__sheet-tabs {
   display: flex;

@@ -29,6 +29,7 @@ export type FileKind =
   | "notebook"
   | "mermaid"
   | "source"
+  | "jsonl"
   | "google"
   | "fallback";
 
@@ -66,6 +67,11 @@ const CSV_EXTS = new Set(["csv"]);
 const XLSX_EXTS = new Set(["xlsx", "xls"]);
 
 const NOTEBOOK_EXTS = new Set(["ipynb"]);
+
+// JSON Lines (one JSON value per line). Routed to its own structured viewer —
+// not the source viewer — so fact/event logs render as readable records rather
+// than a wall of raw text. `.ndjson` is the same format under another name.
+const JSONL_EXTS = new Set(["jsonl", "ndjson"]);
 
 const MERMAID_EXTS = new Set(["mmd", "mermaid"]);
 
@@ -168,6 +174,9 @@ export function fileKindForPath(path: string): FileKind {
   if (CSV_EXTS.has(ext)) return "csv";
   if (XLSX_EXTS.has(ext)) return "xlsx";
   if (NOTEBOOK_EXTS.has(ext)) return "notebook";
+  // JSONL is checked before SOURCE_EXTS so `.jsonl` never falls through to the
+  // syntax-highlighted source view — it gets the structured record viewer.
+  if (JSONL_EXTS.has(ext)) return "jsonl";
   if (MERMAID_EXTS.has(ext)) return "mermaid";
   if (GOOGLE_EXTS.has(ext)) return "google";
   const singleton = SINGLETON_KIND_BY_EXT[ext];
@@ -221,6 +230,8 @@ export function fileKindLabel(path: string): string {
       return "Diagram";
     case "source":
       return "Source";
+    case "jsonl":
+      return "Records";
     case "google":
       return "Google";
     default: {

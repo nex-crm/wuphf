@@ -20,6 +20,7 @@ import {
   type LucideIcon,
   NotebookText,
   Presentation,
+  Table2,
 } from "lucide-react";
 
 import type { WikiFSTreeNode } from "../../../api/wiki";
@@ -85,6 +86,7 @@ const FILE_GLYPH: Record<FileKind, LucideIcon> = {
   notebook: NotebookText,
   mermaid: GitBranch,
   source: FileCode2,
+  jsonl: Table2,
   google: FileText,
   fallback: File,
 };
