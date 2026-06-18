@@ -993,6 +993,23 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 	return out
 }
 
+// MarkExternalDelivered records that a message was already delivered to its
+// external surface, so the outbound dispatcher's ExternalQueue will not send it
+// again. Used when a reply was delivered out-of-band — streamed live to a Slack
+// pane — but still recorded to the message store for history.
+func (b *Broker) MarkExternalDelivered(msgID string) {
+	msgID = strings.TrimSpace(msgID)
+	if b == nil || msgID == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{})
+	}
+	b.externalDelivered[msgID] = struct{}{}
+}
+
 // SetWebURL records the web UI's base URL so surfaces that link back to the
 // app (e.g. the Slack App Home tab) can build real links.
 func (b *Broker) SetWebURL(url string) {

@@ -281,7 +281,11 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	relay.Flush()
 	finalText := strings.TrimSpace(result.FinalMessage)
-	if finalText != "" {
+	// A pane reply streamed live in place; finalize it and skip the normal
+	// final-message fallback (which would double-post it).
+	if relay.closeStream(finalText) {
+		appendHeadlessClaudeLog(slug, "stream: finalized streamed pane reply")
+	} else if finalText != "" {
 		appendHeadlessClaudeLog(slug, "result: "+finalText)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, finalText, startedAt)
 		if err != nil {

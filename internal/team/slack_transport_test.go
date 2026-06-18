@@ -109,6 +109,19 @@ type fakeSlackAPI struct {
 
 	titles   []fakeTitle
 	titleErr error
+
+	streamStarts   []fakeStreamCall
+	streamAppends  []fakeStreamCall
+	streamStops    []fakeStreamCall
+	startStreamErr error
+	streamTS       string // ts returned by StartStream; defaults to "stream.1"
+}
+
+// fakeStreamCall records one streaming Web API call's channel/ts/chunks.
+type fakeStreamCall struct {
+	ChannelID string
+	ThreadTS  string
+	Chunks    string
 }
 
 type fakeStatus struct {
@@ -226,6 +239,52 @@ func (f *fakeSlackAPI) SetAssistantThreadsTitleContext(_ context.Context, params
 		Title:     params.Title,
 	})
 	return nil
+}
+
+func (f *fakeSlackAPI) StartStreamContext(_ context.Context, channelID string, opts ...slack.MsgOption) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.startStreamErr != nil {
+		return "", "", f.startStreamErr
+	}
+	values, err := slackFormFromOptions(channelID, opts...)
+	if err != nil {
+		return "", "", err
+	}
+	ts := f.streamTS
+	if ts == "" {
+		ts = "stream.1"
+	}
+	f.streamStarts = append(f.streamStarts, fakeStreamCall{
+		ChannelID: channelID, ThreadTS: firstValue(values, "thread_ts"), Chunks: firstValue(values, "chunks"),
+	})
+	return channelID, ts, nil
+}
+
+func (f *fakeSlackAPI) AppendStreamContext(_ context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	values, err := slackFormFromOptions(channelID, opts...)
+	if err != nil {
+		return "", "", err
+	}
+	f.streamAppends = append(f.streamAppends, fakeStreamCall{
+		ChannelID: channelID, ThreadTS: timestamp, Chunks: firstValue(values, "chunks"),
+	})
+	return channelID, timestamp, nil
+}
+
+func (f *fakeSlackAPI) StopStreamContext(_ context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	values, err := slackFormFromOptions(channelID, opts...)
+	if err != nil {
+		return "", "", err
+	}
+	f.streamStops = append(f.streamStops, fakeStreamCall{
+		ChannelID: channelID, ThreadTS: timestamp, Chunks: firstValue(values, "chunks"),
+	})
+	return channelID, timestamp, nil
 }
 
 func (f *fakeSlackAPI) PublishViewContext(_ context.Context, userID string, view slack.HomeTabViewRequest) error {

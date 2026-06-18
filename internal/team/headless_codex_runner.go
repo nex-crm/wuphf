@@ -338,9 +338,14 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(ctx, slug), result.Usage)
 	}
 	relay.Flush()
-	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
-		appendHeadlessCodexLog(slug, "result: "+text)
-		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
+	finalText := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))
+	// A pane reply streamed live in place; finalize it and skip the normal
+	// final-message fallback (which would double-post it).
+	if relay.closeStream(finalText) {
+		appendHeadlessCodexLog(slug, "stream: finalized streamed pane reply")
+	} else if finalText != "" {
+		appendHeadlessCodexLog(slug, "result: "+finalText)
+		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, finalText, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "fallback-post-error: "+err.Error())
 		} else if posted {

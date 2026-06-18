@@ -84,6 +84,15 @@ type slackAPI interface {
 	// (assistant.threads.setTitle) so it is findable in the user's pane history.
 	// Set once from the first user message. Same requirement; degrades silently.
 	SetAssistantThreadsTitleContext(ctx context.Context, params slack.AssistantThreadsSetTitleParameters) error
+	// StartStreamContext / AppendStreamContext / StopStreamContext drive a single
+	// streaming message that builds in place (chat.startStream → appendStream →
+	// stopStream), used to deliver an agent's pane reply live — one message that
+	// grows as the reply is generated — instead of several separate posts. Each
+	// returns (channelID, messageTS, err). Needs the Assistant feature; the
+	// relay falls back to normal posting on any error.
+	StartStreamContext(ctx context.Context, channelID string, opts ...slack.MsgOption) (string, string, error)
+	AppendStreamContext(ctx context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, error)
+	StopStreamContext(ctx context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, error)
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -153,6 +162,18 @@ func (c *slackClient) SetAssistantThreadsSuggestedPromptsContext(ctx context.Con
 
 func (c *slackClient) SetAssistantThreadsTitleContext(ctx context.Context, params slack.AssistantThreadsSetTitleParameters) error {
 	return c.api.SetAssistantThreadsTitleContext(ctx, params)
+}
+
+func (c *slackClient) StartStreamContext(ctx context.Context, channelID string, opts ...slack.MsgOption) (string, string, error) {
+	return c.api.StartStreamContext(ctx, channelID, opts...)
+}
+
+func (c *slackClient) AppendStreamContext(ctx context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, error) {
+	return c.api.AppendStreamContext(ctx, channelID, timestamp, opts...)
+}
+
+func (c *slackClient) StopStreamContext(ctx context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, error) {
+	return c.api.StopStreamContext(ctx, channelID, timestamp, opts...)
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and
