@@ -427,6 +427,17 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 				l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
 				return
 			}
+			// Guarantee the active slot is released even if the turn body
+			// panics. finishHeadlessTurn clears active[lane] (freeing the
+			// concurrency-cap slot), respawns parked lanes, and wakes the
+			// lead/CEO after a specialist completes. If a panic in
+			// headlessCodexRunTurn, the recovery helpers, or
+			// recordTaskLedgerEntry skipped it, the slot leaked forever:
+			// under a cap every other agent's lane stayed parked and the CEO
+			// never reacted to completions — agents silently stalled with no
+			// reply. recoverPanicTo (deferred above, so it runs last) still
+			// swallows and logs the panic after this cleanup runs.
+			defer l.finishHeadlessTurn(lane)
 			appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
 			l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
 
@@ -475,7 +486,6 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 				l.recoverFailedHeadlessTurn(slug, turn, startedAt, detail)
 			}
 			l.recordTaskLedgerEntry(slug, turn, startedAt, err)
-			l.finishHeadlessTurn(lane)
 		}()
 		l.headless.mu.Lock()
 		_, stillRunning := l.headless.workers[lane]
