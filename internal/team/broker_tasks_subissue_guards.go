@@ -32,7 +32,14 @@ func (b *Broker) applySubIssueCreateRulesLocked(task *teamTask, actor string) er
 	task.TaskType = "issue"
 	parent := b.findTaskByIDLocked(task.ParentIssueID)
 	if parent == nil {
-		return nil
+		// Refuse a sub-issue whose parent does not exist — a dangling
+		// parent_issue_id would otherwise create an orphan that bypasses every
+		// parent-based guard (plan-gate, shallow-restate, sibling dedup).
+		return taskMutationError(
+			TaskMutationNotFound,
+			fmt.Sprintf("parent issue %s not found — create the parent first or fix the parent_issue_id", strings.TrimSpace(task.ParentIssueID)),
+			nil,
+		)
 	}
 	if strings.TrimSpace(parent.ParentIssueID) != "" {
 		return taskMutationError(

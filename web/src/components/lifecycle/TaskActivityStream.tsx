@@ -175,6 +175,8 @@ function describeActivity(
   const trimmed = activity?.trim();
   if (trimmed) return trimmed;
   switch (state) {
+    case "planning":
+      return "Planning — drafting a plan for human approval.";
     case "running":
     case "intake":
       return "Idle — waiting for the next event.";
