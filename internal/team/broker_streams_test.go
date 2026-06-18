@@ -243,6 +243,16 @@ func TestReapStaleActivityLocked(t *testing.T) {
 		if snap.Slug != "stale-active" && snap.Slug != "stale-thinking" {
 			t.Errorf("unexpected reaped slug: %q", snap.Slug)
 		}
+		// The idle detail must read as plain English to a non-technical
+		// operator and say how to recover — never engineer jargon like
+		// "stale activity reaped". Regression for the customer complaint
+		// that the live stream "doesn't tell much fruitful stuff".
+		if strings.Contains(snap.Detail, "reaped") || strings.Contains(snap.Detail, "stale activity") {
+			t.Errorf("reaped detail leaks jargon: %q", snap.Detail)
+		}
+		if !strings.Contains(snap.Detail, "send a new message") {
+			t.Errorf("reaped detail should tell the operator how to recover; got %q", snap.Detail)
+		}
 	}
 
 	if b.activity["fresh-active"].Status != "active" {

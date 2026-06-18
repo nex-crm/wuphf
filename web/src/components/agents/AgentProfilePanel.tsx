@@ -22,6 +22,7 @@ import {
   listAgentLogTasks,
   type Task,
   type TaskLogSummary,
+  updateTaskStatus,
 } from "../../api/tasks";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import type { HarnessKind } from "../../lib/harness";
@@ -35,6 +36,7 @@ import {
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { showNotice } from "../ui/Toast";
 import { AgentInstructionsSection } from "./AgentInstructionsSection";
 
 const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
@@ -233,7 +235,41 @@ interface RecentTasksSectionProps {
   tasks: Task[];
 }
 
+/**
+ * Statuses where an agent should be making progress but may have silently
+ * stalled — the only states a "Resume" nudge makes sense for. Resuming routes
+ * through the broker's documented wake path (task_updated action →
+ * notifyTaskActionsLoop → enqueueHeadlessCodexTurn), re-engaging the owner.
+ */
+export function isResumableStatus(raw: string): boolean {
+  const s = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  return (
+    s === "blocked" ||
+    s === "in_progress" ||
+    s === "running" ||
+    s === "queued" ||
+    s === "queued_behind_owner" ||
+    s === "planning"
+  );
+}
+
 function RecentArtifactsSection({ agentSlug, tasks }: RecentTasksSectionProps) {
+  const queryClient = useQueryClient();
+  const resumeMutation = useMutation({
+    mutationFn: (task: Task) =>
+      updateTaskStatus(task.id, "resume", task.channel ?? "", "human"),
+    onSuccess: (_data, task) => {
+      showNotice(`Resuming ${agentSlug} on “${task.title}”.`, "success");
+      void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: (err) => {
+      showNotice(
+        err instanceof Error ? err.message : "Failed to resume the agent.",
+        "error",
+      );
+    },
+  });
   const agentTasks = tasks
     .filter((t) => t.owner === agentSlug)
     .sort((a, b) => {
@@ -269,6 +305,20 @@ function RecentArtifactsSection({ agentSlug, tasks }: RecentTasksSectionProps) {
                   {normalizeTaskStatus(t.status)}
                 </span>
               </button>
+              {isResumableStatus(t.status) ? (
+                <button
+                  type="button"
+                  className="agent-profile-resume-btn"
+                  title="Re-engage this agent on the task if it has gone quiet"
+                  disabled={resumeMutation.isPending}
+                  onClick={() => resumeMutation.mutate(t)}
+                >
+                  {resumeMutation.isPending &&
+                  resumeMutation.variables?.id === t.id
+                    ? "Resuming…"
+                    : "Resume"}
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>

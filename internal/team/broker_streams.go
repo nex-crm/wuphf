@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -549,7 +550,15 @@ func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot 
 		case age >= staleActivityThreshold:
 			snap.Status = "idle"
 			snap.Activity = "idle"
-			snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
+			// Plain-language, actionable detail — this string surfaces in the
+			// activity feed and the agent pill tooltip, so it must read as
+			// English to a non-technical operator (not "stale activity
+			// reaped") and tell them how to get the agent moving again.
+			mins := int(age.Round(time.Minute) / time.Minute)
+			if mins < 1 {
+				mins = 1
+			}
+			snap.Detail = fmt.Sprintf("Went idle after no progress for %d min — send a new message to bring it back.", mins)
 			snap.LastTime = now.UTC().Format(time.RFC3339)
 			// Reaping back to idle clears any prior stuck flag — the
 			// agent is no longer claiming to be working.

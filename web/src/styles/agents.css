@@ -697,6 +697,43 @@
   color: var(--accent);
 }
 
+/* When a task row also carries a Resume nudge, let the title button take the
+   available space and keep the action pinned to the trailing edge. */
+.agent-profile-list-item .agent-profile-task-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+/* "Resume" nudge for a stalled task — re-engages the agent via the proven
+   task wake path. Quiet by default, accent on hover, so it does not compete
+   with the task title. */
+.agent-profile-resume-btn {
+  flex: 0 0 auto;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 9px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+.agent-profile-resume-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.agent-profile-resume-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .agent-profile-run-id {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
