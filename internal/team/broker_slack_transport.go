@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 // broker_slack_transport.go owns the in-process lifecycle of the Slack transport
@@ -58,6 +59,8 @@ func (b *Broker) EnsureSlackTransportRunning() {
 	dispatchDone := make(chan struct{})
 	cardsDone := make(chan struct{})
 	entitiesDone := make(chan struct{})
+	thinkingDone := make(chan struct{})
+	reportingDone := make(chan struct{})
 
 	go func() {
 		defer close(done)
@@ -86,14 +89,30 @@ func (b *Broker) EnsureSlackTransportRunning() {
 			log.Printf("[transport] slack: entity fact sync exited: %v", err)
 		}
 	}()
+	go func() {
+		defer close(thinkingDone)
+		if err := st.runAgentThinkingStatus(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[transport] slack: thinking-status loop exited: %v", err)
+		}
+	}()
+	// Task-thread reporter: pings assignees on subtask assignment, mirrors
+	// lifecycle transitions, and links new wiki articles into the right thread.
+	go func() {
+		defer close(reportingDone)
+		if err := st.runTaskReporting(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[transport] slack: task-reporting loop exited: %v", err)
+		}
+	}()
 
 	b.slackTransport = st
 	b.slackTransportStop = func() {
 		cancel()
-		<-done         // Run returns before broker.Stop()
-		<-dispatchDone // outbound dispatcher
-		<-cardsDone    // task-card sync loop
-		<-entitiesDone // entity fact sync loop
+		<-done          // Run returns before broker.Stop()
+		<-dispatchDone  // outbound dispatcher
+		<-cardsDone     // task-card sync loop
+		<-entitiesDone  // entity fact sync loop
+		<-thinkingDone  // native thinking-status loop
+		<-reportingDone // task-thread reporting loop
 	}
 	log.Printf("[transport] slack: started (%d channel(s))", len(st.ChannelMap))
 }
@@ -115,10 +134,27 @@ func (b *Broker) stopSlackTransport() {
 	}
 }
 
-// slackTransportRunning reports whether the in-process Slack transport is live.
-// Used by /slack/status to distinguish "configured" from "actually connected".
+// slackTransportRunning reports whether the in-process Slack transport has been
+// started (its goroutines are spawned). It does NOT mean the Socket Mode
+// connection is up — use slackTransportConnected for that.
 func (b *Broker) slackTransportRunning() bool {
 	b.slackTransportMu.Lock()
 	defer b.slackTransportMu.Unlock()
 	return b.slackTransport != nil
+}
+
+// slackTransportConnected reports whether the live Slack transport's Socket Mode
+// connection is healthy. This is the signal the onboarding wizard polls after
+// /slack/connect hot-starts the transport, so the "you're live" confirmation
+// reflects a real connection rather than just a spawned goroutine. The transport
+// ref is captured under slackTransportMu, then Health() is read on the transport's
+// own mutex (no nested lock).
+func (b *Broker) slackTransportConnected() bool {
+	b.slackTransportMu.Lock()
+	st := b.slackTransport
+	b.slackTransportMu.Unlock()
+	if st == nil {
+		return false
+	}
+	return st.Health().State == transport.HealthConnected
 }

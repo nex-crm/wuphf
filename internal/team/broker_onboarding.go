@@ -66,6 +66,18 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 		b.mu.Lock()
 		defer b.mu.Unlock()
 
+		// Data-loss guard: never reseed over a real office. The onboarded.json
+		// marker and the on-disk broker state can disagree after a clean-env
+		// restart (marker cleared, real state intact); the wizard then re-appears
+		// and completing it would wipe an existing office's channels and tasks.
+		// When a real (non-system task) office is already loaded, adopt it
+		// instead of seeding: return nil so the handler marks the workspace
+		// onboarded and the user lands back in their office, untouched.
+		if b.hasRealOfficeStateLocked() {
+			log.Printf("onboarding: existing office detected; adopting it instead of reseeding (data-loss guard)")
+			return nil
+		}
+
 		// Dedupe after we're inside the lock so the messages slice is stable.
 		// If a prior call already posted this exact task as an onboarding_origin
 		// message (crash-recovery scenario), skip re-seeding and preserve the

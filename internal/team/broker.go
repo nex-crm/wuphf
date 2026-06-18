@@ -145,10 +145,17 @@ type Broker struct {
 	usage             teamUsageState
 	externalDelivered map[string]struct{}            // message IDs already queued for external delivery
 	slackTaskCards    map[string]slackTaskCardRecord // task ID → posted Slack lifecycle card (persisted)
+	slackTagOrigins   map[string]slackTagOrigin      // slack channel id → where the office was last @-tagged (in-memory; for task-thread backlinks)
+	assistantThreads  map[string]string              // DM slug → current Slack Assistant thread root ts (in-memory; threads the office's pane replies)
+	assistantTitled   map[string]bool                // Slack Assistant thread root ts → title already set (in-memory; set once from the first user message)
+	slackFeedback     []slackFeedbackEvent           // bounded ring of recent 👍/👎 verdicts on office pane replies (in-memory)
 	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
 	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
 	// nil means the real Slack Web API. Tests inject a fake.
-	slackSpawnAuthTest      slackSpawnAuthTestFunc
+	slackSpawnAuthTest slackSpawnAuthTestFunc
+	// slackOnboardingAuthTest is the auth.test seam for the web onboarding
+	// wizard's token-validation step; nil means the real Slack Web API.
+	slackOnboardingAuthTest slackOnboardingAuthTestFunc
 	messageSubscribers      map[int]chan channelMessage
 	actionSubscribers       map[int]chan officeActionLog
 	activity                map[string]agentActivitySnapshot
@@ -161,6 +168,10 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
+	// bgWG tracks fire-and-forget broker goroutines that write to disk (task
+	// distillation, wiki promotion). WaitBackground drains them so a shutdown /
+	// test teardown does not race their writes against state removal.
+	bgWG                    sync.WaitGroup
 	wikiInitMu              sync.Mutex
 	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
@@ -707,6 +718,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
 	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
+	mux.HandleFunc("/slack/app-manifest", b.requireAuth(b.handleSlackAppManifest))
+	mux.HandleFunc("/slack/tokens", b.requireAuth(b.handleSlackTokens))
+	mux.HandleFunc("/slack/status", b.requireAuth(b.handleSlackStatus))
+	mux.HandleFunc("/slack/discover", b.requireAuth(b.handleSlackDiscover))
 	mux.HandleFunc("/slack/agents", b.requireAuth(b.handleSlackAgents))
 	mux.HandleFunc("/slack/agents/spawn", b.requireAuth(b.handleSlackAgentsSpawn))
 	mux.HandleFunc("/slack/agents/spawn/complete", b.requireAuth(b.handleSlackAgentsSpawnComplete))
@@ -976,6 +991,23 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 		out = append(out, cloneChannelMessageForRead(msg))
 	}
 	return out
+}
+
+// MarkExternalDelivered records that a message was already delivered to its
+// external surface, so the outbound dispatcher's ExternalQueue will not send it
+// again. Used when a reply was delivered out-of-band — streamed live to a Slack
+// pane — but still recorded to the message store for history.
+func (b *Broker) MarkExternalDelivered(msgID string) {
+	msgID = strings.TrimSpace(msgID)
+	if b == nil || msgID == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{})
+	}
+	b.externalDelivered[msgID] = struct{}{}
 }
 
 // SetWebURL records the web UI's base URL so surfaces that link back to the

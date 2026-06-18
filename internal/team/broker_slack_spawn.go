@@ -122,19 +122,40 @@ type slackManifestScopes struct {
 // slackSpawnManifest builds the ready-to-paste app manifest for one spawned
 // agent. Display name = the agent's office name so the Slack identity reads
 // as the agent, not as "wuphf-2".
-func slackSpawnManifest(name string) slackAppManifest {
+func slackSpawnManifest(name, role string) slackAppManifest {
+	display := slackSpawnDisplayName(name, role)
+	// Slack caps the app's display_information.name at 35 chars; the bot's
+	// display_name tolerates more. Fall back to the bare name for the app name
+	// when the role makes "Name (Role)" too long, but keep the role on the bot
+	// display name so the posting identity still reads e.g. "Scout (RevOps Agent)".
+	appName := display
+	if len(appName) > 35 {
+		appName = name
+	}
 	return slackAppManifest{
 		DisplayInformation: slackManifestDisplay{
-			Name:        name,
-			Description: fmt.Sprintf("%s — a WUPHF office agent posting as itself.", name),
+			Name:        appName,
+			Description: fmt.Sprintf("%s — a WUPHF office agent posting as itself.", display),
 		},
 		Features: slackManifestFeatures{
-			BotUser: slackManifestBotUser{DisplayName: name, AlwaysOnline: true},
+			BotUser: slackManifestBotUser{DisplayName: display, AlwaysOnline: true},
 		},
 		OauthConfig: slackManifestOauth{
-			Scopes: slackManifestScopes{Bot: []string{"chat:write", "users:read"}},
+			Scopes: slackManifestScopes{Bot: []string{"assistant:write", "chat:write", "users:read"}},
 		},
 	}
+}
+
+// slackSpawnDisplayName renders a spawned agent's public identity as
+// "Name (Role)" so its role is legible the moment it posts in Slack (e.g.
+// "Scout (RevOps Agent)"). With no role it is just the name.
+func slackSpawnDisplayName(name, role string) string {
+	name = strings.TrimSpace(name)
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, role)
 }
 
 // slackSpawnTokenEnv derives the env var NAME the spawned agent's bot token
@@ -204,7 +225,7 @@ func (b *Broker) handleSlackAgentsSpawn(w http.ResponseWriter, r *http.Request) 
 			"name":      rec.Name,
 			"role":      rec.Role,
 			"token_env": rec.TokenEnv,
-			"manifest":  slackSpawnManifest(rec.Name),
+			"manifest":  slackSpawnManifest(rec.Name, rec.Role),
 			"guide":     slackSpawnGuide(rec.Name, rec.TokenEnv, rec.Slug),
 		})
 	default:

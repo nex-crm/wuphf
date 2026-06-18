@@ -110,6 +110,9 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 	if action == "create" && len(args.DependsOn) > 0 {
 		payload["depends_on"] = args.DependsOn
 	}
+	if (action == "create" || action == "update") && len(args.Participants) > 0 {
+		payload["participants"] = args.Participants
+	}
 	if action == "define" {
 		// R4 intake contract: forward the structured definition under the
 		// single "definition" wire key. The broker validates (goal required,

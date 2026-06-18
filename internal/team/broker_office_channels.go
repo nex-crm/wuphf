@@ -186,16 +186,22 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"task_reminder_minutes":  config.ResolveTaskReminderInterval(),
 			"task_recheck_minutes":   config.ResolveTaskRecheckInterval(),
 			// Integrations — secret fields as booleans
-			"api_key_set":          config.ResolveAPIKey("") != "",
-			"openai_key_set":       config.ResolveOpenAIAPIKey() != "",
-			"anthropic_key_set":    config.ResolveAnthropicAPIKey() != "",
-			"gemini_key_set":       config.ResolveGeminiAPIKey() != "",
-			"minimax_key_set":      config.ResolveMinimaxAPIKey() != "",
-			"one_key_set":          config.ResolveOneSecret() != "",
-			"composio_key_set":     config.IsComposioConfigured(),
-			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
-			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
-			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
+			"api_key_set":         config.ResolveAPIKey("") != "",
+			"openai_key_set":      config.ResolveOpenAIAPIKey() != "",
+			"anthropic_key_set":   config.ResolveAnthropicAPIKey() != "",
+			"gemini_key_set":      config.ResolveGeminiAPIKey() != "",
+			"minimax_key_set":     config.ResolveMinimaxAPIKey() != "",
+			"one_key_set":         config.ResolveOneSecret() != "",
+			"composio_key_set":    config.IsComposioConfigured(),
+			"telegram_token_set":  config.ResolveTelegramBotToken() != "",
+			"slack_bot_token_set": config.ResolveSlackBotToken() != "",
+			"slack_app_token_set": config.ResolveSlackAppToken() != "",
+			// Whether >=1 Slack channel is actually bridged, distinct from tokens
+			// being set. The Integrations card keys its "Connect Slack" vs
+			// "Connect another channel" label off this, not the token flags.
+			"slack_channel_connected": len(b.SurfaceChannels("slack")) > 0,
+			"openclaw_token_set":      config.ResolveOpenclawToken() != "",
+			"openclaw_gateway_url":    config.ResolveOpenclawGatewayURL(),
 			// Product analytics consent (PostHog). The two channels are
 			// independently toggleable; analytics_configured reports whether
 			// the backend injects a key (the frontend ORs this with its own

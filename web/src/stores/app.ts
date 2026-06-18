@@ -224,6 +224,9 @@ export interface AppStore {
   telegramConnectMode: "provider" | "telegram";
   openConnectWizard: (mode: "provider" | "telegram") => void;
   setTelegramConnectOpen: (v: boolean) => void;
+  slackConnectOpen: boolean;
+  openSlackConnect: () => void;
+  setSlackConnectOpen: (v: boolean) => void;
 
   // Onboarding
   onboardingComplete: boolean;
@@ -401,6 +404,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openConnectWizard: (mode) =>
     set({ telegramConnectOpen: true, telegramConnectMode: mode }),
   setTelegramConnectOpen: (v) => set({ telegramConnectOpen: v }),
+  slackConnectOpen: false,
+  openSlackConnect: () => set({ slackConnectOpen: true }),
+  setSlackConnectOpen: (v) => set({ slackConnectOpen: v }),
 
   agentActivitySnapshots: {},
   agentActivityHistory: {},
@@ -468,6 +474,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // reason searchOpen / composerHelpOpen are: any modal left open here
       // would float over the onboarding flow.
       telegramConnectOpen: false,
+      slackConnectOpen: false,
       onboardingComplete: false,
     }),
 }));

@@ -173,7 +173,43 @@ func (t *SlackTransport) ensureTaskThreadRoot(ctx context.Context, taskID string
 		rec.Pinned = true
 	}
 	t.Broker.SetSlackTaskCard(taskID, rec)
+
+	// If this task traces to a fresh @wuphf tag, link its new thread back into
+	// the conversation where it was tagged so those humans can follow it. Posted
+	// once (the origin is consumed) and best-effort: a link failure never blocks
+	// the card. The card itself is a new root thread; the backlink is a reply in
+	// the original thread, which is exactly "new thread, linked in the original."
+	if origin := t.Broker.consumeSlackTagOrigin(channelID); origin != "" {
+		t.postTaskThreadBacklink(cctx, channelID, origin, task, ts)
+	}
 	return ts
+}
+
+// postTaskThreadBacklink posts a one-line pointer to a task's new thread (rootTS)
+// into the conversation it came from (originThreadTS). Best-effort: a permalink
+// or post failure is logged, not fatal.
+func (t *SlackTransport) postTaskThreadBacklink(ctx context.Context, channelID, originThreadTS string, task *teamTask, rootTS string) {
+	label := strings.TrimSpace(task.ID)
+	if label == "" {
+		label = "this"
+	}
+	link := ""
+	if u, err := t.api.GetPermalinkContext(ctx, &slack.PermalinkParameters{Channel: channelID, Ts: rootTS}); err == nil {
+		link = strings.TrimSpace(u)
+	}
+	text := fmt.Sprintf("On it. Tracking as %s in its own thread.", label)
+	if link != "" {
+		text = fmt.Sprintf("On it. Tracking as %s in its own thread: %s", label, link)
+	}
+	// escapeText=false: office-authored text plus a Slack-issued permalink, so
+	// the link renders. The only interpolated value is the task id
+	// (office-controlled), never foreign-tainted input.
+	if _, _, err := t.api.PostMessageContext(ctx, channelID,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionTS(originThreadTS),
+	); err != nil {
+		log.Printf("[slack] task thread backlink failed for %s: %v", label, err)
+	}
 }
 
 func (t *SlackTransport) updateTaskCard(ctx context.Context, rec slackTaskCardRecord, task *teamTask, state string) {

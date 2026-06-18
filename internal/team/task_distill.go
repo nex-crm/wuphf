@@ -70,10 +70,22 @@ func taskDistillInsight(task teamTask, res *TaskVerificationResult) string {
 
 // queueTaskDistillation schedules distillation off the mutation hot path.
 func (b *Broker) queueTaskDistillation(taskID string) {
+	b.bgWG.Add(1)
 	go func() {
+		defer b.bgWG.Done()
 		defer recoverPanicTo("distillCompletedTask", "task="+taskID)
 		b.distillCompletedTask(taskID)
 	}()
+}
+
+// WaitBackground blocks until all fire-and-forget broker goroutines that write
+// to disk (distillation, wiki promotion) have finished. Used on shutdown / test
+// teardown so their writes never race state removal.
+func (b *Broker) WaitBackground() {
+	if b == nil {
+		return
+	}
+	b.bgWG.Wait()
 }
 
 // distillCompletedTask writes one learning record for a verified-done task.

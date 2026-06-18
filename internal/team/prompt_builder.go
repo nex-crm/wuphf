@@ -45,6 +45,14 @@ type promptBuilder struct {
 	// Issues already exist and ends up duplicating scope.
 	activeIssues func() []IssueSummary
 
+	// humans returns the humans the office knows about (active share-session
+	// teammates), each with a short context line drawn from their wiki
+	// article. Rendered as the HUMANS IN THE OFFICE block in the CEO prompt so
+	// the lead can loop a human into a task for work humans are better suited
+	// to (approvals, judgment, providing info, relationships). Optional so the
+	// builder stays usable from tests without a broker; nil -> block omitted.
+	humans func() []humanPromptEntry
+
 	// agentInstruction reads one of an agent's instruction files (SOUL /
 	// IDENTITY / OPERATIONS / TOOLS) from the wiki repo, or "" when absent or
 	// the wiki backend is off. officeUser reads the office-wide USER.md. Both
@@ -159,6 +167,14 @@ func (p *promptBuilder) Build(slug string) string {
 		sort.Slice(activeIssues, func(i, j int) bool { return activeIssues[i].ID < activeIssues[j].ID })
 	}
 
+	// Snapshot the humans the office knows about for the HUMANS IN THE OFFICE
+	// block (CEO leader prompt only). Sorted by HumansForPrompt already; the
+	// builder leaves the order as-is for prompt-cache byte stability.
+	var officeHumans []humanPromptEntry
+	if p.humans != nil {
+		officeHumans = p.humans()
+	}
+
 	var sb strings.Builder
 	companyCtx := config.CompanyContextBlock()
 
@@ -271,6 +287,7 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		sb.WriteString(renderSkillsCatalogBlock(activeSkills, slug))
 		sb.WriteString(renderAvailableAgentsBlock(officeMembers, slug))
+		sb.WriteString(renderHumansInOfficeBlock(officeHumans))
 		sb.WriteString(renderActiveIssuesBlock(activeIssues))
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString(issueJudgmentBlock())
@@ -819,6 +836,7 @@ func renderAvailableAgentsBlock(members []officeMember, selfSlug string) string 
 	var sb strings.Builder
 	sb.WriteString("== AVAILABLE AGENTS ==\n")
 	sb.WriteString("These are the ONLY agent slugs valid for the `owner` field on team_task action=create and for @-mentions in chat. Pick an existing agent whose expertise fits the Issue — assigning yourself is fine when the work sits in your own domain. Only spin up a new agent (via team_member action=create) when NO existing agent fits.\n")
+	sb.WriteString("CONSIDER HELP BEFORE GOING SOLO. When a goal lands, do not quietly do multi-step or cross-domain work alone. First scan this roster (and the humans below) and decide who should carry each part: assign the best-fit specialist as owner, and split a goal that spans domains into Issues owned by the right agents instead of one Issue you run yourself. If the work genuinely needs an expertise no one here has, propose a new specialist with team_member action=create — that raises an approval the human accepts or rejects before the agent joins; name the role and why it is needed. Reach for an existing agent or a human first; propose a spawn only when there is a real gap.\n")
 	others := 0
 	for _, m := range members {
 		expertise := strings.Join(m.Expertise, ", ")
@@ -841,6 +859,35 @@ func renderAvailableAgentsBlock(members []officeMember, selfSlug string) string 
 		sb.WriteString("(no specialists yet — only you. Assign yourself as owner OR call team_member action=create FIRST to spin up a specialist, then pass the new slug as owner.)\n")
 	}
 	sb.WriteString("\n")
+	return sb.String()
+}
+
+// renderHumansInOfficeBlock lists the humans the office knows about so the CEO
+// can loop one into a task for work humans are better suited to. Humans are
+// NOT agents: they are never owners and never run a turn. They are added to a
+// task as participants/support via the `participants` field on team_task, and
+// the broker @-pings them through the agent-mention path so the human sees the
+// ask. Returns "" when no humans are known (the block is then omitted).
+//
+// The instruction is deliberately concrete about WHEN to loop a human in:
+// approvals, judgment calls, providing info only the human has, and
+// relationship-owned steps. The agents do the autonomous work; humans are
+// pulled in for the decisions and inputs that are genuinely theirs.
+func renderHumansInOfficeBlock(humans []humanPromptEntry) string {
+	if len(humans) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("== HUMANS IN THE OFFICE ==\n")
+	sb.WriteString("These are the human teammates in this office. They are NOT agents: never set a human as a task `owner`, and never @-mention a human expecting them to run a turn. Loop a human into a task by listing their slug in the `participants` field on team_task action=create (or action=update). The broker pings them so the ask reaches the right person.\n")
+	for _, h := range humans {
+		line := fmt.Sprintf("- @%s — %s", h.Slug, h.Name)
+		if ctx := strings.TrimSpace(h.Context); ctx != "" {
+			line += " (" + clipPromptText(ctx, 200) + ")"
+		}
+		sb.WriteString(line + "\n")
+	}
+	sb.WriteString("Loop a human in for the steps that are genuinely theirs: an approval or sign-off before a risky or external action; a judgment call the team should not make alone; information only the human has (account access, a relationship, a business decision, a preference); or a relationship-owned step (talking to a customer, partner, or investor). For everything an agent can do autonomously, assign an agent owner and let the human stay out of the loop. When you do loop a human in, say in the task details exactly what you need from them and why, so the ask is actionable.\n\n")
 	return sb.String()
 }
 

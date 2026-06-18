@@ -2,9 +2,11 @@ import { HermesDetail, hermesStatus } from "./HermesCard";
 import {
   HermesLogo,
   OpenClawLogo,
+  SlackLogo,
   TelegramLogo,
 } from "./IntegrationLogos";
 import { OpenClawDetail, openClawStatus } from "./OpenClawCard";
+import { SlackDetail, slackStatus } from "./SlackCard";
 import { TelegramDetail, telegramStatus } from "./TelegramCard";
 import type { IntegrationContext, IntegrationDescriptor } from "./types";
 
@@ -48,6 +50,19 @@ export const INTEGRATIONS: readonly IntegrationDescriptor[] = [
   },
 
   // ── Channels ─────────────────────────────────────────────────────
+  {
+    id: "slack",
+    category: "channels",
+    title: "Slack",
+    summary:
+      "Bring WUPHF agents into Slack and make your other AI agents work together.",
+    logo: SlackLogo,
+    // Slack is always offered — the wizard validates tokens live and the
+    // backend reports reachability; there's no compile flag that strips it.
+    isAvailable: () => true,
+    status: ({ cfg }) => slackStatus(cfg),
+    render: ({ cfg }) => <SlackDetail cfg={cfg} />,
+  },
   {
     id: "telegram",
     category: "channels",

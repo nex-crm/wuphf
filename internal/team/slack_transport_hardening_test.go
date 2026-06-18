@@ -54,12 +54,15 @@ func TestSlackRouteInboundDropsBotsWithoutBotUserID(t *testing.T) {
 		t.Fatalf("bot messages must be dropped even without botUserID, got %d", len(msgs))
 	}
 
+	// A genuine human still flows — but only when it tags the bot (passivity
+	// gate). Restore a resolved bot id so the <@UBOT> tag can be recognized.
+	tr.botUserID = "UBOT"
 	api.users["U7"] = &slack.User{ID: "U7", RealName: "Alice"}
-	if err := tr.routeInbound(ctx, host, &slackevents.MessageEvent{User: "U7", Channel: "C0123", Text: "real", TimeStamp: "1.3"}); err != nil {
+	if err := tr.routeInbound(ctx, host, &slackevents.MessageEvent{User: "U7", Channel: "C0123", Text: "<@UBOT> real", TimeStamp: "1.3"}); err != nil {
 		t.Fatalf("routeInbound human: %v", err)
 	}
 	if msgs := b.ChannelMessages("slack-general"); len(msgs) != 1 {
-		t.Fatalf("human message should flow, got %d", len(msgs))
+		t.Fatalf("tagged human message should flow, got %d", len(msgs))
 	}
 }
 
@@ -88,7 +91,9 @@ func TestSlackHandleEventAckDecision(t *testing.T) {
 		Type: socketmode.EventTypeEventsAPI,
 		Data: slackevents.EventsAPIEvent{
 			InnerEvent: slackevents.EventsAPIInnerEvent{
-				Data: &slackevents.MessageEvent{User: "U7", Channel: "C0123", Text: "hi", TimeStamp: "1.1"},
+				// Tag the bot so the human message passes the passivity gate and
+				// reaches the Host, where the Ack decision is what's under test.
+				Data: &slackevents.MessageEvent{User: "U7", Channel: "C0123", Text: "<@UBOT> hi", TimeStamp: "1.1"},
 			},
 		},
 	}

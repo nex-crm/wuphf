@@ -64,6 +64,12 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			}
 			return l.broker.ListActiveIssueSummariesForPrompt()
 		},
+		humans: func() []humanPromptEntry {
+			if l == nil || l.broker == nil {
+				return nil
+			}
+			return l.broker.HumansForPrompt()
+		},
 		agentInstruction: func(slug, name string) string {
 			if l == nil || l.broker == nil {
 				return ""

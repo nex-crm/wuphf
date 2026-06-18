@@ -54,6 +54,7 @@ export function TelegramConnectModal({
   initialStep,
   onClose,
 }: TelegramConnectModalProps) {
+  const openSlackConnect = useAppStore((s) => s.openSlackConnect);
   const [step, setStep] = useState<Step>(initialStep);
   const [token, setToken] = useState("");
   const [botName, setBotName] = useState<string | null>(null);
@@ -244,6 +245,23 @@ export function TelegramConnectModal({
               <li style={{ marginBottom: 4 }}>
                 <button
                   type="button"
+                  data-testid="tg-provider-slack"
+                  className="wk-editor-cancel"
+                  style={{ width: "100%", textAlign: "left" }}
+                  onClick={() => {
+                    onClose();
+                    openSlackConnect();
+                  }}
+                >
+                  Slack{" "}
+                  <span style={{ opacity: 0.6 }}>
+                    — run your office and coordinate other AI agents
+                  </span>
+                </button>
+              </li>
+              <li style={{ marginBottom: 4 }}>
+                <button
+                  type="button"
                   data-testid="tg-provider-openclaw"
                   className="wk-editor-cancel"
                   style={{ width: "100%", textAlign: "left" }}
@@ -257,17 +275,6 @@ export function TelegramConnectModal({
                 >
                   OpenClaw{" "}
                   <span style={{ opacity: 0.6 }}>— TUI only for now</span>
-                </button>
-              </li>
-              <li style={{ marginBottom: 4 }}>
-                <button
-                  type="button"
-                  data-testid="tg-provider-slack"
-                  className="wk-editor-cancel"
-                  style={{ width: "100%", textAlign: "left", opacity: 0.5 }}
-                  disabled={true}
-                >
-                  Slack <span style={{ opacity: 0.6 }}>— coming soon</span>
                 </button>
               </li>
               <li style={{ marginBottom: 4 }}>

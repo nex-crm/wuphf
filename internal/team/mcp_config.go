@@ -40,7 +40,10 @@ func agentMCPServers(slug string) []string {
 	if codingAgentSlugs[slug] {
 		return []string{"wuphf-office"}
 	}
-	return []string{"wuphf-office", "nex"}
+	// Non-coding agents (CEO, PM, RevOps, …) also get the Slack read/search MCP
+	// when it's wired — "slack" is a no-op here when buildMCPServerMap omits it
+	// (not enabled). Coding agents stay minimal (worktree work, no Slack lookups).
+	return []string{"wuphf-office", "nex", "slack"}
 }
 
 // buildMCPServerMap constructs the full set of MCP server entries.
@@ -120,6 +123,24 @@ func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
 				},
 			}
 		}
+	}
+
+	// Slack's official MCP server (mcp.slack.com) — a READ/SEARCH/CANVAS
+	// retrieval surface for agents (search messages/users/channels, read
+	// history, create/read Canvases), so an agent can pull Slack context on
+	// demand instead of only the broker's fixed window. Opt-in (off by default).
+	// NOT an outbound path: posting/coordination stays on the bridge, which has
+	// the egress redaction + approval gate + one-task-one-thread model. Grant
+	// only read scopes when you authorize it.
+	if config.ResolveSlackMCPEnabled() {
+		slackMCP := map[string]any{
+			"type": "http",
+			"url":  "https://mcp.slack.com/mcp",
+		}
+		if tok := config.ResolveSlackMCPToken(); tok != "" {
+			slackMCP["headers"] = map[string]string{"Authorization": "Bearer " + tok}
+		}
+		servers["slack"] = slackMCP
 	}
 
 	return servers, nil

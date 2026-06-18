@@ -55,13 +55,14 @@ func TestHandleSlackAgentsSpawn_ManifestAndGuide(t *testing.T) {
 	if resp.TokenEnv != "WUPHF_SLACK_AGENT_RESEARCHER_TOKEN" {
 		t.Fatalf("token_env = %q", resp.TokenEnv)
 	}
-	// The manifest names the bot after the agent and asks for exactly the
-	// posting scopes — spawned agents only POST as themselves.
-	if resp.Manifest.DisplayInformation.Name != "Ress" || resp.Manifest.Features.BotUser.DisplayName != "Ress" {
-		t.Fatalf("manifest bot name = %+v, want Ress", resp.Manifest)
+	// The manifest names the bot "Name (Role)" so the role is legible in Slack,
+	// and asks for the posting + native-status scopes (spawned agents POST as
+	// themselves and show the native "is thinking…" status).
+	if resp.Manifest.DisplayInformation.Name != "Ress (Research)" || resp.Manifest.Features.BotUser.DisplayName != "Ress (Research)" {
+		t.Fatalf("manifest bot name = %+v, want Ress (Research)", resp.Manifest)
 	}
-	if got := resp.Manifest.OauthConfig.Scopes.Bot; len(got) != 2 || got[0] != "chat:write" || got[1] != "users:read" {
-		t.Fatalf("scopes = %v, want [chat:write users:read]", got)
+	if got := resp.Manifest.OauthConfig.Scopes.Bot; len(got) != 3 || got[0] != "assistant:write" || got[1] != "chat:write" || got[2] != "users:read" {
+		t.Fatalf("scopes = %v, want [assistant:write chat:write users:read]", got)
 	}
 	// No socket mode / event subscriptions: inbound stays on the main bot.
 	if strings.Contains(w.Body.String(), "socket_mode") || strings.Contains(w.Body.String(), "event_subscriptions") {

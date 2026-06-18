@@ -23,6 +23,7 @@ import {
   initApi,
 } from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
+import { SlackConnectHost } from "../components/integrations/SlackConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
 import { ChannelParticipants } from "../components/messages/ChannelParticipants";
@@ -1178,6 +1179,7 @@ export default function RootRoute() {
       <ConfirmHost />
       <ProviderSwitcherHost />
       <TelegramConnectHost />
+      <SlackConnectHost />
     </ErrorBoundary>
   );
 }

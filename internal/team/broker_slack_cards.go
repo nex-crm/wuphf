@@ -44,6 +44,20 @@ func (b *Broker) SetSlackTaskCard(taskID string, rec slackTaskCardRecord) {
 	_ = b.saveLocked()
 }
 
+// SlackThreadIsTaskRoot reports whether ts is the Slack thread-root of a known
+// task card, i.e. a reply carrying this thread_ts is continuing work WUPHF
+// already owns. The inbound passivity gate uses it so task-thread replies (a
+// foreign agent's delegation reply, a human's follow-up) keep flowing even
+// though WUPHF was not re-tagged.
+func (b *Broker) SlackThreadIsTaskRoot(ts string) bool {
+	if strings.TrimSpace(ts) == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.slackTaskByRootTSLocked(ts) != nil
+}
+
 // slackTaskByRootTSLocked returns the task whose Slack thread-root card has
 // the given message ts, or nil. This is the reverse of the card registry: an
 // inbound Slack reply carries the root ts as its thread_ts, and this maps it
