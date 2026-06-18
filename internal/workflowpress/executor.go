@@ -15,10 +15,20 @@ import (
 // Generated runners and authored overlay code are HOSTILE BY ASSUMPTION. Treat
 // every action they ask to run as adversarial input.
 //
-//   - NO LIVE EXECUTION ships in this phase. The only backend here, hostExecutor,
-//     is a STUB that refuses every mutating or network action with a clear "not
-//     authorized for live execution" error. It exists to prove the seam, not to
-//     run anything.
+//   - The PACKAGE DEFAULT backend, hostExecutor (NewHostExecutor), is a STUB that
+//     refuses every mutating or network action with a clear "not authorized for
+//     live execution" error. It exists to prove the seam, not to run anything.
+//   - An OS-NATIVE SANDBOX backend, osSandboxExecutor (NewOSSandboxExecutor in
+//     executor_ossandbox.go), DOES perform real execution and is therefore OFF BY
+//     DEFAULT — a caller must explicitly opt in. It wraps the action's argv in the
+//     host OS sandbox (macOS Seatbelt via sandbox-exec; Linux bubblewrap via bwrap)
+//     with a deny-by-default filesystem allow-list and deny-all network, modeled on
+//     @anthropic-ai/sandbox-runtime (what the pi coding agent uses) but implemented
+//     natively in Go. It keeps EVERY gate the stub does, and FAILS CLOSED on an
+//     unsupported platform or a missing sandbox tool — it NEVER runs unsandboxed.
+//     Enabling it in a real run requires security-reviewer sign-off. An OS sandbox
+//     is a FILESYSTEM + NETWORK boundary, NOT kernel isolation; the stronger
+//     container / micro-VM tiers ride the SAME seam.
 //   - Live execution is gated behind security-reviewer review AND triangulation
 //     (multiple orthogonal-lens sub-agents) before any generated or authored
 //     code runs in a real backend (host -> container -> micro-VM).
@@ -112,7 +122,8 @@ type ExecResult struct {
 // Backends are deny-by-default and downstream of the approval gate. INSIDE the
 // kernel (the seam); the backends themselves are reviewed per Phase 0.
 type Executor interface {
-	// Backend names the backend ("host-stub", "container", "microvm") for audit.
+	// Backend names the backend ("host-stub", "os-sandbox", "container",
+	// "microvm") for audit.
 	Backend() string
 	// Execute runs one action under cfg, or refuses it. A backend MUST refuse
 	// any mutating/network action when cfg.ApprovalGranted is false or the

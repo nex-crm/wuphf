@@ -187,6 +187,113 @@ the existing `ExternalActionApprovalCard`; `security-reviewer` + triangulation
 before anything generated/authored runs in it. **Nothing downstream ships until
 this boundary is proven.**
 
+### The Executor seam and its backends
+
+`executor.go` defines the seam (`Executor`, `ExecConfig`, `ExecAction`). Two
+backends ship today; the heavier tiers ride the **same** seam:
+
+| Backend | Constructor | Default? | Executes? | Isolation |
+|---|---|---|---|---|
+| host-stub | `NewHostExecutor` | **yes** | no — refuses every live action | none (proves the seam) |
+| os-sandbox | `NewOSSandboxExecutor` | **no (opt-in)** | yes | OS FS + network boundary |
+| container | *(later phase)* | no | yes | OS + image/root isolation |
+| micro-VM | *(later phase)* | no | yes | hardware-virtualized kernel |
+
+The package default stays the **host-stub**: it runs nothing and refuses every
+mutating/network action, so importing the kernel never grants live execution. A
+caller must **explicitly opt into** a real backend, and enabling one in a real
+run requires **security-reviewer sign-off** plus triangulation.
+
+### The OS-native sandbox backend (`executor_ossandbox.go`)
+
+`osSandboxExecutor` does real execution by wrapping an action's argv in the host
+OS sandbox. It is modeled on **`@anthropic-ai/sandbox-runtime`** — the sandbox
+the **pi coding agent** uses — but implemented **natively in Go, with no Node
+dependency**:
+
+- **macOS** — generates a deterministic **Seatbelt** profile from `ExecConfig`
+  and runs `sandbox-exec -p <profile> <argv>`. The profile is `(deny default)`,
+  then `(allow process*)`, a `(allow file-read* …)` clause covering **only** a
+  fixed system read-base (the dyld closure / shared cache / frameworks a binary
+  needs to start) **plus the allow-listed read paths**, a `(allow file-write*
+  …)` clause covering **only** the allow-listed write paths, and `(deny
+  network*)`. `sandbox-exec` is **Apple-deprecated but still functional**, and is
+  exactly what `sandbox-runtime` drives on darwin.
+- **Linux** — generates **bubblewrap** (`bwrap`) args from `ExecConfig`:
+  `--unshare-all` (+ explicit `--unshare-net` when network is denied),
+  `--die-with-parent`, `--new-session`, `--no-new-privs`, a minimal `/proc` +
+  `/dev`, read-only binds of the system dirs needed to start a binary, `--ro-bind`
+  of allow-listed read paths and `--bind` of allow-listed write paths. **If
+  `bwrap` is not installed the backend FAILS CLOSED** — it refuses the action and
+  never runs unsandboxed.
+
+**Path canonicalization is load-bearing.** Seatbelt and bwrap both match *real*
+paths, and on macOS `/tmp` is a symlink to `/private/tmp`. Every allow-list entry
+is resolved through its symlinks (existing path *and* a not-yet-existing write
+target via the deepest existing ancestor) before it enters the profile/args, or
+the boundary silently fails. Crafted paths are escaped for the Seatbelt string
+grammar so a path cannot break out of its quoted token and inject a directive
+(proven by a live injection test, not just a string assertion).
+
+**Resource caps.** `MaxWallMillis` is enforced by a `context.WithTimeout` that
+kills the wrapped process (zero is replaced by a bounded default, never
+unlimited). `MaxCPUMillis` / `MaxMemoryMB` are carried on `ExecConfig` for the
+container/micro-VM tiers that can enforce them via cgroups / VM limits; the
+OS-sandbox tier does **not** yet hard-enforce CPU/memory (documented gap — the
+wallclock cap is the only hard resource bound here).
+
+**Network is DENY-ALL in this tier.** Domain-level egress allow-listing needs a
+filtering proxy this backend does not ship, so rather than silently widen the
+boundary to allow-all network, a non-empty `Net` allow-list is **refused**
+(`ErrNetworkAllowlistUnsupported`) — a `Net` entry is a documented follow-up (a
+proxy), not a capability this backend grants. Deny-all-network is robust and is
+the only supported mode.
+
+### Honest threat model
+
+- An **OS sandbox is a filesystem + network boundary, NOT kernel isolation.**
+  Seatbelt and bwrap both run the payload on the host kernel; a kernel-level
+  escape (a 0-day in a syscall the profile still permits) is **out of scope** for
+  this tier. For hostile, fully-untrusted code the stronger opt-in tiers behind
+  the same seam are a **container** (image/root isolation) and a **micro-VM**
+  (hardware-virtualized kernel).
+- `sandbox-exec` is **Apple-deprecated but functional**; it remains the practical
+  macOS primitive (and what `sandbox-runtime` uses). If Apple removes it, the
+  darwin path moves to a container/VM tier on the same seam.
+- **Every gate is preserved and fails closed:** an unknown `ActionKind` is refused
+  (allow-list, because `IsWrite` fails *open* for an unknown kind); a mutating
+  action is refused unless `ApprovalGranted` (the seam never self-approves —
+  writes clear the `ExternalActionApprovalCard` upstream); a target outside the FS
+  allow-list is refused (empty allow-list == deny all); an **unsupported platform**
+  (not darwin/linux) is refused with `ErrNotAuthorized` rather than run
+  unsandboxed — a backend without a boundary is a *false* boundary, worse than
+  none.
+- **Domain egress is deferred.** Until a reviewed proxy lands, network is
+  deny-all; partial egress is not faked.
+
+### Adversarial proof (run live)
+
+The boundary is proven by **live adversarial tests** that spawn real processes
+under the sandbox on this macOS dev box (and under `bwrap` on Linux when
+installed; otherwise the exec-tests `t.Skip` and the portable unit tests still
+cover the arg/profile generation, so the suite is green on both a darwin box and
+Linux CI):
+
+- a sandboxed read of a **non-allow-listed** path is **blocked**; an allow-listed
+  read **succeeds** (including the kernel-enforced variant: target gate passes,
+  but a file *outside* the read allow-list still cannot be opened);
+- a sandboxed **write outside** the writable allow-list is **blocked** (no file
+  appears); an allow-listed write **succeeds**;
+- a sandboxed **network** connect is **blocked** under deny-all-network;
+- a crafted injection path does **not** grant write end-to-end (the escaper holds
+  against the real kernel);
+- the **resource cap** kills a runaway process;
+- a **mutating action without approval is refused**, and an **unknown kind is
+  refused** — before any process is spawned.
+
+Each test is written to go **red if the boundary is bypassable** (verified by
+temporarily breaking the path escaper and watching the injection tests fail).
+
 ## Execution sequencing (after the sandbox)
 
 1. **Contracts + kernel boundary.** Define `workflow-research.json` and
@@ -339,8 +446,12 @@ every generated tool stay in lockstep, by construction.
 
 ## Risks & open questions
 
-- **Sandbox choice** (container / micro-VM / `sandbox-runtime`) — Phase 0 must
-  pick and prove one.
+- **Sandbox choice** (container / micro-VM / `sandbox-runtime`) — Phase 0 picked
+  and proved the **OS-native** tier first (Seatbelt/bwrap, modeled on
+  `@anthropic-ai/sandbox-runtime`, implemented natively in Go), opt-in and off by
+  default; container / micro-VM remain the stronger tiers on the same seam for
+  fully-untrusted code. **Domain-level network egress is deferred** (needs a
+  proxy); this tier is deny-all-network.
 - **Inference is lossy** — the freeze step + shipcheck + the human review are the
   mitigation; never trust observation without the review and the proof.
 - **Contract drift** — undocumented systems change silently; `improvement_signals`
