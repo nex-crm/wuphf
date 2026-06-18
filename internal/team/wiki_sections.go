@@ -580,16 +580,17 @@ func (b *Broker) PublishWikiSectionsUpdated(evt WikiSectionsUpdatedEvent) {
 
 // EnqueueSectionsRefresh is the broker-level adapter the wiki worker
 // calls after a successful team wiki write. Implements
-// wikiSectionsNotifier. No-op when the cache is not attached (tests,
-// non-markdown backend).
+// wikiSectionsNotifier. It fans out to every derived nav cache (sections
+// and categories) since any wiki write can change either. No-op for a
+// cache that is not attached (tests, non-markdown backend).
 func (b *Broker) EnqueueSectionsRefresh() {
 	b.mu.Lock()
 	cache := b.wikiSectionsCache
 	b.mu.Unlock()
-	if cache == nil {
-		return
+	if cache != nil {
+		cache.Enqueue()
 	}
-	cache.Enqueue()
+	b.EnqueueCategoriesRefresh()
 }
 
 // WikiSectionsCache returns the attached cache, or nil when the markdown

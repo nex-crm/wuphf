@@ -161,6 +161,36 @@ type FactStore interface {
 	CountFacts(ctx context.Context) (int, error)
 	ResolveRedirect(ctx context.Context, slug string) (string, bool, error)
 
+	// --- article_categories (Wikipedia-style category layer) ----------------
+	//
+	// Markdown is authoritative (an article's `categories:` frontmatter); these
+	// rows are a rebuildable derived cache that folds into CanonicalHashAll.
+
+	// UpsertArticleCategories REPLACES the full set of category memberships for
+	// articlePath with `categories` (normalized slugs). An empty/nil slice
+	// clears the article's rows. This set-replace semantic keeps the derived
+	// index in lockstep with the article's frontmatter on every reconcile.
+	UpsertArticleCategories(ctx context.Context, articlePath string, categories []string) error
+	// ListArticlesInCategory returns the wiki-root-relative paths of every
+	// article filed under the given category slug, sorted ascending.
+	ListArticlesInCategory(ctx context.Context, category string) ([]string, error)
+	// ListCategoriesForArticle returns the category slugs an article belongs to,
+	// sorted ascending.
+	ListCategoriesForArticle(ctx context.Context, articlePath string) ([]string, error)
+	// ListAllCategories returns every category slug with its article count,
+	// sorted by slug ascending. Backs the category nav/API.
+	ListAllCategories(ctx context.Context) ([]CategoryCount, error)
+
+	// UpsertCategoryParents REPLACES the parent edges of a category with
+	// `parents` (normalized slugs). An empty/nil slice clears them (the category
+	// becomes a tree root). Source is a category page's `parent_categories:`.
+	UpsertCategoryParents(ctx context.Context, category string, parents []string) error
+	// ListCategoryParents returns a category's parent slugs, sorted ascending.
+	ListCategoryParents(ctx context.Context, category string) ([]string, error)
+	// ListAllCategoryParents returns every category→parent edge, sorted by
+	// (category, parent). Backs the subcategory tree + CanonicalHashAll.
+	ListAllCategoryParents(ctx context.Context) ([]CategoryParent, error)
+
 	// ListFactsByPredicateObject returns every fact whose triplet matches
 	// (predicate, object) exactly. Used by the typed-predicate graph walk
 	// for multi_hop queries (Slice 2 Thread A).
@@ -456,6 +486,9 @@ func (w *WikiIndex) ListFactsByTriplet(ctx context.Context, subject, predicate, 
 	return w.store.ListFactsByTriplet(ctx, subject, predicate, objectPrefix)
 }
 
+// Category passthroughs (ListAllCategories / ListArticlesInCategory /
+// ListAllCategoryParents / ListCategoryParents) live in wiki_categories_store.go.
+
 // ListEdgesForEntity returns graph.log edges incident on an entity.
 func (w *WikiIndex) ListEdgesForEntity(ctx context.Context, slug string) ([]IndexEdge, error) {
 	resolved, redirected, err := w.store.ResolveRedirect(ctx, slug)
@@ -483,6 +516,10 @@ func (w *WikiIndex) ReconcilePath(ctx context.Context, relPath string) error {
 	switch {
 	case isFactLogPath(relPath):
 		return w.reconcileFactLog(ctx, abs, relPath)
+	case isCategoryPagePath(relPath):
+		// Checked before the entity-brief case: the brief regex would also
+		// match team/.categories/{slug}.md, but a category page is not an entity.
+		return w.reconcileCategoryPage(ctx, abs, relPath)
 	case isEntityBriefPath(relPath):
 		return w.reconcileEntityBrief(ctx, abs, relPath)
 	case isLintReportPath(relPath):
@@ -632,6 +669,12 @@ func (w *WikiIndex) reconcileFactLog(ctx context.Context, abs, relPath string) e
 }
 
 func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath string) error {
+	// Defense in depth: category pages are routed to reconcileCategoryPage by
+	// the callers, but the brief regex would also match them — never index one
+	// as an entity.
+	if isCategoryPagePath(filepath.ToSlash(relPath)) {
+		return nil
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -652,7 +695,8 @@ func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath strin
 		CanonicalSlug: slug,
 		Kind:          kind,
 	}
-	if fm := extractFrontmatter(string(data)); fm != "" {
+	fm := extractFrontmatter(string(data))
+	if fm != "" {
 		if v := frontmatterValue(fm, "canonical_slug"); v != "" {
 			entity.CanonicalSlug = v
 		}
@@ -674,6 +718,13 @@ func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath strin
 			entity.Aliases = aliases
 		}
 	}
+	// Derived article→category memberships. Authoritative source is the
+	// article's `categories:` frontmatter; nil clears stale rows so removing a
+	// category is reflected on reconcile. Runs for every team/X/Y.md article
+	// (entity briefs, playbooks, decisions, concepts), not just entities.
+	if err := w.store.UpsertArticleCategories(ctx, rel, categoriesFromFrontmatter(fm)); err != nil {
+		return fmt.Errorf("upsert categories %s: %w", rel, err)
+	}
 	if entity.CanonicalSlug != entity.Slug {
 		if err := w.store.UpsertRedirect(ctx, Redirect{
 			From: entity.Slug,
@@ -683,6 +734,38 @@ func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath strin
 		}
 	}
 	return w.store.UpsertEntity(ctx, entity)
+}
+
+// reconcileCategoryPage indexes a category-definition page at
+// team/.categories/{slug}.md: its `parent_categories:` frontmatter becomes the
+// category→parent edges of the subcategory tree. A nil/empty parent list clears
+// the category's edges (it becomes a root). The page is NOT indexed as an
+// entity or an article.
+func (w *WikiIndex) reconcileCategoryPage(ctx context.Context, abs, relPath string) error {
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	slug := categoryPageSlug(relPath)
+	if slug == "" {
+		return nil
+	}
+	parents := parseParentCategoriesFrontmatter(string(data))
+	// A category is never its own parent (guards against a self-referential
+	// frontmatter typo creating a 1-cycle in the tree).
+	filtered := parents[:0]
+	for _, p := range parents {
+		if p != slug {
+			filtered = append(filtered, p)
+		}
+	}
+	if err := w.store.UpsertCategoryParents(ctx, slug, filtered); err != nil {
+		return fmt.Errorf("upsert category parents %s: %w", slug, err)
+	}
+	return nil
 }
 
 func (w *WikiIndex) reconcileGraphLog(ctx context.Context, abs string) error {
@@ -813,7 +896,13 @@ func walkEntityBriefs(ctx context.Context, dir string, w *WikiIndex) error {
 		if relErr != nil {
 			return relErr
 		}
-		return w.reconcileEntityBrief(ctx, path, filepath.ToSlash(rel))
+		slash := filepath.ToSlash(rel)
+		// Category pages live under team/.categories/ and would otherwise be
+		// mis-parsed as entities by the brief regex; route them explicitly.
+		if isCategoryPagePath(slash) {
+			return w.reconcileCategoryPage(ctx, path, slash)
+		}
+		return w.reconcileEntityBrief(ctx, path, slash)
 	})
 }
 
@@ -924,14 +1013,23 @@ type inMemoryFactStore struct {
 	entities  map[string]IndexEntity
 	edgesBy   map[string][]IndexEdge // keyed by subject slug AND object slug
 	redirects map[string]Redirect
+	// articleCats maps an article's wiki-root-relative path to its set of
+	// normalized category slugs. Empty sets are pruned (the key is deleted) so
+	// the canonical hash never sees a phantom empty membership.
+	articleCats map[string]map[string]bool
+	// categoryParents maps a category slug to its set of parent slugs (the
+	// subcategory tree). Empty sets are pruned, like articleCats.
+	categoryParents map[string]map[string]bool
 }
 
 func newInMemoryFactStore() *inMemoryFactStore {
 	return &inMemoryFactStore{
-		facts:     map[string]TypedFact{},
-		entities:  map[string]IndexEntity{},
-		edgesBy:   map[string][]IndexEdge{},
-		redirects: map[string]Redirect{},
+		facts:           map[string]TypedFact{},
+		entities:        map[string]IndexEntity{},
+		edgesBy:         map[string][]IndexEdge{},
+		redirects:       map[string]Redirect{},
+		articleCats:     map[string]map[string]bool{},
+		categoryParents: map[string]map[string]bool{},
 	}
 }
 
@@ -1152,6 +1250,9 @@ func (s *inMemoryFactStore) ResolveRedirect(_ context.Context, slug string) (str
 	return slug, false, nil
 }
 
+// inMemoryFactStore's article_categories + category_parents methods live in
+// wiki_categories_store.go.
+
 func (s *inMemoryFactStore) CanonicalHashFacts(_ context.Context) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1252,6 +1353,52 @@ func (s *inMemoryFactStore) CanonicalHashAll(_ context.Context) (string, error) 
 	sort.Strings(redirectFroms)
 	for _, from := range redirectFroms {
 		b, err := json.Marshal(s.redirects[from])
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// Article categories (sorted by article_path, then category). Serialised as
+	// ArticleCategory rows so the bytes match the SQLite backend exactly.
+	var cats []ArticleCategory
+	for path, set := range s.articleCats {
+		for c := range set {
+			cats = append(cats, ArticleCategory{ArticlePath: path, Category: c})
+		}
+	}
+	sort.Slice(cats, func(i, j int) bool {
+		if cats[i].ArticlePath != cats[j].ArticlePath {
+			return cats[i].ArticlePath < cats[j].ArticlePath
+		}
+		return cats[i].Category < cats[j].Category
+	})
+	for _, ac := range cats {
+		b, err := json.Marshal(ac)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// Category parents (sorted by category, then parent). Same CategoryParent
+	// serialisation as the SQLite backend.
+	var parents []CategoryParent
+	for cat, set := range s.categoryParents {
+		for p := range set {
+			parents = append(parents, CategoryParent{Category: cat, Parent: p})
+		}
+	}
+	sort.Slice(parents, func(i, j int) bool {
+		if parents[i].Category != parents[j].Category {
+			return parents[i].Category < parents[j].Category
+		}
+		return parents[i].Parent < parents[j].Parent
+	})
+	for _, cp := range parents {
+		b, err := json.Marshal(cp)
 		if err != nil {
 			return "", err
 		}

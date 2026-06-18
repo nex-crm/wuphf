@@ -1,8 +1,21 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import "../../styles/wiki.css";
-import type { WikiCatalogEntry } from "../../api/wiki";
+import type { DiscoveredCategory, WikiCatalogEntry } from "../../api/wiki";
 import WikiCategoryPage from "./WikiCategoryPage";
+
+// The subcategory tree: People is a child of the Org category and the parent
+// of Engineering. Drives the "Part of:" + "Subcategories" sections.
+const CATEGORIES: DiscoveredCategory[] = [
+  { slug: "org", title: "Org", article_count: 0, parents: [] },
+  { slug: "people", title: "People", article_count: 7, parents: ["org"] },
+  {
+    slug: "engineering",
+    title: "Engineering",
+    article_count: 0,
+    parents: ["people"],
+  },
+];
 
 const CATALOG: WikiCatalogEntry[] = [
   ...["Ana", "Arturo", "Eng", "Elena", "Nazz", "Zoe"].map((name) => ({
@@ -18,6 +31,16 @@ const CATALOG: WikiCatalogEntry[] = [
     author_slug: "eng",
     last_edited_ts: "2026-06-10T12:00:00Z",
     group: "companies",
+  },
+  // A playbook filed into People via its `categories:` frontmatter — appears
+  // in the People category page even though it lives in a different folder.
+  {
+    path: "team/playbooks/hiring-loop.md",
+    title: "Hiring Loop",
+    author_slug: "ceo",
+    last_edited_ts: "2026-06-11T12:00:00Z",
+    group: "playbooks",
+    categories: ["people"],
   },
 ];
 
@@ -35,6 +58,7 @@ const meta: Meta<typeof WikiCategoryPage> = {
   ],
   args: {
     catalog: CATALOG,
+    categories: CATEGORIES,
     onNavigate: () => {},
   },
 };

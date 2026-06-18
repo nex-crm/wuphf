@@ -127,6 +127,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/wiki/audit",
 			path == "/wiki/visual",
 			path == "/wiki/sections",
+			path == "/wiki/categories",
 			path == "/wiki/diff",
 			path == "/agent-files/read",
 			path == "/notebook/visual-artifacts",
@@ -148,6 +149,10 @@ func humanRouteAllowed(r *http.Request) bool {
 			// Slice 5: per-article version history is a human-readable view on
 			// the same footing as /wiki/audit and /wiki/article. The article
 			// path is the suffix; the handler validates it under team/.
+			return true
+		case strings.HasPrefix(path, "/wiki/categories/"):
+			// Category detail (GET /wiki/categories/{slug}); the category slug
+			// is the suffix. Same read-only footing as /wiki/categories.
 			return true
 		case isTaskDetailPath(path):
 			// Lane E: human sessions hit /tasks/{id} for the Decision
