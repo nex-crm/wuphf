@@ -37,7 +37,6 @@ import (
 	"log"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -282,18 +281,18 @@ func buildEntityArticle(d entityArticleData) string {
 	b.WriteString(d.Title)
 	b.WriteString("\n\n")
 
-	// Lead paragraph — subject bolded, Wikipedia style.
-	fmt.Fprintf(&b, "**%s** is a %s in the team knowledge graph, with %s",
-		d.Title, entityKindNoun(d.Kind), countNoun(len(d.Facts), "recorded fact", "recorded facts"))
-	if len(tasks) > 0 {
-		fmt.Fprintf(&b, " from %s", countNoun(len(tasks), "completed task", "completed tasks"))
-	}
-	if len(d.Associated) > 0 {
-		fmt.Fprintf(&b, " and %s", countNoun(len(d.Associated), "associated entity", "associated entities"))
-	}
-	b.WriteString(".\n\n")
+	// Lead paragraph — Wikipedia-style: state plainly what the subject is and
+	// let the cited observations below carry the substance. This line used to
+	// dump fact/task/association counts ("in the team knowledge graph, with N
+	// recorded facts from M completed tasks…"); that read as metadata, not
+	// knowledge, and buried the actual insight, so it is intentionally gone.
+	fmt.Fprintf(&b, "**%s** is a %s.\n\n", d.Title, entityKindNoun(d.Kind))
 
-	// Infobox-style summary: key facts as a definition list.
+	// Infobox-style summary: identity + navigation only, lifted into a
+	// right-floating infobox by the reader. The raw fact count and the on-disk
+	// file path were pure metadata (the "amount of insights" / a path nobody
+	// clicks), so they are omitted — the body's cited observations are the
+	// substance, not a tally of them.
 	b.WriteString("## Summary\n\n")
 	writeDef := func(term, def string) {
 		b.WriteString(term)
@@ -302,8 +301,6 @@ func buildEntityArticle(d entityArticleData) string {
 		b.WriteString("\n\n")
 	}
 	writeDef("Kind", entityKindNoun(d.Kind))
-	writeDef("Article", briefPath(d.Kind, d.Slug))
-	writeDef("Facts on record", strconv.Itoa(len(d.Facts)))
 	if len(tasks) > 0 {
 		writeDef("Tasks", strings.Join(tasks, ", "))
 	}

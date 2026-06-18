@@ -45,11 +45,10 @@ func TestBuildEntityArticle_Skeleton(t *testing.T) {
 	for _, want := range []string{
 		entityArticleMarker,
 		"# Acme Corp\n",
-		"**Acme Corp** is a company in the team knowledge graph, with 2 recorded facts from 1 completed task and 1 associated entity.",
+		// Substance-first lead: states what it is, no count boilerplate.
+		"**Acme Corp** is a company.\n",
 		"## Summary",
 		"Kind\n: company",
-		"Article\n: team/companies/acme-corp.md",
-		"Facts on record\n: 2",
 		"Tasks\n: TASK-3",
 		"Artifacts\n: [team/playbooks/acme-renewal.md](team/playbooks/acme-renewal.md)",
 		"Associated\n: [[people/eng]]",
@@ -65,6 +64,22 @@ func TestBuildEntityArticle_Skeleton(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("article missing %q\n--- article ---\n%s", want, got)
+		}
+	}
+	// The metadata-feeling boilerplate the customer flagged must be gone: no
+	// "knowledge graph" framing, no fact-count clause, no "Facts on record"
+	// infobox row, and no on-disk file path masquerading as content.
+	for _, banned := range []string{
+		// The lead's old count clause ("…in the team knowledge graph, with N
+		// recorded facts…"). The header HTML comment still references the
+		// knowledge graph, so match the reader-visible phrasing specifically.
+		"in the team knowledge graph",
+		"recorded fact",
+		"Facts on record",
+		"Article\n: team/companies/acme-corp.md",
+	} {
+		if strings.Contains(got, banned) {
+			t.Errorf("article still contains metadata boilerplate %q\n--- article ---\n%s", banned, got)
 		}
 	}
 	if again := buildEntityArticle(data); again != got {

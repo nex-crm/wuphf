@@ -96,18 +96,19 @@ func MinimalBrief(ent IndexEntity) string {
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
-	// Signals stub — fixed field order, skip empty fields.
-	b.WriteString("## Signals\n\n")
+	// Signals — only when we actually have identity signals to show. The old
+	// "## Signals\n- (none)" stub was metadata noise on a page that already had
+	// nothing to say; an empty section reads worse than no section, so a ghost
+	// with no signals skips it entirely and shows just the disclaimer.
 	bullets := signalBullets(ent.Signals)
-	if len(bullets) == 0 {
-		b.WriteString("- (none)\n")
-	} else {
+	if len(bullets) > 0 {
+		b.WriteString("## Signals\n\n")
 		for _, line := range bullets {
 			b.WriteString(line)
 			b.WriteString("\n")
 		}
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	// Disclaimer line — italicised so the next synthesis can replace
 	// the body without leaving conflicting prose. Fixed wording so

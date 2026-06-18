@@ -64,7 +64,11 @@ const MaxBriefSize = 32 * 1024
 // synthesizer from the cross-entity graph log — never invent related-entity
 // bullets. If the LLM output contains a "## Related" section, it is stripped
 // before the authoritative one is appended.
-const SynthesisPromptSystem = `You maintain entity briefs in a team wiki. Given an existing brief and new facts, produce an updated markdown brief that incorporates the facts. Never invent facts. Preserve the canonical structure (sections, ordering). Mark contradictions explicitly with **Contradiction:** inline callouts rather than resolving them. Do not write a "## Related" section — that block is managed automatically from the cross-entity graph. Output ONLY the updated markdown, no explanation.`
+const SynthesisPromptSystem = `You maintain entity briefs in a team wiki. Given an existing brief and new facts, produce an updated markdown brief that incorporates the facts.
+
+Write like a short encyclopedia article, not a metadata dump. Open with one plain-language sentence that says what this person or company actually is and why they matter to the team — never "X is a company in the knowledge graph" and never a count of facts. Then weave the facts into readable prose grouped by topic. If only one thing is known, just state that one thing clearly in a sentence; do not pad it with empty sections or placeholders. As more facts arrive, expand the prose — the brief should get richer over time, never stay a stub.
+
+Hard rules: Never invent facts. Mark contradictions explicitly with **Contradiction:** inline callouts rather than resolving them. Do not restate fact counts, file paths, or internal IDs as if they were content. Do not write a "## Related" section — that block is managed automatically from the cross-entity graph. Output ONLY the updated markdown, no explanation.`
 
 // MaxRelatedEntries bounds the number of "## Related" bullets rendered in a
 // synthesized brief. Ten was the v1 ceiling in the roadmap — enough for a

@@ -17,16 +17,17 @@ describe("prepareArticleMarkdown — B2 generated entity article", () => {
   it("lifts the ## Summary definition list out as infobox rows", () => {
     expect(prepared.infobox).not.toBeNull();
     const rows = prepared.infobox ?? [];
+    // Identity + navigation only — the raw fact count ("Facts on record") and
+    // the on-disk path ("Article") were metadata noise and are no longer
+    // emitted by the generator.
     expect(rows.map((r) => r.term)).toEqual([
       "Kind",
-      "Article",
-      "Facts on record",
       "Tasks",
       "Artifacts",
       "Associated",
     ]);
     expect(rows[0].value).toBe("company");
-    expect(rows[5].value).toBe("[[people/eng]]");
+    expect(rows[3].value).toBe("[[people/eng]]");
     // The Summary section is removed from the rendered body.
     expect(prepared.markdown).not.toContain("## Summary");
     expect(prepared.markdown).not.toContain("Facts on record");
@@ -104,11 +105,14 @@ describe("makeWikilinkResolver", () => {
 });
 
 describe("excerptFromMarkdown", () => {
-  it("returns the first prose words with markdown flattened", () => {
+  it("leads with the substance and skips the infobox def-list", () => {
     const excerpt = excerptFromMarkdown(ENTITY_ARTICLE_FIXTURE, 12);
-    expect(excerpt).toBe(
-      "Acme Corp is a company in the team knowledge graph, with 2…",
-    );
+    // The Wikipedia-style lead comes first…
+    expect(excerpt.startsWith("Acme Corp is a company.")).toBe(true);
+    // …and the ## Summary infobox terms never bleed into the teaser.
+    expect(excerpt).not.toContain("Kind");
+    expect(excerpt).not.toContain("Tasks");
+    expect(excerpt).not.toContain("Facts on record");
   });
 
   it("skips comments, headings, and footnote definitions", () => {

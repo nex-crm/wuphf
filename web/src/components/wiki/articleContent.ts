@@ -198,11 +198,20 @@ function normalizeWikiKey(pathOrSlug: string): string {
  */
 export function excerptFromMarkdown(content: string, maxWords = 40): string {
   const words: string[] = [];
+  // Skip the `## Summary` definition-list block (the infobox). Its bare term
+  // lines ("Kind", "Tasks", …) are not `:`-prefixed, so without this they leak
+  // into the excerpt as if they were prose — especially now that the lead is a
+  // short Wikipedia-style sentence rather than a long count clause.
+  let inSummary = false;
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim();
+    if (/^#{1,6}\s/.test(line)) {
+      inSummary = /^#{2,6}\s+summary\s*$/i.test(line);
+      continue;
+    }
+    if (inSummary) continue;
     if (line === "") continue;
     if (line.startsWith("<!--") || line.endsWith("-->")) continue;
-    if (/^#{1,6}\s/.test(line)) continue;
     if (line.startsWith(":")) continue;
     if (FOOTNOTE_DEF_RE.test(line)) continue;
     if (line === "---") continue;

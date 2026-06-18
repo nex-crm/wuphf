@@ -111,9 +111,13 @@ func TestMinimalBrief_CompanyHumanizesSlug(t *testing.T) {
 	if !strings.Contains(got, "\n# North Star\n") {
 		t.Errorf("expected humanised H1 'North Star'; got:\n%s", got)
 	}
-	// Empty signals → "(none)" placeholder.
-	if !strings.Contains(got, "- (none)") {
-		t.Errorf("expected (none) placeholder when all signals empty; got:\n%s", got)
+	// Empty signals → no Signals section at all (the old "- (none)" stub was
+	// metadata noise on an already-empty page).
+	if strings.Contains(got, "(none)") {
+		t.Errorf("did not expect a (none) placeholder; got:\n%s", got)
+	}
+	if strings.Contains(got, "## Signals") {
+		t.Errorf("expected no Signals section when all signals empty; got:\n%s", got)
 	}
 }
 

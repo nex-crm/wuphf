@@ -35,7 +35,7 @@ const meta: Meta<typeof ArticleReadView> = {
     ]),
     fetchPreview: async (slug: string) => ({
       title: slug.split("/").pop() ?? slug,
-      body: "Eng is a person in the team knowledge graph, with 2 recorded facts from 1 completed task…",
+      body: "Eng is a person. Owns the broker and has led the renewal motion since spring…",
     }),
     onNavigate: () => {},
     onEditSection: () => {},

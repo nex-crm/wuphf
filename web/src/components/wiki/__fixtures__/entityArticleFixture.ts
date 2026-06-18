@@ -13,18 +13,12 @@ export const ENTITY_ARTICLE_FIXTURE = `<!-- wuphf:entity-article — generated f
 
 # Acme Corp
 
-**Acme Corp** is a company in the team knowledge graph, with 2 recorded facts from 1 completed task and 1 associated entity.
+**Acme Corp** is a company.
 
 ## Summary
 
 Kind
 : company
-
-Article
-: team/companies/acme-corp.md
-
-Facts on record
-: 2
 
 Tasks
 : TASK-3

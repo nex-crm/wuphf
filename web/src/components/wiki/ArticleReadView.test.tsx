@@ -35,7 +35,9 @@ describe("<ArticleReadView> — B2 entity article", () => {
     expect(infobox).toHaveTextContent("Acme Corp");
     expect(infobox).toHaveTextContent("Kind");
     expect(infobox).toHaveTextContent("company");
-    expect(infobox).toHaveTextContent("Facts on record");
+    // Identity + navigation rows survive; the raw fact count was dropped.
+    expect(infobox).toHaveTextContent("Tasks");
+    expect(infobox).not.toHaveTextContent("Facts on record");
     // The raw Summary heading does not render in the body.
     expect(
       screen.queryByRole("heading", { name: /Summary/ }),
