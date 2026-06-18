@@ -292,6 +292,105 @@ func TestScaffoldEmbedExcludesBuildArtifacts(t *testing.T) {
 	}
 }
 
+func TestParseAppBuilderTaskAppID(t *testing.T) {
+	id := "app_0123456789abcdef"
+	cases := map[string]struct {
+		want string
+		ok   bool
+	}{
+		// New-app workspace brief form (no space).
+		"publish with register_app(app_id=app_0123456789abcdef) so it appears": {id, true},
+		// Improve brief form (space before paren) + a leading "Improve" line.
+		"Improve the existing app `app_0123456789abcdef`.\n...register_app (app_id=app_0123456789abcdef)": {id, true},
+		// Quoted id.
+		`register_app(app_id="app_0123456789abcdef")`: {id, true},
+		// No register_app instruction → no id.
+		"Build a daily digest of open tasks.": {"", false},
+		// Malformed id (too short) → no match.
+		"register_app(app_id=app_dead)": {"", false},
+	}
+	for details, want := range cases {
+		got, ok := parseAppBuilderTaskAppID(details)
+		if ok != want.ok || got != want.want {
+			t.Fatalf("parseAppBuilderTaskAppID(%q) = (%q,%v), want (%q,%v)", details, got, ok, want.want, want.ok)
+		}
+	}
+}
+
+// TestMutateTaskStampsEditChannelOnBuild: creating a "Build app: X" task mints a
+// per-task channel AND stamps it onto the pre-scaffolded app's manifest, so the
+// FE can bind the per-app edit chat to that channel.
+func TestMutateTaskStampsEditChannelOnBuild(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"ceo", appBuilderSlug}},
+	}
+
+	created, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Build app: Lead Scorer",
+		Details:   "Score inbound leads by ICP fit.",
+		Owner:     appBuilderSlug,
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create: %v", err)
+	}
+	// The task minted a dedicated per-task channel (slug is lowercased).
+	wantChannel := created.Task.Channel
+	if !strings.HasPrefix(wantChannel, "task-") {
+		t.Fatalf("task channel = %q, want a task-<id> channel", wantChannel)
+	}
+	apps, _ := b.appStore().List()
+	if len(apps) != 1 {
+		t.Fatalf("want 1 scaffolded app, got %+v", apps)
+	}
+	if apps[0].EditChannel != wantChannel {
+		t.Fatalf("app EditChannel = %q, want %q", apps[0].EditChannel, wantChannel)
+	}
+}
+
+// TestMutateTaskStampsEditChannelOnImprove: an "Improve app: X" task (created
+// with the canonical register_app(app_id=...) brief) re-binds the EXISTING app
+// to the improve task's channel, so a later edit chat targets the live thread.
+func TestMutateTaskStampsEditChannelOnImprove(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"ceo", appBuilderSlug}},
+	}
+	// An already-published app the improve task targets.
+	id := customAppID("lead-scorer", "Lead Scorer", "general")
+	if _, err := b.appStore().Scaffold(id, "Lead Scorer", "", appBuilderSlug, time.Now()); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+
+	created, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Improve app: Lead Scorer",
+		Details:   "Improve the existing app `" + id + "`.\n\nAdd a CSV export button.\n\nWhen the build passes, register it with register_app (app_id=" + id + ") so it appears under Apps.",
+		Owner:     appBuilderSlug,
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create: %v", err)
+	}
+	wantChannel := created.Task.Channel
+	if !strings.HasPrefix(wantChannel, "task-") {
+		t.Fatalf("improve task channel = %q, want a task-<id> channel", wantChannel)
+	}
+	app, _, err := b.appStore().Get(id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if app.EditChannel != wantChannel {
+		t.Fatalf("improve did not rebind edit channel: got %q want %q", app.EditChannel, wantChannel)
+	}
+}
+
 func keysOf(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

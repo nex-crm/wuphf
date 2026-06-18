@@ -729,6 +729,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				channel = ch.Slug
 			}
 		}
+		// Bind the owning app to this task's channel so the FE can mount the
+		// per-app "chat to edit" panel on it. No-op for non-app-builder creates;
+		// best-effort (a parse miss or store error never blocks task creation).
+		b.stampAppEditChannelForTaskLocked(strings.TrimSpace(body.Owner), channel, body.Details)
 		verification, verr := normalizeTaskVerification(body.VerificationKind, body.VerificationSpec, body.VerificationRequired)
 		if verr != nil {
 			rollbackTask()

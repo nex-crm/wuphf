@@ -84,6 +84,56 @@ func (b *Broker) maybePrescaffoldAppForCreate(action, channel string, body TaskP
 	return body
 }
 
+// appBuilderTaskAppIDRe extracts the app id an App Builder task targets from its
+// details prose. BOTH entry points name the id in a stable, parseable form:
+//   - a NEW-app build appends "register_app(app_id=app_xxxx)" (appWorkspaceBrief)
+//   - an IMPROVE task carries "register_app (app_id=app_xxxx)" and/or
+//     "Improve the existing app `app_xxxx`" (composeAppBrief / appBuilderTaskBrief)
+//
+// We match the register_app form (optional space + optional quotes) because it
+// is present in every app-builder task and is the canonical id the agent
+// publishes under. The capture is the validated 16-hex app id shape.
+var appBuilderTaskAppIDRe = regexp.MustCompile(`register_app\s*\(\s*app_id\s*=\s*["'` + "`" + `]?(app_[0-9a-f]{16})`)
+
+// parseAppBuilderTaskAppID returns the target app id named in an App Builder
+// task's details, or ("", false) when none is present (e.g. a malformed brief).
+func parseAppBuilderTaskAppID(details string) (string, bool) {
+	m := appBuilderTaskAppIDRe.FindStringSubmatch(details)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// stampAppEditChannelForTaskLocked records the App Builder task's channel as the
+// owning app's persistent edit thread, so the FE can bind a per-app "chat to
+// edit" panel to it. Runs for every app-builder task create AFTER its
+// `task-<id>` channel is minted: it parses the target app id from the task
+// details and stamps the channel onto that app's manifest.
+//
+// Best-effort and decoupled: the app store has its own lock, so this takes no
+// broker state; a parse miss or unknown app is a silent no-op (the app just has
+// no edit thread). Idempotent via the store (SetEditChannel no-ops when equal),
+// so a retried create never churns the manifest. Skipped for the lobby channel —
+// only a dedicated per-task channel is a usable edit thread (a human note in
+// #general would not wake the owner).
+func (b *Broker) stampAppEditChannelForTaskLocked(owner, channel, details string) {
+	if !strings.EqualFold(strings.TrimSpace(owner), appBuilderSlug) {
+		return
+	}
+	channel = strings.TrimSpace(channel)
+	if channel == "" || channel == "general" {
+		return
+	}
+	id, ok := parseAppBuilderTaskAppID(details)
+	if !ok {
+		return
+	}
+	// Tolerate "not found": an improve task can reference an app that was deleted
+	// between create and now; nothing to bind then.
+	_ = b.appStore().SetEditChannel(id, channel)
+}
+
 // appWorkspaceBriefMarker is a stable sentinel so the brief is appended at most
 // once per task.
 const appWorkspaceBriefMarker = "App workspace ready:"

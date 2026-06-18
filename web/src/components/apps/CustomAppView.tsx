@@ -22,6 +22,7 @@ import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { showNotice } from "../ui/Toast";
+import { AppEditPanel } from "./AppEditPanel";
 import { AppLivePreview } from "./AppLivePreview";
 import { AppVersionTimeline } from "./AppVersionTimeline";
 import { type AppSelectPayload, CustomAppFrame } from "./CustomAppFrame";
@@ -30,18 +31,16 @@ interface CustomAppViewProps {
   appId: string;
 }
 
-type PreviewMode = "live" | "sealed";
-
 /**
- * Build the App Builder description seed from a "select to edit" click: a
+ * Build the App Builder edit instruction from a "select to edit" click: a
  * concise instruction stub naming the element + its source location, leaving a
  * trailing space so the human types only the actual change. Pure for tests.
  *
  * The element text/tag/file are app-supplied (a hostile app could forge them),
  * so strip backticks and newlines before interpolating: that keeps a crafted
  * label from breaking out of the code-span or injecting extra lines into the
- * seed the human reviews. The human still edits + submits the dialog, so this
- * is defense-in-depth, not the trust boundary.
+ * seed the human reviews. The human still edits + sends from the composer, so
+ * this is defense-in-depth, not the trust boundary.
  */
 export function buildSelectSeed(sel: AppSelectPayload): string {
   const clean = (s: string): string => s.replace(/[`\r\n]+/g, " ").trim();
@@ -53,12 +52,19 @@ export function buildSelectSeed(sel: AppSelectPayload): string {
 
 /**
  * CustomAppView renders one agent-generated internal tool: a header (icon, name,
- * version, Select-to-edit, History, Edit, an overflow menu) above the sandboxed
- * frame. Edit is the primary action; the destructive Delete lives in the
- * overflow menu so a stray click can't remove a depended-on tool.
+ * version, Select-to-edit, History, Edit, an overflow menu) above the app
+ * surface. There is ONE app surface, not a mode toggle: a finished app shows its
+ * published (sealed) bundle. The destructive Delete lives in the overflow menu
+ * so a stray click can't remove a depended-on tool.
  *
- * History is the trust net behind the modify wedge: it opens an append-only
- * version timeline beside the preview. Selecting an older build previews it
+ * Edit is the modify wedge: it opens a persistent, per-app chat with the App
+ * Builder in a right-side panel (v0/Cursor-style). While that panel is open the
+ * main stage switches to the LIVE dev-server preview so the human watches edits
+ * hot-reload as the agent republishes; closing the panel returns to the sealed
+ * bundle. "Select to edit" is the same wedge primed with a precise element ref.
+ *
+ * History is the trust net behind editing: it opens an append-only version
+ * timeline beside the surface. Selecting an older build previews it
  * NON-destructively (the current version is untouched); "Restore this version"
  * then re-publishes those bytes as a new forward version, so a restore is itself
  * reversible. An operator can look before they leap.
@@ -68,15 +74,16 @@ export function buildSelectSeed(sel: AppSelectPayload): string {
  */
 export function CustomAppView({ appId }: CustomAppViewProps) {
   const queryClient = useQueryClient();
-  const openUpdateAppDialog = useAppStore((s) => s.openUpdateAppDialog);
+  const setPendingComposerDraft = useAppStore((s) => s.setPendingComposerDraft);
   const [menuOpen, setMenuOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // The per-app edit chat side panel — a persistent conversation with the App
+  // Builder for THIS app. Opening it switches the stage to the live preview so
+  // republished changes hot-reload in front of the human.
+  const [editOpen, setEditOpen] = useState(false);
   // The older build being previewed, or null while viewing the current build.
   const [previewVersion, setPreviewVersion] = useState<number | null>(null);
-  // Live = the running dev server (HMR); Sealed = the published single-file
-  // bundle. Default to Live so opening an app shows the real, current tool.
-  const [mode, setMode] = useState<PreviewMode>("live");
-  // "Select to edit" inspector toggle (dev/live only) + the latest runtime
+  // "Select to edit" inspector toggle (live preview only) + the latest runtime
   // error the app surfaced, shown as a dismissible banner over the preview.
   const [selectMode, setSelectMode] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
@@ -137,23 +144,34 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
 
   function toggleHistory(): void {
     setHistoryOpen((open) => {
-      // Leaving history drops any in-flight preview so the frame returns to live.
+      // Leaving history drops any in-flight preview so the frame returns to the
+      // current surface.
       if (open) setPreviewVersion(null);
       return !open;
     });
   }
 
   function onSelectVersion(version: number): void {
-    // Selecting the current build is "back to live", not a preview.
+    // Selecting the current build is "back to current", not a preview.
     setPreviewVersion(version === currentVersion ? null : version);
   }
 
+  function onToggleEdit(): void {
+    // Leaving edit also drops select mode (a live-preview-only affordance).
+    setEditOpen((open) => {
+      if (open) setSelectMode(false);
+      return !open;
+    });
+  }
+
   function onSelectElement(sel: AppSelectPayload): void {
-    // One-shot: a select ends the inspector mode, then opens the edit dialog
-    // prefilled with a concise instruction stub from the clicked element.
+    // One-shot: a select ends the inspector, then seeds the edit chat composer
+    // with a concise instruction stub for the clicked element. The human edits
+    // + sends it as a normal message in the per-app edit thread.
     setSelectMode(false);
-    if (data) {
-      openUpdateAppDialog(data.app.id, data.app.name, buildSelectSeed(sel));
+    if (data?.app.editChannel) {
+      setEditOpen(true);
+      setPendingComposerDraft(data.app.editChannel, buildSelectSeed(sel));
     }
   }
 
@@ -210,19 +228,23 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   }
 
   const { app, html } = data;
+  // The edit chat needs a bound channel; an app registered html-only (or minted
+  // before the edit-channel field existed) has none. Hide the edit affordances
+  // rather than open an empty panel.
+  const canEdit = Boolean(app.editChannel);
 
   return (
     <div className="custom-app-view">
       <AppViewHeader
         app={app}
-        mode={mode}
-        onMode={setMode}
         isPreviewing={isPreviewing}
+        canEdit={canEdit}
+        editOpen={editOpen}
         selectMode={selectMode}
         onToggleSelect={() => setSelectMode((on) => !on)}
         historyOpen={historyOpen}
         onToggleHistory={toggleHistory}
-        onEdit={() => openUpdateAppDialog(app.id, app.name)}
+        onToggleEdit={onToggleEdit}
         menuOpen={menuOpen}
         onToggleMenu={() => setMenuOpen((open) => !open)}
         menuRef={menuRef}
@@ -232,7 +254,11 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
         appId={appId}
         app={app}
         html={html}
-        mode={mode}
+        editOpen={editOpen && canEdit}
+        onCloseEdit={() => {
+          setEditOpen(false);
+          setSelectMode(false);
+        }}
         historyOpen={historyOpen}
         versions={versions.data ?? []}
         versionsLoading={versions.isLoading}
@@ -258,14 +284,14 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
 
 interface AppViewHeaderProps {
   app: CustomApp;
-  mode: PreviewMode;
-  onMode: (mode: PreviewMode) => void;
   isPreviewing: boolean;
+  canEdit: boolean;
+  editOpen: boolean;
   selectMode: boolean;
   onToggleSelect: () => void;
   historyOpen: boolean;
   onToggleHistory: () => void;
-  onEdit: () => void;
+  onToggleEdit: () => void;
   menuOpen: boolean;
   onToggleMenu: () => void;
   menuRef: RefObject<HTMLDivElement | null>;
@@ -274,14 +300,14 @@ interface AppViewHeaderProps {
 
 function AppViewHeader({
   app,
-  mode,
-  onMode,
   isPreviewing,
+  canEdit,
+  editOpen,
   selectMode,
   onToggleSelect,
   historyOpen,
   onToggleHistory,
-  onEdit,
+  onToggleEdit,
   menuOpen,
   onToggleMenu,
   menuRef,
@@ -298,38 +324,16 @@ function AppViewHeader({
           <p className="custom-app-view__summary">{app.summary}</p>
         ) : null}
       </div>
-      {/* The Live/Sealed toggle is meaningless while previewing an older,
-          already-sealed build, so it yields to the preview banner. */}
-      {isPreviewing ? null : (
-        <div className="custom-app-view__mode">
-          <button
-            type="button"
-            className="custom-app-view__mode-btn"
-            aria-pressed={mode === "live"}
-            onClick={() => onMode("live")}
-          >
-            Live
-          </button>
-          <button
-            type="button"
-            className="custom-app-view__mode-btn"
-            aria-pressed={mode === "sealed"}
-            onClick={() => onMode("sealed")}
-          >
-            Sealed
-          </button>
-        </div>
-      )}
       <span
         className="custom-app-view__version"
         title={`Updated ${app.updatedAt}`}
       >
         v{app.version}
       </span>
-      {/* Select to edit is a live-preview affordance: it intercepts a click in
-          the running app to seed a precise edit. It's meaningless while viewing
-          the sealed bundle or a read-only past version. */}
-      {!isPreviewing && mode === "live" ? (
+      {/* Select to edit primes the edit chat with a precise element ref. It's a
+          live-preview affordance, so it only shows while editing and never on a
+          read-only past version. */}
+      {canEdit && editOpen && !isPreviewing ? (
         <button
           type="button"
           className="custom-app-view__action"
@@ -350,14 +354,17 @@ function AppViewHeader({
         <ClockRotateRight width={15} height={15} />
         <span>History</span>
       </button>
-      <button
-        type="button"
-        className="custom-app-view__action"
-        onClick={onEdit}
-      >
-        <EditPencil width={15} height={15} />
-        <span>Edit</span>
-      </button>
+      {canEdit ? (
+        <button
+          type="button"
+          className="custom-app-view__action"
+          aria-pressed={editOpen}
+          onClick={onToggleEdit}
+        >
+          <EditPencil width={15} height={15} />
+          <span>Edit</span>
+        </button>
+      ) : null}
       <div className="custom-app-view__menu-wrap" ref={menuRef}>
         <button
           type="button"
@@ -390,7 +397,8 @@ interface AppViewBodyProps {
   appId: string;
   app: CustomApp;
   html: string;
-  mode: PreviewMode;
+  editOpen: boolean;
+  onCloseEdit: () => void;
   historyOpen: boolean;
   versions: CustomAppVersion[];
   versionsLoading: boolean;
@@ -415,7 +423,8 @@ function AppViewBody({
   appId,
   app,
   html,
-  mode,
+  editOpen,
+  onCloseEdit,
   historyOpen,
   versions,
   versionsLoading,
@@ -435,12 +444,15 @@ function AppViewBody({
   appError,
   onDismissError,
 }: AppViewBodyProps) {
+  const className = [
+    "custom-app-view__body",
+    historyOpen ? "custom-app-view__body--history" : "",
+    editOpen ? "custom-app-view__body--edit" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div
-      className={`custom-app-view__body${
-        historyOpen ? " custom-app-view__body--history" : ""
-      }`}
-    >
+    <div className={className}>
       {historyOpen ? (
         <AppVersionTimeline
           versions={versions}
@@ -451,7 +463,7 @@ function AppViewBody({
         />
       ) : null}
       <div className="custom-app-view__stage">
-        {appError && !isPreviewing && mode === "live" ? (
+        {appError && editOpen && !isPreviewing ? (
           <div className="custom-app-view__app-error" role="alert">
             <span className="custom-app-view__app-error-text">{appError}</span>
             <button
@@ -479,7 +491,7 @@ function AppViewBody({
           appId={appId}
           app={app}
           html={html}
-          mode={mode}
+          editOpen={editOpen}
           isPreviewing={isPreviewing}
           previewVersion={previewVersion}
           previewHtml={previewHtml}
@@ -489,6 +501,13 @@ function AppViewBody({
           onAppError={onAppError}
         />
       </div>
+      {editOpen && app.editChannel ? (
+        <AppEditPanel
+          appName={app.name}
+          channel={app.editChannel}
+          onClose={onCloseEdit}
+        />
+      ) : null}
     </div>
   );
 }
@@ -497,7 +516,7 @@ interface AppViewStageFrameProps {
   appId: string;
   app: CustomApp;
   html: string;
-  mode: PreviewMode;
+  editOpen: boolean;
   isPreviewing: boolean;
   previewVersion: number | null;
   previewHtml?: string;
@@ -509,14 +528,15 @@ interface AppViewStageFrameProps {
 
 /**
  * AppViewStageFrame picks the right surface for the stage: a read-only snapshot
- * of a past version (with a loading shim), the live dev preview, or the sealed
- * single-file bundle.
+ * of a past version (with a loading shim); the live dev preview while the edit
+ * chat is open (so republished changes hot-reload in front of the human); or the
+ * sealed single-file bundle (the default, finished app).
  */
 function AppViewStageFrame({
   appId,
   app,
   html,
-  mode,
+  editOpen,
   isPreviewing,
   previewVersion,
   previewHtml,
@@ -540,7 +560,7 @@ function AppViewStageFrame({
       />
     );
   }
-  if (mode === "live") {
+  if (editOpen) {
     return (
       <AppLivePreview
         appId={appId}

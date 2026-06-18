@@ -19,6 +19,14 @@ export interface CustomApp {
    * (shown as a building row, not a clickable app). Absent/"ready" = published.
    */
   status?: "building" | "ready";
+  /**
+   * Slug of the app's persistent edit thread — the channel of the App Builder
+   * task that created/improves it (`task-<id>`). The app view binds its
+   * "chat to edit" side panel to this channel: a human message there re-engages
+   * the App Builder to read get_app + republish via register_app. Absent for
+   * apps minted before this field existed or registered html-only (no task).
+   */
+  editChannel?: string;
   createdBy: string;
   updatedBy?: string;
   createdAt: string;

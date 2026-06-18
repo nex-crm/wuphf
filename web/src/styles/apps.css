@@ -255,6 +255,98 @@
   grid-template-columns: 248px minmax(0, 1fr);
 }
 
+/* Edit open: a per-app chat rail to the RIGHT of the app stage. The stage stays
+   the primary surface; the chat is a side conversation. */
+.custom-app-view__body--edit {
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 32%, 420px);
+}
+
+/* Both rails open: timeline (left) · stage · edit chat (right). */
+.custom-app-view__body--history.custom-app-view__body--edit {
+  grid-template-columns: 248px minmax(0, 1fr) clamp(300px, 32%, 420px);
+}
+
+/* Per-app edit chat side rail. Reuses the shared conversation-chat layout
+   (feed + composer) so it matches every other chat surface. */
+.app-edit-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  background: var(--bg-card, #fff);
+}
+
+.app-edit-panel__header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+}
+
+.app-edit-panel__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-edit-panel__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #687083);
+}
+
+.app-edit-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-edit-panel__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.app-edit-panel__close:hover {
+  background: var(--bg-subtle);
+}
+
+/* Stack the edit chat under the stage on narrow viewports. */
+@media (max-width: 880px) {
+  .custom-app-view__body--edit,
+  .custom-app-view__body--history.custom-app-view__body--edit {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+
+  .app-edit-panel {
+    border-left: 0;
+    border-top: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  }
+}
+
 .custom-app-view__stage {
   position: relative;
   min-width: 0;
@@ -918,31 +1010,8 @@
   overflow-wrap: anywhere;
 }
 
-/* Live/Sealed preview toggle on the standalone app screen. */
-.custom-app-view__mode {
-  display: inline-flex;
-  margin-right: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  overflow: hidden;
-}
-
-.custom-app-view__mode-btn {
-  padding: 4px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.custom-app-view__mode-btn[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-contrast, #fff);
-}
-
-/* "Select to edit" / "History" share .custom-app-view__action; the pressed
-   state reads as an active toggle without a new control. */
+/* "Select to edit" / "History" / "Edit" share .custom-app-view__action; the
+   pressed state reads as an active toggle without a new control. */
 .custom-app-view__action[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--accent-soft, var(--bg-subtle));

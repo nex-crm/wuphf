@@ -20,13 +20,15 @@ vi.mock("../../api/apps", () => ({
   deleteApp: vi.fn(),
 }));
 
-// Stable store mock so tests can assert on openUpdateAppDialog calls (a fresh
-// vi.fn() per selector call would otherwise be unassertable).
-const openUpdateAppDialog = vi.fn();
+// Stable store mock so tests can assert on setPendingComposerDraft calls (a
+// fresh vi.fn() per selector call would otherwise be unassertable).
+const setPendingComposerDraft = vi.fn();
 vi.mock("../../stores/app", () => ({
   useAppStore: (
-    selector: (s: { openUpdateAppDialog: () => void }) => unknown,
-  ) => selector({ openUpdateAppDialog }),
+    selector: (s: {
+      setPendingComposerDraft: (channel: string, text: string) => void;
+    }) => unknown,
+  ) => selector({ setPendingComposerDraft }),
 }));
 
 vi.mock("../ui/Toast", () => ({ showNotice: vi.fn() }));
@@ -74,8 +76,29 @@ vi.mock("./CustomAppFrame", () => ({
     </div>
   ),
 }));
+// The edit panel mounts the shared chat primitives; stub it to a marker so we
+// assert open/close + the bound channel without mounting MessageFeed/Composer.
+vi.mock("./AppEditPanel", () => ({
+  AppEditPanel: ({
+    appName,
+    channel,
+    onClose,
+  }: {
+    appName: string;
+    channel: string;
+    onClose: () => void;
+  }) => (
+    <aside data-testid="edit-panel" data-channel={channel}>
+      <span>Editing {appName}</span>
+      <button type="button" data-testid="edit-panel-close" onClick={onClose}>
+        close
+      </button>
+    </aside>
+  ),
+}));
 
 const APP_ID = "app_0000000000000abc";
+const EDIT_CHANNEL = "task-office-7";
 
 function appDetail() {
   return {
@@ -87,6 +110,7 @@ function appDetail() {
       summary: "Scores inbound leads",
       entry: "index.html",
       version: 3,
+      editChannel: EDIT_CHANNEL,
       createdBy: "app-builder",
       createdAt: "2026-06-10T00:00:00Z",
       updatedAt: "2026-06-15T12:00:00Z",
@@ -107,6 +131,65 @@ function renderView() {
   }
   return render(<CustomAppView appId={APP_ID} />, { wrapper: Wrapper });
 }
+
+describe("CustomAppView single surface", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getApp).mockResolvedValue(appDetail());
+  });
+
+  it("shows ONLY the sealed bundle by default — no Live/Sealed toggle", async () => {
+    renderView();
+    await screen.findByText("Lead Scorer");
+
+    // The finished app renders the sealed (published) bundle, not the live dev
+    // server, and there is no mode toggle to choose between them.
+    expect(screen.getByTestId("frame")).toHaveTextContent("CURRENT_HTML");
+    expect(screen.queryByTestId("live-preview")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^live$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^sealed$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the edit chat panel on Edit and swaps the stage to the live preview", async () => {
+    renderView();
+    await screen.findByText("Lead Scorer");
+
+    // No edit panel and no live preview until Edit is clicked.
+    expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+
+    // The panel is bound to the app's persistent edit channel, and the stage now
+    // shows the hot-reloading live preview instead of the sealed bundle.
+    const panel = await screen.findByTestId("edit-panel");
+    expect(panel.getAttribute("data-channel")).toBe(EDIT_CHANNEL);
+    expect(screen.getByTestId("live-preview")).toBeInTheDocument();
+    expect(screen.queryByTestId("frame")).not.toBeInTheDocument();
+
+    // Closing returns to the sealed bundle.
+    fireEvent.click(screen.getByTestId("edit-panel-close"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("frame")).toHaveTextContent("CURRENT_HTML");
+  });
+
+  it("hides the Edit affordance when the app has no edit channel", async () => {
+    const detail = appDetail();
+    detail.app.editChannel = "";
+    vi.mocked(getApp).mockResolvedValue(detail);
+    renderView();
+    await screen.findByText("Lead Scorer");
+
+    expect(
+      screen.queryByRole("button", { name: /^edit$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
 
 describe("CustomAppView version history", () => {
   beforeEach(() => {
@@ -149,8 +232,8 @@ describe("CustomAppView version history", () => {
   it("opens the timeline, previews an older version non-destructively, then restores", async () => {
     renderView();
     await screen.findByText("Lead Scorer");
-    // Default view is the live preview, not a past version.
-    expect(screen.getByTestId("live-preview")).toBeInTheDocument();
+    // Default view is the sealed current build, not a past version.
+    expect(screen.getByTestId("frame")).toHaveTextContent("CURRENT_HTML");
 
     // Open history → the timeline lists prior builds.
     fireEvent.click(screen.getByRole("button", { name: /history/i }));
@@ -192,7 +275,8 @@ describe("CustomAppView version history", () => {
       expect(screen.queryByText(/Viewing/)).not.toBeInTheDocument(),
     );
     expect(vi.mocked(rollbackApp)).not.toHaveBeenCalled();
-    expect(screen.getByTestId("live-preview")).toBeInTheDocument();
+    // Back on the sealed current build.
+    expect(screen.getByTestId("frame")).toHaveTextContent("CURRENT_HTML");
   });
 });
 
@@ -202,12 +286,16 @@ describe("CustomAppView select to edit", () => {
     vi.mocked(getApp).mockResolvedValue(appDetail());
   });
 
-  it("toggles select mode and opens the update dialog with a seed on select", async () => {
+  it("seeds the edit chat composer with the element ref on select", async () => {
     renderView();
     await screen.findByText("Lead Scorer");
 
-    // Select mode is off until toggled on.
-    const toggle = screen.getByRole("button", { name: /select to edit/i });
+    // Select to edit appears only while the edit chat is open (it primes the
+    // live preview inspector). Open Edit first.
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    const toggle = await screen.findByRole("button", {
+      name: /select to edit/i,
+    });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(
       screen.getByTestId("live-preview").getAttribute("data-select-mode"),
@@ -219,18 +307,20 @@ describe("CustomAppView select to edit", () => {
       screen.getByTestId("live-preview").getAttribute("data-select-mode"),
     ).toBe("true");
 
-    // Simulating a select opens the update dialog seeded with the element +
-    // its source location, and turns select mode back off (one-shot).
+    // Simulating a select seeds the edit composer (keyed to the app's edit
+    // channel) with the element + its source location, and turns select mode
+    // back off (one-shot).
     fireEvent.click(screen.getByTestId("fire-select"));
-    expect(openUpdateAppDialog).toHaveBeenCalledTimes(1);
-    const [appId, name, seed] = openUpdateAppDialog.mock.calls[0];
-    expect(appId).toBe(APP_ID);
-    expect(name).toBe("Lead Scorer");
+    expect(setPendingComposerDraft).toHaveBeenCalledTimes(1);
+    const [channel, seed] = setPendingComposerDraft.mock.calls[0];
+    expect(channel).toBe(EDIT_CHANNEL);
     expect(typeof seed).toBe("string");
     expect(seed).toContain("button");
     expect(seed).toContain("components/Button.tsx:12");
     expect(seed).toContain("Save");
 
     expect(toggle).toHaveAttribute("aria-pressed", "false");
+    // The edit panel stays open after a select.
+    expect(screen.getByTestId("edit-panel")).toBeInTheDocument();
   });
 });

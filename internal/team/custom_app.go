@@ -87,7 +87,15 @@ type CustomApp struct {
 	// Status is "building" for a pre-scaffolded app awaiting its first publish,
 	// or "ready"/"" for a published app. Lets the sidebar hide drafts while the
 	// build task's live preview still resolves them.
-	Status      string `json:"status,omitempty"`
+	Status string `json:"status,omitempty"`
+	// EditChannel is the slug of the app's persistent edit thread — the channel
+	// of the App Builder task that created/improves it (`task-<id>`). Binding the
+	// app to a stable channel lets the FE mount a per-app "chat to edit" panel:
+	// a human note posted there re-engages the App Builder owner (via the
+	// existing task_followup wake) to read get_app + republish with register_app.
+	// Empty for apps minted before this field existed or registered html-only
+	// (no owning task) — those simply have no edit thread until the next build.
+	EditChannel string `json:"editChannel,omitempty"`
 	CreatedBy   string `json:"createdBy"`
 	UpdatedBy   string `json:"updatedBy,omitempty"`
 	CreatedAt   string `json:"createdAt"`
@@ -465,6 +473,43 @@ const scaffoldPlaceholderHTML = `<!doctype html><html lang="en"><head><meta char
 	`<title>Building…</title></head><body style="font:14px system-ui;padding:2rem;color:#555">` +
 	`<p>This app is being built. The live preview shows progress as it is created.</p>` +
 	`</body></html>`
+
+// SetEditChannel stamps the app's persistent edit-thread channel onto its
+// manifest, idempotently. It is the one mutation the broker performs on an app
+// it did NOT just build: when an App Builder task mints its `task-<id>` channel,
+// the broker records that slug here so the FE can later bind the per-app edit
+// chat to it. A no-op when the channel is already set to the same value (a
+// retried create) so it never churns the manifest or bumps anything.
+//
+// Unknown id → caller error (404 upstream). Never touches Version/Status/bytes.
+func (s *customAppStore) SetEditChannel(id, channel string) error {
+	if err := validateCustomAppID(id); err != nil {
+		return err
+	}
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		return newCustomAppCallerError("app: edit channel is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, err := s.readManifestLocked(id)
+	if err != nil {
+		return newCustomAppCallerError("app: %s not found", id)
+	}
+	if app.EditChannel == channel {
+		return nil
+	}
+	app.EditChannel = channel
+	manifestBytes, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return fmt.Errorf("app: marshal manifest: %w", err)
+	}
+	manifestBytes = append(manifestBytes, '\n')
+	if err := writeFileAtomic(filepath.Join(s.appDir(id), customAppManifestFile), manifestBytes, 0o600); err != nil {
+		return fmt.Errorf("app: write manifest: %w", err)
+	}
+	return nil
+}
 
 // Scaffold materializes a brand-new app's editable source from the embedded
 // starter template and records a "building" draft manifest, BEFORE the App

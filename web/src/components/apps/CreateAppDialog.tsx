@@ -9,10 +9,13 @@ import { showNotice } from "../ui/Toast";
 const TITLE_ID = "app-builder-modal-title";
 
 /**
- * CreateAppDialog is the human-initiated entry point for the App Builder, opened
- * by /create-app, /update-app, and the Edit button on an app screen. Submitting
- * kicks off an App Builder task directly — these paths are pre-authorized by the
- * human, so they skip the propose_app approval gate.
+ * CreateAppDialog is the human-initiated entry point for CREATING a new app
+ * (the /create-app slash command and the sidebar "+ create app" button). It also
+ * still backs the /update-app <app-id> slash command as a power-user fallback,
+ * but the primary edit path for an existing app is now the per-app edit chat
+ * (the Edit button → AppEditPanel), not this dialog. Submitting kicks off an App
+ * Builder task directly — these paths are pre-authorized by the human, so they
+ * skip the propose_app approval gate.
  *
  * Mirrors the app's canonical modal frame (HelpModal / VersionModal): a
  * .help-overlay + .help-modal card with a .help-header and Esc affordance,
