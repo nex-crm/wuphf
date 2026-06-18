@@ -743,7 +743,13 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	// Cap the response read. Raised from 2 MiB: a single integration read can
+	// legitimately return several MiB (e.g. a 25-message Gmail fetch carrying
+	// full bodies), and the old cap truncated mid-JSON — yielding invalid JSON
+	// downstream that surfaced in Apps as an empty/failed result. Apps trim the
+	// payload further before display (boundIntegrationResult), so the large read
+	// is transient, not held.
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &ComposioAPIError{
 			Method:     method,
