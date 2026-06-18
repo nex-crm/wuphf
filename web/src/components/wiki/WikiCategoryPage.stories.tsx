@@ -19,6 +19,16 @@ const CATALOG: WikiCatalogEntry[] = [
     last_edited_ts: "2026-06-10T12:00:00Z",
     group: "companies",
   },
+  // A playbook filed into People via its `categories:` frontmatter — appears
+  // in the People category page even though it lives in a different folder.
+  {
+    path: "team/playbooks/hiring-loop.md",
+    title: "Hiring Loop",
+    author_slug: "ceo",
+    last_edited_ts: "2026-06-11T12:00:00Z",
+    group: "playbooks",
+    categories: ["people"],
+  },
 ];
 
 /** Auto-generated alphabetical category index (Wikipedia category page). */

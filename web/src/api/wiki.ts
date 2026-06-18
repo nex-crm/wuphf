@@ -366,6 +366,13 @@ export interface WikiCatalogEntry {
   author_slug: string;
   last_edited_ts: string;
   group: string;
+  /**
+   * Many-to-many category slugs from the article's `categories:` frontmatter
+   * (markdown-authoritative). Always present from the broker (possibly empty);
+   * optional here for older fixtures. `group` (the folder) is the fallback nav
+   * key during the category migration.
+   */
+  categories?: string[];
   /** ISO-8601 timestamp of the last access by any reader. Null if never accessed. */
   last_read?: string | null;
   human_read_count?: number;

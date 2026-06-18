@@ -5,11 +5,13 @@ import { pluralize } from "../../lib/format";
 import { categoryPath } from "./wikiPaths";
 
 /**
- * Auto-generated Wikipedia-style category index page: every article whose
- * path kind (catalog `group`) matches the category, listed alphabetically
- * and grouped by first letter. Linked from each article's category line
- * and from the home page's Browse panel — categories replace folders as
- * the wiki's organizing surface.
+ * Auto-generated Wikipedia-style category index page: every article filed in
+ * this category, listed alphabetically and grouped by first letter. Membership
+ * is the article's many-to-many `categories:` frontmatter (catalog
+ * `categories`), with the folder `group` kept as a fallback so links stay
+ * populated during the migration to real categories. Linked from each
+ * article's category line and the home Browse panel — categories replace
+ * folders as the wiki's organizing surface.
  */
 
 interface WikiCategoryPageProps {
@@ -42,8 +44,14 @@ export default function WikiCategoryPage({
 }: WikiCategoryPageProps) {
   const normalized = slug.toLowerCase();
   const { letters, count, siblings } = useMemo(() => {
+    // An article is in this category when its `categories:` frontmatter names
+    // the slug, OR (fallback) its folder group matches — so links stay
+    // populated until articles carry explicit categories.
+    const inCategory = (entry: WikiCatalogEntry): boolean =>
+      (entry.categories ?? []).some((c) => c.toLowerCase() === normalized) ||
+      entry.group.toLowerCase() === normalized;
     const members = catalog
-      .filter((entry) => entry.group.toLowerCase() === normalized)
+      .filter(inCategory)
       .sort((a, b) => a.title.localeCompare(b.title));
     const byLetter = new Map<string, WikiCatalogEntry[]>();
     for (const entry of members) {
@@ -52,14 +60,21 @@ export default function WikiCategoryPage({
       if (bucket) bucket.push(entry);
       else byLetter.set(letter, [entry]);
     }
-    const otherGroups = [
-      ...new Set(catalog.map((entry) => entry.group)),
-    ].filter((g) => g.toLowerCase() !== normalized);
-    otherGroups.sort((a, b) => a.localeCompare(b));
+    // Sibling categories: the union of every article's real categories and its
+    // folder group, minus this one.
+    const allCategories = new Set<string>();
+    for (const entry of catalog) {
+      for (const c of entry.categories ?? []) allCategories.add(c);
+      if (entry.group) allCategories.add(entry.group);
+    }
+    const otherCategories = [...allCategories].filter(
+      (c) => c.toLowerCase() !== normalized,
+    );
+    otherCategories.sort((a, b) => a.localeCompare(b));
     return {
       letters: [...byLetter.entries()].sort(([a], [b]) => a.localeCompare(b)),
       count: members.length,
-      siblings: otherGroups,
+      siblings: otherCategories,
     };
   }, [catalog, normalized]);
 

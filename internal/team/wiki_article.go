@@ -103,6 +103,11 @@ type CatalogEntry struct {
 	AuthorSlug   string `json:"author_slug"`
 	LastEditedTs string `json:"last_edited_ts"`
 	Group        string `json:"group"`
+	// Categories are the article's many-to-many category slugs from its
+	// `categories:` frontmatter (markdown-authoritative). Always present
+	// (possibly empty) so the UI can rely on the field. The folder `Group`
+	// stays as a fallback nav key during the category migration.
+	Categories []string `json:"categories"`
 	// Read tracking — always present; zero when no reads have been recorded.
 	LastRead       *time.Time `json:"last_read,omitempty"`
 	HumanReadCount int        `json:"human_read_count"`
@@ -224,12 +229,17 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 	var entries []CatalogEntry
 
 	walkErr := r.walkCatalogArticles(includeArchived, func(rel string, content []byte, isArchived bool) {
+		cats := parseCategoriesFrontmatter(string(content))
+		if cats == nil {
+			cats = []string{}
+		}
 		entry := CatalogEntry{
-			Path:      rel,
-			Archived:  isArchived,
-			Title:     extractTitle(content, rel),
-			Group:     groupFromPath(rel),
-			WordCount: countWords(content),
+			Path:       rel,
+			Archived:   isArchived,
+			Title:      extractTitle(content, rel),
+			Group:      groupFromPath(rel),
+			Categories: cats,
+			WordCount:  countWords(content),
 		}
 		entries = append(entries, entry)
 	})

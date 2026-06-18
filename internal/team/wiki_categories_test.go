@@ -270,6 +270,51 @@ func TestBuildArticle_Categories(t *testing.T) {
 	}
 }
 
+func TestBuildCatalog_Categories(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	repo := NewRepoAt(root, filepath.Join(t.TempDir(), "bak"))
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// A playbook filed into People via categories — folder is playbooks but the
+	// catalog entry must carry the real category so cross-folder nav works.
+	withCats := "---\ncategories: [people, revenue-operations]\n---\n# Hiring Loop\n"
+	if _, _, err := repo.Commit(ctx, "ceo", "team/playbooks/hiring-loop.md", withCats, "create", "add"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	bare := "# Bare\n\nNo frontmatter.\n"
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/zoe.md", bare, "create", "add"); err != nil {
+		t.Fatalf("commit bare: %v", err)
+	}
+
+	entries, err := repo.BuildCatalog(ctx, "", nil, false)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	byPath := map[string]CatalogEntry{}
+	for _, e := range entries {
+		byPath[e.Path] = e
+	}
+
+	hiring, ok := byPath["team/playbooks/hiring-loop.md"]
+	if !ok {
+		t.Fatalf("hiring-loop not in catalog: %+v", entries)
+	}
+	if !reflect.DeepEqual(hiring.Categories, []string{"people", "revenue-operations"}) {
+		t.Errorf("hiring Categories = %v, want [people revenue-operations]", hiring.Categories)
+	}
+	// An article without categories carries a non-nil empty slice (stable JSON).
+	zoe := byPath["team/people/zoe.md"]
+	if zoe.Categories == nil || len(zoe.Categories) != 0 {
+		t.Errorf("zoe Categories = %v, want non-nil empty slice", zoe.Categories)
+	}
+}
+
 // --- helpers --------------------------------------------------------------
 
 func writeBrief(t *testing.T, root, rel, content string) {

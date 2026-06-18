@@ -100,4 +100,58 @@ describe("<WikiCategoryPage>", () => {
     );
     expect(screen.getByText("No pages yet.")).toBeInTheDocument();
   });
+
+  it("includes cross-folder articles via explicit categories", () => {
+    // A playbook (different folder) filed into the People category via its
+    // `categories:` frontmatter shows alongside the folder members.
+    const catalog: WikiCatalogEntry[] = [
+      ...CATALOG,
+      {
+        path: "team/playbooks/onboarding.md",
+        title: "Onboarding",
+        author_slug: "ceo",
+        last_edited_ts: "2026-06-11T12:00:00Z",
+        group: "playbooks",
+        categories: ["people"],
+      },
+    ];
+    render(
+      <WikiCategoryPage
+        slug="people"
+        catalog={catalog}
+        onNavigate={() => {}}
+      />,
+    );
+    // 3 folder members + 1 cross-folder explicit member = 4.
+    expect(screen.getByText(/The following 4 pages are/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Onboarding" }),
+    ).toBeInTheDocument();
+  });
+
+  it("lists sibling categories that exist only via explicit categories", () => {
+    const catalog: WikiCatalogEntry[] = [
+      ...CATALOG,
+      {
+        path: "team/playbooks/mql.md",
+        title: "MQL",
+        author_slug: "ceo",
+        last_edited_ts: "2026-06-11T12:00:00Z",
+        group: "playbooks",
+        categories: ["revenue-operations"],
+      },
+    ];
+    const onNavigate = vi.fn();
+    render(
+      <WikiCategoryPage
+        slug="people"
+        catalog={catalog}
+        onNavigate={onNavigate}
+      />,
+    );
+    // "Revenue Operations" is a real category (no matching folder) and appears
+    // as a sibling link.
+    fireEvent.click(screen.getByRole("link", { name: "Revenue Operations" }));
+    expect(onNavigate).toHaveBeenCalledWith("_category/revenue-operations");
+  });
 });
