@@ -36,10 +36,14 @@ func normalizeTitleTokens(title string) []string {
 	})
 	out := make([]string, 0, len(fields))
 	for _, f := range fields {
-		if _, stop := titleStopwords[f]; stop {
+		// Stem BEFORE the stopword check so plural stopwords drop too: "issues"
+		// stems to "issue" (a stopword) and is removed, keeping "Create issue"
+		// and "Create issues" identical instead of diverging.
+		stemmed := stemTitleToken(f)
+		if _, stop := titleStopwords[stemmed]; stop {
 			continue
 		}
-		out = append(out, stemTitleToken(f))
+		out = append(out, stemmed)
 	}
 	return out
 }

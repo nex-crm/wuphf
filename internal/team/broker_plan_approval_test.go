@@ -115,6 +115,9 @@ func TestShallowSubtaskRestatingParentRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a sub-issue restating the parent to be rejected")
 	}
+	if !strings.Contains(err.Error(), "restates parent") {
+		t.Fatalf("expected shallow-restate guard error, got %v", err)
+	}
 }
 
 // RaisePlanApproval is idempotent: a second call for the same planning task
@@ -215,5 +218,8 @@ func TestDuplicateSiblingSubtaskRejected(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected a sub-issue duplicating a sibling to be rejected")
+	}
+	if !strings.Contains(err.Error(), "duplicates existing sibling") {
+		t.Fatalf("expected sibling-dedup guard error, got %v", err)
 	}
 }

@@ -500,8 +500,10 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 	// across legacy reindexes while it is still pre-execution. Only the explicit
 	// plan-approval transition (Planning→Running) or a submit/terminal action —
 	// which change the legacy status away from in_progress/open — move it out of
-	// Planning.
-	if task.LifecycleState == LifecycleStatePlanning {
+	// Planning. A blocked task is NOT preserved as Planning: blocked means it is
+	// waiting on a dependency and the block derivation above (LifecycleStateBlocked)
+	// must win, or the block would be silently masked.
+	if task.LifecycleState == LifecycleStatePlanning && !task.blocked {
 		switch strings.ToLower(strings.TrimSpace(task.status)) {
 		case "", "open", "in_progress":
 			derived = LifecycleStatePlanning

@@ -10,6 +10,7 @@ func TestTitlesAreSimilar(t *testing.T) {
 		{"Ship the MVP", "ship mvp!", true},                          // punctuation + stopwords
 		{"Wire Stripe webhooks", "wire the stripe webhook", true},    // stopword + singular/plural-ish token overlap
 		{"MVP onboarding flow", "onboarding flow for the MVP", true}, // order-insensitive
+		{"Create issue", "Create issues", true},                      // plural stopword: stem-before-stopword drops both
 		{"Build the billing system", "Wire Stripe webhooks", false},  // genuinely distinct
 		{"Send the weekly digest", "Send the monthly report", false}, // share only low-signal tokens
 		{"", "anything", false},                                      // empty
