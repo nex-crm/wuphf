@@ -411,7 +411,7 @@
 }
 
 /* Analytics-consent block on the final step: two honest, independent toggles
-   (anonymous events, fully-masked recordings), both checked by default. Reuses
+   (anonymous events, typed-text-masked recordings), both checked by default. Reuses
    the keep-in-touch row primitives for the checkboxes. */
 .onboarding-analytics-consent {
   margin-top: var(--space-5);
