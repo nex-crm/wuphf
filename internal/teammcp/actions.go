@@ -987,12 +987,16 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 		return toolError(err), nil, nil
 	}
 	job := map[string]any{
-		"slug":          schedulerSlug(provider.Name(), channel, args.Key),
-		"kind":          provider.Name() + "_workflow",
-		"label":         "Run " + humanizeWorkflowKey(args.Key),
-		"target_type":   "workflow",
-		"target_id":     strings.TrimSpace(args.Key),
-		"channel":       channel,
+		"slug":        schedulerSlug(provider.Name(), channel, args.Key),
+		"kind":        provider.Name() + "_workflow",
+		"label":       "Run " + humanizeWorkflowKey(args.Key),
+		"target_type": "workflow",
+		"target_id":   strings.TrimSpace(args.Key),
+		"channel":     channel,
+		// agent = the office agent that scheduled this workflow; it owns the
+		// routine in the UI. provider is the integration vendor (composio/one),
+		// which must never be surfaced as the owning agent.
+		"agent":         slug,
 		"provider":      provider.Name(),
 		"workflow_key":  strings.TrimSpace(args.Key),
 		"skill_name":    strings.TrimSpace(args.SkillName),
