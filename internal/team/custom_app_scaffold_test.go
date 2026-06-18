@@ -1,11 +1,14 @@
 package team
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/templates"
 )
 
 // TestScaffoldCreatesBuildingDraft locks the instant-preview contract: Scaffold
@@ -238,6 +241,53 @@ func TestMutateTaskImproveDoesNotPrescaffold(t *testing.T) {
 	apps, _ := b.appStore().List()
 	if len(apps) != 0 {
 		t.Fatalf("improve task pre-scaffolded an app: %+v", apps)
+	}
+}
+
+// TestScaffoldEmbedExcludesBuildArtifacts guards a real footgun: the App
+// scaffold is embedded with `//go:embed all:app-scaffold`, which sweeps EVERY
+// file on disk under templates/app-scaffold at build time — it does not honor
+// .gitignore. A release binary is built from a clean checkout (goreleaser does
+// not run `bun install` for the scaffold), so node_modules/dist are absent and
+// only the ~dozen source files embed. But if node_modules (now ~127 MB with the
+// refine + Mantine stack) or a dist/ build output were ever committed or present
+// at build time, the binary would balloon and every scaffolded app would
+// materialize a stale node_modules. This test materializes the scaffold from the
+// embedded FS and fails if any build-artifact path leaked in, catching a bad
+// commit or an embed-directive regression in CI (where the tree is clean).
+func TestScaffoldEmbedExcludesBuildArtifacts(t *testing.T) {
+	// Walk the EMBEDDED scaffold FS directly — this is what
+	// writeScaffoldSourceLocked materializes onto disk, before Source() filters
+	// node_modules back out. A leak here means the binary embedded the artifacts
+	// and every scaffolded app pays to write them.
+	var leaked []string
+	err := fs.WalkDir(
+		templates.AppScaffold,
+		templates.AppScaffoldRoot,
+		func(p string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.IsDir() {
+				return nil
+			}
+			slashed := filepath.ToSlash(p)
+			if strings.Contains(slashed, "/node_modules/") ||
+				strings.Contains(slashed, "/dist/") {
+				leaked = append(leaked, slashed)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("walk embedded scaffold: %v", err)
+	}
+	if len(leaked) > 0 {
+		t.Fatalf("scaffold embed includes %d build-artifact file(s); the binary "+
+			"would balloon and every scaffolded app would materialize them. Run "+
+			"`rm -rf templates/app-scaffold/node_modules templates/app-scaffold/dist` "+
+			"before building, and never commit them. First few: %v",
+			len(leaked), leaked[:min(5, len(leaked))])
 	}
 }
 
