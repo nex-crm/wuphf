@@ -270,7 +270,7 @@ function Provenance({ wf }: { wf: ExtractedWorkflow }) {
     >
       {wf.why && (
         <div>
-          <b style={{ color: "var(--text)" }}>Why:</b> {wf.why}
+          <b style={{ color: "var(--text)" }}>Why we spotted this:</b> {wf.why}
         </div>
       )}
       {tasks.length > 0 && (

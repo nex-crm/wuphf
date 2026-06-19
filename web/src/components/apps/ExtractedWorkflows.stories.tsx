@@ -31,7 +31,7 @@ const digest: ExtractedWorkflow = {
   name: "Urgent Inbox → Slack Alert",
   description:
     "Pulls the day's important emails from Gmail and posts a summary of the urgent ones to Slack #general.",
-  why: "Two ordered steps form a repeatable procedure with a clear outcome; the time-bounded query implies a recurring daily digest, not a one-off lookup.",
+  why: "We spotted this while you were going through your Gmail inbox for urgent customer emails and asking your assistant to post the key ones to your Slack #general channel — the same pull-the-urgent-emails-then-alert-Slack routine each morning.",
   confidence: 0.9,
   trigger: { kind: "schedule", interval_minutes: 1440 },
   recurrence: 1,
@@ -76,7 +76,7 @@ const recurring: ExtractedWorkflow = {
   name: "Draft replies to waiting emails",
   description:
     "Finds Gmail threads awaiting a reply and drafts a response for each, ready for review.",
-  why: "The same fetch-then-draft procedure recurred across four tasks — a strong signal it's worth automating.",
+  why: "We spotted this because across four separate tasks you kept asking your assistant to pull up the emails waiting on a reply and draft responses for each — the same find-and-draft routine every time.",
   confidence: 0.82,
   trigger: { kind: "manual" },
   recurrence: 4,
