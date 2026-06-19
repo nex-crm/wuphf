@@ -8,6 +8,7 @@ import {
   getApp,
   getAppVersion,
   listAppVersions,
+  openAppEditSession,
   rollbackApp,
 } from "../../api/apps";
 import { CustomAppView } from "./CustomAppView";
@@ -18,6 +19,7 @@ vi.mock("../../api/apps", () => ({
   getAppVersion: vi.fn(),
   rollbackApp: vi.fn(),
   deleteApp: vi.fn(),
+  openAppEditSession: vi.fn(),
 }));
 
 // Stable store mock so tests can assert on setPendingComposerDraft calls (a
@@ -178,16 +180,24 @@ describe("CustomAppView single surface", () => {
     expect(screen.getByTestId("frame")).toHaveTextContent("CURRENT_HTML");
   });
 
-  it("hides the Edit affordance when the app has no edit channel", async () => {
+  it("offers Edit even with no edit channel, minting one lazily on click", async () => {
     const detail = appDetail();
     detail.app.editChannel = "";
     vi.mocked(getApp).mockResolvedValue(detail);
+    const MINTED = "task-office-42";
+    vi.mocked(openAppEditSession).mockResolvedValue(MINTED);
     renderView();
     await screen.findByText("Lead Scorer");
 
-    expect(
-      screen.queryByRole("button", { name: /^edit$/i }),
-    ).not.toBeInTheDocument();
+    // Every app is editable: the button is offered even before a thread exists.
+    const editBtn = screen.getByRole("button", { name: /^edit$/i });
+    expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
+
+    // Clicking mints a thread, then opens the panel bound to the minted channel.
+    fireEvent.click(editBtn);
+    const panel = await screen.findByTestId("edit-panel");
+    expect(openAppEditSession).toHaveBeenCalledWith(APP_ID);
+    expect(panel.getAttribute("data-channel")).toBe(MINTED);
   });
 });
 

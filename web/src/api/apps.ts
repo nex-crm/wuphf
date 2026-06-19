@@ -136,6 +136,22 @@ export async function stopAppDev(id: string): Promise<void> {
   await post(`/apps/${encodeURIComponent(id)}/dev/stop`, { actor: "human" });
 }
 
+/**
+ * openAppEditSession ensures the app has a persistent edit thread and returns
+ * its channel slug. Apps minted before edit-channel stamping (or registered
+ * html-only) carry none, so the app view could not show Edit for them. This
+ * lazily mints one — the broker spins up an App Builder "Edit app" task whose
+ * `task-<id>` channel it binds to the app — so EVERY app is editable. Idempotent:
+ * an app already bound returns its existing channel without spawning a task.
+ */
+export async function openAppEditSession(id: string): Promise<string> {
+  const res = await post<{ channel: string }>(
+    `/apps/${encodeURIComponent(id)}/edit-session`,
+    { actor: "human" },
+  );
+  return res.channel;
+}
+
 export interface AppBuildRequest {
   name: string;
   description: string;

@@ -10,11 +10,13 @@ import {
 
 import {
   type CustomApp,
+  type CustomAppDetail,
   type CustomAppVersion,
   deleteApp,
   getApp,
   getAppVersion,
   listAppVersions,
+  openAppEditSession,
   rollbackApp,
 } from "../../api/apps";
 import { formatRelativeTime } from "../../lib/format";
@@ -92,6 +94,11 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["app", appId],
     queryFn: () => getApp(appId),
+    // The published bundle only changes on a republish (rare), which the edit
+    // flow already invalidates. Don't refetch on every window focus — the
+    // global default is on, and for a static app it just churns the query each
+    // time the browser tab regains focus for no benefit.
+    refetchOnWindowFocus: false,
     refetchInterval: 10_000,
   });
 
@@ -109,6 +116,26 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
     queryKey: ["app-version", appId, previewVersion],
     queryFn: () => getAppVersion(appId, previewVersion as number),
     enabled: isPreviewing,
+  });
+
+  // Opening the edit chat on an app with no bound thread (a legacy app, or one
+  // registered html-only) lazily mints one, then opens the panel. We seed the
+  // returned channel straight into the cached app so the panel mounts without a
+  // refetch round-trip.
+  const ensureEditSession = useMutation({
+    mutationFn: () => openAppEditSession(appId),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<CustomAppDetail>(["app", appId], (prev) =>
+        prev ? { ...prev, app: { ...prev.app, editChannel: channel } } : prev,
+      );
+      setEditOpen(true);
+    },
+    onError: (err: unknown) => {
+      showNotice(
+        err instanceof Error ? err.message : "Could not open the edit chat.",
+        "error",
+      );
+    },
   });
 
   const rollback = useMutation({
@@ -157,11 +184,19 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   }
 
   function onToggleEdit(): void {
-    // Leaving edit also drops select mode (a live-preview-only affordance).
-    setEditOpen((open) => {
-      if (open) setSelectMode(false);
-      return !open;
-    });
+    if (editOpen) {
+      // Leaving edit also drops select mode (a live-preview-only affordance).
+      setSelectMode(false);
+      setEditOpen(false);
+      return;
+    }
+    // An already-bound app opens immediately; a legacy app with no thread mints
+    // one first (the mutation opens the panel on success).
+    if (data?.app.editChannel) {
+      setEditOpen(true);
+      return;
+    }
+    ensureEditSession.mutate();
   }
 
   function onSelectElement(sel: AppSelectPayload): void {
@@ -228,9 +263,11 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
   }
 
   const { app, html } = data;
-  // The edit chat needs a bound channel; an app registered html-only (or minted
-  // before the edit-channel field existed) has none. Hide the edit affordances
-  // rather than open an empty panel.
+  // Every app is editable: Edit is always offered. An app with no bound thread
+  // (registered html-only, or minted before the edit-channel field existed)
+  // mints one lazily on the first click (ensureEditSession). `canEdit` only
+  // gates the live-preview-only "Select to edit" affordance, which needs the
+  // bound channel that's guaranteed to exist by the time the panel is open.
   const canEdit = Boolean(app.editChannel);
 
   return (
@@ -239,6 +276,7 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
         app={app}
         isPreviewing={isPreviewing}
         canEdit={canEdit}
+        editPending={ensureEditSession.isPending}
         editOpen={editOpen}
         selectMode={selectMode}
         onToggleSelect={() => setSelectMode((on) => !on)}
@@ -286,6 +324,7 @@ interface AppViewHeaderProps {
   app: CustomApp;
   isPreviewing: boolean;
   canEdit: boolean;
+  editPending: boolean;
   editOpen: boolean;
   selectMode: boolean;
   onToggleSelect: () => void;
@@ -302,6 +341,7 @@ function AppViewHeader({
   app,
   isPreviewing,
   canEdit,
+  editPending,
   editOpen,
   selectMode,
   onToggleSelect,
@@ -354,17 +394,16 @@ function AppViewHeader({
         <ClockRotateRight width={15} height={15} />
         <span>History</span>
       </button>
-      {canEdit ? (
-        <button
-          type="button"
-          className="custom-app-view__action"
-          aria-pressed={editOpen}
-          onClick={onToggleEdit}
-        >
-          <EditPencil width={15} height={15} />
-          <span>Edit</span>
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className="custom-app-view__action"
+        aria-pressed={editOpen}
+        disabled={editPending}
+        onClick={onToggleEdit}
+      >
+        <EditPencil width={15} height={15} />
+        <span>{editPending ? "Opening…" : "Edit"}</span>
+      </button>
       <div className="custom-app-view__menu-wrap" ref={menuRef}>
         <button
           type="button"
@@ -555,6 +594,7 @@ function AppViewStageFrame({
     }
     return (
       <CustomAppFrame
+        appId={appId}
         html={previewHtml}
         title={`${app.name} (v${previewVersion})`}
       />
@@ -573,7 +613,7 @@ function AppViewStageFrame({
       />
     );
   }
-  return <CustomAppFrame html={html} title={app.name} />;
+  return <CustomAppFrame appId={appId} html={html} title={app.name} />;
 }
 
 interface PreviewBannerProps {

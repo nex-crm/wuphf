@@ -115,6 +115,8 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
 	case "rollback":
 		b.handleAppRollback(w, r, id)
+	case "edit-session":
+		b.handleAppEditSession(w, r, id)
 	case "dev":
 		b.handleAppDev(w, r, id, parts)
 	default:
@@ -266,6 +268,77 @@ func (b *Broker) handleAppRollback(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"app": app})
+}
+
+// handleAppEditSession opens (or returns) the app's persistent edit thread —
+// the per-app "chat to edit" channel:
+//
+//	POST /apps/{id}/edit-session -> { channel }
+//
+// Every app should be editable, but an app minted before edit-channel stamping
+// (or registered html-only, with no backing task) carries no channel, so the FE
+// could not surface Edit for it. This lazily mints one: it creates an App
+// Builder "Edit app: <name>" task, and the task-create hook
+// (stampAppEditChannelForTaskLocked) stamps the new task-<id> channel onto the
+// app SYNCHRONOUSLY, so the bound channel is readable the moment MutateTask
+// returns. The App Builder then greets the human in that channel and waits; a
+// human post there wakes it through the same task_followup path edits use.
+//
+// Idempotent: an app already bound to an edit thread returns it untouched, so a
+// double-click never spawns a second task. Gated like register/delete — a human
+// session or the App Builder only.
+func (b *Broker) handleAppEditSession(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	actor, status, err := richArtifactAuthenticatedSlug(r, "", "actor")
+	if err != nil {
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	if !b.appWriterAllowed(r, actor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a human or the App Builder may open an edit session"})
+		return
+	}
+	app, _, err := b.appStore().Get(id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	// Idempotent: already bound → return the existing thread, no new task.
+	if ch := strings.TrimSpace(app.EditChannel); ch != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"channel": ch})
+		return
+	}
+	title, details := appEditSessionBrief(app)
+	// MutateTask locks internally; this handler holds no broker lock (same
+	// pattern as maybeSpawnAppBuilderTaskFromProposal).
+	if _, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     title,
+		Details:   details,
+		Owner:     appBuilderSlug,
+		CreatedBy: "human",
+		TaskType:  "issue",
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// The create hook stamped the new task-<id> channel onto the app
+	// synchronously; re-read the manifest to return the bound channel.
+	updated, _, err := b.appStore().Get(id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	ch := strings.TrimSpace(updated.EditChannel)
+	if ch == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "edit session created but no channel was bound"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"channel": ch})
 }
 
 // appWriterAllowed reports whether the request may write/delete app bytes:
