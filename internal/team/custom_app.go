@@ -427,6 +427,13 @@ func (s *customAppStore) resolvePublishHTML(dir string, req CustomAppWriteReques
 		// (the sandbox policy still gates it in the caller).
 		return req.HTML, nil
 	}
+	// Deterministic efficiency harness: reject a publish whose source re-runs work
+	// on tab focus or polls tighter than the floor, BEFORE staging/building it.
+	// AI_RULES advises against these; this ENFORCES it so a token-burner can never
+	// reach the sealed bundle. The agent reads the file:line list and republishes.
+	if violations := checkAppSourceEfficiency(req.Files); len(violations) > 0 {
+		return "", appEfficiencyGuardError(violations)
+	}
 	// The host owns the contract: discard the agent's protected files and replace
 	// them with the canonical embedded versions before anything is persisted or
 	// built.

@@ -614,6 +614,42 @@ describe("routeInboundMessage — Bridge v2 forwarding", () => {
       "*",
     );
   });
+
+  it("forwards the host app_id on ai() and integration calls for per-app budgeting", async () => {
+    const { frame, win } = makeFrame();
+    routeInboundMessage(
+      event(win, { source: "wuphf-app", type: "ai", id: 5, prompt: "go" }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+      "app_deadbeefdeadbeef",
+    );
+    routeInboundMessage(
+      event(win, {
+        source: "wuphf-app",
+        type: "integration",
+        id: 6,
+        platform: "gmail",
+        action: "GMAIL_FETCH_EMAILS",
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+      "app_deadbeefdeadbeef",
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledWith(
+      "/apps/ai",
+      expect.objectContaining({ app_id: "app_deadbeefdeadbeef" }),
+    );
+    expect(post).toHaveBeenCalledWith(
+      "/apps/integrations/call",
+      expect.objectContaining({ app_id: "app_deadbeefdeadbeef" }),
+    );
+  });
 });
 
 describe("parseErrorPayload", () => {

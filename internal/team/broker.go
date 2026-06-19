@@ -261,11 +261,16 @@ type Broker struct {
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 
-	// App ai() buckets — the broker token exempts the web host from the IP
-	// bucket, so a hostile App could otherwise loop POST /apps/ai and burn LLM
-	// credits unthrottled (security review H2). Keyed per actor/session,
-	// lazily-initialized in consumeAppAIRateLimit.
-	appAIRateLimitBuckets map[string]ipRateLimitBucket
+	// App budget buckets — the broker token exempts the web host from the IP
+	// bucket, so a hostile or buggy App could otherwise loop POST /apps/ai or
+	// /apps/integrations/call and burn LLM credits / upstream rate limits
+	// unthrottled (security review H2). Keyed PER-APP (appBudgetKey), enforced on
+	// a per-minute AND a per-day window. Initialized in NewBroker.
+	appAIRateLimitBuckets        map[string]ipRateLimitBucket // ai(): per-minute
+	appAIDailyBuckets            map[string]ipRateLimitBucket // ai(): per-day
+	appIntegrationReadBuckets    map[string]ipRateLimitBucket // reads: per-minute
+	appIntegrationReadDayBuckets map[string]ipRateLimitBucket // reads: per-day
+	lastAppBudgetPrune           time.Time                    // throttles the idle-key sweep
 
 	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
 	// transport is started in-process — at boot by RegisterTransports and at
@@ -418,6 +423,11 @@ func NewBrokerAt(statePath string) *Broker {
 		agentRateLimitBuckets:  make(map[string]ipRateLimitBucket),
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
+
+		appAIRateLimitBuckets:        make(map[string]ipRateLimitBucket),
+		appAIDailyBuckets:            make(map[string]ipRateLimitBucket),
+		appIntegrationReadBuckets:    make(map[string]ipRateLimitBucket),
+		appIntegrationReadDayBuckets: make(map[string]ipRateLimitBucket),
 
 		statePath:       statePath,
 		lifecycleCtx:    lifecycleCtx,

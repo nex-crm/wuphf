@@ -65,12 +65,30 @@ const (
 	appAITimeout = 60 * time.Second
 
 	// appAIRateLimit / appAIRateWindow cap how many ai() completions a single
-	// actor/session may trigger per window. The broker token exempts the web host
-	// from the IP bucket, so without this a hostile App could loop ai() and burn
-	// LLM credits (security review H2). Each completion already costs ~seconds, so
-	// a small allowance is plenty for a real digest/score app.
+	// app may trigger per minute. The broker token exempts the web host from the
+	// IP bucket, so without this a hostile or buggy App (e.g. one that re-runs an
+	// ai() summary on every tab refocus) could loop ai() and burn LLM credits
+	// (security review H2). Each completion already costs ~seconds, so a small
+	// allowance is plenty for a real digest/score app.
 	appAIRateLimit  = 8
 	appAIRateWindow = time.Minute
+	// appAIDailyLimit / appAIDailyWindow are the HARD per-app spend ceiling: the
+	// per-minute cap bounds bursts, but a tab-switch loop that paces itself under
+	// 8/min could still grind through tokens all day. The daily cap is the
+	// deterministic backstop the build-time guard pairs with.
+	appAIDailyLimit  = 150
+	appAIDailyWindow = 24 * time.Hour
+
+	// appIntegrationReadLimit / appIntegrationReadDailyLimit bound how many
+	// integration READ actions one app may run (per minute / per rolling day).
+	// Reads are cheaper than ai() but hit the upstream provider (Composio), which
+	// has its OWN rate limits — an app looping reads on focus would risk those for
+	// the whole workspace. Mutations are not metered here: they already route
+	// through a human approval card and a workspace-wide dedupe.
+	appIntegrationReadLimit       = 30
+	appIntegrationReadWindow      = time.Minute
+	appIntegrationReadDailyLimit  = 1500
+	appIntegrationReadDailyWindow = 24 * time.Hour
 )
 
 // appsLLMCompleter is the seam the ai() endpoint calls for a one-shot
@@ -119,6 +137,10 @@ type appIntegrationCallRequest struct {
 	Platform string         `json:"platform"`
 	Action   string         `json:"action"`
 	Params   map[string]any `json:"params,omitempty"`
+	// AppID identifies the calling app so the read budget is per-app, not shared
+	// across every app the human has open. Host-supplied (the sealed iframe never
+	// sees it), so it is a trustworthy budget key, not a security decision.
+	AppID string `json:"app_id,omitempty"`
 }
 
 // appIntegrationCallResponse is the business outcome of an App integration call.
@@ -186,9 +208,22 @@ func (b *Broker) handleAppsIntegrationsCall(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// READ ACTION: resolve the connection and execute. A not-connected /
-	// unreachable integration surfaces as {connected:false} (HTTP 200) so the
-	// App can render a connect-state.
+	// READ ACTION: budget it per-app BEFORE touching the provider. A read loop
+	// (e.g. an app refetching on every tab refocus) would otherwise hammer
+	// Composio's own rate limits for the whole workspace. Over budget → a clean
+	// product error the app renders (HTTP 200), not a thrown transport error.
+	if _, limited := b.consumeAppIntegrationReadBudget(appBudgetKey(req.AppID, r)); limited {
+		writeJSON(w, http.StatusOK, appIntegrationCallResponse{
+			Connected: true,
+			ReadOnly:  true,
+			Error:     "rate_limited",
+		})
+		return
+	}
+
+	// Resolve the connection and execute. A not-connected / unreachable
+	// integration surfaces as {connected:false} (HTTP 200) so the App can render a
+	// connect-state.
 	composio := action.NewComposioFromEnv()
 	connKey, connected := b.resolveAppIntegrationConnection(r.Context(), composio, platform)
 	if !connected {
@@ -474,6 +509,9 @@ type appAIRequest struct {
 	Prompt string `json:"prompt"`
 	Input  any    `json:"input,omitempty"`
 	JSON   bool   `json:"json,omitempty"`
+	// AppID identifies the calling app so the ai() budget is per-app. Host-supplied
+	// (the sealed iframe never sees it), so it is a trustworthy budget key.
+	AppID string `json:"app_id,omitempty"`
 }
 
 // appAIResponse returns the model's text (and, when json:true, a parsed object).
@@ -493,16 +531,17 @@ func (b *Broker) handleAppsAI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// Rate-limit before doing any work: a hostile App loops cheaply, but each
-	// completion is expensive. Keyed per actor/session so one app cannot starve
-	// the workspace.
-	if retryAfter, limited := b.consumeAppAIRateLimit(appActionApprovalActor(r)); limited {
-		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())))
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "ai rate limit; slow down"})
-		return
-	}
 	var req appAIRequest
 	if !decodeIntegrationRequest(w, r, &req) {
+		return
+	}
+	// Budget before doing any work: a hostile App loops cheaply, but each
+	// completion is expensive. Keyed PER-APP (not per human) and enforced on a
+	// per-minute AND per-day window, so one app that re-runs ai() on every tab
+	// refocus is bounded and cannot starve the workspace or burn the daily budget.
+	if retryAfter, limited := b.consumeAppAIBudget(appBudgetKey(req.AppID, r)); limited {
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limited"})
 		return
 	}
 	prompt := strings.TrimSpace(req.Prompt)
@@ -531,36 +570,132 @@ func (b *Broker) handleAppsAI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, finalizeAppsAIResponse(out, req.JSON))
 }
 
-// consumeAppAIRateLimit counts one ai() call against a per-actor sliding-window
-// bucket and reports (retryAfter, limited). It reuses the same bucket/prune
-// primitives as the agent rate limiter so behavior is consistent. Lazily
-// initializes the map so it needs no constructor change.
-func (b *Broker) consumeAppAIRateLimit(actor string) (time.Duration, bool) {
-	key := strings.TrimSpace(actor)
-	if key == "" {
-		key = "app"
+// appBudgetKey is the per-app budget key. It prefers the host-supplied app id
+// (the sealed iframe cannot forge it, and only the host can reach these
+// endpoints), so each app gets its own bucket; it falls back to the human
+// actor/session when an older host omits the id. The "app:" / "actor:" prefixes
+// keep the two namespaces from colliding.
+func appBudgetKey(appID string, r *http.Request) string {
+	// Validate the id SHAPE before trusting it as a map key: a host-supplied id is
+	// trustworthy, but validating keeps a malformed/forged value from spraying
+	// arbitrary keys into the budget maps. An invalid id falls back to the actor
+	// bucket (more restrictive, never less).
+	if id := strings.TrimSpace(appID); id != "" && validateCustomAppID(id) == nil {
+		return "app:" + id
 	}
-	now := b.rateLimitNow()
-	cutoff := now.Add(-appAIRateWindow)
+	actor := strings.TrimSpace(appActionApprovalActor(r))
+	if actor == "" {
+		actor = "app"
+	}
+	return "actor:" + actor
+}
 
+// consumeAppAIBudget charges one ai() call against the per-app per-minute AND
+// per-day buckets, reporting (retryAfter, limited). It peeks both limits first
+// and records a hit on neither when either is exceeded, so a rejected call never
+// pollutes a bucket. Caller must NOT hold b.mu.
+func (b *Broker) consumeAppAIBudget(key string) (time.Duration, bool) {
+	now := b.rateLimitNow()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.appAIRateLimitBuckets == nil {
-		b.appAIRateLimitBuckets = make(map[string]ipRateLimitBucket)
+	b.maybeSweepAppBudgetsLocked(now)
+	if d, limited := peekRollingLimit(b.appAIRateLimitBuckets, key, appAIRateLimit, appAIRateWindow, now); limited {
+		return d, true
 	}
-	bucket := b.appAIRateLimitBuckets[key]
-	bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
-	if len(bucket.timestamps) >= appAIRateLimit {
-		retryAfter := bucket.timestamps[0].Add(appAIRateWindow).Sub(now)
+	if d, limited := peekRollingLimit(b.appAIDailyBuckets, key, appAIDailyLimit, appAIDailyWindow, now); limited {
+		return d, true
+	}
+	recordRollingHit(b.appAIRateLimitBuckets, key, now)
+	recordRollingHit(b.appAIDailyBuckets, key, now)
+	return 0, false
+}
+
+// consumeAppIntegrationReadBudget charges one integration READ against the
+// per-app per-minute AND per-day buckets. Same peek-both-then-record discipline
+// as consumeAppAIBudget. Caller must NOT hold b.mu.
+func (b *Broker) consumeAppIntegrationReadBudget(key string) (time.Duration, bool) {
+	now := b.rateLimitNow()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maybeSweepAppBudgetsLocked(now)
+	if d, limited := peekRollingLimit(b.appIntegrationReadBuckets, key, appIntegrationReadLimit, appIntegrationReadWindow, now); limited {
+		return d, true
+	}
+	if d, limited := peekRollingLimit(b.appIntegrationReadDayBuckets, key, appIntegrationReadDailyLimit, appIntegrationReadDailyWindow, now); limited {
+		return d, true
+	}
+	recordRollingHit(b.appIntegrationReadBuckets, key, now)
+	recordRollingHit(b.appIntegrationReadDayBuckets, key, now)
+	return 0, false
+}
+
+// peekRollingLimit prunes the bucket to the window and reports whether it is at
+// or over the limit WITHOUT recording a new hit (so a rejected multi-limit call
+// pollutes no bucket). It writes the pruned bucket back. Caller holds b.mu and
+// the map is non-nil (initialized in NewBroker).
+func peekRollingLimit(buckets map[string]ipRateLimitBucket, key string, limit int, window time.Duration, now time.Time) (time.Duration, bool) {
+	bucket := buckets[key]
+	bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, now.Add(-window))
+	// Self-sweep: an empty bucket is dropped rather than resurrected, so a key
+	// that goes idle does not linger in the map forever.
+	if len(bucket.timestamps) == 0 {
+		delete(buckets, key)
+		return 0, false
+	}
+	buckets[key] = bucket
+	if len(bucket.timestamps) >= limit {
+		retryAfter := bucket.timestamps[0].Add(window).Sub(now)
 		if retryAfter < time.Second {
 			retryAfter = time.Second
 		}
-		b.appAIRateLimitBuckets[key] = bucket
 		return retryAfter, true
 	}
-	bucket.timestamps = append(bucket.timestamps, now)
-	b.appAIRateLimitBuckets[key] = bucket
 	return 0, false
+}
+
+// recordRollingHit appends one hit at now. Caller holds b.mu; the bucket was just
+// pruned by peekRollingLimit.
+func recordRollingHit(buckets map[string]ipRateLimitBucket, key string, now time.Time) {
+	bucket := buckets[key]
+	bucket.timestamps = append(bucket.timestamps, now)
+	buckets[key] = bucket
+}
+
+// appBudgetSweepInterval is how often maybeSweepAppBudgetsLocked walks the budget
+// maps to evict keys that have gone fully idle. The per-peek self-sweep already
+// drops a key when ITS owner calls again; this catches keys whose owner never
+// returns (e.g. a one-off id), bounding total memory to "apps active recently".
+const appBudgetSweepInterval = time.Hour
+
+// maybeSweepAppBudgetsLocked periodically evicts fully-expired keys from all four
+// app-budget maps, each pruned by its own window. Throttled to once per
+// appBudgetSweepInterval so it adds negligible cost to the hot path. Caller holds
+// b.mu.
+func (b *Broker) maybeSweepAppBudgetsLocked(now time.Time) {
+	if !b.lastAppBudgetPrune.IsZero() && now.Sub(b.lastAppBudgetPrune) < appBudgetSweepInterval {
+		return
+	}
+	b.lastAppBudgetPrune = now
+	specs := []struct {
+		m      map[string]ipRateLimitBucket
+		window time.Duration
+	}{
+		{b.appAIRateLimitBuckets, appAIRateWindow},
+		{b.appAIDailyBuckets, appAIDailyWindow},
+		{b.appIntegrationReadBuckets, appIntegrationReadWindow},
+		{b.appIntegrationReadDayBuckets, appIntegrationReadDailyWindow},
+	}
+	for _, s := range specs {
+		cutoff := now.Add(-s.window)
+		for k, bucket := range s.m {
+			bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+			if len(bucket.timestamps) == 0 {
+				delete(s.m, k)
+			} else {
+				s.m[k] = bucket
+			}
+		}
+	}
 }
 
 // buildAppsAIPrompt composes the system + user prompt for an ai() call and

@@ -121,6 +121,7 @@ export function AppLivePreview({
 
   return (
     <CustomAppFrame
+      appId={appId}
       devUrl={data.url}
       title={title}
       selectMode={selectMode}

@@ -474,6 +474,7 @@ async function serviceIntegrationCall(
   message: AppIntegrationMessage,
   target: Window,
   replyOrigin: string,
+  appId?: string,
 ): Promise<void> {
   const reply = (payload: {
     ok: boolean;
@@ -495,10 +496,14 @@ async function serviceIntegrationCall(
     return;
   }
   try {
+    // app_id is HOST-supplied (the sealed iframe never sees it), so the broker
+    // budgets integration reads per-app. Omitted when unknown → server falls back
+    // to the actor bucket.
     const data = await post("/apps/integrations/call", {
       platform: args.platform,
       action: args.action,
       params: args.params ?? {},
+      ...(appId ? { app_id: appId } : {}),
     });
     reply({ ok: true, data });
   } catch (err) {
@@ -516,6 +521,7 @@ async function serviceAICall(
   message: AppAIMessage,
   target: Window,
   replyOrigin: string,
+  appId?: string,
 ): Promise<void> {
   const reply = (payload: {
     ok: boolean;
@@ -537,10 +543,13 @@ async function serviceAICall(
     return;
   }
   try {
+    // app_id is HOST-supplied so the broker budgets ai() per-app (a misbehaving
+    // app can't burn the whole workspace's LLM budget). Omitted when unknown.
     const data = await post("/apps/ai", {
       prompt: args.prompt,
       input: args.input,
       json: args.json,
+      ...(appId ? { app_id: appId } : {}),
     });
     reply({ ok: true, data });
   } catch (err) {
@@ -567,6 +576,7 @@ export function routeInboundMessage(
   replyOrigin: string,
   onSelectRef: SelectHandlerRef,
   onAppErrorRef: ErrorHandlerRef,
+  appId?: string,
 ): void {
   // Identity by window reference, not origin: a sandboxed opaque-origin frame
   // reports origin "null", so origin checks are useless here.
@@ -592,7 +602,7 @@ export function routeInboundMessage(
   // Every remaining type is a request that needs a reply: it MUST carry an id
   // and a real sender window. Gate that once here so each handler can assume it.
   if (data.id === undefined || event.source === null) return;
-  routeAppRequest(data, event.source as Window, replyOrigin);
+  routeAppRequest(data, event.source as Window, replyOrigin, appId);
 }
 
 /**
@@ -606,6 +616,7 @@ function routeAppRequest(
   data: { type?: string; id?: string | number },
   source: Window,
   replyOrigin: string,
+  appId?: string,
 ): void {
   switch (data.type) {
     // The one safe office write: a human-confirmed, host-parameterized task.
@@ -621,11 +632,12 @@ function routeAppRequest(
         data as AppIntegrationMessage,
         source,
         replyOrigin,
+        appId,
       );
       return;
     // Bridge v2: a bounded one-shot ai() completion over data the app holds.
     case "ai":
-      void serviceAICall(data as AppAIMessage, source, replyOrigin);
+      void serviceAICall(data as AppAIMessage, source, replyOrigin, appId);
       return;
     case "broker":
       void serviceBrokerGet(data as BrokerBridgeMessage, source, replyOrigin);
@@ -647,6 +659,7 @@ function useAppBridge(
   devUrl: string | undefined,
   onSelectRef: SelectHandlerRef,
   onAppErrorRef: ErrorHandlerRef,
+  appId: string | undefined,
 ): void {
   useEffect(() => {
     // In DEV mode the frame is a real, known origin (the proxy), so pin replies
@@ -670,11 +683,12 @@ function useAppBridge(
         replyOrigin,
         onSelectRef,
         onAppErrorRef,
+        appId,
       );
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [devUrl, iframeRef, onSelectRef, onAppErrorRef]);
+  }, [devUrl, iframeRef, onSelectRef, onAppErrorRef, appId]);
 }
 
 /**
@@ -715,6 +729,12 @@ function useSelectModeSync(
 
 interface CustomAppFrameProps {
   title: string;
+  /**
+   * The owning app's id. Forwarded (host-side) on ai() / integration bridge
+   * calls so the broker meters them PER-APP. Optional: when absent the broker
+   * falls back to an actor-scoped budget.
+   */
+  appId?: string;
   /** Sealed mode: the published single-file bundle, rendered via srcDoc. */
   html?: string;
   /**
@@ -741,6 +761,7 @@ interface CustomAppFrameProps {
 export function CustomAppFrame({
   html,
   title,
+  appId,
   devUrl,
   selectMode,
   onSelect,
@@ -759,7 +780,7 @@ export function CustomAppFrame({
     [html],
   );
 
-  useAppBridge(iframeRef, devUrl, onSelectRef, onAppErrorRef);
+  useAppBridge(iframeRef, devUrl, onSelectRef, onAppErrorRef, appId);
   useSelectModeSync(iframeRef, devUrl, selectMode);
 
   if (devUrl) {

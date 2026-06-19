@@ -202,6 +202,23 @@ loudly — apps are read-mostly by design. Don't try to work around this.
    `"ai_unavailable"`). Render a real connect-state / error-state / empty-state.
    NEVER run an unguarded `JSON.parse` on a bridge reply and never let a bad
    response crash the app into a white screen.
+8. **Don't refetch on every focus — this is ENFORCED.** Load once on mount;
+   refresh only on an explicit user action (a Refresh button) or a deliberate
+   schedule (a timer with a COMPUTED delay, e.g. a daily 9am refresh). Do NOT
+   re-run work — a Gmail fetch, an `ai()` summary, any pipeline — from a
+   `visibilitychange` or window-`focus`/`blur`/`pageshow` listener, and do NOT
+   `setInterval` faster than 30s. The human switches browser tabs constantly, so a
+   focus-triggered refresh reloads the whole app every time they come back and a
+   tight poll hammers integration rate limits and LLM tokens. **The publish step
+   rejects these patterns** (`register_app` returns a `file:line` violation list
+   from the efficiency harness) — fix them and republish. refine's data layer
+   already sets `refetchOnWindowFocus: false`; match that in any hand-rolled
+   fetch/effect. If the HUMAN explicitly asked for focus-triggered refresh or a
+   fast live cadence, record that on the offending line with
+   `// wuphf-allow: focus-refresh — <what the human asked for>` (or
+   `// wuphf-allow: poll — …`) — the only way to ship it. Separately, the broker
+   meters `ai()` and integration reads PER-APP (per-minute + per-day), so an app
+   that slips through still cannot burn the workspace's budget.
 
 ## Style
 
