@@ -58,7 +58,18 @@ type appGuardViolation struct {
 const (
 	appGuardFocusMsg = "re-runs work when the browser tab regains focus. A visibilitychange / window focus|blur|pageshow listener fires every time the user switches tabs, so the app re-fetches data and re-runs ai() — burning integration rate limits and LLM tokens. Load once on mount and refresh only on an explicit user action (a button) or a deliberate schedule (a timer with a computed delay). If the human explicitly asked for focus-triggered refresh, put `// wuphf-allow: focus-refresh — <why>` on the listener line."
 	appGuardPollMsg  = "polls faster than 30s with setInterval. In a sealed internal tool a tight poll hammers integration rate limits and LLM tokens. Use a longer cadence, a computed-delay timer, or refresh on user action. If the human asked for a fast live refresh, put `// wuphf-allow: poll — <why>` on the setInterval line."
+
+	// appGuardMantineMsg is shown when an app abandons the fixed Mantine kit. The
+	// design discipline is "override the theme, don't replace the kit"; a publish
+	// that ships hand-rolled CSS off-stack is rejected here so "use Mantine" is
+	// deterministic, not just advisory.
+	appGuardMantineMsg = "must be built on the fixed Mantine kit — it does not render inside MantineProvider or import @mantine/core. Keep the provider shape from the scaffold's src/main.tsx and build the UI from Mantine components. To make it look designed, OVERRIDE the theme via createTheme (see DESIGN.md) — do NOT replace Mantine with a hand-rolled CSS system. If the human EXPLICITLY asked for a non-Mantine app, put `// wuphf-allow: no-mantine — <why>` in src/main.tsx."
+
+	// wuphfAllowNoMantine is the file-level opt-out for the Mantine requirement.
+	wuphfAllowNoMantine = "wuphf-allow: no-mantine"
 )
+
+var reMantineProvider = regexp.MustCompile(`\bMantineProvider\b`)
 
 var (
 	// visibilitychange only ever fires at the tab/document level, so flag any
@@ -92,6 +103,48 @@ func checkAppSourceEfficiency(files map[string]string) []appGuardViolation {
 		out = append(out, scanAppFile(rel, files[rel])...)
 	}
 	return out
+}
+
+// checkAppStackConformance enforces "design WITHIN Mantine" deterministically: a
+// published app must render inside MantineProvider and import @mantine/core. An
+// app that drops the kit to hand-roll CSS (which looked more "designed" but went
+// off-contract) is rejected, unless src/main.tsx carries the explicit
+// `wuphf-allow: no-mantine` opt-out. Returns nil for an html-only app (no
+// scannable source).
+func checkAppStackConformance(files map[string]string) []appGuardViolation {
+	scanned := false
+	hasProvider := false
+	hasMantineImport := false
+	optedOut := false
+	entry := ""
+	for rel, content := range files {
+		if !appGuardShouldScan(rel) {
+			continue
+		}
+		scanned = true
+		base := path.Base(rel)
+		if base == "main.tsx" || base == "main.jsx" {
+			entry = rel
+		}
+		if strings.Contains(content, wuphfAllowNoMantine) {
+			optedOut = true
+		}
+		code := appCommentStripped(content)
+		if strings.Contains(code, "@mantine/core") {
+			hasMantineImport = true
+		}
+		if reMantineProvider.MatchString(code) {
+			hasProvider = true
+		}
+	}
+	if !scanned || optedOut || (hasProvider && hasMantineImport) {
+		return nil
+	}
+	file := entry
+	if file == "" {
+		file = "src/main.tsx"
+	}
+	return []appGuardViolation{{File: file, Line: 0, Rule: "use-mantine", Message: appGuardMantineMsg}}
 }
 
 // appGuardShouldScan reports whether a project-relative path is agent-authored
@@ -389,7 +442,7 @@ func codeView(line string, st lexState) (string, []bool, lexState) {
 // (HTTP 400 upstream) the App Builder reads and fixes before republishing.
 func appEfficiencyGuardError(violations []appGuardViolation) error {
 	var b strings.Builder
-	b.WriteString("app: publish blocked by the efficiency harness — fix these wasteful interactions and republish (they burn integration rate limits and LLM tokens):")
+	b.WriteString("app: publish blocked by the App Builder harness — fix these and republish:")
 	for _, v := range violations {
 		fmt.Fprintf(&b, "\n  • %s:%d [%s] %s", v.File, v.Line, v.Rule, v.Message)
 	}

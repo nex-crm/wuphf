@@ -256,7 +256,7 @@ func TestCustomAppSourcePersistence(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	a, err := store.Save(CustomAppWriteRequest{
 		Name: "Tool", HTML: validAppHTML, Actor: "app-builder",
-		Files: map[string]string{"src/App.tsx": "export const App = () => null", "package.json": "{}"},
+		Files: map[string]string{"src/App.tsx": "export const App = () => null", "src/main.tsx": testMantineMainTSX, "package.json": "{}"},
 	}, now)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -279,7 +279,7 @@ func TestCustomAppSourcePersistence(t *testing.T) {
 	// host-owned protected files persist across the replace.
 	if _, err := store.Save(CustomAppWriteRequest{
 		ID: a.ID, Name: "Tool", HTML: validAppHTML, Actor: "app-builder",
-		Files: map[string]string{"src/App.tsx": "v2"},
+		Files: map[string]string{"src/App.tsx": "v2", "src/main.tsx": testMantineMainTSX},
 	}, now.Add(time.Minute)); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -288,12 +288,12 @@ func TestCustomAppSourcePersistence(t *testing.T) {
 		t.Fatalf("source not replaced: %v", src2)
 	}
 	// package.json was dropped from the new file set, so it is gone (delete
-	// propagated); only the new app file + the 3 protected files remain.
+	// propagated); only the new app files + the 3 protected files remain.
 	if _, ok := src2["package.json"]; ok {
 		t.Fatalf("dropped file package.json not deleted: %v", keysOf(src2))
 	}
-	if len(src2) != 4 {
-		t.Fatalf("source set = %v, want src/App.tsx + 3 protected files", keysOf(src2))
+	if len(src2) != 5 {
+		t.Fatalf("source set = %v, want src/App.tsx + src/main.tsx + 3 protected files", keysOf(src2))
 	}
 }
 

@@ -116,6 +116,7 @@ func TestPublishFlipsDraftToReadyAndPreservesNodeModules(t *testing.T) {
 		Files: map[string]string{
 			"package.json":   "{}",
 			"src/App.tsx":    "export default function App(){return null}",
+			"src/main.tsx":   testMantineMainTSX,
 			"vite.config.ts": "export default {}",
 			"index.html":     "<!doctype html>",
 		},

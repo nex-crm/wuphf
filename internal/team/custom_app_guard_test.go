@@ -199,6 +199,44 @@ func TestAppEfficiencyGuardError(t *testing.T) {
 	}
 }
 
+// TestCheckAppStackConformance pins the deterministic "design within Mantine"
+// gate: a compliant app passes, an off-stack app (hand-rolled, no Mantine) is
+// rejected, the opt-out marker allows it, and an html-only app is skipped.
+func TestCheckAppStackConformance(t *testing.T) {
+	t.Run("compliant app passes", func(t *testing.T) {
+		files := map[string]string{
+			"src/main.tsx": testMantineMainTSX,
+			"src/App.tsx":  `import { Table } from "@mantine/core"; export function App(){ return <Table/>; }`,
+		}
+		if v := checkAppStackConformance(files); len(v) != 0 {
+			t.Fatalf("compliant app flagged: %+v", v)
+		}
+	})
+	t.Run("off-stack app is rejected", func(t *testing.T) {
+		files := map[string]string{
+			"src/main.tsx": `import { createRoot } from "react-dom/client"; createRoot(el).render(<App/>);`,
+			"src/App.tsx":  `export function App(){ return <div className="x"/>; }`,
+		}
+		v := checkAppStackConformance(files)
+		if len(v) != 1 || v[0].Rule != "use-mantine" {
+			t.Fatalf("expected a use-mantine violation, got %+v", v)
+		}
+	})
+	t.Run("opt-out marker allows non-Mantine", func(t *testing.T) {
+		files := map[string]string{
+			"src/main.tsx": "// wuphf-allow: no-mantine — human asked for a bare canvas\nrender(<App/>);",
+		}
+		if v := checkAppStackConformance(files); len(v) != 0 {
+			t.Fatalf("opt-out should pass, got %+v", v)
+		}
+	})
+	t.Run("html-only app skipped", func(t *testing.T) {
+		if v := checkAppStackConformance(map[string]string{"index.html": "<html></html>"}); len(v) != 0 {
+			t.Fatalf("html-only app should be skipped, got %+v", v)
+		}
+	})
+}
+
 // TestPublishRejectsWastefulSourceViaSave is the end-to-end gate: a publish whose
 // source re-runs work on tab focus is rejected by Save BEFORE the build, as a
 // caller error (HTTP 400) naming the rule — while a clean app with a
@@ -227,13 +265,14 @@ func TestPublishRejectsWastefulSourceViaSave(t *testing.T) {
 		t.Fatalf("rejection should name the rule, got: %v", err)
 	}
 
-	// A clean app (computed-delay refresh timer) publishes fine through Save.
+	// A clean app (computed-delay refresh timer, Mantine-compliant) publishes fine.
 	app, err := store.Save(CustomAppWriteRequest{
 		Name:  "Clean",
 		Actor: "app-builder",
 		Files: map[string]string{
 			"package.json": "{}",
 			"src/App.tsx":  `const t = setTimeout(() => refresh(), msUntilNext9am());`,
+			"src/main.tsx": testMantineMainTSX,
 		},
 	}, now)
 	if err != nil {

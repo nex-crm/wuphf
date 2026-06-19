@@ -225,7 +225,10 @@ loudly — apps are read-mostly by design. Don't try to work around this.
 These rules keep the app correct. **`DESIGN.md` keeps it from looking AI-generated
 — read it, hold its bar, and run its pre-ship checklist before `register_app`.** A
 WUPHF App is a fixed-kit, single-screen Mantine tool on white; the design bar is
-"make THAT feel crafted," not "add things the sandbox forbids." In short:
+"make THAT feel crafted," not "add things the sandbox forbids." **ENFORCED: the
+publish step rejects an app that does not render inside `MantineProvider` /
+import `@mantine/core` — make it look designed by OVERRIDING the theme, never by
+replacing Mantine with a hand-rolled CSS system.** In short:
 
 1. **Set a real theme.** Override Mantine once in `main.tsx` via `createTheme` —
    `primaryColor`, one `defaultRadius`, a heading scale, a tightened `spacing`

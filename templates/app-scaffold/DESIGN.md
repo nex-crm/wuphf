@@ -26,6 +26,12 @@ read-down digest, so I'm going wide-leading and quiet") so the choice is visible
 
 ## 2. Set a real theme — never ship default Mantine
 
+> ENFORCED: the publish step rejects an app that does not render inside
+> `MantineProvider` or import `@mantine/core`. The way to look custom is to
+> OVERRIDE the theme below — NOT to drop Mantine and hand-roll a parallel CSS
+> system. (If the human explicitly asked for a non-Mantine app, put
+> `// wuphf-allow: no-mantine — <why>` in `src/main.tsx`.)
+
 Default Mantine is a recognizable look. Override it once in `main.tsx` via
 `createTheme` so the whole app inherits a deliberate scale, radius, and accent.
 This is the single highest-leverage move. A restrained example:

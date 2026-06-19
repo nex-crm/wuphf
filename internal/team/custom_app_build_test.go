@@ -35,6 +35,13 @@ func failBuildBundle(_ string) ([]byte, error) {
 	return nil, newCustomAppCallerError("app: build failed (exit status 1)\nsrc/App.tsx(3,1): error TS2304: Cannot find name 'oops'.")
 }
 
+// testMantineMainTSX is a minimal entry that satisfies the stack-conformance gate
+// (renders MantineProvider, imports @mantine/core). Build/source fixtures include
+// it so they exercise their own concern rather than tripping the use-mantine gate.
+const testMantineMainTSX = `import { MantineProvider } from "@mantine/core";
+import { createRoot } from "react-dom/client";
+createRoot(document.getElementById("root")!).render(<MantineProvider><App /></MantineProvider>);`
+
 // TestPublishOverwritesTamperedBridgeWithCanonical is the core security
 // regression: an agent that rewrites the protected wuphf-bridge.ts (here,
 // dropping the lean Gmail params getEmails relies on) must still publish with the
@@ -60,6 +67,7 @@ func TestPublishOverwritesTamperedBridgeWithCanonical(t *testing.T) {
 		Files: map[string]string{
 			"package.json":           "{}",
 			"src/App.tsx":            "export default function App(){return null}",
+			"src/main.tsx":           testMantineMainTSX,
 			"src/wuphf-bridge.ts":    tamperedBridge, // the tamper
 			"src/wuphf-inspector.ts": "// agent inspector tamper",
 			"vite.config.ts":         "// agent vite tamper",
@@ -128,7 +136,7 @@ func TestPublishBuildFailureDoesNotPublish(t *testing.T) {
 	app, err := store.Save(CustomAppWriteRequest{
 		Name:  "Tool",
 		Actor: "app-builder",
-		Files: map[string]string{"package.json": "{}", "src/App.tsx": goodApp},
+		Files: map[string]string{"package.json": "{}", "src/App.tsx": goodApp, "src/main.tsx": testMantineMainTSX},
 	}, now)
 	if err != nil {
 		t.Fatalf("initial Save: %v", err)
@@ -143,7 +151,7 @@ func TestPublishBuildFailureDoesNotPublish(t *testing.T) {
 		ID:    app.ID,
 		Name:  "Tool",
 		Actor: "app-builder",
-		Files: map[string]string{"package.json": "{}", "src/App.tsx": "const oops: never = oops"},
+		Files: map[string]string{"package.json": "{}", "src/App.tsx": "const oops: never = oops", "src/main.tsx": testMantineMainTSX},
 	}, now.Add(time.Minute))
 	if err == nil {
 		t.Fatalf("expected build failure error, got nil")
@@ -233,6 +241,7 @@ func TestPublishWithFilesDiscardsAgentHTML(t *testing.T) {
 		Files: map[string]string{
 			"package.json": "{}",
 			"src/App.tsx":  "export default function App(){return null}",
+			"src/main.tsx": testMantineMainTSX,
 		},
 	}, now)
 	if err != nil {
