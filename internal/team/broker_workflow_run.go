@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -34,27 +34,55 @@ type workflowGate func(ctx context.Context, agent, platform, actionID string, da
 
 // makeWorkflowActionExec builds the ActionExec the runtime executes the spec
 // with, bound to the operating agent + the real external gate.
-func (b *Broker) makeWorkflowActionExec(ctx context.Context, agent string) workflow.ActionExec {
-	return b.makeWorkflowActionExecWithGate(ctx, agent, b.externalGateDecision)
+func (b *Broker) makeWorkflowActionExec(ctx context.Context, agent string, spec *workflow.Spec) workflow.ActionExec {
+	return b.makeWorkflowActionExecWithGate(ctx, agent, b.externalGateDecision, spec)
 }
 
 // makeWorkflowActionExecWithGate is the testable core: it routes actions by kind
-// and delegates external actions to the supplied gate.
-func (b *Broker) makeWorkflowActionExecWithGate(ctx context.Context, agent string, gate workflowGate) workflow.ActionExec {
+// and delegates external actions to the supplied gate. The spec supplies the
+// integration-read allow-list (D6) — a read for a (platform, action_id) not on
+// AllowedReads is refused before any provider call.
+func (b *Broker) makeWorkflowActionExecWithGate(ctx context.Context, agent string, gate workflowGate, spec *workflow.Spec) workflow.ActionExec {
+	allow := func(platform, actionID string) bool {
+		return spec != nil && spec.IsReadAllowed(platform, actionID)
+	}
 	return func(a workflow.Action, data map[string]any) workflow.ActionOutcome {
+		// Generic integration read: any deterministic step that declares a
+		// provider target (Platform+ActionID). One executor runs every provider;
+		// the spec (agent-authored) carries the params + projection. No
+		// per-integration Go.
+		if a.IsIntegrationRead() {
+			return b.execIntegrationAction(ctx, a, allow)
+		}
 		switch a.Kind {
 		case workflow.ActionLLM:
-			// Real agent-draft seam. WUPHF agents are headless (async), so a
-			// synchronous in-process draft uses a deterministic baseline until the
-			// agent-dispatch seam lands; the drafted text flows to the send action.
-			return workflow.ActionOutcome{OK: true, Output: map[string]any{"draft": draftMessage(a, data)}}
+			// Genuine AI: run the step through the office's configured default
+			// provider (same model the agents use), not a templated stub. Falls
+			// back to a deterministic baseline if no provider is available.
+			return b.execLLMAction(ctx, a, data)
 		case workflow.ActionExternal:
 			if strings.TrimSpace(a.Platform) == "" || strings.TrimSpace(a.ActionID) == "" {
-				// No integration target declared yet (auto-draft): record intent.
-				return workflow.ActionOutcome{OK: true, Output: map[string]any{"gated": true, "note": "no integration target"}}
+				// No integration target wired: this is a DRAFT, not a send. Say so
+				// honestly in the run record instead of reporting a phantom success.
+				// Keys are per-action so multiple sends in one run don't collide.
+				return workflow.ActionOutcome{OK: true, Output: map[string]any{
+					a.ID + "_sent": false,
+					a.ID + "_note": "drafted — no integration connected for " + a.ID + "; nothing was sent",
+				}}
 			}
 			return gate(ctx, agent, a.Platform, a.ActionID, data)
 		default:
+			// A deterministic step with no domain handler. If it looks like a
+			// send/post/notify, do NOT report a silent success — a real send needs
+			// an external (gated) action with a connected integration. Record that
+			// it was drafted only, so the audit never claims an email/post that
+			// did not happen.
+			if looksLikeSendAction(a) {
+				return workflow.ActionOutcome{OK: true, Output: map[string]any{
+					a.ID + "_sent": false,
+					a.ID + "_note": "drafted — " + a.ID + " has no connected integration; make it an external step to actually send",
+				}}
+			}
 			return workflow.ActionOutcome{OK: true}
 		}
 	}
@@ -88,21 +116,6 @@ func (b *Broker) externalGateDecision(ctx context.Context, agent, platform, acti
 	return workflow.ActionOutcome{OK: true, Output: map[string]any{"sent": true}}
 }
 
-// draftMessage is the deterministic baseline draft (sorted for stability). The
-// real LLM agent-draft replaces this body once the headless-agent draft seam is
-// wired; the rest of the runtime is unchanged.
-func draftMessage(a workflow.Action, data map[string]any) string {
-	if len(data) == 0 {
-		return fmt.Sprintf("Draft for %q", a.ID)
-	}
-	parts := make([]string, 0, len(data))
-	for k, v := range data {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-	}
-	sort.Strings(parts)
-	return fmt.Sprintf("Draft for %q (%s)", a.ID, strings.Join(parts, ", "))
-}
-
 // runWorkflowSpec loads a stored contract, executes it over the events, persists
 // the run observation, and updates the binding's last-execution. The run is the
 // raw material the improvement loop mines.
@@ -116,14 +129,10 @@ func (b *Broker) runWorkflowSpec(specID, trigger string, events []workflow.Scena
 		return workflow.RunRecord{}, err
 	}
 	if len(events) == 0 {
-		ev := "run"
-		if len(spec.Events) > 0 {
-			ev = spec.Events[0].ID
-		}
-		events = []workflow.ScenarioEvent{{Event: ev}}
+		events = runToCompletionEvents(spec)
 	}
 
-	exec := b.makeWorkflowActionExec(context.Background(), strings.TrimSpace(spec.Operator))
+	exec := b.makeWorkflowActionExec(context.Background(), strings.TrimSpace(spec.Operator), spec)
 	rec := workflow.Execute(spec, trigger, events, exec)
 	rec.At = time.Now().UTC().Format(time.RFC3339)
 	_ = workflow.AppendRun(workflowRunsPath(specID), rec)
@@ -178,6 +187,361 @@ func (b *Broker) handleWorkflowsProposals(w http.ResponseWriter, r *http.Request
 	runs, _ := workflow.ReadRuns(workflowRunsPath(id))
 	proposals := workflow.ProposeOverlays(spec, runs, workflow.ProposeOptions{})
 	writeJSON(w, http.StatusOK, map[string]any{"spec_id": id, "runs": len(runs), "proposals": proposals})
+}
+
+// workflowTrigger describes one way a frozen workflow fires, for the graph view.
+type workflowTrigger struct {
+	Kind            string `json:"kind"` // manual | schedule | event
+	Label           string `json:"label"`
+	Enabled         bool   `json:"enabled,omitempty"`
+	IntervalMinutes int    `json:"interval_minutes,omitempty"`
+	NextRun         string `json:"next_run,omitempty"`
+}
+
+// handleWorkflowsSpec returns a frozen contract plus its triggers so the panel
+// can render the workflow as nodes (triggers -> states -> actions). Read-only.
+func (b *Broker) handleWorkflowsSpec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("spec_id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "spec_id_required"})
+		return
+	}
+	path := workflowSpecPath(id)
+	if path == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no_runtime_home"})
+		return
+	}
+	spec, err := workflow.LoadSpec(path)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "spec_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"spec": spec, "triggers": b.workflowTriggersFor(id, spec)})
+}
+
+// workflowTriggersFor returns the canonical, user-facing trigger set for a
+// workflow. There are exactly four kinds — manual, schedule, webhook, and
+// context change — and nothing else. The raw state-machine events are NOT
+// triggers: the entry event is just the mechanism the manual run fires, and
+// later events drive mid-run hops, so surfacing them as chips read as random
+// noise. Manual is always present; schedule is present when a scheduler job
+// targets the spec; webhook / context are present when the contract's entry is
+// classified as one (by event naming) until an explicit trigger field exists.
+func (b *Broker) workflowTriggersFor(id string, spec *workflow.Spec) []workflowTrigger {
+	triggers := []workflowTrigger{{Kind: "manual", Label: "Manual"}}
+
+	b.mu.Lock()
+	for i := range b.scheduler {
+		j := b.scheduler[i]
+		if j.TargetType == "workflow_spec" && j.TargetID == id {
+			triggers = append(triggers, workflowTrigger{
+				Kind: "schedule", Label: "Schedule", Enabled: j.Enabled,
+				IntervalMinutes: j.IntervalMinutes, NextRun: j.NextRun,
+			})
+		}
+	}
+	b.mu.Unlock()
+
+	// Classify the workflow's ENTRY events (those leaving the initial state).
+	// A generic run/manual event is the manual mechanism and adds no chip; an
+	// event named like an inbound hook or a context change surfaces that kind.
+	seen := map[string]bool{"manual": true, "schedule": true}
+	entry := entryTriggerEvents(spec)
+	for _, ev := range spec.Events {
+		if !entry[ev.ID] {
+			continue
+		}
+		kind := classifyTriggerEvent(ev)
+		if kind == "" || seen[kind] {
+			continue
+		}
+		seen[kind] = true
+		label := "Webhook"
+		if kind == "context" {
+			label = "Context change"
+		}
+		triggers = append(triggers, workflowTrigger{Kind: kind, Label: label})
+	}
+	return triggers
+}
+
+// classifyTriggerEvent maps an entry event to a canonical trigger kind by its
+// naming, or "" when it is just the generic manual-run mechanism.
+func classifyTriggerEvent(ev workflow.Event) string {
+	hay := strings.ToLower(ev.ID + " " + ev.Label)
+	switch {
+	case strings.Contains(hay, "webhook") || strings.Contains(hay, "hook") ||
+		strings.Contains(hay, "received") || strings.Contains(hay, "incoming") ||
+		strings.Contains(hay, "inbound"):
+		return "webhook"
+	case strings.Contains(hay, "context") || strings.Contains(hay, "changed") ||
+		strings.Contains(hay, "updated") || strings.Contains(hay, "detected") ||
+		strings.Contains(hay, "new_"):
+		return "context"
+	default:
+		return "" // generic run/start event — folded into Manual
+	}
+}
+
+// handleWorkflowsRuns returns a frozen workflow's run history, newest first, for
+// the run-history list. Read-only.
+func (b *Broker) handleWorkflowsRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("spec_id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "spec_id_required"})
+		return
+	}
+	runs, _ := workflow.ReadRuns(workflowRunsPath(id))
+	// Newest first.
+	for i, j := 0, len(runs)-1; i < j; i, j = i+1, j-1 {
+		runs[i], runs[j] = runs[j], runs[i]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"spec_id": id, "runs": runs})
+}
+
+// entryTriggerEvents returns the set of event IDs that ENTER the workflow —
+// i.e. label a transition leaving the initial state. Only these are real
+// triggers; events that drive later hops fire mid-run.
+func entryTriggerEvents(spec *workflow.Spec) map[string]bool {
+	entry := map[string]bool{}
+	for _, t := range spec.Transitions {
+		if t.From == spec.Initial && strings.TrimSpace(t.On) != "" {
+			entry[t.On] = true
+		}
+	}
+	return entry
+}
+
+// runToCompletionEvents builds the event sequence that drives a manual run from
+// the initial state THROUGH every single-exit hop to a terminal state, so
+// "Run now" exercises the whole contract (fetch → summarize → compose → email →
+// announce) instead of stopping at the first state. It walks single-outgoing
+// transitions only — a state with a real branch (multiple outgoing transitions)
+// needs run data to decide, so the walk stops there. Cycle- and length-guarded.
+func runToCompletionEvents(spec *workflow.Spec) []workflow.ScenarioEvent {
+	terminal := map[string]bool{}
+	for _, t := range spec.Terminal {
+		terminal[t] = true
+	}
+	outgoing := map[string][]workflow.Transition{}
+	for _, t := range spec.Transitions {
+		outgoing[t.From] = append(outgoing[t.From], t)
+	}
+	var events []workflow.ScenarioEvent
+	seen := map[string]bool{}
+	state := spec.Initial
+	for hops := 0; hops <= len(spec.States); hops++ {
+		if seen[state] || terminal[state] {
+			break
+		}
+		seen[state] = true
+		outs := outgoing[state]
+		if len(outs) != 1 || strings.TrimSpace(outs[0].On) == "" {
+			break // terminal, dead end, or an undecidable branch
+		}
+		events = append(events, workflow.ScenarioEvent{Event: outs[0].On})
+		state = outs[0].To
+	}
+	if len(events) == 0 {
+		// No usable chain — fall back to the legacy single-event seed so the run
+		// still does something.
+		ev := "run"
+		if len(spec.Events) > 0 {
+			ev = spec.Events[0].ID
+		}
+		events = []workflow.ScenarioEvent{{Event: ev}}
+	}
+	return events
+}
+
+// handleWorkflowsRunToTask kicks off a new task from a workflow run: it composes
+// the run's outcome (path + produced digest/outputs) into the task context and
+// appends the operator's own start prompt, then creates the task so an agent
+// picks it up. This is the "do something with this run" bridge — e.g. run the
+// digest, then spin a task to draft the replies it flagged.
+func (b *Broker) handleWorkflowsRunToTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var body struct {
+		SpecID string             `json:"spec_id"`
+		Prompt string             `json:"prompt"`
+		Run    workflow.RunRecord `json:"run"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_body"})
+		return
+	}
+	specID := strings.TrimSpace(body.SpecID)
+	prompt := strings.TrimSpace(body.Prompt)
+	if specID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "spec_id_required"})
+		return
+	}
+
+	goal := specID
+	if path := workflowSpecPath(specID); path != "" {
+		if spec, err := workflow.LoadSpec(path); err == nil && strings.TrimSpace(spec.Goal) != "" {
+			goal = strings.TrimSpace(spec.Goal)
+		}
+	}
+
+	title := runTaskTitleLine(prompt, 80)
+	if title == "" {
+		title = "Follow up on the " + goal + " run"
+	}
+	details := composeRunTaskDetails(goal, body.Run, prompt)
+
+	res, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Title:     title,
+		Details:   details,
+		Owner:     "ceo", // the CEO triages + routes the kicked-off task
+		CreatedBy: "human",
+		TaskType:  "office",
+	})
+	if err != nil {
+		writeTaskMutationHTTPError(w, err)
+		return
+	}
+	// Seed the task's channel with the run context + prompt as the opening
+	// message, so the task chat is not empty when the operator jumps to it and
+	// the owner wakes on the kickoff. (Details alone is the spec; the chat is
+	// the surface the human and agent actually read.)
+	if ch := strings.TrimSpace(res.Task.Channel); ch != "" {
+		if _, perr := b.PostMessage("human", ch, details, []string{"ceo"}, ""); perr != nil {
+			log.Printf("run-to-task: seed channel %s: %v", ch, perr)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task_id": res.Task.ID,
+		"channel": res.Task.Channel,
+		"title":   res.Task.Title,
+	})
+}
+
+// composeRunTaskDetails folds a workflow run's outcome + the operator's prompt
+// into a task brief.
+func composeRunTaskDetails(goal string, run workflow.RunRecord, prompt string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Kicked off from a run of the **%s** workflow", goal)
+	if strings.TrimSpace(run.At) != "" {
+		fmt.Fprintf(&b, " (%s)", run.At)
+	}
+	b.WriteString(".\n\n")
+	if path := run.Result.StateSeq; len(path) > 0 {
+		fmt.Fprintf(&b, "**Run path:** %s\n", strings.Join(path, " → "))
+	}
+	if digest := asString(run.Result.Outputs["digest"]); strings.TrimSpace(digest) != "" {
+		if n, ok := run.Result.Outputs["email_count"]; ok {
+			fmt.Fprintf(&b, "**Produced (%v items):**\n", n)
+		} else {
+			b.WriteString("**Produced:**\n")
+		}
+		b.WriteString(digest)
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(prompt) != "" {
+		b.WriteString("\n---\n\n**What to do:**\n")
+		b.WriteString(prompt)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// runTaskTitleLine returns the first non-empty line of s, capped to max runes.
+func runTaskTitleLine(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if r := []rune(s); len(r) > max {
+		return strings.TrimSpace(string(r[:max])) + "…"
+	}
+	return s
+}
+
+// asString coerces an any to a string (empty when not a string). Local helper
+// for run-output extraction.
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// handleWorkflowsChannel ensures the per-workflow conversation channel exists
+// and returns its slug. The channel (`workflow-<spec_id>`) is where the human
+// chats with the Workflow Builder about THIS contract from the
+// Workflows page — @mentioning @workflow-builder there wakes its headless turn,
+// and its freeze/edit notes post back to the same channel. Idempotent: a second
+// call no-ops and returns the existing slug.
+func (b *Broker) handleWorkflowsChannel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var body struct {
+		SpecID string `json:"spec_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_body"})
+		return
+	}
+	id := strings.TrimSpace(body.SpecID)
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "spec_id_required"})
+		return
+	}
+	// Derive a human channel name from the spec title when available.
+	name := "Workflow · " + id
+	if path := workflowSpecPath(id); path != "" {
+		if spec, err := workflow.LoadSpec(path); err == nil && strings.TrimSpace(spec.Goal) != "" {
+			name = "Workflow · " + strings.TrimSpace(spec.Goal)
+		}
+	}
+	slug := b.ensureWorkflowChannel(id, name)
+	writeJSON(w, http.StatusOK, map[string]any{"channel": slug})
+}
+
+// ensureWorkflowChannel creates the per-workflow channel if it does not exist
+// and returns its normalized slug. The Workflow Builder is seeded as a member
+// (the CEO has all-channel access via the reserved-slug bypass, so it is not
+// listed explicitly). createChannelLocked persists on success, so no extra save
+// is needed here. Safe to call repeatedly — an existing channel is a no-op.
+func (b *Broker) ensureWorkflowChannel(specID, name string) string {
+	slug := normalizeChannelSlug("workflow-" + specID)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findChannelLocked(slug) != nil {
+		return slug
+	}
+	members := []string{}
+	if b.findMemberLocked(WorkflowBuilderSlug) != nil {
+		members = append(members, WorkflowBuilderSlug)
+	}
+	if _, cerr := b.createChannelLocked(channelCreateInput{
+		Slug:        slug,
+		Name:        name,
+		Description: "Chat with @workflow-builder about this workflow contract.",
+		Members:     members,
+		CreatedBy:   "system",
+	}); cerr != nil {
+		// On a race or validation hiccup, fall back to the slug; the message
+		// post will surface any real error to the operator.
+		return slug
+	}
+	return slug
 }
 
 // handleWorkflowsRun is the manual / programmatic trigger. Schedule and event

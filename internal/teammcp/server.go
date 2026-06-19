@@ -197,6 +197,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	// The Librarian curates the wiki: it gets the promotion-review tool (like the
 	// lead) WITHOUT the lead's structural powers (team_plan/channel/member).
 	isLibrarian := slug == team.LibrarianSlug
+	// The Workflow Builder owns the workflow press: it alone gets the workflow_*
+	// tools. Every other agent hands it a spec (see workflowDelegationBlock).
+	isWorkflowBuilder := slug == team.WorkflowBuilderSlug
 
 	// DM mode: minimal tool set (same as 1:1 mode)
 	if isDM {
@@ -380,6 +383,12 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		// link the canonical articles a task needs so the context-packer can
 		// hand exactly those refs to first-party agents.
 		registerWikiLinkTool(server)
+	}
+	// Workflow-press tools: the Workflow Builder alone. Wiki read tools
+	// (team_wiki_search / wuphf_wiki_lookup) already ride registerSharedMemoryTools
+	// above, so the Builder can ground a contract in playbook/integration context.
+	if isWorkflowBuilder {
+		registerWorkflowTools(server)
 	}
 }
 

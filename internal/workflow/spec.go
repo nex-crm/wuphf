@@ -37,9 +37,23 @@ type Spec struct {
 	Exceptions []Exception `json:"exceptions,omitempty"`
 	SLAs       []SLA       `json:"slas,omitempty"`
 
+	// AllowedReads is the human-blessed allow-list of integration READS this
+	// contract may perform (RFC large-io S3 / D6). The generic integration
+	// executor refuses to call any (platform, action_id) not on this list, so a
+	// prompt-injected builder agent cannot widen a frozen workflow to read other
+	// connected platforms. A spec that declares integration-read actions must
+	// list them here; the human sees and approves this list at freeze.
+	AllowedReads []ActionRef `json:"allowed_reads,omitempty"`
+
 	// Scenarios are the verification fixtures shipcheck replays.
 	Scenarios          []Scenario `json:"scenarios"`
 	ImprovementSignals []string   `json:"improvement_signals,omitempty"`
+}
+
+// ActionRef names a single integration action (platform + Composio action id).
+type ActionRef struct {
+	Platform string `json:"platform"`
+	ActionID string `json:"action_id"`
 }
 
 type Entity struct {
@@ -84,8 +98,34 @@ type Action struct {
 	// SLACK_SEND_MESSAGE). Set on external actions during review; the runtime
 	// gates the send through them (classify -> grant -> Composio execute). Empty
 	// on an auto-drafted action, which the runtime records as intent only.
+	//
+	// For a deterministic INTEGRATION READ (e.g. gmail + GMAIL_FETCH_EMAILS) the
+	// same Platform/ActionID select the read; the agent authors the call args in
+	// Params and the response projection in ResultPath/Expose. The generic
+	// integration executor (broker_workflow_actions.go) runs any such action — no
+	// per-integration Go. The read must be on the spec's AllowedReads list.
 	Platform string `json:"platform,omitempty"`
 	ActionID string `json:"action_id,omitempty"`
+	// Params are the provider call arguments the builder agent authors (e.g.
+	// {"query":"is:unread newer_than:7d","max_results":25,"verbose":false}).
+	// Free-form because provider schemas vary; validated as JSON-round-trippable.
+	Params map[string]any `json:"params,omitempty"`
+	// ResultPath is a dot-path to the primary array in the integration response
+	// (e.g. "data.messages"); Expose lists the per-item fields to project into the
+	// step's data (e.g. ["sender","subject","preview.body","labelIds"]). Together
+	// they replace hardcoded response parsing AND keep raw provider bodies out of
+	// LLM prompts (only exposed fields flow downstream).
+	ResultPath string   `json:"result_path,omitempty"`
+	Expose     []string `json:"expose,omitempty"`
+}
+
+// IsIntegrationRead reports whether a is a deterministic step that reads from a
+// connected integration (Platform+ActionID set). These run through the generic
+// integration executor and must be on the spec's AllowedReads allow-list.
+func (a Action) IsIntegrationRead() bool {
+	return a.Kind == ActionDeterministic &&
+		strings.TrimSpace(a.Platform) != "" &&
+		strings.TrimSpace(a.ActionID) != ""
 }
 
 type Exception struct {
@@ -172,17 +212,51 @@ func (s *Spec) Validate() error {
 			return fmt.Errorf("transition %d: guard %q: %w", i, t.Guard, err)
 		}
 	}
+	allowed := map[string]bool{}
+	for _, r := range s.AllowedReads {
+		allowed[allowKey(r.Platform, r.ActionID)] = true
+	}
 	for i, a := range s.Actions {
 		switch a.Kind {
 		case ActionDeterministic, ActionLLM, ActionExternal:
 		default:
 			return fmt.Errorf("action %d (%s): unknown kind %q", i, a.ID, a.Kind)
 		}
+		// Params must be JSON-round-trippable (an LLM authors them, and they are
+		// persisted in the frozen spec). map[string]any always marshals, but a
+		// value containing a non-serialisable type (channel, func) would not — so
+		// we verify rather than trust.
+		if len(a.Params) > 0 {
+			if _, err := json.Marshal(a.Params); err != nil {
+				return fmt.Errorf("action %d (%s): params not serialisable: %w", i, a.ID, err)
+			}
+		}
+		// Security (D6): every integration read must be on the human-blessed
+		// AllowedReads list. Without this a prompt-injected builder agent could
+		// point a deterministic action at any connected platform.
+		if a.IsIntegrationRead() && !allowed[allowKey(a.Platform, a.ActionID)] {
+			return fmt.Errorf("action %d (%s): integration read %s/%s is not in allowed_reads — a human must approve it at freeze", i, a.ID, a.Platform, a.ActionID)
+		}
 	}
 	if len(s.Scenarios) == 0 {
 		return fmt.Errorf("a shippable spec must declare at least one verification scenario")
 	}
 	return nil
+}
+
+// allowKey normalizes a (platform, action_id) pair for allow-list comparison.
+func allowKey(platform, actionID string) string {
+	return strings.ToLower(strings.TrimSpace(platform)) + "\x00" + strings.ToUpper(strings.TrimSpace(actionID))
+}
+
+// IsReadAllowed reports whether the spec's AllowedReads permits this read.
+func (s *Spec) IsReadAllowed(platform, actionID string) bool {
+	for _, r := range s.AllowedReads {
+		if allowKey(r.Platform, r.ActionID) == allowKey(platform, actionID) {
+			return true
+		}
+	}
+	return false
 }
 
 // reachableStates returns the set of states reachable from Initial by following

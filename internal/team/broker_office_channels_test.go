@@ -747,10 +747,10 @@ func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
 
 	// The curated blueprint roster must survive reload with NO generic
 	// default-manifest agents (ceo/planner/executor/reviewer) leaking back in.
-	// The one exception is the Librarian (Pam): a universal built-in, added to
-	// every roster on load by the Phase 6 migration — like the CEO is meant to
-	// be — so she is expected here, appended last.
-	want := []string{"operator", "planner", "builder", "growth", "reviewer", LibrarianSlug}
+	// The exceptions are the universal built-ins added to every roster on load,
+	// like the CEO is meant to be: the Librarian (Pam) and the Workflow Builder
+	// (Darryl), appended last in that order.
+	want := []string{"operator", "planner", "builder", "growth", "reviewer", LibrarianSlug, WorkflowBuilderSlug}
 	if len(slugs) != len(want) {
 		t.Fatalf("expected blueprint roster %v to survive reload, got %v", want, slugs)
 	}

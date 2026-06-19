@@ -152,9 +152,9 @@ func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 			b := newTestBroker(t)
 			members := b.OfficeMembers()
 			// Roster = the blueprint's starter agents PLUS the always-present
-			// built-in Librarian.
-			if len(members) != len(blueprint.Starter.Agents)+1 {
-				t.Fatalf("expected broker office roster to match starter agents + librarian, got %d want %d", len(members), len(blueprint.Starter.Agents)+1)
+			// built-ins: the Librarian (Pam) and the Workflow Builder (Darryl).
+			if len(members) != len(blueprint.Starter.Agents)+2 {
+				t.Fatalf("expected broker office roster to match starter agents + librarian + workflow-builder, got %d want %d", len(members), len(blueprint.Starter.Agents)+2)
 			}
 
 			memberBySlug := make(map[string]officeMember, len(members))
@@ -163,6 +163,9 @@ func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 			}
 			if _, ok := memberBySlug[LibrarianSlug]; !ok {
 				t.Fatalf("expected built-in librarian in office roster, got %+v", members)
+			}
+			if _, ok := memberBySlug[WorkflowBuilderSlug]; !ok {
+				t.Fatalf("expected built-in workflow-builder in office roster, got %+v", members)
 			}
 			for _, starter := range blueprint.Starter.Agents {
 				member, ok := memberBySlug[starter.Slug]

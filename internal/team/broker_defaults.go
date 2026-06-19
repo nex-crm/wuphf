@@ -38,8 +38,9 @@ func defaultOfficeMembers() []officeMember {
 		builtIn := cfg.System || cfg.Slug == manifest.Lead || cfg.Slug == "ceo"
 		members = append(members, memberFromSpec(cfg, "wuphf", now, builtIn))
 	}
-	// The Librarian is built-in, present in every workspace alongside the lead.
-	return ensureLibrarianMember(members)
+	// The Librarian and Workflow Builder are built-in, present in every
+	// workspace alongside the lead.
+	return ensureWorkflowBuilderMember(ensureLibrarianMember(members))
 }
 
 func defaultOfficeMemberSlugs() []string {
@@ -228,7 +229,7 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if member.Role == "" {
 			member.Role = member.Name
 		}
-		member.BuiltIn = member.Slug == "ceo" || isLibrarianSlug(member.Slug)
+		member.BuiltIn = member.Slug == "ceo" || isLibrarianSlug(member.Slug) || isWorkflowBuilderSlug(member.Slug)
 		member.Expertise = normalizeStringList(member.Expertise)
 		member.AllowedTools = normalizeStringList(member.AllowedTools)
 		normalizedMembers = append(normalizedMembers, member)
@@ -238,7 +239,11 @@ func (b *Broker) normalizeLoadedStateLocked() {
 	// disk predate her, and ensureDefaultOfficeMembersLocked only seeds when the
 	// roster is empty — so append her here on every load. Idempotent (no-op once
 	// present); the BuiltIn line above keeps her flag set on subsequent loads.
-	b.members = ensureLibrarianMember(normalizedMembers)
+	// The Workflow Builder is built-in like the Librarian and CEO,
+	// added to every NEW workspace at seed time. Existing rosters loaded from
+	// disk predate it, so append it here on every load (idempotent once
+	// present; the BuiltIn line above keeps its flag set on subsequent loads).
+	b.members = ensureWorkflowBuilderMember(ensureLibrarianMember(normalizedMembers))
 	for i := range b.channels {
 		b.channels[i].Slug = normalizeChannelSlug(b.channels[i].Slug)
 		if strings.TrimSpace(b.channels[i].Name) == "" {

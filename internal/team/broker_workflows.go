@@ -150,7 +150,7 @@ func (b *Broker) handleWorkflowsDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no_spotted_workflow_for_fingerprint"})
 		return
 	}
-	spec := workflow.DraftSpec(workflowSkillName(*cand), workflowSkillTitle(*cand), cand.Agent, cand.Shape)
+	spec := workflow.DraftSpec(workflowSkillName(*cand), workflowSkillTitle(*cand), cand.Agent, cand.Shape, b.draftKnownPlatforms())
 	report := workflow.Shipcheck(&spec)
 	writeJSON(w, http.StatusOK, map[string]any{"spec": spec, "shipcheck": report})
 }
@@ -216,7 +216,7 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 			spec.Operator = cand.Agent
 		}
 	} else {
-		spec = workflow.DraftSpec(name, title, cand.Agent, cand.Shape)
+		spec = workflow.DraftSpec(name, title, cand.Agent, cand.Shape, b.draftKnownPlatforms())
 	}
 	report := workflow.Shipcheck(&spec)
 	if !report.Passed {

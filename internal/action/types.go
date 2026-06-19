@@ -211,6 +211,13 @@ type ExecuteRequest struct {
 	FormData        bool           `json:"form_data,omitempty"`
 	FormURLEncoded  bool           `json:"form_url_encoded,omitempty"`
 	DryRun          bool           `json:"dry_run,omitempty"`
+	// MaxResponseBytes optionally overrides the default response read cap for
+	// THIS call. A read that exceeds the cap returns a *ResultTooLargeError
+	// instead of silently truncating into invalid JSON. Zero uses the client
+	// default (defaultMaxResponseBytes). Callers that expect large payloads
+	// should ask the provider for a lighter response (e.g. Gmail verbose:false)
+	// rather than raising this without bound.
+	MaxResponseBytes int64 `json:"max_response_bytes,omitempty"`
 }
 
 type ExecuteResult struct {

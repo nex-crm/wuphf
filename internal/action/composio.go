@@ -564,6 +564,9 @@ func (c *ComposioREST) ExecuteAction(ctx context.Context, req ExecuteRequest) (E
 	if req.DryRun {
 		return ExecuteResult{DryRun: true, Request: envelope}, nil
 	}
+	// Apply a per-call response cap when requested; overflow fails loud as a
+	// *ResultTooLargeError rather than truncating into invalid JSON.
+	ctx = withMaxResponseBytes(ctx, req.MaxResponseBytes)
 	raw, err := c.post(ctx, "/tools/execute/"+url.PathEscape(strings.TrimSpace(req.ActionID)), requestPayload)
 	if err != nil {
 		return ExecuteResult{}, err
@@ -729,7 +732,14 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	// Fail loud on oversize: readCapped returns a *ResultTooLargeError instead of
+	// silently truncating a large body into invalid JSON (see response_cap.go).
+	// The cap is per-call (ExecuteAction threads ExecuteRequest.MaxResponseBytes
+	// via context) and defaults to defaultMaxResponseBytes.
+	raw, err := readCapped(resp.Body, maxResponseBytesFromCtx(ctx), path)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &ComposioAPIError{
 			Method:     method,

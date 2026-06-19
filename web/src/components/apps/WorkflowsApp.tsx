@@ -7,10 +7,16 @@ import {
   getProposals,
   getSpottedWorkflows,
   improveWorkflow,
+  type RunRecord,
+  runWorkflow,
   type ShipcheckReport,
   type SpottedWorkflow,
   type WorkflowProposal,
 } from "../../api/workflows";
+import CreateTaskFromRun from "./CreateTaskFromRun";
+import ExtractedWorkflows from "./ExtractedWorkflows";
+import WorkflowBuilderChat from "./WorkflowBuilderChat";
+import WorkflowInsight from "./WorkflowInsight";
 
 /**
  * Spotted Workflows panel. Discovery -> review -> creation:
@@ -108,10 +114,12 @@ export default function WorkflowsApp() {
             marginTop: 6,
           }}
         >
-          Repeated multi-step work the office's agents kept doing. Review the
+          Multi-step work your agents ran end-to-end to a result. Review the
           drafted contract, then freeze it into a reusable workflow.
         </p>
       </header>
+
+      <ExtractedWorkflows />
 
       {isLoading && (
         <p style={{ color: "var(--text-secondary)" }}>
@@ -135,8 +143,8 @@ export default function WorkflowsApp() {
           }}
         >
           <div style={{ fontSize: 28, marginBottom: 8 }}>🔎</div>
-          Nothing spotted yet. Once an agent repeats the same multi-step
-          workflow a few times, it shows up here.
+          Nothing spotted yet. As soon as an agent runs a multi-step job
+          end-to-end to a result, it shows up here.
         </div>
       )}
 
@@ -211,8 +219,10 @@ function WorkflowCard({
           marginBottom: 8,
         }}
       >
-        <span style={{ color: "var(--accent)" }}>✦</span> Spotted a workflow you
-        repeat
+        <span style={{ color: "var(--accent)" }}>✦</span>{" "}
+        {wf.count > 1
+          ? "Spotted a workflow you repeat"
+          : "Spotted a workflow you ran"}
       </div>
       <div style={{ fontSize: 17, fontWeight: 650, marginBottom: 6 }}>
         {wf.title}
@@ -224,9 +234,22 @@ function WorkflowCard({
           marginBottom: 12,
         }}
       >
-        <b style={{ color: "var(--text)" }}>{wf.agent}</b> ran these{" "}
-        {wf.shape.length} steps{" "}
-        <b style={{ color: "var(--text)" }}>{wf.count} times</b>.
+        <b style={{ color: "var(--text)" }}>{wf.agent}</b>{" "}
+        {wf.count > 1 ? (
+          <>
+            ran these {wf.shape.length} steps{" "}
+            <b style={{ color: "var(--text)" }}>{wf.count} times</b>
+          </>
+        ) : (
+          <>ran these {wf.shape.length} steps end-to-end</>
+        )}
+        {wf.outcome ? (
+          <>
+            {" "}
+            to <b style={{ color: "var(--text)" }}>{wf.outcome}</b>
+          </>
+        ) : null}
+        .
       </div>
       <div
         style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}
@@ -255,6 +278,9 @@ function WorkflowCard({
           >
             ✓ Workflow created · contract shipchecked
           </span>
+          <RunWorkflow specId={wf.spec_id} />
+          <WorkflowInsight specId={wf.spec_id} />
+          <WorkflowBuilderChat specId={wf.spec_id} />
           <Improvements specId={wf.spec_id} />
         </div>
       ) : reviewing ? (
@@ -316,6 +342,187 @@ function WorkflowCard({
           {reviewBusy ? "Drafting…" : "Review draft"}
         </button>
       )}
+    </div>
+  );
+}
+
+function RunWorkflow({ specId }: { specId: string }) {
+  const queryClient = useQueryClient();
+  const run = useMutation({
+    mutationFn: () => runWorkflow(specId),
+    onSuccess: () => {
+      // Refresh the graph highlight + run history after a new run.
+      queryClient.invalidateQueries({
+        queryKey: ["workflows", "runs", specId],
+      });
+    },
+  });
+  const rec: RunRecord | undefined = run.data?.run;
+
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--border)",
+        paddingTop: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 700,
+            letterSpacing: ".06em",
+            textTransform: "uppercase",
+            color: "var(--text-secondary)",
+          }}
+        >
+          Execute
+        </span>
+        <button
+          type="button"
+          onClick={() => run.mutate()}
+          disabled={run.isPending}
+          style={primaryBtn(run.isPending)}
+        >
+          {run.isPending ? "Running…" : "Run now"}
+        </button>
+        {rec && (
+          <span
+            style={{ fontSize: 12.5, color: "var(--green)", fontWeight: 600 }}
+          >
+            ✓ Ran → {rec.result.final_state} ({rec.trigger})
+          </span>
+        )}
+      </div>
+      {run.error && (
+        <span style={{ fontSize: 12.5, color: "var(--red)" }}>
+          {run.error instanceof Error ? run.error.message : "Run failed"}
+        </span>
+      )}
+      {rec && <RunDetails rec={rec} specId={specId} />}
+    </div>
+  );
+}
+
+function RunDetails({ rec, specId }: { rec: RunRecord; specId: string }) {
+  const r = rec.result;
+  // Go serializes nil slices as null — normalize so the view never throws.
+  const stateSeq = r.state_seq ?? [];
+  const actionsFired = r.actions_fired ?? [];
+  const audit = r.audit ?? [];
+  const blocked = audit.some((a) => a.skipped === "action_failed");
+  const outputs = r.outputs ?? {};
+  const digest = typeof outputs.digest === "string" ? outputs.digest : null;
+  const emailCount =
+    typeof outputs.email_count === "number" ? outputs.email_count : null;
+  return (
+    <div
+      style={{
+        background: "var(--bg-warm)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "10px 12px",
+        fontSize: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      {blocked && (
+        <div style={{ color: "var(--amber, #b26b00)", fontWeight: 600 }}>
+          ⏸ Paused at the approval gate — an external step needs a human grant
+          before it can run.
+        </div>
+      )}
+      {digest && (
+        <div
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "10px 12px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: ".06em",
+              textTransform: "uppercase",
+              color: "var(--text-secondary)",
+              marginBottom: 6,
+            }}
+          >
+            Produced{emailCount !== null ? ` · ${emailCount} emails` : ""}
+          </div>
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: "pre-wrap",
+              fontFamily: "var(--font-mono, monospace)",
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: "var(--text)",
+            }}
+          >
+            {digest}
+          </pre>
+        </div>
+      )}
+      <div style={{ color: "var(--text-secondary)" }}>
+        <b style={{ color: "var(--text)" }}>Path:</b> {stateSeq.join(" → ")}
+      </div>
+      {actionsFired.length > 0 && (
+        <div style={{ color: "var(--text-secondary)" }}>
+          <b style={{ color: "var(--text)" }}>Actions:</b>{" "}
+          {actionsFired.join(", ")}
+        </div>
+      )}
+      <div>
+        <b style={{ color: "var(--text)" }}>Audit</b>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            marginTop: 4,
+            fontFamily: "var(--font-mono, monospace)",
+            fontSize: 11.5,
+          }}
+        >
+          {audit.map((a, i) => (
+            <div
+              key={`${a.event}-${a.from}-${i}`}
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span
+                style={{ color: a.skipped ? "var(--red)" : "var(--green)" }}
+              >
+                {a.skipped ? "•" : "✓"}
+              </span>{" "}
+              {a.event}: {a.from}
+              {a.to ? ` → ${a.to}` : ""}
+              {a.actions && a.actions.length > 0
+                ? ` [${a.actions.join(", ")}]`
+                : ""}
+              {a.skipped ? ` — ${a.skipped}` : ""}
+            </div>
+          ))}
+        </div>
+      </div>
+      {rec.at && (
+        <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+          {rec.at}
+          {rec.version ? ` · ${rec.version}` : ""}
+          {r.deduped > 0 ? ` · ${r.deduped} deduped` : ""}
+        </div>
+      )}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+        <CreateTaskFromRun specId={specId} rec={rec} />
+      </div>
     </div>
   );
 }

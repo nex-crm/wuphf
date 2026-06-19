@@ -35,6 +35,10 @@ type RunResult struct {
 	Audit        []AuditEntry `json:"audit"`
 	FinalState   string       `json:"final_state"`
 	Deduped      int          `json:"deduped"`
+	// Outputs are the artifacts actions produced (e.g. the composed digest),
+	// merged in action order. Empty for the pure-recorder shipcheck path, so
+	// the orchestration stays deterministic; populated only on real runs.
+	Outputs map[string]any `json:"outputs,omitempty"`
 }
 
 // recordingExec is the default hook: it records nothing extra and reports OK.
@@ -78,14 +82,28 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 			continue
 		}
 
+		// Thread action outputs forward so a later action sees what an earlier
+		// one produced (fetched emails -> composed digest), and capture them
+		// into the run record. Seeded from the event data each transition.
+		runData := make(map[string]any, len(ev.Data))
+		for k, v := range ev.Data {
+			runData[k] = v
+		}
 		failed := false
 		for _, aid := range t.Actions {
-			out := exec(actionByID[aid], ev.Data)
+			out := exec(actionByID[aid], runData)
 			if !out.OK {
 				failed = true
 				break
 			}
 			res.ActionsFired = append(res.ActionsFired, aid)
+			for k, v := range out.Output {
+				runData[k] = v
+				if res.Outputs == nil {
+					res.Outputs = map[string]any{}
+				}
+				res.Outputs[k] = v
+			}
 		}
 		if failed {
 			res.Audit = append(res.Audit, AuditEntry{Event: ev.Event, From: cur, Skipped: "action_failed"})

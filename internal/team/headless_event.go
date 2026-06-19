@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -296,17 +295,28 @@ func emitHeadlessManifest(stream *agentStreamBuffer, turnID, provider, slug, tas
 	if stream == nil {
 		return
 	}
+	// Preserve FIRST-USE order, not alphabetical. The manifest is the
+	// workflow-detection substrate, and the miner treats step order as the
+	// signal (fetch -> summarize -> send). Sorting alphabetically made every
+	// detected workflow read in a meaningless order (e.g. a "draft then fetch"
+	// shape that actually fetched first), so call order is the faithful — and
+	// still deterministic — choice.
 	counts := make(map[string]int, len(toolNames))
+	order := make([]string, 0, len(toolNames))
 	for _, name := range toolNames {
-		if name = strings.TrimSpace(name); name != "" {
-			counts[name]++
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
 		}
+		if _, seen := counts[name]; !seen {
+			order = append(order, name)
+		}
+		counts[name]++
 	}
-	calls := make([]HeadlessManifestEntry, 0, len(counts))
-	for name, count := range counts {
-		calls = append(calls, HeadlessManifestEntry{ToolName: name, Count: count})
+	calls := make([]HeadlessManifestEntry, 0, len(order))
+	for _, name := range order {
+		calls = append(calls, HeadlessManifestEntry{ToolName: name, Count: counts[name]})
 	}
-	sort.Slice(calls, func(i, j int) bool { return calls[i].ToolName < calls[j].ToolName })
 	status := "idle"
 	if strings.TrimSpace(errDetail) != "" {
 		status = "error"

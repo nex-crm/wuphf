@@ -106,6 +106,12 @@ type Broker struct {
 	// 150-entry action ring. Read by the action resolver to gate external
 	// actions; refreshed by probe + connect/disconnect events. Guarded by b.mu.
 	connectionRegistry map[string]connectionRegistryEntry
+	// extractedTaskIDs dedups the completion-time workflow extractor so a task
+	// that reaches the completed state more than once (reopen → re-approve) does
+	// not re-spend a model call. In-memory only (rebuilt per process); a missed
+	// dedup across restart at worst re-extracts an idempotent proposal. Guarded
+	// by b.mu (written in applyLifecycleStateLocked).
+	extractedTaskIDs map[string]bool
 	// actionGrants are persisted, human-issued standing approvals for a specific
 	// (agent, platform, action_id). The resolver reads them to skip the approval
 	// modal for pre-authorized actions. Human-minted only. Guarded by b.mu.
@@ -437,6 +443,9 @@ func NewBrokerAt(statePath string) *Broker {
 			cancel()
 		}()
 		go b.runActivityWatchdog(ctx)
+		// Completion-time workflow detection: a path-independent sweep that
+		// extracts a workflow from each task as it reaches a completed state.
+		go b.startWorkflowExtractionSweep(ctx)
 	}
 	return b
 }
@@ -700,10 +709,16 @@ func (b *Broker) StartOnPort(port int) error {
 	// Workflow detection: spot repeated workflows + freeze one into a skill.
 	mux.HandleFunc("/workflows/spotted", b.requireAuth(b.handleWorkflowsSpotted))
 	mux.HandleFunc("/workflows/draft", b.requireAuth(b.handleWorkflowsDraft))
+	mux.HandleFunc("/workflows/extract", b.requireAuth(b.handleWorkflowsExtract))
+	mux.HandleFunc("/workflows/extracted", b.requireAuth(b.handleWorkflowsExtracted))
 	mux.HandleFunc("/workflows/freeze", b.requireAuth(b.handleWorkflowsFreeze))
 	mux.HandleFunc("/workflows/run", b.requireAuth(b.handleWorkflowsRun))
 	mux.HandleFunc("/workflows/proposals", b.requireAuth(b.handleWorkflowsProposals))
 	mux.HandleFunc("/workflows/improve", b.requireAuth(b.handleWorkflowsImprove))
+	mux.HandleFunc("/workflows/spec", b.requireAuth(b.handleWorkflowsSpec))
+	mux.HandleFunc("/workflows/runs", b.requireAuth(b.handleWorkflowsRuns))
+	mux.HandleFunc("/workflows/channel", b.requireAuth(b.handleWorkflowsChannel))
+	mux.HandleFunc("/workflows/run-to-task", b.requireAuth(b.handleWorkflowsRunToTask))
 	// GET /commands — slash-command registry mirror so the web composer
 	// renders the same command set as the TUI. See broker_commands.go.
 	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))

@@ -221,7 +221,8 @@ func TestEmitHeadlessManifestAggregatesAndSorts(t *testing.T) {
 	metrics := headlessProgressMetrics{TotalMs: 2000, FirstTextMs: 80}
 
 	// Read called 3 times, Edit called 1 time, Bash called 2 times — expect
-	// Bash×2, Edit×1, Read×3 in alphabetical order.
+	// them in FIRST-USE order (Read, Bash, Edit) with counts, not alphabetical:
+	// the manifest preserves call order as the detection signal.
 	toolNames := []string{"Read", "Bash", "Edit", "Read", "Bash", "Read"}
 	emitHeadlessManifest(stream, "turn-m1", HeadlessProviderClaude, "ceo", "task-99", "",
 		toolNames, 1420, metrics, &headlessTokenUsage{InputTokens: 500, OutputTokens: 300})
@@ -257,11 +258,11 @@ func TestEmitHeadlessManifestAggregatesAndSorts(t *testing.T) {
 		t.Fatalf("metrics: %+v", ev.Metrics)
 	}
 
-	// Verify dedup + sort
+	// Verify dedup + first-use order (Read seen first, then Bash, then Edit)
 	want := []HeadlessManifestEntry{
+		{ToolName: "Read", Count: 3},
 		{ToolName: "Bash", Count: 2},
 		{ToolName: "Edit", Count: 1},
-		{ToolName: "Read", Count: 3},
 	}
 	if len(ev.ToolCalls) != len(want) {
 		t.Fatalf("tool_calls length: want %d, got %d: %+v", len(want), len(ev.ToolCalls), ev.ToolCalls)
@@ -365,8 +366,8 @@ func TestEmitHeadlessManifestFiltersEmptyToolNames(t *testing.T) {
 	if len(ev.ToolCalls) != 2 {
 		t.Fatalf("want 2 tool entries (Read, Edit), got %d: %+v", len(ev.ToolCalls), ev.ToolCalls)
 	}
-	if ev.ToolCalls[0].ToolName != "Edit" || ev.ToolCalls[1].ToolName != "Read" {
-		t.Fatalf("expected alphabetical [Edit, Read], got %+v", ev.ToolCalls)
+	if ev.ToolCalls[0].ToolName != "Read" || ev.ToolCalls[1].ToolName != "Edit" {
+		t.Fatalf("expected first-use order [Read, Edit], got %+v", ev.ToolCalls)
 	}
 }
 

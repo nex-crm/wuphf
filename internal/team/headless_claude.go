@@ -188,6 +188,19 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	turnID := newHeadlessTurnID()
 	var turnToolNames []string
 	var turnTextLen int
+	// Workflow-detection trace capture: correlate each integration tool_use with
+	// its following tool_result so the completion-time extractor has the real
+	// (masked) args + response shape, not just the action name. Pending holds the
+	// in-flight proxy call until its result arrives; flushed on the next tool_use
+	// or at turn end. See trace_sink.go.
+	var pendingTrace *ActionTrace
+	traceSeq := 0
+	flushTrace := func() {
+		if pendingTrace != nil {
+			persistActionTrace(*pendingTrace)
+			pendingTrace = nil
+		}
+	}
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -217,11 +230,27 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			}
 			appendHeadlessClaudeLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
-			turnToolNames = append(turnToolNames, event.ToolName)
+			// Record the workflow-detection shape token, not the raw tool name:
+			// the generic external-action proxy is unwrapped to its real
+			// action_id so integration steps become visible to the miner
+			// (manifestToolToken). The live tool_use event below keeps the true
+			// tool name + full input untouched.
+			turnToolNames = append(turnToolNames, manifestToolToken(event.ToolName, event.ToolInput))
+			// A new tool_use means the prior proxy call's result (if any) already
+			// arrived (sequential agent), so flush it; then start tracing this one.
+			flushTrace()
+			if tr, ok := traceFromToolUse(taskID, turnID, slug, event.ToolName, event.ToolInput, traceSeq); ok {
+				traceSeq++
+				pendingTrace = &tr
+			}
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+			if pendingTrace != nil {
+				pendingTrace.Result = summarizeResult(event.Text)
+				flushTrace()
+			}
 			emitHeadlessToolResult(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.Text, "claude.tool_result")
 		case "error":
 			appendHeadlessClaudeLog(slug, "stream_error: "+event.Detail)
@@ -229,6 +258,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		}
 	})
 	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
+	flushTrace()   // persist a trailing integration call whose result closed the turn
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()), err.Error()))
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()

@@ -16,7 +16,7 @@ func TestWorkflowActionExecRouting(t *testing.T) {
 		gotPlatform, gotAction = platform, actionID
 		return workflow.ActionOutcome{OK: false, Output: map[string]any{"needs_approval": true}}
 	}
-	exec := b.makeWorkflowActionExecWithGate(context.Background(), "revops", fakeGate)
+	exec := b.makeWorkflowActionExecWithGate(context.Background(), "revops", fakeGate, &workflow.Spec{})
 
 	// Deterministic action: completes inline, gate not involved.
 	if o := exec(workflow.Action{ID: "track", Kind: workflow.ActionDeterministic}, nil); !o.OK {

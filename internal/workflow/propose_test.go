@@ -47,3 +47,31 @@ func TestProposeNothingForHealthyRuns(t *testing.T) {
 		t.Fatalf("healthy runs should propose nothing, got %d", len(props))
 	}
 }
+
+// TestProposeOverlaysIgnoresPlatformMarkers locks RFC E2: a run whose outputs
+// carry size-reducer markers and whose audit shows an action_failed (e.g. a
+// ResultTooLargeError) must NOT generate overlay proposals — those are platform
+// mechanics, not recurring workflow exceptions.
+func TestProposeOverlaysIgnoresPlatformMarkers(t *testing.T) {
+	base := &Spec{
+		ID:          "wf",
+		Initial:     "start",
+		States:      []State{{ID: "start"}, {ID: "done"}},
+		Events:      []Event{{ID: "run"}},
+		Transitions: []Transition{{From: "start", To: "done", On: "run", Actions: []string{"fetch"}}},
+		Actions:     []Action{{ID: "fetch", Kind: ActionDeterministic, Platform: "gmail", ActionID: "GMAIL_FETCH_EMAILS"}},
+	}
+	markerRun := RunRecord{
+		SpecID: "wf",
+		Events: []ScenarioEvent{{Event: "run"}},
+		Result: RunResult{
+			Audit:   []AuditEntry{{Event: "run", From: "start", Skipped: "action_failed"}},
+			Outputs: map[string]any{"fetch_reduction": Reduction{Truncated: true}, "fetch_error": "result_too_large"},
+		},
+	}
+	// Three identical marker runs — well over MinRecurrences — must still yield 0.
+	got := ProposeOverlays(base, []RunRecord{markerRun, markerRun, markerRun}, ProposeOptions{MinRecurrences: 2})
+	if len(got) != 0 {
+		t.Fatalf("platform markers must not drive proposals, got %d: %+v", len(got), got)
+	}
+}

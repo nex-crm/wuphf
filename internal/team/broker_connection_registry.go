@@ -85,6 +85,26 @@ func (b *Broker) upsertConnectionRegistryLocked(entry connectionRegistryEntry) {
 	_ = b.saveLocked()
 }
 
+// draftKnownPlatforms returns the set of integration platform slugs the office
+// has a connection-registry entry for. The workflow drafter uses it to bind a
+// detected action token (e.g. "gmail_fetch_emails") back to a real
+// platform/action_id ONLY when the platform is one the office actually knows,
+// so a synthetic or non-integration token ("summarize_threads") is never
+// mis-bound to a bogus platform. Returns nil when the office has no known
+// connections, in which case the drafter leaves actions unbound. Locks b.mu.
+func (b *Broker) draftKnownPlatforms() map[string]bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.connectionRegistry) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(b.connectionRegistry))
+	for k := range b.connectionRegistry {
+		out[k] = true
+	}
+	return out
+}
+
 // cloneConnectionRegistryLocked returns a copy of the registry for persistence.
 // The caller MUST hold b.mu (it is invoked from the locked save buildState
 // path, mirroring how other broker slices are cloned there).

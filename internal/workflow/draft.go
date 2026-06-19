@@ -18,22 +18,45 @@ import (
 //	start --run--> done, running every tool as an action on the transition.
 //
 // Tool names are deduped (first-use order) and each becomes an Action whose kind
-// is inferred from the name. The result validates and passes Shipcheck.
-func DraftSpec(id, goal, operator string, shape []string) Spec {
+// is inferred from the name. When a token names a real integration action (its
+// platform prefix is in knownPlatforms, e.g. "gmail_fetch_emails" with gmail
+// connected), the action is BOUND back to its platform + action_id so the
+// drafted contract is executable instead of an empty skeleton — a read becomes
+// a deterministic integration read (added to AllowedReads, the human-blessed
+// allow-list), a write/send becomes a gated external action. Pass nil for
+// knownPlatforms to skip binding (pure structural scaffold). The result
+// validates and passes Shipcheck.
+func DraftSpec(id, goal, operator string, shape []string, knownPlatforms map[string]bool) Spec {
 	actions := make([]Action, 0, len(shape))
 	actionIDs := make([]string, 0, len(shape))
+	var allowedReads []ActionRef
 	seen := map[string]bool{}
+	seenRead := map[string]bool{}
 	for _, tool := range shape {
 		t := strings.TrimSpace(tool)
 		if t == "" || seen[t] {
 			continue
 		}
 		seen[t] = true
-		actions = append(actions, Action{
-			ID:          t,
-			Kind:        inferKind(t),
-			Description: "Detected step: " + t,
-		})
+		a := Action{ID: t, Description: "Detected step: " + t}
+		if platform, actionID, ok := bindIntegrationAction(t, knownPlatforms); ok {
+			a.Platform = platform
+			a.ActionID = actionID
+			if isReadAction(t) {
+				// Deterministic integration read; must be allow-listed or
+				// Validate rejects it (a human approves reads at freeze).
+				a.Kind = ActionDeterministic
+				if key := platform + "\x00" + actionID; !seenRead[key] {
+					seenRead[key] = true
+					allowedReads = append(allowedReads, ActionRef{Platform: platform, ActionID: actionID})
+				}
+			} else {
+				a.Kind = ActionExternal
+			}
+		} else {
+			a.Kind = inferKind(t)
+		}
+		actions = append(actions, a)
 		actionIDs = append(actionIDs, t)
 	}
 	if goal == "" {
@@ -43,15 +66,16 @@ func DraftSpec(id, goal, operator string, shape []string) Spec {
 		operator = "operator"
 	}
 	return Spec{
-		Version:  "1",
-		ID:       id,
-		Goal:     goal,
-		Operator: operator,
-		States:   []State{{ID: "start", Label: "Start"}, {ID: "done", Label: "Done"}},
-		Initial:  "start",
-		Terminal: []string{"done"},
-		Events:   []Event{{ID: "run", Label: "Run the workflow"}},
-		Actions:  actions,
+		Version:      "1",
+		ID:           id,
+		Goal:         goal,
+		Operator:     operator,
+		States:       []State{{ID: "start", Label: "Start"}, {ID: "done", Label: "Done"}},
+		Initial:      "start",
+		Terminal:     []string{"done"},
+		Events:       []Event{{ID: "run", Label: "Run the workflow"}},
+		Actions:      actions,
+		AllowedReads: allowedReads,
 		Transitions: []Transition{
 			{From: "start", To: "done", On: "run", Actions: actionIDs},
 		},
@@ -65,6 +89,48 @@ func DraftSpec(id, goal, operator string, shape []string) Spec {
 		},
 		ImprovementSignals: []string{"run_count", "exception_rate"},
 	}
+}
+
+// bindIntegrationAction reverses a detected action token back to its
+// (platform, action_id). Detection tokens are the lowercased Composio action id
+// (manifestToolToken: GMAIL_FETCH_EMAILS -> "gmail_fetch_emails"), and Composio
+// action ids are platform-prefixed, so the first underscore segment is the
+// platform and the upper-cased token is the action id. Binds only when that
+// platform is in known (a real connected platform), so non-integration tokens
+// ("summarize_threads") are left unbound.
+func bindIntegrationAction(token string, known map[string]bool) (platform, actionID string, ok bool) {
+	seg := strings.SplitN(strings.TrimSpace(token), "_", 2)
+	if len(seg) < 2 {
+		return "", "", false
+	}
+	p := strings.ToLower(seg[0])
+	if known == nil || !known[p] {
+		return "", "", false
+	}
+	return p, strings.ToUpper(strings.TrimSpace(token)), true
+}
+
+// readVerbs name integration actions that only READ (no external side effect),
+// so a bound action carrying one is a deterministic integration read rather than
+// a gated write/send.
+var readVerbs = map[string]bool{
+	"fetch": true, "get": true, "list": true, "search": true, "read": true,
+	"find": true, "lookup": true, "retrieve": true, "pull": true, "load": true,
+	"query": true, "count": true, "check": true,
+}
+
+// isReadAction reports whether a platform-prefixed action token is a read. It
+// scans the verb segments after the platform prefix; a token with no read verb
+// (e.g. slack_chat_post_message, gmail_send_email, gmail_create_email_draft) is
+// treated as a write/send.
+func isReadAction(token string) bool {
+	parts := strings.Split(strings.ToLower(token), "_")
+	for _, v := range parts[1:] { // skip the platform prefix
+		if readVerbs[v] {
+			return true
+		}
+	}
+	return false
 }
 
 // inferKind guesses an action's kind from its tool name. Sends/posts are

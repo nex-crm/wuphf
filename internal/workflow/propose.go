@@ -26,6 +26,14 @@ func ProposeOverlays(base *Spec, runs []RunRecord, opts ProposeOptions) []Overla
 
 	// Group recurring no_transition exceptions by (from-state, event); keep one
 	// representative event sequence per group to build a capture scenario.
+	//
+	// The miner reads ONLY "no_transition" audit entries — never run Outputs and
+	// never other skip reasons. In particular it ignores platform markers
+	// (`*_reduction` outputs from the size reducer, and "action_failed" entries
+	// from a ResultTooLargeError): those are platform mechanics, not workflow
+	// faults, so they must not drive overlay proposals (RFC E2). The action_id
+	// allow-list and Params live in the spec the agent re-freezes, not in an
+	// auto-overlay.
 	type key struct{ from, event string }
 	counts := map[key]int{}
 	sample := map[key][]ScenarioEvent{}

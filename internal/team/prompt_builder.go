@@ -333,6 +333,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- To suggest adding a new specialist agent, use team_member with a clear expertise and rationale\n")
 		sb.WriteString("- When integrations matter, make the required systems explicit in playbook articles and agent rationale so the team knows which connected accounts or placeholders each workflow expects\n")
 		sb.WriteString("- When you create a new specialist for integration/onboarding work, include the owned integrations directly in that agent's expertise so the roster clearly shows who owns Gmail, Slack, YouTube, Drive, analytics, or similar lanes\n\n")
+		sb.WriteString(workflowDelegationBlock())
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use compact markdown for simple chat structure; for dense, visual, or interactive outputs, create a notebook HTML visual artifact instead of leaving the human with a long markdown wall.\n")
 		if markdownMemory {
 			sb.WriteString("Do not pretend the team wiki was updated; verify notebook_promote was approved or team_wiki_write succeeded from a verified human request before claiming canonical storage.\n")
@@ -442,6 +443,8 @@ func (p *promptBuilder) Build(slug string) string {
 		if markdownMemory {
 			if isLibrarianSlug(slug) {
 				sb.WriteString(librarianWikiAuthorityBlock())
+			} else if isWorkflowBuilderSlug(slug) {
+				sb.WriteString(workflowBuilderAuthorityBlock())
 			} else {
 				sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own working notes with notebook_write and submit notebook_promote when they should become canonical. Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.\n")
 				sb.WriteString("12b. When another agent or the human explicitly asks you to preserve something for the team, OR when your own scan reveals a notebook entry that is clearly high-demand (cross-agent searches converging on it, repeated context-asks), submit notebook_promote in the same turn and say it is queued for @librarian's review. Claim canonical wiki storage only after the promotion is approved. @librarian owns the wiki and is the quality gate — the broker auto-writes on approval; you draft and submit.\n")
@@ -453,6 +456,9 @@ func (p *promptBuilder) Build(slug string) string {
 		} else {
 			sb.WriteString("12. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n")
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
+		}
+		if !isWorkflowBuilderSlug(slug) {
+			sb.WriteString(workflowDelegationBlock())
 		}
 		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use compact markdown for simple chat structure; for dense, visual, or interactive outputs, create a notebook HTML visual artifact instead of leaving the human with a long markdown wall.\n")
 		sb.WriteString("Never launch another WUPHF office from inside your turn (`wuphf`, `./wuphf`, `/reset`, or a new browser instance). The office is already running; inspect the current repo and UI instead.\n")
@@ -748,6 +754,20 @@ func ceoIssueManagementBlock() string {
 		"3. Watch for [SUGGESTION] comments. Specialists can't edit Issues but they can comment with a [SUGGESTION] prefix to propose scope changes. Read each one, decide on it, and reply (team_task action=comment) explaining what you did and why. Examples: \"Adopted — created sub-issue task-42 for the auth question.\" / \"Skipped — that's out of scope for this Issue; file it as a new Issue if it's worth doing.\" Never silently ignore a [SUGGESTION].\n" +
 		"4. Reassign when the owner is wrong. If a specialist's status updates reveal a different agent is better suited, just reassign — don't ask. team_task action=reassign with the new owner slug.\n" +
 		"5. Surface lifecycle changes. The broker auto-posts an issue_lifecycle card when an Issue transitions, so you don't have to narrate state. But DO post a human_message when you make a non-obvious scope call (created a sub-issue, hired someone, reassigned an Issue) so the human can intervene if they disagree.\n\n"
+}
+
+// workflowDelegationBlock is the delegation contract emitted to every agent
+// EXCEPT the Workflow Builder. The office has a single owner of the
+// workflow press: agents do not draft, edit, freeze, or improve workflow
+// contracts themselves once a repeated motion is detected. They hand the
+// Workflow Builder a full creation/change spec and let it own the contract.
+// This keeps one agent — with the workflow tooling and Wiki context — as the
+// authority, instead of every agent hand-rolling automation off the cuff.
+func workflowDelegationBlock() string {
+	return "== WORKFLOWS: HAND OFF TO @workflow-builder ==\n" +
+		"@workflow-builder (the Workflow Builder) is the office's single owner of workflows. Do NOT draft, edit, freeze, run, or improve a workflow contract yourself, and do not call the workflow_* tools — you do not have them.\n" +
+		"When a repeated motion is worth turning into a workflow, or a detected/spotted workflow needs building or changing, @mention @workflow-builder and hand it a FULL spec: the trigger, the ordered steps (each step's action and whether it is deterministic / an LLM draft / an external send), the inputs, and the final outcome the workflow should produce. Be concrete enough that it can build the contract without re-deriving it.\n" +
+		"Then keep working on what you own. It will draft/freeze the contract, run shipcheck, and report back in the workflow's channel.\n\n"
 }
 
 // specialistSuggestionBlock is the non-CEO-side mirror of the CEO
