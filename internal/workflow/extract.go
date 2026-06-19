@@ -271,7 +271,12 @@ HARD RULES:
 - Judge honestly: set is_workflow=false (with a reason) for one-offs. Confidence is 0..1.
 - Suggest a trigger: manual, schedule (with interval_minutes if the ask implies a cadence like "every morning"=1440), webhook, or context.
 
-Give a clear human-readable name (a title an operator would recognize) and a one-to-two sentence description of what the workflow does.
+WRITING STYLE for name, description, and reason — these are read by a BUSY, NON-TECHNICAL operator, so write them like you're explaining to a smart 10-year-old:
+- Plain everyday English. Short sentences. Talk about the actual work ("your unread emails", "the #general Slack channel"), NOT the plumbing.
+- NEVER use these words or anything like them: trace, action_id, pipeline, canonical, allowed, agent, retry, dedupe, parameters, payload, shape, "two-step procedure", "collapsed into". They mean nothing to an operator.
+- name: a short title an operator recognizes (e.g. "Morning inbox digest", "Urgent email → Slack alert").
+- description: one or two sentences on what it does for them, in their terms.
+- reason: WHY this is worth turning into a one-click/automatic workflow — what tedious manual work it saves them and how often (e.g. "You do this every morning — checking your inbox for anything urgent and flagging it in Slack. Make it a workflow and it runs on its own, so nothing important slips by."). Make it motivating and concrete, not a technical summary of what the steps were.
 
 Reply with ONLY a JSON object of this shape:
 {"is_workflow":bool,"confidence":number,"name":string,"description":string,"trigger":{"kind":string,"interval_minutes":number,"rationale":string},"steps":[{"action_id":string,"platform":string,"params":object,"result_path":string,"expose":[string],"feeds_from":string}],"reason":string}`)
