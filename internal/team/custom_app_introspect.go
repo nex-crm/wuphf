@@ -58,7 +58,9 @@ var (
 func compileBridgeAPIRegexps() map[string]*regexp.Regexp {
 	out := make(map[string]*regexp.Regexp, len(bridgeAPINames))
 	for _, name := range bridgeAPINames {
-		out[name] = regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\s*\(`)
+		// Allow an optional TS generic clause before the call paren so a typed
+		// call like ai<AIResult>(...) or getEmails<T>(...) is still detected.
+		out[name] = regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\s*(?:<[^<>(){}]*>\s*)?\(`)
 	}
 	return out
 }

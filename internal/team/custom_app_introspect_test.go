@@ -97,6 +97,21 @@ function onClick(){ createTask({ title: "x" }); }`,
 	}
 }
 
+// TestIntrospectDetectsGenericBridgeCall: a typed bridge call like
+// ai<AIResult>(...) must still be detected (regression — a real generated app
+// used a generic and the AI step went unreported).
+func TestIntrospectDetectsGenericBridgeCall(t *testing.T) {
+	files := map[string]string{
+		"src/App.tsx": `
+import { ai } from "./wuphf-bridge";
+const r = await ai<AIClusterResult>(PROMPT, quotes, { json: true });`,
+	}
+	caps := introspectAppSource(files)
+	if !introspectHas(caps.BridgeAPIs, "ai") {
+		t.Fatalf("a generic ai<T>(...) call must be detected, got %v", caps.BridgeAPIs)
+	}
+}
+
 // TestIntrospectNoFalsePositivesFromComments — patterns in comments/strings must
 // not be reported as real usage (the lexer strips comments, keeps strings).
 func TestIntrospectEmptyForHTMLOnly(t *testing.T) {
