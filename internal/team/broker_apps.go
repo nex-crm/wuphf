@@ -189,7 +189,10 @@ func (b *Broker) handleAppRoot(w http.ResponseWriter, r *http.Request, id string
 		}
 		out := map[string]any{"app": app, "html": htmlBody}
 		// ?source=1 includes the app's source project — only the App Builder
-		// needs it (to edit), so the FE view never asks for it.
+		// needs it (to edit), so the FE view never asks for it. Alongside the raw
+		// source we attach a deterministic capability summary (data model, APIs,
+		// office writes, UI) so the agent edits from the app's REAL shape instead
+		// of guessing or inventing capabilities it lacks.
 		if r.URL.Query().Get("source") == "1" {
 			source, err := b.appStore().Source(id)
 			if err != nil {
@@ -197,6 +200,7 @@ func (b *Broker) handleAppRoot(w http.ResponseWriter, r *http.Request, id string
 				return
 			}
 			out["source"] = source
+			out["capabilities"] = introspectAppSource(source)
 		}
 		writeJSON(w, http.StatusOK, out)
 	case http.MethodDelete:
@@ -311,7 +315,13 @@ func (b *Broker) handleAppEditSession(w http.ResponseWriter, r *http.Request, id
 		writeJSON(w, http.StatusOK, map[string]any{"channel": ch})
 		return
 	}
-	title, details := appEditSessionBrief(app)
+	// Ground the edit thread in the app's REAL shape (data model, APIs, writes,
+	// UI), derived from its source, so the agent never invents capabilities.
+	capsSummary := ""
+	if source, serr := b.appStore().Source(id); serr == nil {
+		capsSummary = renderAppCapabilities(introspectAppSource(source))
+	}
+	title, details := appEditSessionBrief(app, capsSummary)
 	// MutateTask locks internally; this handler holds no broker lock (same
 	// pattern as maybeSpawnAppBuilderTaskFromProposal).
 	if _, err := b.MutateTask(TaskPostRequest{

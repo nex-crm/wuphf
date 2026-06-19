@@ -1454,6 +1454,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		// releases (same hazard class that killed the old auto-notebook-writer).
 		if reachedDone {
 			b.queueTaskDistillation(task.ID)
+			// Post-task App discovery: a deterministic, broker-actuated judge that
+			// proposes an App only when the completed work looks repeatable. No-op
+			// unless enabled (production web path).
+			b.queueWorkflowAppDetection(task.ID)
 		}
 		return TaskResponse{Task: *task}, nil
 	}

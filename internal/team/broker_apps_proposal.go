@@ -166,12 +166,16 @@ func appBuilderTaskBrief(spec appProposalSpec, humanNote string) (string, string
 // no change is requested yet, so it must NOT rebuild until the human asks. The
 // register_app(app_id=…) line is load-bearing: stampAppEditChannelForTaskLocked
 // parses the id from it to bind the channel.
-func appEditSessionBrief(app CustomApp) (string, string) {
+func appEditSessionBrief(app CustomApp, capsSummary string) (string, string) {
 	title := fmt.Sprintf("Edit app: %s", app.Name)
 	var d strings.Builder
 	fmt.Fprintf(&d, "Open the persistent edit thread for the existing app `%s` (\"%s\").\n\n", app.ID, app.Name)
+	if s := strings.TrimSpace(capsSummary); s != "" {
+		d.WriteString(s)
+		d.WriteString("\n")
+	}
 	d.WriteString("No change is requested yet — the human just opened the \"chat to edit\" panel beside this app. ")
-	d.WriteString("Call get_app to read its current source and manifest, then post ONE short greeting: say in a sentence what the app does today and ask what they would like to change. Do NOT modify or republish the app until they ask.\n\n")
+	d.WriteString("Call get_app to read its current source and manifest (it returns the same capabilities summary above), then post ONE short greeting grounded in what the app ACTUALLY does today — do not claim capabilities not listed above — and ask what they would like to change. Do NOT modify or republish the app until they ask.\n\n")
 	fmt.Fprintf(&d, "When they request a change here, apply it to the source and republish with register_app(app_id=%s) so it updates in place.", app.ID)
 	return title, d.String()
 }

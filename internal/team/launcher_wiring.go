@@ -21,8 +21,15 @@ func (l *Launcher) installBroker(b *Broker) {
 		return
 	}
 	l.broker = b
-	if b != nil && l.brokerConfigurator != nil {
-		l.brokerConfigurator(b)
+	if b != nil {
+		// Post-task App discovery is a live-office behavior. Enable it for every
+		// launcher-booted broker (web + headless), regardless of boot order. Tests
+		// construct &Launcher{broker: b} directly and never call installBroker, so
+		// the unit suite stays off and never fires a live LLM judge on completion.
+		b.workflowDetectionEnabled = true
+		if l.brokerConfigurator != nil {
+			l.brokerConfigurator(b)
+		}
 	}
 }
 

@@ -272,6 +272,11 @@ type Broker struct {
 	appIntegrationReadDayBuckets map[string]ipRateLimitBucket // reads: per-day
 	lastAppBudgetPrune           time.Time                    // throttles the idle-key sweep
 
+	// workflowDetectionEnabled gates post-task App discovery (broker_workflow_detect.go).
+	// On only in the production web-serve path so the unit suite never fires a live
+	// LLM judge when a test completes a task.
+	workflowDetectionEnabled bool
+
 	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
 	// transport is started in-process — at boot by RegisterTransports and at
 	// runtime by handleSlackConnect — so connecting a channel from the web app
