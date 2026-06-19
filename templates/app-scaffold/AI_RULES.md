@@ -220,6 +220,30 @@ loudly — apps are read-mostly by design. Don't try to work around this.
    meters `ai()` and integration reads PER-APP (per-minute + per-day), so an app
    that slips through still cannot burn the workspace's budget.
 
+## Design
+
+These rules keep the app correct. **`DESIGN.md` keeps it from looking AI-generated
+— read it, hold its bar, and run its pre-ship checklist before `register_app`.** A
+WUPHF App is a fixed-kit, single-screen Mantine tool on white; the design bar is
+"make THAT feel crafted," not "add things the sandbox forbids." In short:
+
+1. **Set a real theme.** Override Mantine once in `main.tsx` via `createTheme` —
+   `primaryColor`, one `defaultRadius`, a heading scale, a tightened `spacing`
+   scale. Never ship default-themed Mantine; it is the #1 AI tell. (Keep
+   `forceColorScheme="light"` and the provider shape above — only `theme` is yours.)
+2. **Hierarchy is type, not boxes.** One real `<Title>`, then `fw`/`size`/`c="dimmed"`
+   for rank — three tiers, not five font sizes. Monospace numbers and IDs.
+3. **Earn the card.** A pile of identical `<Card>`s is a tell — use a `<Table>` or
+   divider-separated `<Stack>` rows for lists; cards only for standalone objects.
+4. **One accent, with meaning.** Restrained neutral surface + one accent ≤10% of
+   pixels; status colors mean status (`variant="light"` badges). No gradients,
+   glassmorphism, colored card backgrounds, or decorative motion.
+5. **Compose with intent.** Use the theme spacing scale (not raw px), vary rhythm,
+   and use an asymmetric `Group`/`Grid` split when content has a primary + secondary
+   region instead of a reflexive centered column.
+6. **Real copy, real states.** Name the actual thing (no "Dashboard"/"Welcome"
+   placeholders); designed empty / loading / error / not-connected states, every one.
+
 ## Style
 
 - Use Mantine components and props (`c="dimmed"`, `fw`, `size`, `variant`) for
