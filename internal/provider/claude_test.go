@@ -399,3 +399,16 @@ func TestClaudeHelperProcess(t *testing.T) {
 		t.Fatalf("unknown helper scenario: %s", os.Getenv("CLAUDE_TEST_SCENARIO"))
 	}
 }
+
+func TestFormatClaudeToolResultFullNotTruncatedTo500(t *testing.T) {
+	big := strings.Repeat("x", 4000)
+	full := formatClaudeToolResultFull(big)
+	if len(full) <= 500 {
+		t.Fatalf("full result must exceed the 500-char display cap, got %d", len(full))
+	}
+	// JSON structure is preserved (marshaled) for non-strings.
+	got := formatClaudeToolResultFull(map[string]any{"data": map[string]any{"messages": []any{}}})
+	if !strings.Contains(got, "messages") {
+		t.Fatalf("structural keys must survive, got %q", got)
+	}
+}

@@ -711,6 +711,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workflows/draft", b.requireAuth(b.handleWorkflowsDraft))
 	mux.HandleFunc("/workflows/extract", b.requireAuth(b.handleWorkflowsExtract))
 	mux.HandleFunc("/workflows/extracted", b.requireAuth(b.handleWorkflowsExtracted))
+	mux.HandleFunc("/workflows/freeze-extracted", b.requireAuth(b.handleWorkflowsFreezeExtracted))
 	mux.HandleFunc("/workflows/freeze", b.requireAuth(b.handleWorkflowsFreeze))
 	mux.HandleFunc("/workflows/run", b.requireAuth(b.handleWorkflowsRun))
 	mux.HandleFunc("/workflows/proposals", b.requireAuth(b.handleWorkflowsProposals))

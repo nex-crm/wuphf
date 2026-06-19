@@ -99,3 +99,18 @@ func TestExtractWorkflowForTaskGate(t *testing.T) {
 		t.Errorf("single-action task must not be a workflow: %+v", prop)
 	}
 }
+
+// TestExtractedSkillName pins the stable slug derived from a fingerprint so
+// re-freezing the same recurring workflow updates-over-creates.
+func TestExtractedSkillName(t *testing.T) {
+	cases := map[string]string{
+		"gmail_fetch_emails>slack_send_message": "extracted-gmail-fetch-emails-slack-send-message",
+		"GMAIL_FETCH_EMAILS":                    "extracted-gmail-fetch-emails",
+		">>weird<<chars!!":                      "extracted-weird-chars",
+	}
+	for fp, want := range cases {
+		if got := extractedSkillName(fp); got != want {
+			t.Errorf("extractedSkillName(%q) = %q, want %q", fp, got, want)
+		}
+	}
+}

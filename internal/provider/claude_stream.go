@@ -15,6 +15,11 @@ type ClaudeStreamEvent struct {
 	ToolInput string
 	ToolUseID string
 	Detail    string
+	// ResultRaw is the tool_result content WITHOUT the 500-char display
+	// truncation Text/Detail carry (safety-capped). Workflow-detection trace
+	// capture reads it so result_path/expose can be inferred from the full
+	// response shape, not a clipped prefix. Empty for non-tool_result events.
+	ResultRaw string
 }
 
 // ClaudeUsage captures token counts and cost from a Claude CLI result event.
@@ -109,6 +114,7 @@ func ReadClaudeJSONStream(r io.Reader, onEvent func(ClaudeStreamEvent)) (ClaudeS
 							ToolUseID: block.ID,
 							Text:      resultStr,
 							Detail:    resultStr,
+							ResultRaw: formatClaudeToolResultFull(block.Content),
 						})
 					}
 				}
@@ -116,9 +122,10 @@ func ReadClaudeJSONStream(r io.Reader, onEvent func(ClaudeStreamEvent)) (ClaudeS
 			if msg.ToolUseResult != nil && strings.TrimSpace(msg.ToolUseResult.Stdout) != "" && onEvent != nil {
 				resultStr := truncateClaudeOutput(msg.ToolUseResult.Stdout)
 				onEvent(ClaudeStreamEvent{
-					Type:   "tool_result",
-					Text:   resultStr,
-					Detail: resultStr,
+					Type:      "tool_result",
+					Text:      resultStr,
+					Detail:    resultStr,
+					ResultRaw: capToolResultRaw(msg.ToolUseResult.Stdout),
 				})
 			}
 		case "result":

@@ -248,7 +248,14 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
 			if pendingTrace != nil {
-				pendingTrace.Result = summarizeResult(event.Text)
+				// Prefer the untruncated ResultRaw so result_path/expose can be
+				// inferred from the full response shape, not the 500-char display
+				// clip; summarizeResult bounds it to a shape-preserving summary.
+				raw := event.ResultRaw
+				if strings.TrimSpace(raw) == "" {
+					raw = event.Text
+				}
+				pendingTrace.Result = summarizeResult(raw)
 				flushTrace()
 			}
 			emitHeadlessToolResult(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.Text, "claude.tool_result")

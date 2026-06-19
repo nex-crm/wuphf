@@ -174,6 +174,17 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	turnID := newHeadlessTurnID()
 	var turnToolNames []string
 	var turnTextLen int
+	// Workflow-detection trace capture (mirrors the claude runner): correlate
+	// each integration tool_use with its result so the extractor sees real args
+	// + response shape. See trace_sink.go.
+	var pendingTrace *ActionTrace
+	traceSeq := 0
+	flushTrace := func() {
+		if pendingTrace != nil {
+			persistActionTrace(*pendingTrace)
+			pendingTrace = nil
+		}
+	}
 
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
@@ -192,7 +203,12 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		onToolUse: func(name, rawInput string) {
 			state.onToolUseChunk(name, rawInput)
 			l.updateHeadlessProgress(slug, "active", "tool", "running "+name, metrics)
-			turnToolNames = append(turnToolNames, name)
+			turnToolNames = append(turnToolNames, manifestToolToken(name, rawInput))
+			flushTrace()
+			if tr, ok := traceFromToolUse(activeTaskID, turnID, slug, name, rawInput, traceSeq); ok {
+				traceSeq++
+				pendingTrace = &tr
+			}
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, name, rawInput, kind+".tool_use")
 		},
 		onError: state.onError,
@@ -201,6 +217,10 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 			text := result
 			if err != nil {
 				text = err.Error()
+			}
+			if pendingTrace != nil {
+				pendingTrace.Result = summarizeResult(text)
+				flushTrace()
 			}
 			emitHeadlessToolResult(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, name, text, kind+".tool_result")
 		},
@@ -217,6 +237,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 
 	finalText, iterationsUsed, turnUsage, streamErr, err := loop.run(ctx, msgs)
+	flushTrace() // persist a trailing integration call whose result closed the turn
 	// Record token counts even on partial / errored turns: a failed turn
 	// can still have generated thousands of tokens we want surfaced in the
 	// usage panel. CostUSD stays at zero — local runtimes have no marginal

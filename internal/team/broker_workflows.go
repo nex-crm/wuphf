@@ -196,10 +196,8 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 	if actor, ok := requestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.Slug) != "" {
 		createdBy = actor.Slug
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
 	name := workflowSkillName(*cand)
 	title := workflowSkillTitle(*cand)
-	channel := normalizeChannelSlug("general")
 
 	// Discovery -> contract. Either bind the operator's reviewed/enriched spec
 	// (when supplied) or auto-draft from the detected shape. Either way the
@@ -218,41 +216,55 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 	} else {
 		spec = workflow.DraftSpec(name, title, cand.Agent, cand.Shape, b.draftKnownPlatforms())
 	}
+	description := fmt.Sprintf("Workflow contract for a pattern by %q repeated %d times (shipcheck passed).", cand.Agent, cand.Count)
+	sk, report, created, errCode := b.freezeWorkflowSpec(spec, name, title, description, createdBy, []string{"workflow", "spotted"})
+	if errCode != "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": errCode})
+		return
+	}
+	if !report.Passed {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "shipcheck_failed", "shipcheck": report})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": created})
+}
+
+// freezeWorkflowSpec proves a contract with shipcheck and, on pass, binds it as
+// a teamSkill (the runtime binding to the spec), persists the spec, schedules a
+// daily run, and announces it. Update-over-create: re-freezing a known name
+// returns the existing binding. Shared by the deterministic-spotted and
+// LLM-extracted freeze paths. errCode is "" on success; report.Passed is false
+// when the contract failed the mechanical proof (nothing is created).
+func (b *Broker) freezeWorkflowSpec(spec workflow.Spec, name, title, description, createdBy string, tags []string) (teamSkill, workflow.ShipcheckReport, bool, string) {
 	report := workflow.Shipcheck(&spec)
 	if !report.Passed {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"error": "shipcheck_failed", "shipcheck": report,
-		})
-		return
+		return teamSkill{}, report, false, ""
 	}
 	specPath := workflowSpecPath(name)
 	if specPath != "" {
 		if err := workflow.SaveSpec(specPath, &spec); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "spec_persist_failed"})
-			return
+			return teamSkill{}, report, false, "spec_persist_failed"
 		}
 	}
+	channel := normalizeChannelSlug("general")
+	now := time.Now().UTC().Format(time.RFC3339)
 
 	b.mu.Lock()
-	// Update-over-create: re-freezing a known shape returns the existing binding.
 	if existing := b.findSkillByNameLocked(name); existing != nil {
-		sk := *existing
+		ex := *existing
 		b.mu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": false})
-		return
+		return ex, report, false, ""
 	}
-	// The teamSkill is now the RUNTIME BINDING to the proven spec, not a prose
-	// skill: it points at the contract and records the shipcheck verdict.
 	sk := teamSkill{
 		ID:          b.allocateSkillIDLocked(name),
 		Name:        name,
 		Title:       title,
-		Description: fmt.Sprintf("Workflow contract for a pattern by %q repeated %d times (shipcheck passed).", cand.Agent, cand.Count),
+		Description: description,
 		Content:     bindingSkillContent(spec, report, specPath),
 		CreatedBy:   createdBy,
 		OwnerAgents: b.allMemberSlugsLocked(),
 		Channel:     channel,
-		Tags:        []string{"workflow", "spotted"},
+		Tags:        tags,
 		Trigger:     "manual",
 		WorkflowKey: spec.ID,
 		Status:      "active",
@@ -262,19 +274,12 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 	b.skills = append(b.skills, sk)
 	if err := b.saveLocked(); err != nil {
 		b.mu.Unlock()
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "persist_failed"})
-		return
+		return teamSkill{}, report, false, "persist_failed"
 	}
 	b.mu.Unlock()
 
-	// Announce in-channel (PostMessage takes its own lock; best-effort).
 	_, _ = b.PostMessage("system", channel,
-		fmt.Sprintf("Created workflow %q from a pattern repeated %d times. Shipcheck passed (%d checks).", title, cand.Count, len(report.Checks)),
-		nil, "")
-
-	// Register the contract as a scheduled workflow so it can fire on its own
-	// (daily by default). Manual /workflows/run and event triggers hit the same
-	// runtime. Best-effort: a failed registration must not fail the freeze.
+		fmt.Sprintf("Created workflow %q. Shipcheck passed (%d checks).", title, len(report.Checks)), nil, "")
 	_ = b.SetSchedulerJob(schedulerJob{
 		Slug:            "wf-" + name,
 		Label:           "Run: " + title,
@@ -286,8 +291,7 @@ func (b *Broker) handleWorkflowsFreeze(w http.ResponseWriter, r *http.Request) {
 		Enabled:         true,
 		Payload:         `{"spec_id":"` + name + `"}`,
 	})
-
-	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": true})
+	return sk, report, true, ""
 }
 
 // handleWorkflowsImprove is stage 5: apply an improvement overlay to a stored

@@ -68,6 +68,21 @@ func registerWorkflowTools(server *mcp.Server) {
 		"workflow_improve",
 		"Change a frozen workflow by applying an overlay (states/events/transitions/actions to add or replace). Pass spec_id and the overlay object — either one you authored or one from workflow_proposals. The patched spec must pass shipcheck before it lands; a rejected overlay returns the review so you can fix and retry.",
 	), handleWorkflowImprove)
+
+	mcp.AddTool(server, officeWriteTool(
+		"workflow_extract",
+		"Extract a reusable workflow from a COMPLETED task's real trace. Pass task_id. Reads the task's integration actions (with their args + response shapes), judges whether they form a workflow worth automating, and returns a named, parameterized, executable contract (or is_workflow=false with a reason). Use after finishing a multi-step task to turn it into a contract you can freeze.",
+	), handleWorkflowExtract)
+
+	mcp.AddTool(server, readOnlyTool(
+		"workflow_detected",
+		"List workflows the office auto-extracted from completed tasks, grouped by recurrence (how many distinct tasks ran the same shape). Each carries a fingerprint (pass it to workflow_freeze_extracted) and an executable contract. Use this to see what work is worth pressing into a workflow.",
+	), handleWorkflowDetected)
+
+	mcp.AddTool(server, officeWriteTool(
+		"workflow_freeze_extracted",
+		"Freeze an auto-extracted workflow into a runnable, registered workflow. Pass the fingerprint from workflow_detected. The proposal already carries a shipchecked contract; freezing proves it again and creates the binding. Returns the registered skill, spec_id, and shipcheck report.",
+	), handleWorkflowFreezeExtracted)
 }
 
 // ─── Tool argument contracts ───
@@ -116,7 +131,52 @@ type WorkflowImproveArgs struct {
 	Overlay workflow.Overlay `json:"overlay" jsonschema:"The overlay to apply — add_states / add_events / add_actions / add_transitions / add_scenarios / add_terminal / add_allowed_reads / set_goal. Merges by id: re-declare an existing step (same id) with new content to EDIT it in place; a new id is appended. An overlay that changes nothing is rejected. Use one from workflow_proposals or author your own."`
 }
 
+// WorkflowExtractArgs identifies a completed task to extract a workflow from.
+type WorkflowExtractArgs struct {
+	TaskID string `json:"task_id" jsonschema:"The completed task to extract a workflow from (e.g. OFFICE-123)."`
+}
+
+// WorkflowDetectedArgs takes no inputs; the detected feed is unfiltered.
+type WorkflowDetectedArgs struct{}
+
+// WorkflowFreezeExtractedArgs freezes an auto-extracted proposal.
+type WorkflowFreezeExtractedArgs struct {
+	Fingerprint string `json:"fingerprint" jsonschema:"The extracted workflow's fingerprint (from workflow_detected)."`
+}
+
 // ─── Handlers ───
+
+func handleWorkflowExtract(ctx context.Context, _ *mcp.CallToolRequest, args WorkflowExtractArgs) (*mcp.CallToolResult, any, error) {
+	id := strings.TrimSpace(args.TaskID)
+	if id == "" {
+		return toolError(fmt.Errorf("task_id is required")), nil, nil
+	}
+	var out map[string]any
+	if err := brokerPostJSON(ctx, "/workflows/extract", map[string]any{"task_id": id}, &out); err != nil {
+		return toolError(fmt.Errorf("extract workflow: %w", err)), nil, nil
+	}
+	return jsonResult(out)
+}
+
+func handleWorkflowDetected(ctx context.Context, _ *mcp.CallToolRequest, _ WorkflowDetectedArgs) (*mcp.CallToolResult, any, error) {
+	var out map[string]any
+	if err := brokerGetJSON(ctx, "/workflows/extracted", &out); err != nil {
+		return toolError(fmt.Errorf("list detected workflows: %w", err)), nil, nil
+	}
+	return jsonResult(out)
+}
+
+func handleWorkflowFreezeExtracted(ctx context.Context, _ *mcp.CallToolRequest, args WorkflowFreezeExtractedArgs) (*mcp.CallToolResult, any, error) {
+	fp := strings.TrimSpace(args.Fingerprint)
+	if fp == "" {
+		return toolError(fmt.Errorf("fingerprint is required")), nil, nil
+	}
+	var out map[string]any
+	if err := brokerPostJSON(ctx, "/workflows/freeze-extracted", map[string]any{"fingerprint": fp}, &out); err != nil {
+		return toolError(fmt.Errorf("freeze extracted workflow: %w", err)), nil, nil
+	}
+	return jsonResult(out)
+}
 
 func handleWorkflowList(ctx context.Context, _ *mcp.CallToolRequest, _ WorkflowListArgs) (*mcp.CallToolResult, any, error) {
 	var spotted struct {

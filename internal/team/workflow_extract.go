@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -163,4 +164,89 @@ func (b *Broker) handleWorkflowsExtracted(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"workflows": items})
+}
+
+// extractedSkillName derives a stable skill/contract name from a workflow
+// fingerprint (its ordered action ids) so re-freezing the same recurring
+// workflow updates-over-creates rather than duplicating.
+func extractedSkillName(fingerprint string) string {
+	var b strings.Builder
+	b.WriteString("extracted-")
+	prevDash := true // the prefix already ends with a dash; avoid doubling it
+	for _, r := range strings.ToLower(strings.TrimSpace(fingerprint)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
+}
+
+// handleWorkflowsFreezeExtracted binds an LLM-extracted proposal into a runtime
+// workflow. The stored proposal already carries an executable, shipchecked spec,
+// so freeze just proves it again and creates the binding (POST {fingerprint}).
+func (b *Broker) handleWorkflowsFreezeExtracted(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var body struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	fp := strings.TrimSpace(body.Fingerprint)
+	if fp == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "fingerprint_required"})
+		return
+	}
+	items, err := surfaceExtractedWorkflows(ProposalSinkPath())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "read_failed"})
+		return
+	}
+	var ew *ExtractedWorkflow
+	for i := range items {
+		if items[i].Fingerprint == fp {
+			ew = &items[i]
+			break
+		}
+	}
+	if ew == nil || ew.Spec == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no_extracted_workflow_for_fingerprint"})
+		return
+	}
+
+	createdBy := "system"
+	if actor, ok := requestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.Slug) != "" {
+		createdBy = actor.Slug
+	}
+	name := extractedSkillName(fp)
+	spec := *ew.Spec
+	spec.ID = name
+	title := strings.TrimSpace(ew.Name)
+	if title == "" {
+		title = "Detected workflow"
+	}
+	src := "one completed task"
+	if ew.Recurrence > 1 {
+		src = fmt.Sprintf("%d completed tasks", ew.Recurrence)
+	}
+	description := fmt.Sprintf("Detected from %s and judged a reusable workflow (%.0f%% confident, shipcheck passed).", src, ew.Confidence*100)
+
+	sk, report, created, errCode := b.freezeWorkflowSpec(spec, name, title, description, createdBy, []string{"workflow", "extracted"})
+	if errCode != "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": errCode})
+		return
+	}
+	if !report.Passed {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "shipcheck_failed", "shipcheck": report})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skill": sk, "spec_id": spec.ID, "shipcheck": report, "created": created})
 }

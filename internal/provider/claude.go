@@ -318,6 +318,31 @@ func truncateClaudeOutput(value string) string {
 	return value
 }
 
+// toolResultRawCap bounds the untruncated tool_result view so a pathological
+// multi-MB response still cannot wedge the stream; the workflow trace reducer
+// shrinks it further to a shape-preserving summary.
+const toolResultRawCap = 16 << 10
+
+// formatClaudeToolResultFull renders a tool_result content block WITHOUT the
+// 500-char display truncation, capped at toolResultRawCap. Used for
+// workflow-detection trace capture.
+func formatClaudeToolResultFull(value any) string {
+	switch v := value.(type) {
+	case string:
+		return capToolResultRaw(v)
+	default:
+		b, _ := json.Marshal(v)
+		return capToolResultRaw(string(b))
+	}
+}
+
+func capToolResultRaw(value string) string {
+	if len(value) > toolResultRawCap {
+		return value[:toolResultRawCap] + "…"
+	}
+	return value
+}
+
 func parseClaudeErrors(rawErrors []json.RawMessage) []string {
 	messages := make([]string, 0, len(rawErrors))
 	for _, raw := range rawErrors {

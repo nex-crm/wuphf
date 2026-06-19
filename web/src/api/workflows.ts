@@ -135,6 +135,14 @@ export function getExtractedWorkflows(): Promise<{
   return get<{ workflows: ExtractedWorkflow[] }>("/workflows/extracted");
 }
 
+/** Freeze an extracted proposal into a runtime workflow by its fingerprint. The
+ * stored proposal already carries an executable, shipchecked contract. */
+export function freezeExtractedWorkflow(
+  fingerprint: string,
+): Promise<FreezeResult> {
+  return post<FreezeResult>("/workflows/freeze-extracted", { fingerprint });
+}
+
 /** A node in the workflow contract's state machine. */
 export interface WorkflowState {
   id: string;

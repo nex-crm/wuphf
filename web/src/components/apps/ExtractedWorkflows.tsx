@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   type ExtractedTrigger,
   type ExtractedWorkflow,
+  freezeExtractedWorkflow,
   getExtractedWorkflows,
 } from "../../api/workflows";
 
@@ -69,8 +70,18 @@ function triggerLabel(t: ExtractedTrigger): string {
 }
 
 function ExtractedCard({ wf }: { wf: ExtractedWorkflow }) {
+  const queryClient = useQueryClient();
   const [showContract, setShowContract] = useState(false);
   const steps = wf.spec?.actions ?? [];
+
+  const freeze = useMutation({
+    mutationFn: () => freezeExtractedWorkflow(wf.fingerprint),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workflows", "spotted"] });
+      queryClient.invalidateQueries({ queryKey: ["skills", "all"] });
+    },
+  });
+  const created = freeze.data?.created || freeze.isSuccess;
   return (
     <div
       style={{
@@ -135,22 +146,57 @@ function ExtractedCard({ wf }: { wf: ExtractedWorkflow }) {
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() => setShowContract((v) => !v)}
-        style={{
-          background: "transparent",
-          color: "var(--text-secondary)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: "6px 12px",
-          fontSize: 12.5,
-          fontWeight: 550,
-          cursor: "pointer",
-        }}
-      >
-        {showContract ? "Hide contract" : "View contract"}
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {created ? (
+          <span
+            style={{ fontSize: 13, color: "var(--green)", fontWeight: 600 }}
+          >
+            ✓ Workflow created · contract shipchecked
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => freeze.mutate()}
+            disabled={freeze.isPending}
+            style={{
+              background: "var(--accent)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              padding: "7px 14px",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: freeze.isPending ? "default" : "pointer",
+              opacity: freeze.isPending ? 0.7 : 1,
+            }}
+          >
+            {freeze.isPending ? "Creating…" : "Create workflow"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setShowContract((v) => !v)}
+          style={{
+            background: "transparent",
+            color: "var(--text-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "6px 12px",
+            fontSize: 12.5,
+            fontWeight: 550,
+            cursor: "pointer",
+          }}
+        >
+          {showContract ? "Hide contract" : "View contract"}
+        </button>
+      </div>
+      {freeze.error && (
+        <div style={{ fontSize: 12.5, color: "var(--red)", marginTop: 8 }}>
+          {freeze.error instanceof Error
+            ? freeze.error.message
+            : "Couldn't create the workflow"}
+        </div>
+      )}
 
       {showContract && wf.spec && (
         <pre
