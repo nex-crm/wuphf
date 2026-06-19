@@ -25,24 +25,33 @@ import (
 // tasks produced it ("you've done this 4 times"). The deterministic miner is
 // the cheap gate; this store is the LLM-extracted, executable output.
 
-// storedProposal is one persisted extraction (one completed task).
+// storedProposal is one persisted extraction (one completed task). It records
+// full provenance: the source task, why it was judged a workflow, and the wiki
+// articles that task read.
 type storedProposal struct {
 	Fingerprint string                    `json:"fingerprint"`
 	TaskID      string                    `json:"task_id"`
 	Name        string                    `json:"name"`
+	Description string                    `json:"description,omitempty"`
+	Why         string                    `json:"why,omitempty"`
 	Confidence  float64                   `json:"confidence"`
 	Trigger     workflow.ExtractedTrigger `json:"trigger"`
+	WikiContext []string                  `json:"wiki_context,omitempty"`
 	Spec        *workflow.Spec            `json:"spec,omitempty"`
 }
 
-// ExtractedWorkflow is the surfaced, recurrence-counted proposal.
+// ExtractedWorkflow is the surfaced, recurrence-counted proposal with provenance
+// (title, description, why-generated, source tasks, wiki context) — all linkable.
 type ExtractedWorkflow struct {
 	Fingerprint string                    `json:"fingerprint"`
 	Name        string                    `json:"name"`
+	Description string                    `json:"description,omitempty"`
+	Why         string                    `json:"why,omitempty"`
 	Confidence  float64                   `json:"confidence"`
 	Trigger     workflow.ExtractedTrigger `json:"trigger"`
 	Recurrence  int                       `json:"recurrence"` // distinct completed tasks
-	TaskIDs     []string                  `json:"task_ids"`
+	TaskIDs     []string                  `json:"task_ids"`   // source tasks (linkable)
+	WikiContext []string                  `json:"wiki_context,omitempty"`
 	Spec        *workflow.Spec            `json:"spec,omitempty"`
 }
 
@@ -138,6 +147,7 @@ func surfaceExtractedWorkflows(path string) ([]ExtractedWorkflow, error) {
 	type agg struct {
 		ew      ExtractedWorkflow
 		taskSet map[string]bool
+		wikiSet map[string]bool
 	}
 	byFP := map[string]*agg{}
 	var order []string
@@ -151,18 +161,27 @@ func surfaceExtractedWorkflows(path string) ([]ExtractedWorkflow, error) {
 		}
 		a, ok := byFP[fp]
 		if !ok {
-			a = &agg{ew: ExtractedWorkflow{Fingerprint: fp}, taskSet: map[string]bool{}}
+			a = &agg{ew: ExtractedWorkflow{Fingerprint: fp}, taskSet: map[string]bool{}, wikiSet: map[string]bool{}}
 			byFP[fp] = a
 			order = append(order, fp)
 		}
 		// Latest record wins for display fields.
 		a.ew.Name = p.Name
+		a.ew.Description = p.Description
+		a.ew.Why = p.Why
 		a.ew.Confidence = p.Confidence
 		a.ew.Trigger = p.Trigger
 		a.ew.Spec = p.Spec
 		if id := strings.TrimSpace(p.TaskID); id != "" && !a.taskSet[id] {
 			a.taskSet[id] = true
 			a.ew.TaskIDs = append(a.ew.TaskIDs, id)
+		}
+		// Union the wiki context read across every task that produced this shape.
+		for _, art := range p.WikiContext {
+			if art = strings.TrimSpace(art); art != "" && !a.wikiSet[art] {
+				a.wikiSet[art] = true
+				a.ew.WikiContext = append(a.ew.WikiContext, art)
+			}
 		}
 	}
 	out := make([]ExtractedWorkflow, 0, len(order))
@@ -287,8 +306,11 @@ func (b *Broker) onTaskCompletedExtract(taskID string) {
 		Fingerprint: proposalFingerprint(prop.Spec),
 		TaskID:      prop.TaskID,
 		Name:        prop.Name,
+		Description: prop.Description,
+		Why:         prop.Reason,
 		Confidence:  prop.Confidence,
 		Trigger:     prop.Trigger,
+		WikiContext: prop.WikiContext,
 		Spec:        prop.Spec,
 	}); err != nil {
 		log.Printf("workflow-extract: persist failed for task %s: %v", taskID, err)

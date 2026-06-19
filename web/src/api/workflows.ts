@@ -120,10 +120,16 @@ export interface ExtractedTrigger {
 export interface ExtractedWorkflow {
   fingerprint: string;
   name: string;
+  description?: string;
+  /** Why this was judged a reusable workflow (provenance rationale). */
+  why?: string;
   confidence: number;
   trigger: ExtractedTrigger;
   recurrence: number;
+  /** Source tasks this was extracted from (linkable). */
   task_ids: string[];
+  /** Wiki articles the source task(s) read (linkable provenance). */
+  wiki_context?: string[];
   spec?: WorkflowSpec;
 }
 

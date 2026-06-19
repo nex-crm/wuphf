@@ -37,10 +37,14 @@ func TestExtractWorkflowForTaskEndToEnd(t *testing.T) {
 		Args: map[string]any{"data": map[string]any{"query": "is:unread"}}, Result: `{"data":{"messages":[]}}`})
 	persistActionTrace(ActionTrace{TaskID: "OFFICE-9", Seq: 1, Platform: "slack", ActionID: "SLACK_CHAT_POST_MESSAGE",
 		Args: map[string]any{"data": map[string]any{"channel": "general"}}})
+	// Provenance: the task read a wiki article — it must flow onto the proposal.
+	persistWikiRead("OFFICE-9", "playbooks/inbox-triage.md")
 
 	stub := &stubExtractor{ret: workflow.Extraction{
 		IsWorkflow: true, Confidence: 0.9, Name: "Inbox to Slack alert",
-		Trigger: workflow.ExtractedTrigger{Kind: "schedule", IntervalMinutes: 1440},
+		Description: "Fetches urgent email and alerts Slack.",
+		Reason:      "Repeatable two-step procedure with a clear outcome.",
+		Trigger:     workflow.ExtractedTrigger{Kind: "schedule", IntervalMinutes: 1440},
 		Steps: []workflow.ExtractedStep{
 			{ActionID: "GMAIL_FETCH_EMAILS", Platform: "gmail", Params: map[string]any{"query": "is:unread"}, ResultPath: "data.messages", Expose: []string{"sender"}},
 			{ActionID: "STRIPE_CREATE_CHARGE", Platform: "stripe"}, // phantom — must be grounded out
@@ -64,6 +68,16 @@ func TestExtractWorkflowForTaskEndToEnd(t *testing.T) {
 	}
 	if prop.Trigger.Kind != "schedule" || prop.Trigger.IntervalMinutes != 1440 {
 		t.Errorf("trigger not carried through: %+v", prop.Trigger)
+	}
+	// Provenance flows onto the proposal: description, why (reason), wiki context.
+	if prop.Description != "Fetches urgent email and alerts Slack." {
+		t.Errorf("description not carried through: %q", prop.Description)
+	}
+	if prop.Reason == "" {
+		t.Errorf("why/reason not carried through")
+	}
+	if len(prop.WikiContext) != 1 || prop.WikiContext[0] != "playbooks/inbox-triage.md" {
+		t.Errorf("wiki context not captured: %v", prop.WikiContext)
 	}
 	if prop.Shipcheck == nil || !prop.Shipcheck.Passed {
 		t.Fatalf("extracted contract must pass shipcheck: %+v", prop.Shipcheck)

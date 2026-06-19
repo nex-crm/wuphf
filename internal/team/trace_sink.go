@@ -256,6 +256,106 @@ func ReadActionTraces(path string) ([]ActionTrace, error) {
 	return out, nil
 }
 
+// ─── wiki context (provenance) ───
+
+const wikiContextSinkFile = "wiki_context.jsonl"
+
+var wikiContextSinkMu sync.Mutex
+
+// wikiReadRecord is one wiki article a task's agent read — the provenance trail
+// for "what context informed this work".
+type wikiReadRecord struct {
+	TaskID  string `json:"task_id"`
+	Article string `json:"article"`
+}
+
+// wikiReadFromToolUse extracts the article path from a team_wiki_read tool call,
+// or ok=false for any other tool. This is the structured provenance signal:
+// which wiki article the agent actually opened (team_wiki_read carries the exact
+// path; lookup/search are fuzzier and not captured here).
+func wikiReadFromToolUse(toolName, toolInput string) (string, bool) {
+	n := strings.ToLower(strings.TrimSpace(toolName))
+	if n != "team_wiki_read" && !strings.HasSuffix(n, "__team_wiki_read") {
+		return "", false
+	}
+	var in struct {
+		ArticlePath string `json:"article_path"`
+	}
+	if json.Unmarshal([]byte(toolInput), &in) == nil {
+		if p := strings.TrimSpace(in.ArticlePath); p != "" {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// WikiContextSinkPath returns the durable wiki-provenance file under the runtime
+// home, or "" when no home is resolvable.
+func WikiContextSinkPath() string {
+	home := strings.TrimSpace(config.RuntimeHomeDir())
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".wuphf", "office", wikiContextSinkFile)
+}
+
+// persistWikiRead records that a task's agent read a wiki article. Best-effort.
+func persistWikiRead(taskID, article string) {
+	path := WikiContextSinkPath()
+	if path == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(article) == "" {
+		return
+	}
+	line, err := json.Marshal(wikiReadRecord{TaskID: strings.TrimSpace(taskID), Article: strings.TrimSpace(article)})
+	if err != nil {
+		return
+	}
+	line = append(line, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	wikiContextSinkMu.Lock()
+	defer wikiContextSinkMu.Unlock()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = f.Write(line)
+}
+
+// WikiContextForTask returns the distinct wiki articles a task read (first-seen
+// order), matched by canonical task identity. Empty when none/absent.
+func WikiContextForTask(path, taskID string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	want := canonicalTaskID(taskID)
+	seen := map[string]bool{}
+	var out []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var rec wikiReadRecord
+		if json.Unmarshal(line, &rec) != nil {
+			continue
+		}
+		if canonicalTaskID(rec.TaskID) != want {
+			continue
+		}
+		if a := strings.TrimSpace(rec.Article); a != "" && !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // canonicalTaskID normalizes a task identity so traces tagged with a task's
 // CHANNEL slug ("task-office-443") and its task ID ("OFFICE-443") collapse to
 // the same key. Headless turns are tagged with whichever the trigger carried

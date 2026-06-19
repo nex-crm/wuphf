@@ -7,6 +7,7 @@ import {
   freezeExtractedWorkflow,
   getExtractedWorkflows,
 } from "../../api/workflows";
+import { router } from "../../lib/router";
 
 /**
  * Detected Workflows feed. As tasks complete, the office extracts a real,
@@ -117,6 +118,19 @@ function ExtractedCard({ wf }: { wf: ExtractedWorkflow }) {
         )}
       </div>
 
+      {wf.description && (
+        <p
+          style={{
+            margin: "0 0 10px",
+            fontSize: 13.5,
+            lineHeight: 1.5,
+            color: "var(--text-secondary)",
+          }}
+        >
+          {wf.description}
+        </p>
+      )}
+
       <div
         style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}
       >
@@ -145,6 +159,8 @@ function ExtractedCard({ wf }: { wf: ExtractedWorkflow }) {
           </span>
         ))}
       </div>
+
+      <Provenance wf={wf} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {created ? (
@@ -222,6 +238,105 @@ function ExtractedCard({ wf }: { wf: ExtractedWorkflow }) {
     </div>
   );
 }
+
+function wikiArticleTitle(path: string): string {
+  const leaf = path.split("/").pop() ?? path;
+  return leaf.replace(/\.(md|html|json)$/i, "");
+}
+
+/**
+ * Provenance trail for a detected workflow: why it was generated, which
+ * task(s) it came from (linkable), and what wiki context informed the work
+ * (linkable). Everything is traceable back to its source.
+ */
+function Provenance({ wf }: { wf: ExtractedWorkflow }) {
+  const tasks = wf.task_ids ?? [];
+  const wiki = wf.wiki_context ?? [];
+  if (!wf.why && tasks.length === 0 && wiki.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--border)",
+        paddingTop: 10,
+        marginBottom: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        fontSize: 12.5,
+        color: "var(--text-secondary)",
+      }}
+    >
+      {wf.why && (
+        <div>
+          <b style={{ color: "var(--text)" }}>Why:</b> {wf.why}
+        </div>
+      )}
+      {tasks.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            alignItems: "center",
+          }}
+        >
+          <b style={{ color: "var(--text)" }}>From:</b>
+          {tasks.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() =>
+                void router.navigate({
+                  to: "/tasks/$taskId",
+                  params: { taskId: id },
+                })
+              }
+              style={linkChip}
+            >
+              {id}
+            </button>
+          ))}
+        </div>
+      )}
+      {wiki.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            alignItems: "center",
+          }}
+        >
+          <b style={{ color: "var(--text)" }}>Wiki context:</b>
+          {wiki.map((path) => (
+            <a
+              key={path}
+              href={`#/wiki/${encodeURI(path)}`}
+              style={linkChip}
+              title={path}
+            >
+              📄 {wikiArticleTitle(path)}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const linkChip: React.CSSProperties = {
+  fontSize: 12,
+  fontFamily: "var(--font-mono, monospace)",
+  background: "var(--bg-warm)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  padding: "2px 8px",
+  color: "var(--accent)",
+  textDecoration: "none",
+  cursor: "pointer",
+};
 
 function Chip({ children }: { children: React.ReactNode }) {
   return (

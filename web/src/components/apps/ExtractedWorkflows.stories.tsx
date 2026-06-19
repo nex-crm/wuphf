@@ -29,10 +29,14 @@ function Wrapped({ workflows }: { workflows: ExtractedWorkflow[] }) {
 const digest: ExtractedWorkflow = {
   fingerprint: "gmail_fetch_emails>slack_send_message",
   name: "Urgent Inbox → Slack Alert",
+  description:
+    "Pulls the day's important emails from Gmail and posts a summary of the urgent ones to Slack #general.",
+  why: "Two ordered steps form a repeatable procedure with a clear outcome; the time-bounded query implies a recurring daily digest, not a one-off lookup.",
   confidence: 0.9,
   trigger: { kind: "schedule", interval_minutes: 1440 },
   recurrence: 1,
   task_ids: ["OFFICE-443"],
+  wiki_context: ["playbooks/inbox-triage.md", "team/escalation.md"],
   spec: {
     version: "1",
     id: "extracted-gmail-fetch-emails-slack-send-message",
@@ -70,10 +74,14 @@ const recurring: ExtractedWorkflow = {
   ...digest,
   fingerprint: "gmail_fetch_emails>gmail_create_email_draft",
   name: "Draft replies to waiting emails",
+  description:
+    "Finds Gmail threads awaiting a reply and drafts a response for each, ready for review.",
+  why: "The same fetch-then-draft procedure recurred across four tasks — a strong signal it's worth automating.",
   confidence: 0.82,
   trigger: { kind: "manual" },
   recurrence: 4,
   task_ids: ["OFFICE-201", "OFFICE-260", "OFFICE-330", "OFFICE-401"],
+  wiki_context: ["playbooks/reply-tone.md"],
 };
 
 const meta: Meta<typeof Wrapped> = {

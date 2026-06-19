@@ -64,12 +64,17 @@ type ExtractedStep struct {
 type Extraction struct {
 	// IsWorkflow is the model's judgment that this task is a reusable workflow
 	// worth automating (vs a one-off). A proposal is surfaced only when true.
-	IsWorkflow bool             `json:"is_workflow"`
-	Confidence float64          `json:"confidence"`
-	Name       string           `json:"name"`
-	Trigger    ExtractedTrigger `json:"trigger"`
-	Steps      []ExtractedStep  `json:"steps"`
-	Reason     string           `json:"reason,omitempty"`
+	IsWorkflow bool    `json:"is_workflow"`
+	Confidence float64 `json:"confidence"`
+	Name       string  `json:"name"`
+	// Description is a one-to-two sentence human-readable summary of what the
+	// workflow does (provenance: shown on the workflow card and binding).
+	Description string           `json:"description,omitempty"`
+	Trigger     ExtractedTrigger `json:"trigger"`
+	Steps       []ExtractedStep  `json:"steps"`
+	// Reason is WHY this was judged a workflow — the rationale shown as the
+	// "why generated" provenance line.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Extractor is the injected model call. The broker implements it with the live
@@ -266,8 +271,10 @@ HARD RULES:
 - Judge honestly: set is_workflow=false (with a reason) for one-offs. Confidence is 0..1.
 - Suggest a trigger: manual, schedule (with interval_minutes if the ask implies a cadence like "every morning"=1440), webhook, or context.
 
+Give a clear human-readable name (a title an operator would recognize) and a one-to-two sentence description of what the workflow does.
+
 Reply with ONLY a JSON object of this shape:
-{"is_workflow":bool,"confidence":number,"name":string,"trigger":{"kind":string,"interval_minutes":number,"rationale":string},"steps":[{"action_id":string,"platform":string,"params":object,"result_path":string,"expose":[string],"feeds_from":string}],"reason":string}`)
+{"is_workflow":bool,"confidence":number,"name":string,"description":string,"trigger":{"kind":string,"interval_minutes":number,"rationale":string},"steps":[{"action_id":string,"platform":string,"params":object,"result_path":string,"expose":[string],"feeds_from":string}],"reason":string}`)
 
 	var b strings.Builder
 	b.WriteString("HUMAN'S ASK:\n")

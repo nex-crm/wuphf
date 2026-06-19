@@ -209,6 +209,9 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 				traceSeq++
 				pendingTrace = &tr
 			}
+			if article, ok := wikiReadFromToolUse(name, rawInput); ok {
+				persistWikiRead(activeTaskID, article)
+			}
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, name, rawInput, kind+".tool_use")
 		},
 		onError: state.onError,

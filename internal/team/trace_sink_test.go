@@ -121,3 +121,34 @@ func TestActionTracesForTaskMergesChannelAndID(t *testing.T) {
 		}
 	}
 }
+
+// TestWikiReadFromToolUse pins the wiki-provenance signal: team_wiki_read's
+// article_path is captured; other tools (including non-wiki MCP) are skipped.
+func TestWikiReadFromToolUse(t *testing.T) {
+	if got, ok := wikiReadFromToolUse("mcp__wuphf-office__team_wiki_read", `{"article_path":"playbooks/triage.md"}`); !ok || got != "playbooks/triage.md" {
+		t.Fatalf("expected playbooks/triage.md, got %q ok=%v", got, ok)
+	}
+	if got, ok := wikiReadFromToolUse("team_wiki_read", `{"article_path":"team/x.md"}`); !ok || got != "team/x.md" {
+		t.Fatalf("bare name must work, got %q ok=%v", got, ok)
+	}
+	for _, name := range []string{"team_wiki_search", "Bash", "mcp__wuphf-office__team_action_execute"} {
+		if _, ok := wikiReadFromToolUse(name, `{"article_path":"x"}`); ok {
+			t.Errorf("non-read tool %q must be skipped", name)
+		}
+	}
+}
+
+// TestWikiContextForTask drives persist -> read-by-task (canonical, deduped).
+func TestWikiContextForTask(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	path := WikiContextSinkPath()
+	persistWikiRead("OFFICE-5", "playbooks/triage.md")
+	persistWikiRead("task-office-5", "team/escalation.md") // channel-slug tagging
+	persistWikiRead("OFFICE-5", "playbooks/triage.md")     // dup
+	persistWikiRead("OFFICE-OTHER", "noise.md")
+
+	got := WikiContextForTask(path, "OFFICE-5")
+	if len(got) != 2 || got[0] != "playbooks/triage.md" || got[1] != "team/escalation.md" {
+		t.Fatalf("want [triage, escalation] merged+deduped, got %v", got)
+	}
+}

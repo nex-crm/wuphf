@@ -243,6 +243,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 				traceSeq++
 				pendingTrace = &tr
 			}
+			if article, ok := wikiReadFromToolUse(event.ToolName, event.ToolInput); ok {
+				persistWikiRead(taskID, article) // provenance: context that informed the work
+			}
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))

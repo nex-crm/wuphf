@@ -34,14 +34,18 @@ func (e brokerExtractor) Extract(in workflow.ExtractInput) (workflow.Extraction,
 // workflowProposal is the result of extracting a workflow from one task. When
 // IsWorkflow is false, Spec/Shipcheck are nil and Reason explains why.
 type workflowProposal struct {
-	TaskID     string                    `json:"task_id"`
-	IsWorkflow bool                      `json:"is_workflow"`
-	Confidence float64                   `json:"confidence"`
-	Name       string                    `json:"name"`
-	Trigger    workflow.ExtractedTrigger `json:"trigger"`
-	Reason     string                    `json:"reason,omitempty"`
-	Spec       *workflow.Spec            `json:"spec,omitempty"`
-	Shipcheck  *workflow.ShipcheckReport `json:"shipcheck,omitempty"`
+	TaskID      string                    `json:"task_id"`
+	IsWorkflow  bool                      `json:"is_workflow"`
+	Confidence  float64                   `json:"confidence"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description,omitempty"`
+	Trigger     workflow.ExtractedTrigger `json:"trigger"`
+	Reason      string                    `json:"reason,omitempty"`
+	// WikiContext are the wiki articles the source task read — the provenance
+	// "what context informed this" trail.
+	WikiContext []string                  `json:"wiki_context,omitempty"`
+	Spec        *workflow.Spec            `json:"spec,omitempty"`
+	Shipcheck   *workflow.ShipcheckReport `json:"shipcheck,omitempty"`
 }
 
 // taskGoalAndOwner returns the human-facing ask (title + details) and the owner
@@ -103,8 +107,10 @@ func (b *Broker) extractWorkflowForTask(taskID string, ext workflow.Extractor) (
 	prop.IsWorkflow = ex.IsWorkflow
 	prop.Confidence = ex.Confidence
 	prop.Name = ex.Name
+	prop.Description = ex.Description
 	prop.Trigger = ex.Trigger
 	prop.Reason = ex.Reason
+	prop.WikiContext = WikiContextForTask(WikiContextSinkPath(), taskID)
 	if !ex.IsWorkflow || len(ex.Steps) == 0 {
 		return prop, nil
 	}
@@ -233,11 +239,22 @@ func (b *Broker) handleWorkflowsFreezeExtracted(w http.ResponseWriter, r *http.R
 	if title == "" {
 		title = "Detected workflow"
 	}
-	src := "one completed task"
-	if ew.Recurrence > 1 {
-		src = fmt.Sprintf("%d completed tasks", ew.Recurrence)
+	// Human description + provenance: what it does, where it came from, why.
+	description := strings.TrimSpace(ew.Description)
+	if description == "" {
+		description = title
 	}
-	description := fmt.Sprintf("Detected from %s and judged a reusable workflow (%.0f%% confident, shipcheck passed).", src, ew.Confidence*100)
+	src := strings.Join(ew.TaskIDs, ", ")
+	if src == "" {
+		src = "completed work"
+	}
+	description = fmt.Sprintf("%s — generated from %s (%.0f%% confident, shipcheck passed).", description, src, ew.Confidence*100)
+	if w := strings.TrimSpace(ew.Why); w != "" {
+		description += " Why: " + w
+	}
+	if len(ew.WikiContext) > 0 {
+		description += " Wiki context: " + strings.Join(ew.WikiContext, ", ") + "."
+	}
 
 	sk, report, created, errCode := b.freezeWorkflowSpec(spec, name, title, description, createdBy, []string{"workflow", "extracted"})
 	if errCode != "" {
