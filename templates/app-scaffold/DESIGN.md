@@ -92,7 +92,10 @@ raw pixels, so the rhythm is consistent.
 - **Cards are the lazy answer.** A pile of identical `<Card>`s is the #1 AI tell.
   Reach for `<Card withBorder>` only when an item is a genuine standalone object.
   For a list, a bordered `<Table>` or a `<Stack gap={0}>` of divider-separated rows
-  reads cleaner and denser than card confetti.
+  reads cleaner and denser than card confetti. ENFORCED: a `.map(...)` that
+  produces `<Card>`s is rejected at publish (a list rendered as a card pile). If a
+  small set is genuinely distinct standalone objects, put
+  `// wuphf-allow: card-pile — <why>` on the `.map` line.
 - Compose with intent: `<Group justify="space-between">` to push a count or action
   to the far edge; `<Stack>` for vertical flow; an asymmetric two-column
   `<Grid>`/`<SimpleGrid>` (e.g. a wide table + a narrow summary rail) beats a

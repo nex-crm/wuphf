@@ -237,6 +237,84 @@ func TestCheckAppStackConformance(t *testing.T) {
 	})
 }
 
+// TestCheckAppThemeDepth pins the design-depth gate: a Mantine app must override
+// the theme non-trivially; default/empty/one-key themes are the #1 AI tell and are
+// rejected, while a non-Mantine app and an explicit opt-out are skipped.
+func TestCheckAppThemeDepth(t *testing.T) {
+	mantine := func(main string) map[string]string {
+		return map[string]string{
+			"src/main.tsx": main,
+			"src/App.tsx":  `import { Table } from "@mantine/core"; export function App(){ return <Table/>; }`,
+		}
+	}
+	t.Run("non-trivial theme passes", func(t *testing.T) {
+		if v := checkAppThemeDepth(mantine(testMantineMainTSX)); len(v) != 0 {
+			t.Fatalf("a real theme must pass, got %+v", v)
+		}
+	})
+	t.Run("no createTheme is flagged", func(t *testing.T) {
+		main := `import { MantineProvider } from "@mantine/core"; render(<MantineProvider><App/></MantineProvider>);`
+		v := checkAppThemeDepth(mantine(main))
+		if len(v) != 1 || v[0].Rule != "default-theme" {
+			t.Fatalf("expected a default-theme violation, got %+v", v)
+		}
+	})
+	t.Run("trivial one-key theme is flagged", func(t *testing.T) {
+		main := `import { MantineProvider, createTheme } from "@mantine/core"; const t = createTheme({ primaryColor: "blue" }); render(<MantineProvider theme={t}><App/></MantineProvider>);`
+		if v := checkAppThemeDepth(mantine(main)); len(v) != 1 {
+			t.Fatalf("a one-key theme should be flagged, got %+v", v)
+		}
+	})
+	t.Run("non-Mantine app is not theme-flagged", func(t *testing.T) {
+		files := map[string]string{"src/main.tsx": `render(<App/>);`, "src/App.tsx": `export function App(){ return null; }`}
+		if v := checkAppThemeDepth(files); len(v) != 0 {
+			t.Fatalf("a non-Mantine app must not get a theme violation, got %+v", v)
+		}
+	})
+	t.Run("opt-out passes", func(t *testing.T) {
+		main := "// wuphf-allow: default-theme — human wants stock Mantine\nimport { MantineProvider } from \"@mantine/core\"; render(<MantineProvider><App/></MantineProvider>);"
+		if v := checkAppThemeDepth(mantine(main)); len(v) != 0 {
+			t.Fatalf("the default-theme opt-out should pass, got %+v", v)
+		}
+	})
+}
+
+// TestCheckAppCardPile flags a list rendered as a grid of Cards, leaves a
+// standalone Card and a mapped Table alone, and honors the opt-out.
+func TestCheckAppCardPile(t *testing.T) {
+	t.Run("a map producing Cards is flagged", func(t *testing.T) {
+		files := map[string]string{
+			"src/App.tsx": `export function App(){ return <SimpleGrid>{items.map((i) => <Card key={i.id}>{i.name}</Card>)}</SimpleGrid>; }`,
+		}
+		v := checkAppCardPile(files)
+		if len(v) != 1 || v[0].Rule != "card-pile" {
+			t.Fatalf("expected a card-pile violation, got %+v", v)
+		}
+	})
+	t.Run("a standalone Card is fine", func(t *testing.T) {
+		files := map[string]string{"src/App.tsx": `export function App(){ return <Card>hello</Card>; }`}
+		if v := checkAppCardPile(files); len(v) != 0 {
+			t.Fatalf("a standalone Card must not be flagged, got %+v", v)
+		}
+	})
+	t.Run("a map producing table rows is fine", func(t *testing.T) {
+		files := map[string]string{
+			"src/App.tsx": `export function App(){ return <Table>{rows.map((r) => <Table.Tr key={r.id}><Table.Td>{r.x}</Table.Td></Table.Tr>)}</Table>; }`,
+		}
+		if v := checkAppCardPile(files); len(v) != 0 {
+			t.Fatalf("mapped table rows must not be flagged, got %+v", v)
+		}
+	})
+	t.Run("opt-out passes", func(t *testing.T) {
+		files := map[string]string{
+			"src/App.tsx": "export function App(){ return <div>{kpis.map((k) => // wuphf-allow: card-pile — 3 distinct KPIs\n <Card key={k.id}>{k.v}</Card>)}</div>; }",
+		}
+		if v := checkAppCardPile(files); len(v) != 0 {
+			t.Fatalf("the card-pile opt-out should pass, got %+v", v)
+		}
+	})
+}
+
 // TestPublishRejectsWastefulSourceViaSave is the end-to-end gate: a publish whose
 // source re-runs work on tab focus is rejected by Save BEFORE the build, as a
 // caller error (HTTP 400) naming the rule — while a clean app with a

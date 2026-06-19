@@ -1,12 +1,26 @@
 import "@mantine/core/styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { MantineProvider } from "@mantine/core";
+import { createTheme, MantineProvider } from "@mantine/core";
 import { Refine } from "@refinedev/core";
 
 import { App } from "./App";
 import { bridgeDataProvider } from "./bridgeDataProvider";
 import "./styles.css";
+
+// A real theme is the single highest-leverage design move — default Mantine is
+// the #1 "AI-generated" tell, and the publish step REJECTS an app that ships it
+// unchanged. CUSTOMIZE this for the tool you are building (a calm digest vs. a
+// dense console vs. a triage queue want different accents/rhythm) — see DESIGN.md
+// §2. Keep it a deliberate override, not the default.
+const appTheme = createTheme({
+  primaryColor: "indigo",
+  defaultRadius: "md",
+  fontFamilyMonospace:
+    "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+  headings: { fontWeight: "650", sizes: { h1: { fontSize: "1.6rem" } } },
+  spacing: { md: "1rem" },
+});
 
 // NOTE: the live-preview "select to edit" + error-capture inspector is injected
 // by vite.config.ts (dev only), NOT imported here — so it survives any rewrite
@@ -25,7 +39,7 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <MantineProvider forceColorScheme="light">
+      <MantineProvider theme={appTheme} forceColorScheme="light">
         <Refine
           dataProvider={bridgeDataProvider}
           resources={[

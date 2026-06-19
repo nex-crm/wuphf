@@ -434,6 +434,8 @@ func (s *customAppStore) resolvePublishHTML(dir string, req CustomAppWriteReques
 	// The agent reads the file:line list and republishes.
 	violations := checkAppSourceEfficiency(req.Files)
 	violations = append(violations, checkAppStackConformance(req.Files)...)
+	violations = append(violations, checkAppThemeDepth(req.Files)...)
+	violations = append(violations, checkAppCardPile(req.Files)...)
 	if len(violations) > 0 {
 		return "", appEfficiencyGuardError(violations)
 	}

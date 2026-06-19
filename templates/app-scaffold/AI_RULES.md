@@ -74,6 +74,14 @@ bridge calls:
 Declare the resources you use in `<Refine resources={[…]}>`, then read them with
 refine hooks. **Never call `fetch` and never re-implement the data layer.**
 
+**Use refine, or don't mount it.** If your app reads/writes workspace data, route
+it through refine hooks (`useTable` / `useList` / `useOne` / `useCreate`) — that is
+why `<Refine>` + `bridgeDataProvider` are wired. Do NOT mount `<Refine>` and then
+ignore it by calling the bridge directly — a wired-but-unused data layer is dead
+weight and an AI tell. Conversely, if your app ONLY uses `ai()` + `createTask`
+(e.g. a paste-input tool with no workspace resources), you may drop `<Refine>`
+entirely and keep just `MantineProvider` — don't carry an unused provider.
+
 ### A sortable / filterable / paginated grid — `useTable`
 
 This is the main pattern. `src/App.tsx` is a complete worked example over
@@ -201,7 +209,9 @@ loudly — apps are read-mostly by design. Don't try to work around this.
    error? }`; `ai()` returns `{ text?, object?, error? }` (e.g.
    `"ai_unavailable"`). Render a real connect-state / error-state / empty-state.
    NEVER run an unguarded `JSON.parse` on a bridge reply and never let a bad
-   response crash the app into a white screen.
+   response crash the app into a white screen. If you make MORE THAN ONE `ai()`
+   call (a multi-step pipeline), guard EVERY call — check `ai_unavailable` / a
+   generic `error` / a malformed `object` after each one, not just the first.
 8. **Don't refetch on every focus — this is ENFORCED.** Load once on mount;
    refresh only on an explicit user action (a Refresh button) or a deliberate
    schedule (a timer with a COMPUTED delay, e.g. a daily 9am refresh). Do NOT
@@ -225,10 +235,13 @@ loudly — apps are read-mostly by design. Don't try to work around this.
 These rules keep the app correct. **`DESIGN.md` keeps it from looking AI-generated
 — read it, hold its bar, and run its pre-ship checklist before `register_app`.** A
 WUPHF App is a fixed-kit, single-screen Mantine tool on white; the design bar is
-"make THAT feel crafted," not "add things the sandbox forbids." **ENFORCED: the
-publish step rejects an app that does not render inside `MantineProvider` /
-import `@mantine/core` — make it look designed by OVERRIDING the theme, never by
-replacing Mantine with a hand-rolled CSS system.** In short:
+"make THAT feel crafted," not "add things the sandbox forbids." **ENFORCED — the
+publish step rejects an app that:** (a) does not render inside `MantineProvider` /
+import `@mantine/core` (build on the kit, don't hand-roll a CSS system); (b) ships
+**default-themed Mantine** — a missing or no-op `createTheme` (override it: ≥2 of
+primaryColor / defaultRadius / spacing / headings / fontFamily); or (c) renders a
+**list as a pile of `<Card>`s** (`.map(...)` producing `<Card>` — use a `<Table>`
+or rows instead). In short:
 
 1. **Set a real theme.** Override Mantine once in `main.tsx` via `createTheme` —
    `primaryColor`, one `defaultRadius`, a heading scale, a tightened `spacing`

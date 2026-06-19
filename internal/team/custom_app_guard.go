@@ -67,9 +67,39 @@ const (
 
 	// wuphfAllowNoMantine is the file-level opt-out for the Mantine requirement.
 	wuphfAllowNoMantine = "wuphf-allow: no-mantine"
+
+	// appGuardThemeMsg fires when a Mantine app ships the default theme. Default
+	// Mantine is the #1 "AI made this" tell; the design discipline's single
+	// highest-leverage move is a real createTheme override.
+	appGuardThemeMsg       = "ships default-themed Mantine — there is no real createTheme override. Default Mantine is the #1 \"AI-generated\" tell. Override the theme once in src/main.tsx via createTheme with at least two of: primaryColor, defaultRadius, spacing, headings/fontSizes, fontFamily, colors (see DESIGN.md §2). If the human EXPLICITLY wants stock Mantine, put `// wuphf-allow: default-theme — <why>` in src/main.tsx."
+	wuphfAllowDefaultTheme = "wuphf-allow: default-theme"
+
+	// appGuardCardPileMsg fires on a list rendered as a grid of Cards — the
+	// "card pile" anti-pattern. Lists belong in a Table or divider rows; cards are
+	// for standalone objects.
+	appGuardCardPileMsg = "renders a list as a pile of <Card>s (a .map(...) producing <Card>). A homogeneous list belongs in a <Table> or divider-separated rows; reserve <Card> for a few standalone objects (see DESIGN.md §4). If this really is a small set of distinct objects, put `// wuphf-allow: card-pile — <why>` on the .map line."
 )
 
-var reMantineProvider = regexp.MustCompile(`\bMantineProvider\b`)
+var (
+	reMantineProvider = regexp.MustCompile(`\bMantineProvider\b`)
+	reCreateTheme     = regexp.MustCompile(`createTheme\s*\(`)
+	reMapCardPile     = regexp.MustCompile(`\.map\s*\([\s\S]{0,600}?<Card\b`)
+	// themeKeyRegexps detect a meaningful override key set inside a createTheme call.
+	themeMeaningfulKeys = []string{
+		"primaryColor", "primaryShade", "defaultRadius", "radius", "spacing",
+		"fontSizes", "headings", "fontFamily", "fontFamilyMonospace", "colors",
+		"components", "shadows", "lineHeights", "autoContrast", "scale", "white", "black",
+	}
+	themeKeyRegexps = compileThemeKeyRegexps()
+)
+
+func compileThemeKeyRegexps() map[string]*regexp.Regexp {
+	out := make(map[string]*regexp.Regexp, len(themeMeaningfulKeys))
+	for _, k := range themeMeaningfulKeys {
+		out[k] = regexp.MustCompile(`\b` + regexp.QuoteMeta(k) + `\s*:`)
+	}
+	return out
+}
 
 var (
 	// visibilitychange only ever fires at the tab/document level, so flag any
@@ -145,6 +175,137 @@ func checkAppStackConformance(files map[string]string) []appGuardViolation {
 		file = "src/main.tsx"
 	}
 	return []appGuardViolation{{File: file, Line: 0, Rule: "use-mantine", Message: appGuardMantineMsg}}
+}
+
+// checkAppThemeDepth enforces design DEPTH within Mantine: a Mantine app must
+// override the theme non-trivially (a real createTheme), not ship stock Mantine.
+// Only fires for an app that actually renders MantineProvider (a non-Mantine app
+// is already handled by the stack gate / its no-mantine opt-out). The
+// default-theme opt-out skips it.
+func checkAppThemeDepth(files map[string]string) []appGuardViolation {
+	scanned := false
+	usesMantine := false
+	bestKeys := 0
+	entry := ""
+	for rel, content := range files {
+		if !appGuardShouldScan(rel) {
+			continue
+		}
+		scanned = true
+		if base := path.Base(rel); base == "main.tsx" || base == "main.jsx" {
+			entry = rel
+		}
+		if strings.Contains(content, wuphfAllowNoMantine) || strings.Contains(content, wuphfAllowDefaultTheme) {
+			return nil
+		}
+		code := appCommentStripped(content)
+		if reMantineProvider.MatchString(code) {
+			usesMantine = true
+		}
+		if n := createThemeKeyCount(code); n > bestKeys {
+			bestKeys = n
+		}
+	}
+	if !scanned || !usesMantine || bestKeys >= 2 {
+		return nil
+	}
+	file := entry
+	if file == "" {
+		file = "src/main.tsx"
+	}
+	return []appGuardViolation{{File: file, Line: 0, Rule: "default-theme", Message: appGuardThemeMsg}}
+}
+
+// createThemeKeyCount returns how many distinct meaningful override keys the first
+// createTheme({...}) call in code sets (0 when there is no such call). Used to tell
+// a real theme from an empty/no-op one.
+func createThemeKeyCount(code string) int {
+	loc := reCreateTheme.FindStringIndex(code)
+	if loc == nil {
+		return 0
+	}
+	obj, ok := balancedBraceAfter(code, loc[1])
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, re := range themeKeyRegexps {
+		if re.MatchString(obj) {
+			n++
+		}
+	}
+	return n
+}
+
+// balancedBraceAfter returns the contents of the first {...} block at or after
+// `from` in s, tracking string spans so a brace inside a string is ignored.
+func balancedBraceAfter(s string, from int) (string, bool) {
+	i := strings.IndexByte(s[from:], '{')
+	if i < 0 {
+		return "", false
+	}
+	start := from + i
+	depth := 0
+	var quote byte
+	esc := false
+	for j := start; j < len(s); j++ {
+		c := s[j]
+		if quote != 0 {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == quote:
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start+1 : j], true
+			}
+		}
+	}
+	return "", false
+}
+
+// checkAppCardPile flags a list rendered as a grid of Cards — a `.map(...)` whose
+// body produces a `<Card>`. Honors a line-level `wuphf-allow: card-pile` opt-out
+// (on the .map line or the line above). Heuristic by nature; the opt-out covers
+// the rare legit "few distinct objects" case.
+func checkAppCardPile(files map[string]string) []appGuardViolation {
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var out []appGuardViolation
+	for _, rel := range keys {
+		if !appGuardShouldScan(rel) {
+			continue
+		}
+		content := files[rel]
+		rawLines := strings.Split(content, "\n")
+		code := appCommentStripped(content)
+		loc := reMapCardPile.FindStringIndex(code)
+		if loc == nil {
+			continue
+		}
+		line := 1 + strings.Count(code[:loc[0]], "\n")
+		if appGuardSuppressed(rawLines, strings.Split(code, "\n"), line-1) {
+			continue
+		}
+		out = append(out, appGuardViolation{File: rel, Line: line, Rule: "card-pile", Message: appGuardCardPileMsg})
+	}
+	return out
 }
 
 // appGuardShouldScan reports whether a project-relative path is agent-authored

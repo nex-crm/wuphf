@@ -35,12 +35,14 @@ func failBuildBundle(_ string) ([]byte, error) {
 	return nil, newCustomAppCallerError("app: build failed (exit status 1)\nsrc/App.tsx(3,1): error TS2304: Cannot find name 'oops'.")
 }
 
-// testMantineMainTSX is a minimal entry that satisfies the stack-conformance gate
-// (renders MantineProvider, imports @mantine/core). Build/source fixtures include
-// it so they exercise their own concern rather than tripping the use-mantine gate.
-const testMantineMainTSX = `import { MantineProvider } from "@mantine/core";
+// testMantineMainTSX is a minimal entry that satisfies the stack-conformance AND
+// theme-depth gates (renders MantineProvider, imports @mantine/core, and applies a
+// non-trivial createTheme). Build/source fixtures include it so they exercise their
+// own concern rather than tripping the use-mantine / default-theme gates.
+const testMantineMainTSX = `import { MantineProvider, createTheme } from "@mantine/core";
 import { createRoot } from "react-dom/client";
-createRoot(document.getElementById("root")!).render(<MantineProvider><App /></MantineProvider>);`
+const theme = createTheme({ primaryColor: "indigo", defaultRadius: "md", spacing: { md: "1rem" } });
+createRoot(document.getElementById("root")!).render(<MantineProvider theme={theme}><App /></MantineProvider>);`
 
 // TestPublishOverwritesTamperedBridgeWithCanonical is the core security
 // regression: an agent that rewrites the protected wuphf-bridge.ts (here,
