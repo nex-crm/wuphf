@@ -277,6 +277,50 @@ export function createAppRouter(history: RouterHistory = createHashHistory()) {
   return createRouter({ routeTree, history });
 }
 
+/**
+ * Bridge a path-form deep link into the hash the router actually reads.
+ *
+ * The web server (broker `spaFileServer`) deliberately serves index.html for
+ * any non-asset path so external deep links resolve — `/apps/app_<id>`,
+ * `/tasks/OFFICE-41`, `/wiki/team/people/x.md` from the Slack Home tab, a
+ * shared app URL, a build-complete link. But the router runs on hash history,
+ * which ignores `location.pathname` and reads `location.hash`. Without this
+ * bridge every path-form deep link boots the home composer (empty hash →
+ * index route) instead of the linked surface — the exact "open /apps/<id>
+ * directly and land on Home" failure.
+ *
+ * When the page loads on a real path (`pathname !== "/"`) and carries no
+ * client hash route, return the canonical hash-form URL (`/#<pathname><search>`)
+ * so the caller can rewrite the address bar BEFORE `createHashHistory` reads
+ * location. A URL that already carries a hash route is left untouched — the
+ * hash is the source of truth, so we never clobber a working `#/...` deep link.
+ * Pure (location-shaped input, string|null output) so it unit-tests without a
+ * DOM.
+ */
+export function pathDeepLinkToHashURL(loc: {
+  pathname: string;
+  search: string;
+  hash: string;
+}): string | null {
+  const pathname = loc.pathname || "/";
+  if (pathname === "/") return null;
+  const hashRoute = loc.hash.replace(/^#/, "");
+  // A meaningful hash route already drives the router; never overwrite it.
+  if (hashRoute !== "" && hashRoute !== "/") return null;
+  return `/#${pathname}${loc.search}`;
+}
+
+// Run the bridge before the router is constructed (createHashHistory reads
+// location eagerly when createRouter builds its initial match). replaceState
+// keeps this boot fixup out of the back-stack — it's a normalization, not a
+// navigation the user took.
+if (typeof window !== "undefined") {
+  const normalized = pathDeepLinkToHashURL(window.location);
+  if (normalized) {
+    window.history.replaceState(null, "", normalized);
+  }
+}
+
 export const router = createAppRouter();
 
 declare module "@tanstack/react-router" {
