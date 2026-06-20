@@ -1,0 +1,12 @@
+[project]
+name = "deepagents-seam-spike"
+version = "0.0.0"
+description = "Throwaway spike: prove Go-broker <-> Python-deepagents seam over MCP."
+requires-python = ">=3.11"
+dependencies = [
+    "deepagents",
+    "langchain-mcp-adapters",
+    "langgraph",
+    "langchain-core",
+    "mcp",
+]

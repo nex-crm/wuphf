@@ -1,0 +1,4 @@
+results.json
+_runstate.sqlite
+__pycache__/
+*.pyc
