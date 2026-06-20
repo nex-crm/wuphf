@@ -123,3 +123,39 @@ func TestRenderContextSkipsInternalKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderActionParamsSubstitutesUpstreamOutput verifies the send body is
+// built from the action's params with {{step}} tokens replaced by the real
+// upstream output (the llm step's text) — not the raw context map, and not a
+// placeholder.
+func TestRenderActionParamsSubstitutesUpstreamOutput(t *testing.T) {
+	params := map[string]any{"data": map[string]any{
+		"channel":       "#general",
+		"markdown_text": "{{summarize_urgent_emails}}",
+	}}
+	data := map[string]any{
+		"summarize_urgent_emails":  "⚠️ 2 urgent: Acme renewal, YC intro.",
+		"gmail_fetch_emails":       []any{map[string]any{"subject": "Acme renewal"}},
+		"gmail_fetch_emails_count": 2, // internal-ish; must not leak into a token
+	}
+	body := renderActionParams(params, data)
+	inner, _ := body["data"].(map[string]any)
+	if inner == nil {
+		t.Fatalf("rendered body missing data envelope: %+v", body)
+	}
+	if inner["channel"] != "#general" {
+		t.Errorf("channel must pass through, got %v", inner["channel"])
+	}
+	if inner["markdown_text"] != "⚠️ 2 urgent: Acme renewal, YC intro." {
+		t.Fatalf("markdown_text must be the real summary, got %q", inner["markdown_text"])
+	}
+}
+
+// TestRenderActionParamsEmptyFallsBackToContext keeps legacy contracts working:
+// with no authored params, the whole context is the body (old behavior).
+func TestRenderActionParamsEmptyFallsBackToContext(t *testing.T) {
+	data := map[string]any{"x": 1}
+	if got := renderActionParams(nil, data); got["x"] != 1 {
+		t.Fatalf("empty params must fall back to context, got %+v", got)
+	}
+}

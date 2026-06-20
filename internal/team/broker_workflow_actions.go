@@ -196,15 +196,86 @@ func (b *Broker) execLLMAction(ctx context.Context, a workflow.Action, data map[
 		baseline := fmt.Sprintf("[baseline — %s] %s", note, a.ID)
 		return workflow.ActionOutcome{OK: true, Output: map[string]any{
 			outputKeyFor(a): baseline,
+			a.ID:            baseline, // addressable as {{<step id>}} by a later step
 			"draft":         baseline,
 			"llm_used":      false,
 		}}
 	}
 	return workflow.ActionOutcome{OK: true, Output: map[string]any{
 		outputKeyFor(a): text,
+		a.ID:            text, // addressable as {{<step id>}} by a later step
 		"draft":         text,
 		"llm_used":      true,
 	}}
+}
+
+// renderActionParams builds an external action's request body from its authored
+// Params, substituting {{key}} tokens in string values with the matching prior
+// step output from data (e.g. an llm step's produced text). This is how a send's
+// content gets the REAL text synthesised upstream instead of a static
+// placeholder. With no authored params it falls back to the raw context map
+// (legacy contracts that relied on the whole context being the body).
+func renderActionParams(params, data map[string]any) map[string]any {
+	if len(params) == 0 {
+		return data
+	}
+	if m, ok := renderTemplateValue(params, data).(map[string]any); ok {
+		return m
+	}
+	return params
+}
+
+// renderTemplateValue recursively substitutes {{key}} tokens in every string
+// reachable in v with values from data.
+func renderTemplateValue(v any, data map[string]any) any {
+	switch t := v.(type) {
+	case string:
+		return substituteTemplate(t, data)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, vv := range t {
+			out[k] = renderTemplateValue(vv, data)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, vv := range t {
+			out[i] = renderTemplateValue(vv, data)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// substituteTemplate replaces each {{key}} in s with the stringified data[key].
+// Unmatched tokens are left as-is (visible in the run record / approval card so a
+// mis-wired reference is caught, not silently sent blank).
+func substituteTemplate(s string, data map[string]any) string {
+	if !strings.Contains(s, "{{") {
+		return s
+	}
+	for k, v := range data {
+		if isInternalOutputKey(k) {
+			continue
+		}
+		token := "{{" + k + "}}"
+		if strings.Contains(s, token) {
+			s = strings.ReplaceAll(s, token, valueToTemplateString(v))
+		}
+	}
+	return s
+}
+
+func valueToTemplateString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 // outputKeyFor names the primary output of an llm step for downstream + the UI:

@@ -90,3 +90,58 @@ func TestParseExtractionToleratesFence(t *testing.T) {
 		t.Fatalf("decoded wrong: %+v", e)
 	}
 }
+
+// TestExtractInsertsLLMSynthesisStep is the regression for the "hollow workflow"
+// bug: the assistant's in-head synthesis (summarize) is NOT a tool call, so it
+// is not in the gated shape — but the extractor must keep it (it's the
+// intelligence that makes fetch→post actually produce content) and build it as a
+// real llm step, while the send references its output instead of a placeholder.
+func TestExtractInsertsLLMSynthesisStep(t *testing.T) {
+	shape := []string{"gmail_fetch_emails", "slack_send_message"} // only the 2 tool calls
+	e := Extraction{
+		IsWorkflow: true,
+		Name:       "Urgent inbox → Slack",
+		Steps: []ExtractedStep{
+			{Kind: "integration", ActionID: "GMAIL_FETCH_EMAILS", Platform: "gmail",
+				Params: map[string]any{"data": map[string]any{"query": "is:important"}}, ResultPath: "data.messages", Expose: []string{"subject"}},
+			{Kind: "llm", ActionID: "summarize_urgent_emails",
+				Instruction: "Summarize the urgent emails into a short Slack alert."},
+			{Kind: "integration", ActionID: "SLACK_SEND_MESSAGE", Platform: "slack",
+				Params: map[string]any{"data": map[string]any{"channel": "#general", "markdown_text": "{{summarize_urgent_emails}}"}}},
+		},
+	}
+	g := GroundExtraction(e, shape)
+	if len(g.Steps) != 3 || !g.IsWorkflow {
+		t.Fatalf("grounding must KEEP the llm step (3 steps, is_workflow), got %d / %v", len(g.Steps), g.IsWorkflow)
+	}
+
+	spec, err := BuildSpecFromExtraction("x", "outbound", g, map[string]bool{"gmail": true, "slack": true})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if rep := Shipcheck(&spec); !rep.Passed {
+		t.Fatalf("3-step contract must shipcheck:\n%s", rep.String())
+	}
+	// Real chain: 4 states / 3 transitions / 3 actions.
+	if len(spec.States) != 4 || len(spec.Transitions) != 3 || len(spec.Actions) != 3 {
+		t.Fatalf("want a 3-step chain (4 states), got %d states / %d transitions / %d actions",
+			len(spec.States), len(spec.Transitions), len(spec.Actions))
+	}
+	mid := actionByID(spec, "summarize_urgent_emails")
+	if mid == nil || mid.Kind != ActionLLM || mid.Platform != "" {
+		t.Fatalf("middle step must be an unbound llm action, got %+v", mid)
+	}
+	if mid.Description != "Summarize the urgent emails into a short Slack alert." {
+		t.Errorf("llm instruction not carried as description: %q", mid.Description)
+	}
+	// The llm step must NOT be allow-listed (it's not an integration read).
+	if readAllowed(spec, "", "SUMMARIZE_URGENT_EMAILS") {
+		t.Errorf("llm step must not appear in allowed_reads")
+	}
+	// The send still references the synthesis output (templating happens at run time).
+	send := actionByID(spec, "slack_send_message")
+	body, _ := send.Params["data"].(map[string]any)
+	if body == nil || body["markdown_text"] != "{{summarize_urgent_emails}}" {
+		t.Fatalf("send must reference the llm output token, got %+v", send.Params)
+	}
+}

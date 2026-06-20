@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/workflow"
@@ -44,5 +45,60 @@ func TestWorkflowActionExecRouting(t *testing.T) {
 	o = exec(workflow.Action{ID: "slack_send", Kind: workflow.ActionExternal}, nil)
 	if called || !o.OK {
 		t.Fatalf("targetless external should record intent without the gate: called=%v ok=%v", called, o.OK)
+	}
+}
+
+// TestWorkflowRunWiresLLMOutputIntoSend proves the execution fix end-to-end
+// through the real action dispatch: a read's output flows into an llm step,
+// whose produced text is substituted into the SEND's body — so the send carries
+// real content, not the "{{...}}" token or a placeholder. Uses a fake gate so
+// no live integration is needed; the llm step runs the real (here unconfigured →
+// baseline) provider, which still exercises the output-threading + templating.
+func TestWorkflowRunWiresLLMOutputIntoSend(t *testing.T) {
+	b := newTestBroker(t)
+
+	var sentBody map[string]any
+	fakeGate := func(_ context.Context, _, platform, actionID string, data map[string]any) workflow.ActionOutcome {
+		sentBody = data // what the runtime would hand Composio as the send body
+		return workflow.ActionOutcome{OK: true, Output: map[string]any{"sent": true}}
+	}
+	exec := b.makeWorkflowActionExecWithGate(context.Background(), "outbound", fakeGate, &workflow.Spec{})
+
+	// Simulate the runner threading data across steps.
+	data := map[string]any{}
+
+	// 1) read already produced the projected emails (skip the live Composio call).
+	data["gmail_fetch_emails"] = []any{map[string]any{"subject": "Acme renewal due Friday"}}
+
+	// 2) llm synthesis step — real provider call (baseline when unconfigured).
+	llm := workflow.Action{ID: "summarize_urgent_emails", Kind: workflow.ActionLLM,
+		Description: "Summarize the urgent emails into a short Slack alert."}
+	for k, v := range exec(llm, data).Output {
+		data[k] = v
+	}
+	summary, _ := data["summarize_urgent_emails"].(string)
+	if strings.TrimSpace(summary) == "" {
+		t.Fatalf("llm step must produce text addressable by its id, got %+v", data)
+	}
+
+	// 3) send step references the llm output token; the gate must receive the
+	//    REAL produced text, not the token.
+	send := workflow.Action{ID: "slack_send_message", Kind: workflow.ActionExternal,
+		Platform: "slack", ActionID: "SLACK_SEND_MESSAGE",
+		Params: map[string]any{"data": map[string]any{
+			"channel": "#general", "markdown_text": "{{summarize_urgent_emails}}",
+		}}}
+	exec(send, data)
+
+	inner, _ := sentBody["data"].(map[string]any)
+	if inner == nil {
+		t.Fatalf("send body missing data envelope: %+v", sentBody)
+	}
+	got, _ := inner["markdown_text"].(string)
+	if strings.Contains(got, "{{") {
+		t.Fatalf("send still carries an unresolved token: %q", got)
+	}
+	if got != summary {
+		t.Fatalf("send body must be the llm output %q, got %q", summary, got)
 	}
 }

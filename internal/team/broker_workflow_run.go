@@ -70,7 +70,11 @@ func (b *Broker) makeWorkflowActionExecWithGate(ctx context.Context, agent strin
 					a.ID + "_note": "drafted — no integration connected for " + a.ID + "; nothing was sent",
 				}}
 			}
-			return gate(ctx, agent, a.Platform, a.ActionID, data)
+			// The send body is the action's authored params with {{step}} tokens
+			// replaced by the real upstream output (e.g. the summary an llm step
+			// produced) — NOT the raw context map. That is what turns a contract
+			// with "{{summarize_emails}}" into an actual message.
+			return gate(ctx, agent, a.Platform, a.ActionID, renderActionParams(a.Params, data))
 		default:
 			// A deterministic step with no domain handler. If it looks like a
 			// send/post/notify, do NOT report a silent success — a real send needs

@@ -49,15 +49,30 @@ type ExtractedTrigger struct {
 
 // ExtractedStep is one workflow step the model reconstructed from the trace.
 type ExtractedStep struct {
+	// Kind is "integration" (a real provider call — default) or "llm" (a
+	// synthesis/reasoning step the assistant did in its head — summarize, draft,
+	// decide. That work is NOT a tool call, so it is NOT in the gated shape; the
+	// extractor is allowed to re-insert it as the connective intelligence a
+	// fetch→post workflow needs to actually produce real content).
+	Kind       string         `json:"kind,omitempty"`
 	ActionID   string         `json:"action_id"`
 	Platform   string         `json:"platform"`
 	Params     map[string]any `json:"params,omitempty"`
 	ResultPath string         `json:"result_path,omitempty"`
 	Expose     []string       `json:"expose,omitempty"`
+	// Instruction is the prompt for an llm step: what to produce from the prior
+	// steps' data (e.g. "Summarize the urgent emails into a short Slack alert").
+	Instruction string `json:"instruction,omitempty"`
 	// FeedsFrom names an earlier step's action_id whose output feeds this step,
 	// or "" for an independent step. Surfaced for review; the linear contract is
 	// built from step order.
 	FeedsFrom string `json:"feeds_from,omitempty"`
+}
+
+// isLLMStep reports whether a step is a synthesis/reasoning step (not a real
+// integration call) — exempt from the grounded-to-shape requirement.
+func (s ExtractedStep) isLLMStep() bool {
+	return strings.EqualFold(strings.TrimSpace(s.Kind), "llm")
 }
 
 // Extraction is the model's judgment + reconstruction for one completed task.
@@ -95,16 +110,31 @@ func GroundExtraction(e Extraction, shape []string) Extraction {
 	}
 	seen := map[string]bool{}
 	grounded := make([]ExtractedStep, 0, len(e.Steps))
+	hasIntegration := false
 	for _, st := range e.Steps {
 		key := strings.ToLower(strings.TrimSpace(st.ActionID))
-		if key == "" || !allowed[key] || seen[key] {
+		if key == "" || seen[key] {
 			continue
 		}
+		if st.isLLMStep() {
+			// Synthesis step (summarize/draft/decide) — connective intelligence
+			// that was the assistant's reasoning, not a tool call, so it is NOT
+			// in the gated shape. Keep it; it cannot mint an integration call.
+			seen[key] = true
+			grounded = append(grounded, st)
+			continue
+		}
+		if !allowed[key] {
+			continue // an integration step must be grounded in what actually ran
+		}
 		seen[key] = true
+		hasIntegration = true
 		grounded = append(grounded, st)
 	}
 	e.Steps = grounded
-	if len(grounded) == 0 {
+	// A workflow needs at least one real integration action; pure-llm "workflows"
+	// (no provider calls grounded) are not surfaced.
+	if !hasIntegration {
 		e.IsWorkflow = false
 	}
 	return e
@@ -148,29 +178,40 @@ func BuildSpecFromExtraction(id, operator string, e Extraction, knownPlatforms m
 		token := actionToken(st.ActionID)
 		// Action binding.
 		a := Action{ID: token, Description: "Step: " + token}
-		platform := strings.ToLower(strings.TrimSpace(st.Platform))
-		if platform == "" {
-			if p, _, ok := bindIntegrationAction(token, knownPlatforms); ok {
-				platform = p
+		switch {
+		case st.isLLMStep():
+			// Connective synthesis step: a real model call at run time
+			// (execLLMAction renders the prior steps' data into the prompt). No
+			// integration binding, never allow-listed.
+			a.Kind = ActionLLM
+			if instr := strings.TrimSpace(st.Instruction); instr != "" {
+				a.Description = instr
 			}
-		}
-		if platform != "" && (knownPlatforms == nil || knownPlatforms[platform]) {
-			a.Platform = platform
-			a.ActionID = strings.ToUpper(token)
-			a.Params = st.Params
-			a.ResultPath = st.ResultPath
-			a.Expose = st.Expose
-			if isReadAction(token) {
-				a.Kind = ActionDeterministic
-				if key := platform + "\x00" + a.ActionID; !seenRead[key] {
-					seenRead[key] = true
-					allowedReads = append(allowedReads, ActionRef{Platform: platform, ActionID: a.ActionID})
+		default:
+			platform := strings.ToLower(strings.TrimSpace(st.Platform))
+			if platform == "" {
+				if p, _, ok := bindIntegrationAction(token, knownPlatforms); ok {
+					platform = p
+				}
+			}
+			if platform != "" && (knownPlatforms == nil || knownPlatforms[platform]) {
+				a.Platform = platform
+				a.ActionID = strings.ToUpper(token)
+				a.Params = st.Params
+				a.ResultPath = st.ResultPath
+				a.Expose = st.Expose
+				if isReadAction(token) {
+					a.Kind = ActionDeterministic
+					if key := platform + "\x00" + a.ActionID; !seenRead[key] {
+						seenRead[key] = true
+						allowedReads = append(allowedReads, ActionRef{Platform: platform, ActionID: a.ActionID})
+					}
+				} else {
+					a.Kind = ActionExternal
 				}
 			} else {
-				a.Kind = ActionExternal
+				a.Kind = inferKind(token)
 			}
-		} else {
-			a.Kind = inferKind(token)
 		}
 		actions = append(actions, a)
 		expectActions = append(expectActions, token)
@@ -265,9 +306,11 @@ You analyze ONE completed task from an AI office and decide whether it is a reus
 A workflow is a repeatable, multi-step procedure with a clear outcome (e.g. "fetch unread email -> summarize -> post to Slack"). A one-off question, a single lookup, or pure exploration is NOT a workflow.
 
 HARD RULES:
-- Ground every step in the trace. You may ONLY use action_id values that appear in the ALLOWED list. Never invent a step.
-- Fill each step's params from the REAL arguments you see in the trace (e.g. the gmail query, the slack channel). Use result_path + expose to name the response fields the next step consumes — infer them from the response shape, never copy raw values.
-- Keep steps in the order they ran. Set feeds_from to the earlier step whose output a step consumes.
+- Integration steps (kind:"integration", the default) must be GROUNDED: only use action_id values that appear in the ALLOWED list. Never invent an integration call.
+- Fill each integration step's params from the REAL arguments you see in the trace (e.g. the gmail query, the slack channel). Use result_path + expose to name the response fields the next step consumes — infer them from the response shape, never copy raw values.
+- INSERT THE THINKING. The trace only shows tool calls, but the real work also includes what the assistant DID IN ITS HEAD between them — summarizing the fetched data, deciding what's urgent, writing the message. When a later step's CONTENT is produced from earlier data (a summary, a digest, a drafted reply), add a step with kind:"llm", a short action_id (e.g. "summarize_urgent_emails"), and an "instruction" describing what to produce. Place it BEFORE the step that uses it. This is the only kind of step allowed to be outside the ALLOWED list.
+- WIRE THE CONTENT. A send/post step must NOT contain a placeholder like "<summary here>". Reference the llm step's output by putting "{{<that step's action_id>}}" in the field (e.g. the slack message text becomes "{{summarize_urgent_emails}}"). At run time that token is replaced with the real produced text.
+- Keep steps in the order they ran (with the llm step inserted in its logical place). Set feeds_from to the earlier step whose output a step consumes.
 - Judge honestly: set is_workflow=false (with a reason) for one-offs. Confidence is 0..1.
 - Suggest a trigger: manual, schedule (with interval_minutes if the ask implies a cadence like "every morning"=1440), webhook, or context.
 
@@ -279,7 +322,7 @@ WRITING STYLE for name, description, and reason — these are read by a BUSY, NO
 - reason: this is the PROVENANCE — explain how we spotted this by describing what the OPERATOR was actually doing in this task that revealed the workflow. Ground it in the human's ask and the real work you see in the trace: name the actual things they touched (their Gmail inbox, the #general Slack channel, their Notion notes, their HubSpot records) and what they were trying to get done, and call out any repetition (they had the assistant do the same thing several times). It should read like "We noticed this while you were …, where you kept having the assistant …" so the operator RECOGNIZES their own work and trusts the suggestion. Example shape: "We spotted this while you were emailing YC partners and kept asking your assistant to pull the earlier VC conversations from Notion and HubSpot before each reply — the same pull-context-then-draft routine every time." Describe what HAPPENED, do not pitch the benefit.
 
 Reply with ONLY a JSON object of this shape:
-{"is_workflow":bool,"confidence":number,"name":string,"description":string,"trigger":{"kind":string,"interval_minutes":number,"rationale":string},"steps":[{"action_id":string,"platform":string,"params":object,"result_path":string,"expose":[string],"feeds_from":string}],"reason":string}`)
+{"is_workflow":bool,"confidence":number,"name":string,"description":string,"trigger":{"kind":string,"interval_minutes":number,"rationale":string},"steps":[{"kind":"integration"|"llm","action_id":string,"platform":string,"params":object,"result_path":string,"expose":[string],"instruction":string,"feeds_from":string}],"reason":string}`)
 
 	var b strings.Builder
 	b.WriteString("HUMAN'S ASK:\n")
