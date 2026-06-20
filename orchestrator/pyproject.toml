@@ -1,0 +1,23 @@
+[project]
+name = "wuphf-orchestrator"
+version = "0.1.0"
+description = "WUPHF agent orchestrator (LangGraph). Owns task lifecycle on top of Claude Code/Codex; Go broker stays the durable host."
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2",
+    "fastapi>=0.110",
+    "sse-starlette>=2",
+    "uvicorn>=0.29",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# Real inner-harness execution. Optional so the package installs + tests green
+# without it; ClaudeAgentHarness imports it lazily.
+claude = ["claude-agent-sdk"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
