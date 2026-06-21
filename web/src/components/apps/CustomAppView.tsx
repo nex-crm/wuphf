@@ -199,10 +199,24 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
     ensureEditSession.mutate();
   }
 
+  function onToggleSelect(): void {
+    // "Select to edit" is a first-class entry point — it works whether or not
+    // the edit chat is already open. The inspector lives in the live preview,
+    // which only mounts when the panel is open, so enabling select also opens
+    // the panel ("if the panel is not open, open it"). Disabling just ends the
+    // inspector and leaves the panel as-is.
+    setSelectMode((on) => {
+      const next = !on;
+      if (next) setEditOpen(true);
+      return next;
+    });
+  }
+
   function onSelectElement(sel: AppSelectPayload): void {
-    // One-shot: a select ends the inspector, then seeds the edit chat composer
-    // with a concise instruction stub for the clicked element. The human edits
-    // + sends it as a normal message in the per-app edit thread.
+    // One-shot: a select ends the inspector, opens the edit chat (if it wasn't
+    // already), and seeds the composer with the clicked element's details as
+    // context. The human edits + sends it as a normal message in the per-app
+    // edit thread.
     setSelectMode(false);
     if (data?.app.editChannel) {
       setEditOpen(true);
@@ -279,7 +293,7 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
         editPending={ensureEditSession.isPending}
         editOpen={editOpen}
         selectMode={selectMode}
-        onToggleSelect={() => setSelectMode((on) => !on)}
+        onToggleSelect={onToggleSelect}
         historyOpen={historyOpen}
         onToggleHistory={toggleHistory}
         onToggleEdit={onToggleEdit}
@@ -371,9 +385,10 @@ function AppViewHeader({
         v{app.version}
       </span>
       {/* Select to edit primes the edit chat with a precise element ref. It's a
-          live-preview affordance, so it only shows while editing and never on a
-          read-only past version. */}
-      {canEdit && editOpen && !isPreviewing ? (
+          first-class entry point — offered whenever the app is editable and not
+          showing a read-only past version. Toggling it on opens the edit panel
+          (live preview + inspector) if it isn't already. */}
+      {canEdit && !isPreviewing ? (
         <button
           type="button"
           className="custom-app-view__action"

@@ -333,4 +333,32 @@ describe("CustomAppView select to edit", () => {
     // The edit panel stays open after a select.
     expect(screen.getByTestId("edit-panel")).toBeInTheDocument();
   });
+
+  it("offers select-to-edit without opening the chat first, and opens the panel on enable", async () => {
+    renderView();
+    await screen.findByText("Lead Scorer");
+
+    // The edit panel is closed on first render — the user has not opened Edit.
+    expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
+
+    // Select to edit is a first-class entry point: it is offered without first
+    // opening the edit chat.
+    const toggle = screen.getByRole("button", { name: /select to edit/i });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    // Enabling it opens the edit panel ("if the panel is not open, open it")
+    // and activates the live-preview inspector.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("edit-panel")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("live-preview").getAttribute("data-select-mode"),
+    ).toBe("true");
+
+    // Selecting an element then seeds the composer with the element's details
+    // as context, keyed to the app's edit channel.
+    fireEvent.click(screen.getByTestId("fire-select"));
+    expect(setPendingComposerDraft).toHaveBeenCalledTimes(1);
+    expect(setPendingComposerDraft.mock.calls[0][0]).toBe(EDIT_CHANNEL);
+  });
 });
