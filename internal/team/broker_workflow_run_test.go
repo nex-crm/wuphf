@@ -102,3 +102,39 @@ func TestWorkflowRunWiresLLMOutputIntoSend(t *testing.T) {
 		t.Fatalf("send body must be the llm output %q, got %q", summary, got)
 	}
 }
+
+// TestEnsureWorkflowApprovalRequestMintsCard verifies a workflow's external send
+// that needs approval gets a real approval card (kind=approval) carrying the
+// action payload — so the human has something to approve and the workflow can
+// resume. (The resolver builds the preview but never created the request.)
+func TestEnsureWorkflowApprovalRequestMintsCard(t *testing.T) {
+	b := newTestBroker(t)
+	resp := integrationResolveResponse{
+		Decision: "approve", Platform: "slack", ActionID: "SLACK_SEND_MESSAGE", Name: "Slack",
+		Account: &integrationResolveAccount{Name: "acme", Key: "secret-key"},
+		RawEnvelope: &integrationResolveEnvelope{
+			Method: "POST", URL: "https://slack/api",
+			Data: map[string]any{"channel": "general", "markdown_text": "real summary"},
+		},
+	}
+	id := b.ensureWorkflowApprovalRequest("ceo", resp)
+	if id == "" {
+		t.Fatal("expected a minted approval request id")
+	}
+	var got *humanInterview
+	for i := range b.requests {
+		if b.requests[i].ID == id {
+			got = &b.requests[i]
+		}
+	}
+	if got == nil || got.Kind != "approval" || got.Action == nil {
+		t.Fatalf("minted request must be an approval with an action payload, got %+v", got)
+	}
+	if got.Action.ActionID != "SLACK_SEND_MESSAGE" || got.Action.Platform != "slack" {
+		t.Errorf("action payload wrong: %+v", got.Action)
+	}
+	// The internal connection key must never reach the card.
+	if got.Action.Account != nil && got.Action.Account.Key != "" {
+		t.Errorf("connection key leaked onto the approval card: %q", got.Action.Account.Key)
+	}
+}

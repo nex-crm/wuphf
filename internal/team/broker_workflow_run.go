@@ -104,8 +104,17 @@ func (b *Broker) externalGateDecision(ctx context.Context, agent, platform, acti
 		// The gate requires human action (connect / approve / wait). The send
 		// does not fire; the run records the stop so the workflow can resume
 		// once the human resolves it.
+		requestID := resp.RequestID
+		// For an "approve" decision the resolver builds the preview envelope but
+		// does NOT create the card (the MCP path mints it; the workflow path did
+		// not — so a frozen workflow's send stopped with nothing to approve). Mint
+		// it here so the human gets a real approval card with the rendered send
+		// body and can approve → the workflow resumes and the send fires.
+		if resp.Decision == string(action.DecisionApprove) && strings.TrimSpace(requestID) == "" {
+			requestID = b.ensureWorkflowApprovalRequest(agent, resp)
+		}
 		return workflow.ActionOutcome{OK: false, Output: map[string]any{
-			"decision": resp.Decision, "needs_approval": true, "request_id": resp.RequestID,
+			"decision": resp.Decision, "needs_approval": true, "request_id": requestID,
 		}}
 	}
 	composio := action.NewComposioFromEnv()
@@ -118,6 +127,51 @@ func (b *Broker) externalGateDecision(ctx context.Context, agent, platform, acti
 		return workflow.ActionOutcome{OK: false, Err: err.Error()}
 	}
 	return workflow.ActionOutcome{OK: true, Output: map[string]any{"sent": true}}
+}
+
+// ensureWorkflowApprovalRequest mints the external-action approval card for a
+// workflow send the gate decided needs human approval. The resolver builds the
+// masked preview envelope but does not create the request; without this a frozen
+// workflow's send stops with nothing for the human to approve. Returns the new
+// request id (or "" if the request could not be created).
+func (b *Broker) ensureWorkflowApprovalRequest(agent string, resp integrationResolveResponse) string {
+	payload := &approvalActionPayload{
+		Platform: resp.Platform,
+		ActionID: resp.ActionID,
+		Name:     resp.Name,
+		LogoURL:  resp.LogoURL,
+	}
+	if resp.Account != nil {
+		payload.Account = &approvalActionAccount{Name: resp.Account.Name}
+	}
+	if resp.RawEnvelope != nil {
+		payload.RawEnvelope = &approvalActionEnvelope{
+			Method:  resp.RawEnvelope.Method,
+			URL:     resp.RawEnvelope.URL,
+			Headers: resp.RawEnvelope.Headers,
+			Data:    resp.RawEnvelope.Data,
+		}
+	}
+	label := strings.TrimSpace(resp.Name)
+	if label == "" {
+		label = resp.Platform
+	}
+	options, recommended := requestOptionDefaults("approval")
+	req, err := b.CreateRequest(humanInterview{
+		Kind:          "approval",
+		From:          strings.TrimSpace(agent),
+		Channel:       "general",
+		Title:         "Approve workflow action: " + resp.ActionID,
+		Question:      fmt.Sprintf("A workflow wants to run %s on %s. Approve?", resp.ActionID, label),
+		Options:       options,
+		RecommendedID: recommended,
+		Blocking:      true,
+		Action:        sanitizeApprovalActionPayload(payload),
+	})
+	if err != nil {
+		return ""
+	}
+	return req.ID
 }
 
 // runWorkflowSpec loads a stored contract, executes it over the events, persists
