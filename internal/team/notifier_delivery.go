@@ -175,6 +175,15 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 	if l.broker != nil && l.broker.AgentAwaitingInterviewAnswer(target.Slug) {
 		return
 	}
+	// LangGraph orchestrator-of-record (P1b-ii): when this task is owned by the
+	// orchestrator and a dispatcher is wired, hand the whole task to it instead
+	// of building a packet and enqueuing a headless CLI turn. Per-task single
+	// ownership — never both paths. Runs in a goroutine so the notify loop is
+	// not blocked on the orchestration step (one step = one agent turn).
+	if l.orchestrator != nil && taskUsesOrchestrator(task) {
+		go l.dispatchTaskViaOrchestrator(target.Slug, task)
+		return
+	}
 	channel := normalizeChannelSlug(task.Channel)
 	if channel == "" {
 		channel = "general"

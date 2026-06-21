@@ -79,6 +79,14 @@ type Launcher struct {
 	provider           string
 	brokerConfigurator func(*Broker)
 
+	// orchestrator is the LangGraph orchestrator-of-record dispatch client,
+	// wired only when WUPHF_ORCHESTRATOR_URL is configured (strangler-fig: nil
+	// by default, so the broker's in-process turn loop owns every task). When
+	// set, tasks carrying Orchestrator=="langgraph" route to it instead of the
+	// headless CLI path. See orchestrator_dispatch.go. Injectable for tests via
+	// SetTaskOrchestrator.
+	orchestrator taskOrchestrator
+
 	// headless is the per-launcher headless-worker pool (PLAN.md §C7).
 	// All headless dispatch state — mutex, ctx/cancel, queues, workers,
 	// active turns, deferred lead turn, stop channel, and worker
@@ -259,6 +267,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		sessionMode:        sessionMode,
 		oneOnOne:           oneOnOne,
 		provider:           config.ResolveLLMProvider(""),
+		orchestrator:       newConfiguredTaskOrchestrator(),
 		headless: headlessWorkerPool{
 			workers: make(map[headlessLane]bool),
 			active:  make(map[headlessLane]*headlessCodexActiveTurn),

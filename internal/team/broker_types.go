@@ -245,8 +245,17 @@ type teamTask struct {
 	// "codex", …); Model is the runtime-specific model id. Empty means "fall
 	// back to the owner's binding, then the global default". Wire keys
 	// "provider"/"model" are additive + stable per the migration plan.
-	Provider         string `json:"provider,omitempty"`
-	Model            string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// Orchestrator names the orchestration-of-record for this task: "" (empty,
+	// the default) means the broker's in-process turn loop owns it; "langgraph"
+	// hands the whole task to the Python LangGraph orchestrator via the
+	// deepagents DispatchClient (internal/provider/deepagents.go). Strangler-fig
+	// migration knob with per-task single ownership — never co-owned. The broker
+	// only honours it when a dispatcher is wired (WUPHF_ORCHESTRATOR_URL set);
+	// otherwise the task falls through to the normal headless path unchanged.
+	// Wire key "orchestrator" is additive + stable.
+	Orchestrator     string `json:"orchestrator,omitempty"`
 	reviewState      string
 	SourceSignalID   string   `json:"source_signal_id,omitempty"`
 	SourceDecisionID string   `json:"source_decision_id,omitempty"`
@@ -489,6 +498,7 @@ type teamTaskWire struct {
 	Effort               string                  `json:"effort,omitempty"`
 	Provider             string                  `json:"provider,omitempty"`
 	Model                string                  `json:"model,omitempty"`
+	Orchestrator         string                  `json:"orchestrator,omitempty"`
 	ReviewState          string                  `json:"review_state,omitempty"`
 	SourceSignalID       string                  `json:"source_signal_id,omitempty"`
 	SourceDecisionID     string                  `json:"source_decision_id,omitempty"`
@@ -546,6 +556,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		Effort:               t.Effort,
 		Provider:             t.Provider,
 		Model:                t.Model,
+		Orchestrator:         t.Orchestrator,
 		ReviewState:          t.reviewState,
 		SourceSignalID:       t.SourceSignalID,
 		SourceDecisionID:     t.SourceDecisionID,
@@ -605,6 +616,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.Effort = w.Effort
 	t.Provider = w.Provider
 	t.Model = w.Model
+	t.Orchestrator = w.Orchestrator
 	t.reviewState = w.ReviewState
 	t.SourceSignalID = w.SourceSignalID
 	t.SourceDecisionID = w.SourceDecisionID
