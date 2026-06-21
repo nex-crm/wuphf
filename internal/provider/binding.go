@@ -12,6 +12,18 @@ const (
 	KindOpenclaw     = "openclaw"
 	KindOpenclawHTTP = "openclaw-http"
 	KindHermesAgent  = "hermes-agent"
+	// KindDeepagents tags a task whose lifecycle is owned by the LangGraph
+	// orchestrator-of-record (the Python sidecar), not the broker's in-process
+	// turn loop. The broker does not dispatch LLM turns for it directly: it
+	// hands the authoritative record to the orchestrator via the deepagents
+	// DispatchClient (POST /run, POST /resume) and writes the returned
+	// projection back onto the task record. The inner harness (Claude Code /
+	// Codex) is still selected per-agent and passed to the orchestrator in the
+	// DispatchRequest; this kind only names the *orchestration* axis. Broker
+	// routing on this kind + the per-task orchestrator flag land in a later
+	// slice — for now the kind is accepted so bindings validate and the
+	// dispatch client has a stable name.
+	KindDeepagents = "deepagents"
 	// KindSlack tags a foreign Slack agent bridged through the Slack transport's
 	// membrane: the broker never dispatches LLM turns for it — the agent is a
 	// foreign bot that acts in Slack and whose registered bot user id is the
@@ -74,11 +86,11 @@ func ValidateKind(s string) error {
 	switch s {
 	case "",
 		KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindOpenclawHTTP, KindHermesAgent,
-		KindSlack, KindMLXLM, KindOllama, KindExo:
+		KindSlack, KindMLXLM, KindOllama, KindExo, KindDeepagents:
 		return nil
 	default:
-		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, or empty)",
-			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindOpenclawHTTP, KindHermesAgent, KindSlack, KindMLXLM, KindOllama, KindExo)
+		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, or empty)",
+			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindOpenclawHTTP, KindHermesAgent, KindSlack, KindMLXLM, KindOllama, KindExo, KindDeepagents)
 	}
 }
 

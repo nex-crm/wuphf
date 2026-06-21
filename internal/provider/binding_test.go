@@ -21,6 +21,7 @@ func TestValidateKind(t *testing.T) {
 		{"openclaw_http", "openclaw-http", false},
 		{"hermes_agent", "hermes-agent", false},
 		{"slack", "slack", false},
+		{"deepagents", "deepagents", false},
 		{"unknown", "gemini", true},
 		{"typo", "claud-code", true},
 		{"uppercase_rejected", "Codex", true},
