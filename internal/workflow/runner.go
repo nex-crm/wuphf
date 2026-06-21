@@ -60,6 +60,14 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 	cur := s.Initial
 	seen := map[string]bool{}
 
+	// runData accumulates action outputs across the WHOLE run, not just within a
+	// single transition. A linear contract puts each step on its own transition
+	// (start -> step_1 -> step_2 -> done), so a fetch on transition 1 and a
+	// summarize on transition 2 are separate hops; resetting per transition left
+	// the summarize step blind to the fetched data. Persisting it here is what
+	// makes fetch -> summarize -> send actually pass data down the chain.
+	runData := map[string]any{}
+
 	for _, ev := range events {
 		// Idempotency: a repeated event (same dedup key) is a no-op.
 		if ev.DedupKey != "" {
@@ -82,18 +90,32 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 			continue
 		}
 
-		// Thread action outputs forward so a later action sees what an earlier
-		// one produced (fetched emails -> composed digest), and capture them
-		// into the run record. Seeded from the event data each transition.
-		runData := make(map[string]any, len(ev.Data))
+		// Overlay this transition's event data onto the accumulated run data
+		// (prior action outputs are retained across transitions — see runData
+		// declaration above).
 		for k, v := range ev.Data {
 			runData[k] = v
 		}
 		failed := false
+		var failedID, failErr string
 		for _, aid := range t.Actions {
 			out := exec(actionByID[aid], runData)
 			if !out.OK {
 				failed = true
+				failedID = aid
+				failErr = out.Err
+				// Capture the failed action's diagnostic output (gate decision,
+				// request_id, provider error) into the run record so a failed send
+				// is debuggable instead of silently swallowed.
+				if res.Outputs == nil {
+					res.Outputs = map[string]any{}
+				}
+				for k, v := range out.Output {
+					res.Outputs[k] = v
+				}
+				if failErr != "" {
+					res.Outputs[aid+"_error"] = failErr
+				}
 				break
 			}
 			res.ActionsFired = append(res.ActionsFired, aid)
@@ -106,7 +128,11 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 			}
 		}
 		if failed {
-			res.Audit = append(res.Audit, AuditEntry{Event: ev.Event, From: cur, Skipped: "action_failed"})
+			entry := AuditEntry{Event: ev.Event, From: cur, Skipped: "action_failed"}
+			if failedID != "" {
+				entry.Actions = []string{failedID}
+			}
+			res.Audit = append(res.Audit, entry)
 			continue
 		}
 
