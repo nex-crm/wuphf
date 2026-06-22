@@ -39,6 +39,27 @@ uv pip install langgraph langgraph-checkpoint-sqlite fastapi sse-starlette uvico
 - The FastAPI service surface the Go dispatch client will target.
 - Runs green with **no model key** (FakeHarness drives the loop).
 
+## Live cross-language smoke
+
+`bash scripts/smoke.sh` boots the sidecar and POSTs the exact wire shapes the Go
+`DispatchClient` sends, asserting the `StepResult`/projection contract (happy path
++ fail-loud `unknown`). Run it from `orchestrator/` after building the venv.
+
+## Running the full broker → orchestrator path (E2E)
+
+1. Boot the sidecar: `.venv/bin/uvicorn orchestrator.service:app --app-dir src --port 8770`.
+2. Point the broker at it: `export WUPHF_ORCHESTRATOR_URL=http://127.0.0.1:8770`
+   before launching `wuphf` — `NewLauncher` wires the dispatch client automatically
+   when this is set (nil otherwise, so default installs are unchanged).
+3. Create ONE task with `orchestrator: "langgraph"` (the new-task composer field /
+   `team_task` plan input). When it becomes executable, the broker routes it to
+   `POST /run` instead of a headless CLI turn and writes the projection back.
+
+Caveat (P1 stub): with the default `FakeHarness` an interrupted step's projection
+still reads `running`, so a wired langgraph task re-dispatches each tick. P2's real
+`ClaudeAgentHarness` returns a real gate state and resolves this — until then, run
+the E2E with a single task and expect the stubbed turn, not a real agent.
+
 ## Deferred (next increments — explicit, not hidden)
 
 - **P1b Go side:** a `provider/deepagents`-style dispatch client + the broker-state

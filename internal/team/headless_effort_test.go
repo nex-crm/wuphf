@@ -74,7 +74,7 @@ func TestValidateTaskRuntimeFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateTaskRuntimeFields(tc.provider, tc.model, tc.effort)
+			err := validateTaskRuntimeFields(tc.provider, tc.model, tc.effort, "")
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("validateTaskRuntimeFields(%q,%q,%q) = nil, want error", tc.provider, tc.model, tc.effort)
