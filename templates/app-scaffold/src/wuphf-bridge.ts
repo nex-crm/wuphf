@@ -384,6 +384,55 @@ function mapGmailMessages(result: unknown): EmailItem[] {
   });
 }
 
+// ── File download: save app-generated data to disk ──────────────────────────
+
+export interface DownloadInput {
+  /**
+   * File name, e.g. "leads.csv". The host takes only the basename and strips
+   * path separators + control / illegal characters, so keep it simple.
+   */
+  filename: string;
+  /**
+   * The file contents. UTF-8 text by default (CSV, JSON, Markdown, …). For
+   * BINARY data, base64-encode it and pass encoding:"base64". The host caps the
+   * total size.
+   */
+  content: string;
+  /** MIME type hint, e.g. "text/csv". Defaults to "application/octet-stream". */
+  mime?: string;
+  /** "utf-8" (default) or "base64" for binary content. */
+  encoding?: "utf-8" | "base64";
+}
+
+/**
+ * download saves app-generated data to the user's disk. A raw `<a download>` or
+ * programmatic anchor click does NOT work here — the app runs in an opaque-origin
+ * sandbox, so the browser ignores the download and the click becomes a blocked
+ * navigation. Instead the app hands the bytes to the host, which performs the
+ * actual download from its own trusted context. The app never reaches the
+ * filesystem or the network directly; this keeps the sandbox fully intact.
+ *
+ * Wire it to a button (an "Export CSV" click), never fire it on load. Resolves
+ * once the host has started the download; rejects if the payload is invalid
+ * (empty/oversized), the rate limit is hit, or after a timeout.
+ *
+ * Example — export rows to CSV:
+ *   const csv = "name,score\n" + rows.map(r => `${r.name},${r.score}`).join("\n");
+ *   await download({ filename: "leads.csv", content: csv, mime: "text/csv" });
+ */
+export function download(input: DownloadInput): Promise<void> {
+  return postToHost<void>(
+    {
+      type: "download",
+      filename: input.filename,
+      content: input.content,
+      mime: input.mime,
+      encoding: input.encoding === "base64" ? "base64" : "utf-8",
+    },
+    20_000,
+  );
+}
+
 // ── The one safe write: create a follow-up task ─────────────────────────────
 
 export interface CreateTaskInput {

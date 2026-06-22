@@ -163,6 +163,12 @@ loudly — apps are read-mostly by design. Don't try to work around this.
   classify). It is read-only reasoning, not a network call. With `{ json: true }`
   you get a parsed object. If no provider is configured you get
   `{ error: "ai_unavailable" }` — render a fallback.
+- **File download / export.** A raw `<a download>` or programmatic anchor click
+  does NOT work in the sandbox (opaque origin → the browser ignores `download`
+  and the click becomes a blocked navigation). To let the user save data (CSV,
+  JSON, …), call `download({ filename, content, mime })` from `wuphf-bridge.ts` —
+  the host saves the bytes from its own trusted origin. Wire it to a button,
+  never fire it on load. For binary, base64-encode and pass `encoding:"base64"`.
 
 ## Hard rules
 
@@ -182,7 +188,7 @@ loudly — apps are read-mostly by design. Don't try to work around this.
 5. **Protected files — use, don't rewrite.**
    - `src/wuphf-bridge.ts` — the only channel out of the sandbox. Its helpers
      (`callBroker`, `getTasks`, `getOfficeMembers`, `createTask`,
-     `callIntegration`, `listIntegrations`, `ai`, `getEmails`) are already
+     `callIntegration`, `listIntegrations`, `ai`, `getEmails`, `download`) are already
      correct (e.g. `getTasks()` returns ALL channels, not just "general"). Import
      and call them as-is.
    - `src/bridgeDataProvider.ts` — refine's `DataProvider` over the bridge. Import

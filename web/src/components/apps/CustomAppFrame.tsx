@@ -10,9 +10,10 @@ import { showNotice } from "../ui/Toast";
  *
  * Security model (the iframe is the real boundary, not the write-time HTML
  * validator):
- *   - sandbox="allow-scripts" ONLY — no allow-same-origin, so the app runs at an
- *     opaque origin with no access to cookies, localStorage, or the parent DOM;
- *     no allow-forms / allow-popups / allow-top-navigation.
+ *   - sandbox="allow-scripts allow-downloads" — allow-downloads lets anchor-click
+ *     blob URL downloads work (Chrome 83+); no allow-same-origin, so the app runs
+ *     at an opaque origin with no access to cookies, localStorage, or the parent
+ *     DOM; no allow-forms / allow-popups / allow-top-navigation.
  *   - An injected CSP with connect-src 'none' blocks ALL network from inside the
  *     frame (fetch/XHR/WebSocket), so a generated app cannot exfiltrate data,
  *     even if its own bundle tried to. default-src 'none' + inline script/style
@@ -104,6 +105,18 @@ const INTEGRATION_PARAMS_MAX = 16 * 1024;
 const AI_PROMPT_MAX = 8 * 1024;
 const AI_INPUT_MAX = 200 * 1024;
 
+// Host-brokered file download caps. A sandboxed opaque-origin frame can't do a
+// raw anchor download (the `download` attribute is ignored for an opaque-origin
+// blob, so the click becomes a blocked navigation), so the app posts the bytes
+// and the HOST saves them from its own trusted origin. Bound the size + rate so
+// a buggy/abusive app can't fill the disk or spam the user with downloads. No
+// sandbox/CSP relaxation is involved — the iframe still has connect-src 'none'
+// and no allow-same-origin.
+const DOWNLOAD_MAX_BYTES = 16 * 1024 * 1024;
+const DOWNLOAD_FILENAME_MAX = 128;
+const DOWNLOAD_RATE_MAX = 12;
+const DOWNLOAD_RATE_WINDOW_MS = 60_000;
+
 interface BrokerBridgeMessage {
   source: typeof APP_SOURCE;
   type: "broker";
@@ -138,6 +151,17 @@ interface AppAIMessage {
   prompt?: unknown;
   input?: unknown;
   json?: unknown;
+}
+
+/** A file the app asks the host to save to disk on its behalf. */
+interface AppDownloadMessage {
+  source: typeof APP_SOURCE;
+  type: "download";
+  id: string | number;
+  filename?: unknown;
+  content?: unknown;
+  mime?: unknown;
+  encoding?: unknown;
 }
 
 /** Validated, host-trusted shape of an integration call. */
@@ -462,6 +486,139 @@ function serviceCreateTask(
   });
 }
 
+// ── Host-brokered file download ─────────────────────────────────────────────
+
+/**
+ * Take ONLY the basename and strip control / path / illegal filename chars, so
+ * an app can never traverse a path or smuggle a control sequence into the saved
+ * name. A name that is empty or all-dots after cleaning falls back to a neutral
+ * default. Pure for unit tests.
+ */
+function sanitizeDownloadFilename(raw: unknown): string {
+  let name = typeof raw === "string" ? raw : "";
+  name = name.split(/[/\\]/).pop() ?? "";
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
+  name = name.replace(/[\x00-\x1f<>:"|?*\x7f]/g, "").trim();
+  if (/^\.+$/.test(name)) name = "";
+  if (name.length > DOWNLOAD_FILENAME_MAX) {
+    name = name.slice(0, DOWNLOAD_FILENAME_MAX);
+  }
+  return name || "download";
+}
+
+/**
+ * The mime only LABELS the saved file — the host never renders or executes it —
+ * so this is defense-in-depth, not the trust boundary. Accept a simple
+ * type/subtype token, else fall back to a neutral binary type.
+ */
+function sanitizeDownloadMime(raw: unknown): string {
+  const mime = typeof raw === "string" ? raw.trim() : "";
+  return /^[a-zA-Z0-9!#$&^_.+-]{1,64}\/[a-zA-Z0-9!#$&^_.+-]{1,64}$/.test(mime)
+    ? mime
+    : "application/octet-stream";
+}
+
+/**
+ * Validate + decode a download message into the bytes the host will save.
+ * Returns an `error` string for any invalid/oversized payload instead of
+ * throwing. Pure (no DOM, no postMessage) so the size/encoding/name rules are
+ * unit-testable.
+ */
+export function parseDownloadPayload(
+  message: AppDownloadMessage,
+): { filename: string; part: BlobPart; mime: string } | { error: string } {
+  const content = typeof message.content === "string" ? message.content : null;
+  if (content === null) {
+    return { error: "A download needs string content." };
+  }
+  const filename = sanitizeDownloadFilename(message.filename);
+  const mime = sanitizeDownloadMime(message.mime);
+  if (message.encoding === "base64") {
+    let binary: string;
+    try {
+      binary = atob(content);
+    } catch {
+      return { error: "Download content is not valid base64." };
+    }
+    if (binary.length > DOWNLOAD_MAX_BYTES) {
+      return { error: "Download exceeds the size limit." };
+    }
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return { filename, part: bytes, mime };
+  }
+  if (new TextEncoder().encode(content).length > DOWNLOAD_MAX_BYTES) {
+    return { error: "Download exceeds the size limit." };
+  }
+  return { filename, part: content, mime };
+}
+
+// Sliding-window rate guard: a buggy/abusive app that loops download() on load
+// would otherwise spam the user with save dialogs. Module-level so it bounds the
+// host across every app frame on the page.
+let downloadTimes: number[] = [];
+function downloadRateAllows(): boolean {
+  const now = Date.now();
+  downloadTimes = downloadTimes.filter(
+    (t) => now - t < DOWNLOAD_RATE_WINDOW_MS,
+  );
+  if (downloadTimes.length >= DOWNLOAD_RATE_MAX) {
+    return false;
+  }
+  downloadTimes.push(now);
+  return true;
+}
+
+/**
+ * Service a "download" request: the sandboxed app (opaque origin) cannot
+ * reliably trigger a file download itself, so the host saves the app-supplied
+ * bytes from ITS OWN trusted origin. This is the whole point — it keeps the
+ * iframe fully sandboxed (no allow-same-origin, no allow-downloads dependency,
+ * connect-src 'none' intact) while still letting an internal tool export a CSV
+ * or JSON. The app can only hand over data it already holds (it has no network);
+ * the host bounds the size, sanitizes the filename, and rate-limits.
+ */
+function serviceDownload(
+  message: AppDownloadMessage,
+  target: Window,
+  replyOrigin: string,
+): void {
+  const reply = (payload: { ok: boolean; error?: string }): void => {
+    target.postMessage(
+      { source: HOST_SOURCE, id: message.id, ...payload },
+      replyOrigin,
+    );
+  };
+  if (!downloadRateAllows()) {
+    reply({ ok: false, error: "Too many downloads — slow down." });
+    return;
+  }
+  const parsed = parseDownloadPayload(message);
+  if ("error" in parsed) {
+    reply({ ok: false, error: parsed.error });
+    return;
+  }
+  try {
+    const blob = new Blob([parsed.part], { type: parsed.mime });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = parsed.filename;
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    showNotice(`Downloaded ${parsed.filename}`, "success");
+    reply({ ok: true });
+  } catch (err) {
+    reply({ ok: false, error: errorMessage(err) });
+  }
+}
+
 /**
  * Service a Bridge v2 "integration" call: validate the {platform, action,
  * params} shape, forward to POST /apps/integrations/call, and reply to the
@@ -642,6 +799,11 @@ function routeAppRequest(
     case "broker":
       void serviceBrokerGet(data as BrokerBridgeMessage, source, replyOrigin);
       return;
+    // The sandboxed app hands the host bytes to save; the host downloads them
+    // from its own trusted origin (the iframe stays fully sandboxed).
+    case "download":
+      serviceDownload(data as AppDownloadMessage, source, replyOrigin);
+      return;
     default:
       return;
   }
@@ -800,7 +962,7 @@ export function CustomAppFrame({
       ref={iframeRef}
       className="custom-app-frame"
       title={title}
-      sandbox="allow-scripts"
+      sandbox="allow-scripts allow-downloads"
       srcDoc={srcDoc}
     />
   );

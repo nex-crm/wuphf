@@ -6,6 +6,7 @@ import {
   appBrokerPath,
   isAllowedGetPath,
   parseAIArgs,
+  parseDownloadPayload,
   parseErrorPayload,
   parseIntegrationArgs,
   parseSelectPayload,
@@ -672,5 +673,78 @@ describe("parseErrorPayload", () => {
       message: "boom",
       stack: "",
     });
+  });
+});
+
+describe("parseDownloadPayload (host-brokered download validation)", () => {
+  const msg = (over: Record<string, unknown>) =>
+    ({ source: "wuphf-app", type: "download", id: 1, ...over }) as never;
+
+  it("accepts utf-8 text content with the sanitized name + mime", () => {
+    const out = parseDownloadPayload(
+      msg({ filename: "leads.csv", content: "a,b\n1,2", mime: "text/csv" }),
+    );
+    expect(out).toEqual({
+      filename: "leads.csv",
+      part: "a,b\n1,2",
+      mime: "text/csv",
+    });
+  });
+
+  it("decodes base64 content to bytes", () => {
+    const out = parseDownloadPayload(
+      msg({ filename: "x.bin", content: btoa("hi"), encoding: "base64" }),
+    );
+    if ("error" in out) throw new Error(out.error);
+    expect(out.part).toBeInstanceOf(Uint8Array);
+    expect(Array.from(out.part as Uint8Array)).toEqual([104, 105]); // "hi"
+  });
+
+  it("rejects non-string content and invalid base64", () => {
+    expect(parseDownloadPayload(msg({ content: 5 }))).toHaveProperty("error");
+    expect(
+      parseDownloadPayload(
+        msg({ content: "@@@not base64@@@", encoding: "base64" }),
+      ),
+    ).toHaveProperty("error");
+  });
+
+  it("rejects oversized payloads (text and base64)", () => {
+    const huge = "x".repeat(16 * 1024 * 1024 + 1);
+    expect(parseDownloadPayload(msg({ content: huge }))).toHaveProperty(
+      "error",
+    );
+    const hugeB64 = btoa("y").repeat(0) + "Q".repeat(22 * 1024 * 1024);
+    expect(
+      parseDownloadPayload(msg({ content: hugeB64, encoding: "base64" })),
+    ).toHaveProperty("error");
+  });
+
+  it("strips path traversal and control/illegal chars from the filename", () => {
+    const out = parseDownloadPayload(
+      msg({ filename: "../../etc/pa<ss>wd .txt", content: "x" }),
+    );
+    if ("error" in out) throw new Error(out.error);
+    // Basename only, no path separators, no < > or control bytes.
+    expect(out.filename).toBe("passwd.txt");
+  });
+
+  it("falls back to a neutral name for empty/all-dots, and a neutral mime", () => {
+    expect(
+      (
+        parseDownloadPayload(msg({ filename: "..", content: "x" })) as {
+          filename: string;
+        }
+      ).filename,
+    ).toBe("download");
+    expect(
+      (
+        parseDownloadPayload(
+          msg({ filename: "x", content: "x", mime: "garbage" }),
+        ) as {
+          mime: string;
+        }
+      ).mime,
+    ).toBe("application/octet-stream");
   });
 });
