@@ -200,6 +200,41 @@ describe("routeInboundMessage (the load-bearing ordering invariant)", () => {
     );
   });
 
+  it("services a fire-and-forget download (no id) instead of dropping it", () => {
+    const { frame } = makeFrame();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const createURL = vi.fn(() => "blob:x");
+    const url = globalThis.URL as unknown as {
+      createObjectURL?: unknown;
+      revokeObjectURL?: unknown;
+    };
+    // jsdom doesn't implement object URLs; stub them so the save path runs.
+    url.createObjectURL = createURL;
+    url.revokeObjectURL = vi.fn();
+
+    routeInboundMessage(
+      event(frame.contentWindow, {
+        source: "wuphf-app",
+        type: "download",
+        // NO id — an app that fired the download without awaiting a reply. The
+        // old reply-id gate dropped this; now the host services it anyway.
+        filename: "tasks.csv",
+        content: "a,b\n1,2",
+        mime: "text/csv",
+      }),
+      frame,
+      "*",
+      { current: vi.fn() },
+      { current: vi.fn() },
+    );
+
+    expect(createURL).toHaveBeenCalledTimes(1);
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+  });
+
   it("create_task confirms, then POSTs a host-parameterized task", async () => {
     const { frame, win } = makeFrame();
     routeInboundMessage(

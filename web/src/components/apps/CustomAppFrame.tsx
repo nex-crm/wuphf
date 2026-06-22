@@ -153,11 +153,15 @@ interface AppAIMessage {
   json?: unknown;
 }
 
-/** A file the app asks the host to save to disk on its behalf. */
+/**
+ * A file the app asks the host to save to disk on its behalf. `id` is optional:
+ * the bridge's download() carries one and awaits an ok/err reply, but an app may
+ * also fire-and-forget a bare {type:"download", ...}.
+ */
 interface AppDownloadMessage {
   source: typeof APP_SOURCE;
   type: "download";
-  id: string | number;
+  id?: string | number;
   filename?: unknown;
   content?: unknown;
   mime?: unknown;
@@ -582,10 +586,13 @@ function downloadRateAllows(): boolean {
  */
 function serviceDownload(
   message: AppDownloadMessage,
-  target: Window,
+  target: Window | null,
   replyOrigin: string,
 ): void {
+  // Reply only when the app asked for one (an id) and there is a window to
+  // answer. A fire-and-forget download (no id) still runs; it just gets no ack.
   const reply = (payload: { ok: boolean; error?: string }): void => {
+    if (!target || message.id === undefined) return;
     target.postMessage(
       { source: HOST_SOURCE, id: message.id, ...payload },
       replyOrigin,
@@ -756,6 +763,19 @@ export function routeInboundMessage(
     onAppErrorRef.current?.(parseErrorPayload(data));
     return;
   }
+  // A download is one-way: the app hands the host bytes to save. It may carry an
+  // id (the bridge's download() awaits an ok/err reply) OR fire-and-forget (an
+  // inline helper that just posts {type:"download", ...}). Either way the host
+  // services it, so it is handled BEFORE the reply-id gate below — the
+  // frame-identity check above is the real boundary, not the id.
+  if (data.type === "download") {
+    serviceDownload(
+      data as AppDownloadMessage,
+      event.source as Window | null,
+      replyOrigin,
+    );
+    return;
+  }
   // Every remaining type is a request that needs a reply: it MUST carry an id
   // and a real sender window. Gate that once here so each handler can assume it.
   if (data.id === undefined || event.source === null) return;
@@ -799,11 +819,8 @@ function routeAppRequest(
     case "broker":
       void serviceBrokerGet(data as BrokerBridgeMessage, source, replyOrigin);
       return;
-    // The sandboxed app hands the host bytes to save; the host downloads them
-    // from its own trusted origin (the iframe stays fully sandboxed).
-    case "download":
-      serviceDownload(data as AppDownloadMessage, source, replyOrigin);
-      return;
+    // Note: "download" is handled earlier in routeInboundMessage (before the
+    // reply-id gate) so it works fire-and-forget too.
     default:
       return;
   }
