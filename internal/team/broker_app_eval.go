@@ -27,7 +27,12 @@ import (
 )
 
 const (
-	appAcceptanceTimeout        = 60 * time.Second
+	// The acceptance judge runs on the workspace's own LLM, which can be a cold
+	// headless `claude --print` call under contention (the office may have other
+	// agent turns in flight). 60s proved too tight in practice — the call timed
+	// out and the gate silently passed. A goroutine waiting longer costs nothing
+	// (it never blocks the delivered task), so give the judge real room.
+	appAcceptanceTimeout        = 120 * time.Second
 	appAcceptanceMaxRetries     = 2 // auto-fix attempts before flagging for a human
 	appAcceptanceMaxBriefBytes  = 8 << 10
 	appAcceptanceMaxCapsBytes   = 8 << 10
