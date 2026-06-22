@@ -1458,6 +1458,11 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// proposes an App only when the completed work looks repeatable. No-op
 			// unless enabled (production web path).
 			b.queueWorkflowAppDetection(task.ID)
+			// App acceptance gate: for an App Builder build task, verify the built
+			// app actually meets the brief (regular checks + an LLM judge) BEFORE
+			// "done" sticks; on a shortfall it reopens the task with the gaps for an
+			// auto-fix. No-op for non-app-build tasks and when detection is off.
+			b.queueAppAcceptanceEval(task.ID)
 		}
 		return TaskResponse{Task: *task}, nil
 	}
