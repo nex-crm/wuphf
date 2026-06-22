@@ -70,7 +70,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		// Validate the per-task LLM runtime override at the boundary (covers
 		// both the reuse-merge and fresh-create branches below) so a malformed
 		// provider/effort never lands in broker-state.json.
-		if err := validateTaskRuntimeFields(item.Provider, item.Model, item.Effort); err != nil {
+		if err := validateTaskRuntimeFields(item.Provider, item.Model, item.Effort, item.Orchestrator); err != nil {
 			rollbackPlan()
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -169,6 +169,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Effort:        strings.TrimSpace(item.Effort),
 			Provider:      providerKind,
 			Model:         strings.TrimSpace(item.Model),
+			Orchestrator:  strings.ToLower(strings.TrimSpace(item.Orchestrator)),
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -293,6 +294,7 @@ type plannedTaskInput struct {
 	Effort           string
 	Provider         string
 	Model            string
+	Orchestrator     string
 	ReviewState      string
 	SourceSignalID   string
 	SourceDecisionID string
@@ -331,7 +333,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	}
 	// Validate the per-task LLM runtime override at the boundary (covers both
 	// the reuse-merge and fresh-create branches below).
-	if err := validateTaskRuntimeFields(input.Provider, input.Model, input.Effort); err != nil {
+	if err := validateTaskRuntimeFields(input.Provider, input.Model, input.Effort, input.Orchestrator); err != nil {
 		return teamTask{}, false, err
 	}
 	mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
@@ -442,6 +444,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		Effort:           strings.TrimSpace(input.Effort),
 		Provider:         strings.TrimSpace(input.Provider),
 		Model:            strings.TrimSpace(input.Model),
+		Orchestrator:     strings.ToLower(strings.TrimSpace(input.Orchestrator)),
 		reviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),

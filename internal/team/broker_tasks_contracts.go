@@ -92,6 +92,11 @@ type TaskPlanInput struct {
 	// over the owner agent's binding. Empty means inherit the binding/default.
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	// Orchestrator opts this task into the LangGraph orchestrator-of-record
+	// ("langgraph") instead of the broker's in-process turn loop (""). Per-task
+	// single ownership; honoured only when a dispatcher is wired
+	// (WUPHF_ORCHESTRATOR_URL). Wire key "orchestrator" is additive.
+	Orchestrator string `json:"orchestrator"`
 	// Park, when true, creates the task ASSIGNED but parked in the backlog
 	// (non-executable) instead of dispatching the owner now. The "Backlog"
 	// composer action sets this; "Start now" leaves it false.

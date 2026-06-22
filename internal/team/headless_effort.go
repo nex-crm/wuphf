@@ -71,7 +71,7 @@ const maxTaskModelLen = 256
 // claude ∪ codex union — dispatch refines it per the resolved runtime); Model
 // is free-form but length-bounded. Empty values are always valid and mean
 // "fall back to the owner binding, then the global default".
-func validateTaskRuntimeFields(providerKind, model, effort string) error {
+func validateTaskRuntimeFields(providerKind, model, effort, orchestrator string) error {
 	if err := provider.ValidateKind(strings.TrimSpace(providerKind)); err != nil {
 		return fmt.Errorf("invalid task provider: %w", err)
 	}
@@ -80,6 +80,9 @@ func validateTaskRuntimeFields(providerKind, model, effort string) error {
 	}
 	if trimmed := strings.TrimSpace(model); len(trimmed) > maxTaskModelLen {
 		return fmt.Errorf("task model id too long (%d characters; max %d)", len(trimmed), maxTaskModelLen)
+	}
+	if o := strings.ToLower(strings.TrimSpace(orchestrator)); o != "" && o != orchestratorLangGraph {
+		return fmt.Errorf("invalid task orchestrator %q (valid: %q or empty)", orchestrator, orchestratorLangGraph)
 	}
 	return nil
 }
