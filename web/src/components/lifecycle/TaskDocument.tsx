@@ -732,6 +732,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
             showSubTasks={!doc.parentTaskId}
             verification={doc.verification}
             definition={doc.definition}
+            ownerSlug={doc.ownerSlug}
           />
         </div>
       )}

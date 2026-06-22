@@ -9,14 +9,14 @@ vi.mock("../../hooks/useAgentStream", () => ({
   useAgentStream: mockUseAgentStream,
 }));
 
-import { AppBuildActivity } from "./AppBuildActivity";
+import { TaskActivity } from "./TaskActivity";
 
 function line(id: number, event: Record<string, unknown>) {
   return { id, data: "", parsed: { kind: "headless_event", ...event } };
 }
 
-describe("AppBuildActivity", () => {
-  it("renders merged tool activity as resolving rows", () => {
+describe("TaskActivity", () => {
+  it("renders the owner agent's tool activity as resolving rows", () => {
     mockUseAgentStream.mockReturnValue({
       connected: true,
       lines: [
@@ -41,23 +41,46 @@ describe("AppBuildActivity", () => {
       ],
     });
 
-    render(<AppBuildActivity taskId="OFFICE-1" />);
+    render(<TaskActivity taskId="OFFICE-1" agentSlug="app-builder" />);
 
-    // The resolved write row (target is the basename).
     expect(screen.getByText("Writing")).toBeInTheDocument();
     expect(screen.getByText("App.tsx")).toBeInTheDocument();
     expect(screen.getByText("✓")).toBeInTheDocument();
-    // The still-running build row.
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("bun run build")).toBeInTheDocument();
-    // Two tool calls -> count of 2.
     expect(screen.getByText("2")).toBeInTheDocument();
+    // It is labelled "Task activity" (generalized from "Build activity").
+    expect(
+      screen.getByRole("region", { name: /task activity/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("passes the owner slug to the stream", () => {
+    mockUseAgentStream.mockReturnValue({ connected: false, lines: [] });
+    render(<TaskActivity taskId="OFFICE-2" agentSlug="revops" />);
+    expect(mockUseAgentStream).toHaveBeenCalledWith("revops", "OFFICE-2", {
+      keepAlive: true,
+    });
   });
 
   it("renders nothing when there is no activity", () => {
     mockUseAgentStream.mockReturnValue({ connected: false, lines: [] });
-    const { container } = render(<AppBuildActivity taskId="OFFICE-2" />);
+    const { container } = render(
+      <TaskActivity taskId="OFFICE-2" agentSlug="app-builder" />,
+    );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders nothing for an unstaffed task (no owner)", () => {
+    mockUseAgentStream.mockReturnValue({ connected: false, lines: [] });
+    const { container } = render(
+      <TaskActivity taskId="OFFICE-4" agentSlug={null} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+    // A null owner streams nothing.
+    expect(mockUseAgentStream).toHaveBeenCalledWith(null, "OFFICE-4", {
+      keepAlive: true,
+    });
   });
 
   it("collapses the list when the header is toggled", () => {
@@ -73,9 +96,9 @@ describe("AppBuildActivity", () => {
       ],
     });
 
-    render(<AppBuildActivity taskId="OFFICE-3" />);
+    render(<TaskActivity taskId="OFFICE-3" agentSlug="app-builder" />);
     expect(screen.getByText("Reading")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /build activity/i }));
+    fireEvent.click(screen.getByRole("button", { name: /task activity/i }));
     expect(screen.queryByText("Reading")).not.toBeInTheDocument();
   });
 });

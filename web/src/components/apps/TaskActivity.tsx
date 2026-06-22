@@ -1,28 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgentStream } from "../../hooks/useAgentStream";
-import { APP_BUILDER_SLUG } from "../../lib/constants";
 import {
   type BuildActivityItem,
   extractBuildEvents,
   reduceBuildActivity,
 } from "./buildActivity";
 
-interface AppBuildActivityProps {
+interface TaskActivityProps {
   taskId: string;
+  /**
+   * The agent doing the work — the task's owner. Null/empty (e.g. an unstaffed
+   * task still being triaged) renders nothing; the pane appears once an owner is
+   * streaming tool activity.
+   */
+  agentSlug: string | null | undefined;
 }
 
 /**
- * AppBuildActivity is the live "what the builder is doing" feed shown above the
- * preview on an App Builder task. It subscribes to the App Builder's typed
- * HeadlessEvent stream (scoped to this task) and renders each tool call as a
- * single row that resolves running → ✓ / ✗ — so the human watches concrete
- * progress (writing files, running the build, publishing) in real time, not a
- * wall of prose or a spinner that never finishes. keepAlive keeps the feed live
- * across the build's many turns.
+ * TaskActivity is the live "what the agent is doing" feed for ANY task. It
+ * subscribes to the owner agent's typed HeadlessEvent stream (scoped to this
+ * task) and renders each tool call as a single row that resolves running → ✓ /
+ * ✗ — so the human watches concrete progress (reading files, running commands,
+ * writing, building) in real time, not a wall of prose or a spinner that never
+ * finishes. keepAlive keeps the feed live across the task's many turns.
+ *
+ * Generalized from the App Builder's build feed: an app-build task passes the
+ * App Builder slug, every other task passes its own owner. The CSS classes keep
+ * the original `app-build-activity` names (purely cosmetic) so the styling is
+ * shared.
  */
-export function AppBuildActivity({ taskId }: AppBuildActivityProps) {
-  const { lines, connected } = useAgentStream(APP_BUILDER_SLUG, taskId, {
+export function TaskActivity({ taskId, agentSlug }: TaskActivityProps) {
+  const slug = agentSlug?.trim() ? agentSlug.trim() : null;
+  const { lines, connected } = useAgentStream(slug, taskId, {
     keepAlive: true,
   });
   const [open, setOpen] = useState(true);
@@ -42,13 +52,13 @@ export function AppBuildActivity({ taskId }: AppBuildActivityProps) {
     el.scrollTop = el.scrollHeight;
   }, [lastId, items.length, open]);
 
-  if (items.length === 0) return null;
+  if (!slug || items.length === 0) return null;
 
   return (
     <section
       className="app-build-activity"
       data-open={open}
-      aria-label="Build activity"
+      aria-label="Task activity"
     >
       <button
         type="button"
@@ -59,7 +69,7 @@ export function AppBuildActivity({ taskId }: AppBuildActivityProps) {
         <span className={`app-build-activity__chevron${open ? " open" : ""}`}>
           ▸
         </span>
-        <span className="app-build-activity__title">Build activity</span>
+        <span className="app-build-activity__title">Task activity</span>
         <span
           className={`app-build-activity__dot${
             connected && running ? " live" : ""

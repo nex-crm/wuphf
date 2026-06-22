@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { OpenNewWindow } from "iconoir-react";
 
 import { type CustomApp, getApp, listApps } from "../../api/apps";
+import { APP_BUILDER_SLUG } from "../../lib/constants";
 import { router } from "../../lib/router";
-import { AppBuildActivity } from "./AppBuildActivity";
 import { AppLivePreview } from "./AppLivePreview";
+import { TaskActivity } from "./TaskActivity";
 
 // Poll briefly while a build is in flight so a freshly-registered app (or a new
 // version) shows up in the preview within a few seconds, no reload needed.
@@ -144,7 +145,9 @@ export function AppBuildPreview({ taskTitle, taskId }: AppBuildPreviewProps) {
 
   return (
     <div className="app-build-pane">
-      {taskId ? <AppBuildActivity taskId={taskId} /> : null}
+      {taskId ? (
+        <TaskActivity taskId={taskId} agentSlug={APP_BUILDER_SLUG} />
+      ) : null}
       {preview}
     </div>
   );
