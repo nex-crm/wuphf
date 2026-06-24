@@ -64,7 +64,7 @@ func TestBuildAppAcceptancePromptIncludesBriefAndGaps(t *testing.T) {
 
 // seedAcceptanceApp writes a minimal published app on disk bound to `channel`,
 // so appForEditChannel + the deterministic checks resolve it.
-func seedAcceptanceApp(t *testing.T, id, channel string, bundleBytes int) {
+func seedAcceptanceApp(t *testing.T, id, channel string, bundleBytes int, status string, version int) {
 	t.Helper()
 	dir := filepath.Join(CustomAppsRootDir(), id)
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
@@ -72,7 +72,7 @@ func seedAcceptanceApp(t *testing.T, id, channel string, bundleBytes int) {
 	}
 	manifest := CustomApp{
 		ID: id, Slug: "probe", Name: "Probe", Entry: "index.html",
-		Version: 1, Status: "ready", EditChannel: channel,
+		Version: version, Status: status, EditChannel: channel,
 		CreatedBy: "app-builder", CreatedAt: "2026-06-22T00:00:00Z",
 		UpdatedAt: "2026-06-22T00:00:00Z",
 	}
@@ -110,7 +110,7 @@ func TestAppAcceptanceFailReopensThenHalts(t *testing.T) {
 
 	b := newTestBroker(t)
 	const ch = "task-app-7"
-	seedAcceptanceApp(t, "app_00000000000000aa", ch, 5000)
+	seedAcceptanceApp(t, "app_00000000000000aa", ch, 5000, "ready", 1)
 	b.tasks = append(b.tasks, teamTask{
 		ID: "OFFICE-7", Owner: appBuilderSlug, Channel: ch,
 		Title: "Build app: Lead Board", Details: "Build a lead board. Export the scored leads to CSV.",
@@ -165,7 +165,7 @@ func TestAppAcceptancePassPostsSummaryAndKeepsDone(t *testing.T) {
 	})
 	b := newTestBroker(t)
 	const ch = "task-app-9"
-	seedAcceptanceApp(t, "app_00000000000000bb", ch, 5000)
+	seedAcceptanceApp(t, "app_00000000000000bb", ch, 5000, "ready", 1)
 	b.tasks = append(b.tasks, teamTask{
 		ID: "OFFICE-9", Owner: appBuilderSlug, Channel: ch,
 		Title: "Build app: Digest", Details: "Build a standup digest grouped by agent.",
@@ -178,5 +178,78 @@ func TestAppAcceptancePassPostsSummaryAndKeepsDone(t *testing.T) {
 	}
 	if task := b.taskByIDLocked("OFFICE-9"); task.status != "done" {
 		t.Errorf("PASS must keep the task done, got %q", task.status)
+	}
+}
+
+// Regression: a judge timeout must NOT let an unpublished/stuck app stay "done".
+// The bug was that a judge error returned early, BEFORE the deterministic gate,
+// so a build that never published (status "building", v0 — the exact 30-minute
+// stuck state observed in the live eval) slipped through as delivered.
+func TestAppAcceptanceJudgeTimeoutStillReopensUnpublished(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return "", context.DeadlineExceeded // simulate the timeout
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-11"
+	// UNPUBLISHED app: status "building", version 0.
+	seedAcceptanceApp(t, "app_00000000000000cc", ch, 5000, "building", 0)
+	b.tasks = append(b.tasks, teamTask{
+		ID: "OFFICE-11", Owner: appBuilderSlug, Channel: ch,
+		Title: "Build app: Stuck", Details: "Build a thing.",
+		status: "done",
+	})
+
+	b.evaluateAppAcceptanceForTask("OFFICE-11")
+
+	// The deterministic gate must reopen WITHOUT ever consulting the judge.
+	if judgeCalled {
+		t.Error("an unpublished app must be caught by the deterministic gate without calling the judge")
+	}
+	if task := b.taskByIDLocked("OFFICE-11"); task == nil || task.status != "in_progress" {
+		t.Fatalf("a judge timeout must not stop the deterministic gate from reopening; got %+v", task)
+	}
+	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
+		t.Fatalf("want 1 deterministic acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
+	}
+}
+
+// Regression: an app that PUBLISHED (ready/v1) but is still the unmodified
+// starter scaffold must be reopened deterministically — even if the judge
+// (wrongly) passes it — because the agent never built the requested tool.
+func TestAppAcceptanceReopensUnmodifiedScaffold(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return `{"meets":true,"summary":"looks fine","gaps":[]}`, nil
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-13"
+	seedAcceptanceApp(t, "app_00000000000000dd", ch, 5000, "ready", 1)
+	// Overwrite App.tsx with the unmodified scaffold (carries the sentinel).
+	scaffoldPath := filepath.Join(CustomAppsRootDir(), "app_00000000000000dd", "src", "App.tsx")
+	if err := os.WriteFile(scaffoldPath,
+		[]byte("// "+appScaffoldSentinel+"\nexport default function App(){return null}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b.tasks = append(b.tasks, teamTask{
+		ID: "OFFICE-13", Owner: appBuilderSlug, Channel: ch,
+		Title: "Build app: Real Thing", Details: "Build a real domain tool, not the scaffold.",
+		status: "done",
+	})
+
+	b.evaluateAppAcceptanceForTask("OFFICE-13")
+
+	if judgeCalled {
+		t.Error("a scaffold-unchanged app must be caught deterministically, not sent to the judge")
+	}
+	if task := b.taskByIDLocked("OFFICE-13"); task == nil || task.status != "in_progress" {
+		t.Fatalf("an unmodified scaffold must be reopened; got %+v", task)
+	}
+	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
+		t.Fatalf("want 1 acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
 	}
 }

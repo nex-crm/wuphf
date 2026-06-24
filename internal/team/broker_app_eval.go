@@ -41,6 +41,10 @@ const (
 	appAcceptanceFailKind       = "app_acceptance_fail"
 	appAcceptancePassKind       = "app_acceptance_pass"
 	appAcceptanceHaltKind       = "app_acceptance_halt"
+	// appScaffoldSentinel is a distinctive instruction comment from the starter
+	// App.tsx (templates/app-scaffold/src/App.tsx) that no real app would keep.
+	// Its presence means the agent never replaced the template.
+	appScaffoldSentinel = "Replace the columns + resource to build a different tool"
 )
 
 // queueAppAcceptanceEval fires the post-done acceptance gate for an App Builder
@@ -100,9 +104,20 @@ func (b *Broker) evaluateAppAcceptanceForTask(taskID string) {
 		return // no published app bound to this task → nothing to grade
 	}
 
-	// Deterministic checks first — cheap and never wrong.
-	detGaps := b.deterministicAppGaps(app)
+	// Deterministic checks gate the app FIRST and INDEPENDENTLY of the LLM judge.
+	// A build that didn't publish a ready, versioned bundle is never "done" —
+	// whatever an LLM says, and crucially EVEN IF the judge is unavailable. So if
+	// any deterministic gap exists we reopen/halt here WITHOUT calling the judge;
+	// a judge timeout can no longer let a non-published app slip through (the bug
+	// that let a 30-minute build that never finalized stay "done").
+	if detGaps := b.deterministicAppGaps(app); len(detGaps) > 0 {
+		action, gaps := decideAppAcceptance(
+			appAcceptanceDecision{Meets: false}, detGaps, priorFails)
+		b.applyAppAcceptanceAction(action, taskID, channel, app, gaps, priorFails, "")
+		return
+	}
 
+	// The build published cleanly; ask the judge whether it meets the brief.
 	caps := ""
 	if files, err := b.appStore().Source(app.ID); err == nil {
 		caps = appEvalCapBytes(
@@ -110,14 +125,15 @@ func (b *Broker) evaluateAppAcceptanceForTask(taskID string) {
 			appAcceptanceMaxCapsBytes,
 		)
 	}
-
-	system, prompt := buildAppAcceptancePrompt(app, caps, brief, detGaps)
+	system, prompt := buildAppAcceptancePrompt(app, caps, brief, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), appAcceptanceTimeout)
 	defer cancel()
 	out, err := currentAppsLLMCompleter()(ctx, system, prompt)
 	if err != nil {
+		// Judge unavailable AND the build published OK → don't block a delivered
+		// task on a flaky provider. The deterministic gate above already ran.
 		log.Printf("app acceptance %s: judge unavailable: %v", taskID, err)
-		return // an unavailable provider must not block a delivered task
+		return
 	}
 	decision, ok := parseAppAcceptanceDecision(out)
 	if !ok {
@@ -125,12 +141,26 @@ func (b *Broker) evaluateAppAcceptanceForTask(taskID string) {
 		return
 	}
 
-	action, gaps := decideAppAcceptance(decision, detGaps, priorFails)
+	action, gaps := decideAppAcceptance(decision, nil, priorFails)
+	b.applyAppAcceptanceAction(action, taskID, channel, app, gaps, priorFails, decision.Summary)
+}
+
+// applyAppAcceptanceAction actuates the gate's decision: post a pass/halt notice
+// or reopen the task for an auto-fix. Shared by the deterministic-gap path and
+// the judge path so both produce identical messaging + logging.
+func (b *Broker) applyAppAcceptanceAction(
+	action appAcceptanceAction,
+	taskID, channel string,
+	app CustomApp,
+	gaps []string,
+	priorFails int,
+	summary string,
+) {
 	switch action {
 	case appAcceptanceActionPass:
 		b.postAppAcceptanceResult(channel, appAcceptancePassKind,
 			fmt.Sprintf("✅ Acceptance check passed — %q meets the brief. %s",
-				app.Name, strings.TrimSpace(decision.Summary)))
+				app.Name, strings.TrimSpace(summary)))
 		log.Printf("app acceptance %s: PASS", taskID)
 	case appAcceptanceActionHalt:
 		b.postAppAcceptanceResult(channel, appAcceptanceHaltKind,
@@ -194,6 +224,19 @@ func (b *Broker) deterministicAppGaps(app CustomApp) []string {
 	}
 	if _, html, err := b.appStore().Get(app.ID); err != nil || len(html) < appAcceptanceMinBundleBytes {
 		gaps = append(gaps, "The published bundle is missing or trivially small.")
+	}
+	// The agent must REPLACE the starter scaffold. An App.tsx that still carries
+	// the scaffold's instruction sentinel means it shipped (or stalled on) the
+	// unmodified template — a non-delivery the status/bundle checks miss when a
+	// scaffold happens to pass the build + publish. Cheap, deterministic backstop
+	// for the case the judge would otherwise have to catch (and might time out on).
+	if files, err := b.appStore().Source(app.ID); err == nil {
+		for path, src := range files {
+			if strings.HasSuffix(path, "App.tsx") && strings.Contains(src, appScaffoldSentinel) {
+				gaps = append(gaps, "The app is still the unmodified starter scaffold (App.tsx was never replaced).")
+				break
+			}
+		}
 	}
 	return gaps
 }
