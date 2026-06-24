@@ -145,3 +145,55 @@ func TestExtractInsertsLLMSynthesisStep(t *testing.T) {
 		t.Fatalf("send must reference the llm output token, got %+v", send.Params)
 	}
 }
+
+// TestBuildSpecBindsGroundedStepWithoutPlatformHint is the regression for the
+// silent-unbinding bug: a shape-grounded integration step whose model output
+// omitted Platform AND whose platform is not in knownPlatforms used to fall
+// through to an unbound deterministic no-op — a spec that shipchecks green but
+// fetches nothing at run time (and slips past the AllowedReads gate because
+// IsIntegrationRead needs a platform+action_id). The platform must instead be
+// derived from the action_id's leading segment.
+func TestBuildSpecBindsGroundedStepWithoutPlatformHint(t *testing.T) {
+	shape := []string{"gmail_fetch_emails", "slack_send_message"}
+	e := Extraction{
+		IsWorkflow: true,
+		Name:       "Urgent inbox → Slack",
+		Steps: []ExtractedStep{
+			// No Platform hint from the model — only the grounded action_id.
+			{Kind: "integration", ActionID: "GMAIL_FETCH_EMAILS"},
+			{Kind: "llm", ActionID: "summarize_urgent_emails", Instruction: "Summarize."},
+			{Kind: "integration", ActionID: "SLACK_SEND_MESSAGE"},
+		},
+	}
+	g := GroundExtraction(e, shape)
+	// knownPlatforms intentionally EMPTY: the binder must not depend on it.
+	spec, err := BuildSpecFromExtraction("x", "outbound", g, map[string]bool{})
+	if err != nil {
+		t.Fatalf("build must bind a grounded step even without a platform hint: %v", err)
+	}
+	fetch := actionByID(spec, "gmail_fetch_emails")
+	if fetch == nil || fetch.Kind != ActionDeterministic || fetch.Platform != "gmail" || fetch.ActionID != "GMAIL_FETCH_EMAILS" {
+		t.Fatalf("fetch step must bind to gmail/GMAIL_FETCH_EMAILS, got %+v", fetch)
+	}
+	if !readAllowed(spec, "gmail", "GMAIL_FETCH_EMAILS") {
+		t.Errorf("a bound integration read must be on allowed_reads")
+	}
+	send := actionByID(spec, "slack_send_message")
+	if send == nil || send.Kind != ActionExternal || send.Platform != "slack" || send.ActionID != "SLACK_SEND_MESSAGE" {
+		t.Fatalf("send step must bind to slack/SLACK_SEND_MESSAGE, got %+v", send)
+	}
+}
+
+// TestBuildSpecRejectsUnbindableIntegrationStep proves the fail-loud path: a
+// grounded integration token with no platform prefix cannot be bound and must
+// error rather than emit a silent no-op the operator would trust.
+func TestBuildSpecRejectsUnbindableIntegrationStep(t *testing.T) {
+	e := Extraction{
+		IsWorkflow: true,
+		Steps:      []ExtractedStep{{Kind: "integration", ActionID: "FETCH"}}, // no PLATFORM_ prefix
+	}
+	g := GroundExtraction(e, []string{"fetch"})
+	if _, err := BuildSpecFromExtraction("x", "outbound", g, map[string]bool{}); err == nil {
+		t.Fatalf("an unbindable integration step must fail the build, not produce a silent no-op")
+	}
+}

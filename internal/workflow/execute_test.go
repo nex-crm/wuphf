@@ -97,3 +97,48 @@ func TestRunThreadsOutputAcrossTransitions(t *testing.T) {
 		t.Fatalf("summarize (transition 2) must see fetch's output from transition 1, saw %+v", sawBySummarize)
 	}
 }
+
+// TestRunDistinguishesPendingApprovalFromFailure is the regression for the
+// audit mislabel: a human-gated send halts the chain with needs_approval set
+// and no error — that is a deliberate stop ("pending_approval"), not a failure
+// ("action_failed"). A genuine provider error still records "action_failed".
+func TestRunDistinguishesPendingApprovalFromFailure(t *testing.T) {
+	spec := func() *Spec {
+		return &Spec{
+			Initial:     "start",
+			Terminal:    []string{"done"},
+			States:      []State{{ID: "start"}, {ID: "done"}},
+			Events:      []Event{{ID: "run"}},
+			Actions:     []Action{{ID: "send", Kind: ActionExternal}},
+			Transitions: []Transition{{From: "start", To: "done", On: "run", Actions: []string{"send"}}},
+		}
+	}
+
+	// Gated: the action halts awaiting approval (no error).
+	gated := Run(spec(), []ScenarioEvent{{Event: "run"}}, func(Action, map[string]any) ActionOutcome {
+		return ActionOutcome{OK: false, Output: map[string]any{"needs_approval": true, "request_id": "request-1"}}
+	})
+	if gated.FinalState != "start" {
+		t.Fatalf("a gated send must halt before the terminal state, got %q", gated.FinalState)
+	}
+	if n := len(gated.Audit); n != 1 || gated.Audit[0].Skipped != "pending_approval" {
+		t.Fatalf("gated send must record skipped=pending_approval, got %+v", gated.Audit)
+	}
+	if gated.Audit[0].Actions == nil || gated.Audit[0].Actions[0] != "send" {
+		t.Errorf("audit must name the halted action, got %+v", gated.Audit[0])
+	}
+	if _, ok := gated.Outputs["send_error"]; ok {
+		t.Errorf("a pending-approval halt is not an error — it must not record send_error: %+v", gated.Outputs)
+	}
+
+	// Genuine failure: the action returns an error with no needs_approval.
+	failed := Run(spec(), []ScenarioEvent{{Event: "run"}}, func(Action, map[string]any) ActionOutcome {
+		return ActionOutcome{OK: false, Err: "composio 502"}
+	})
+	if n := len(failed.Audit); n != 1 || failed.Audit[0].Skipped != "action_failed" {
+		t.Fatalf("a real error must still record skipped=action_failed, got %+v", failed.Audit)
+	}
+	if failed.Outputs["send_error"] != "composio 502" {
+		t.Errorf("a real failure must surface the provider error, got %+v", failed.Outputs)
+	}
+}

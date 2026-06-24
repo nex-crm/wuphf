@@ -188,29 +188,43 @@ func BuildSpecFromExtraction(id, operator string, e Extraction, knownPlatforms m
 				a.Description = instr
 			}
 		default:
+			// A non-LLM step here is grounded in the gated shape, so it provably
+			// ran against a real integration. Bind it to that integration. Prefer
+			// the model's platform / a known-platform match, but never let a
+			// shape-grounded step fall through to an unbound deterministic no-op:
+			// the action_id is the canonical PLATFORM_VERB_... slug, so its
+			// leading segment is the platform. A spec with an unbound read/send
+			// step looks runnable but fetches/sends nothing (the original
+			// "extracted workflow posted a placeholder" failure mode), and an
+			// unbound deterministic step also slips past the AllowedReads gate
+			// because IsIntegrationRead requires a platform+action_id.
 			platform := strings.ToLower(strings.TrimSpace(st.Platform))
 			if platform == "" {
 				if p, _, ok := bindIntegrationAction(token, knownPlatforms); ok {
 					platform = p
 				}
 			}
-			if platform != "" && (knownPlatforms == nil || knownPlatforms[platform]) {
-				a.Platform = platform
-				a.ActionID = strings.ToUpper(token)
-				a.Params = st.Params
-				a.ResultPath = st.ResultPath
-				a.Expose = st.Expose
-				if isReadAction(token) {
-					a.Kind = ActionDeterministic
-					if key := platform + "\x00" + a.ActionID; !seenRead[key] {
-						seenRead[key] = true
-						allowedReads = append(allowedReads, ActionRef{Platform: platform, ActionID: a.ActionID})
-					}
-				} else {
-					a.Kind = ActionExternal
+			if platform == "" {
+				if seg := strings.SplitN(token, "_", 2); len(seg) == 2 {
+					platform = strings.ToLower(seg[0])
+				}
+			}
+			if platform == "" {
+				return Spec{}, fmt.Errorf("integration step %q cannot be bound to a platform (action_id must be PLATFORM_VERB_...)", token)
+			}
+			a.Platform = platform
+			a.ActionID = strings.ToUpper(token)
+			a.Params = st.Params
+			a.ResultPath = st.ResultPath
+			a.Expose = st.Expose
+			if isReadAction(token) {
+				a.Kind = ActionDeterministic
+				if key := platform + "\x00" + a.ActionID; !seenRead[key] {
+					seenRead[key] = true
+					allowedReads = append(allowedReads, ActionRef{Platform: platform, ActionID: a.ActionID})
 				}
 			} else {
-				a.Kind = inferKind(token)
+				a.Kind = ActionExternal
 			}
 		}
 		actions = append(actions, a)

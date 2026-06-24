@@ -25,7 +25,7 @@ type AuditEntry struct {
 	From    string   `json:"from"`
 	To      string   `json:"to,omitempty"`
 	Actions []string `json:"actions,omitempty"`
-	Skipped string   `json:"skipped,omitempty"` // "duplicate" | "no_transition" | "guard_failed" | "action_failed"
+	Skipped string   `json:"skipped,omitempty"` // "duplicate" | "no_transition" | "guard_failed" | "action_failed" | "pending_approval"
 }
 
 // RunResult is the deterministic output of executing a Spec over events.
@@ -97,6 +97,7 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 			runData[k] = v
 		}
 		failed := false
+		pending := false // halt awaiting human approval — a deliberate stop, not a failure
 		var failedID, failErr string
 		for _, aid := range t.Actions {
 			out := exec(actionByID[aid], runData)
@@ -104,6 +105,13 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 				failed = true
 				failedID = aid
 				failErr = out.Err
+				// A gated action (e.g. an external send the human must approve)
+				// halts the chain with needs_approval set and NO error. That is
+				// not a failure — distinguish it so the audit reads
+				// "pending_approval", not "action_failed".
+				if na, ok := out.Output["needs_approval"].(bool); ok && na {
+					pending = true
+				}
 				// Capture the failed action's diagnostic output (gate decision,
 				// request_id, provider error) into the run record so a failed send
 				// is debuggable instead of silently swallowed.
@@ -128,7 +136,11 @@ func Run(s *Spec, events []ScenarioEvent, exec ActionExec) RunResult {
 			}
 		}
 		if failed {
-			entry := AuditEntry{Event: ev.Event, From: cur, Skipped: "action_failed"}
+			reason := "action_failed"
+			if pending {
+				reason = "pending_approval"
+			}
+			entry := AuditEntry{Event: ev.Event, From: cur, Skipped: reason}
 			if failedID != "" {
 				entry.Actions = []string{failedID}
 			}
