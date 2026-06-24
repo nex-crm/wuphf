@@ -17,7 +17,7 @@ from typing import Callable
 from fastapi import FastAPI
 
 from .graph import build_graph, drive
-from .harness import FakeHarness, Harness
+from .harness import FakeHarness, Harness, build_harness
 from .lifecycle import State
 from .runstate import from_broker_record, to_projection
 from .wire import DispatchRequest, ResumeRequest, StepResult
@@ -26,10 +26,11 @@ from .wire import DispatchRequest, ResumeRequest, StepResult
 HarnessFactory = Callable[[DispatchRequest], Harness]
 
 
-def _default_harness_factory(_req: DispatchRequest) -> Harness:
-    # P1 default: FakeHarness keeps the service runnable without a model key.
-    # P2 swaps in ClaudeAgentHarness(model=req.model, mcp_config=..., broker_env=...).
-    return FakeHarness()
+def _default_harness_factory(req: DispatchRequest) -> Harness:
+    # P2: drive Claude Code via the Claude Agent SDK when it's installed (passing
+    # the request's model + teammcp config); otherwise degrade to FakeHarness so
+    # the service stays runnable key-free. Tests inject FakeHarness explicitly.
+    return build_harness(req.model, req.mcp)
 
 
 def create_app(harness_factory: HarnessFactory = _default_harness_factory) -> FastAPI:

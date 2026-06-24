@@ -14,11 +14,12 @@ src/orchestrator/
   lifecycle.py   real lifecycle model (13 states, forward/migration maps, migrate_record)
                  + P1 orchestration policy (route / outcome+decision transitions)
   runstate.py    TaskRun schema; from_broker_record (re-hydrate) + to_projection (-> Go)
-  harness.py     Harness protocol; FakeHarness (tests/key-free) + ClaudeAgentHarness (P2)
+  harness.py     Harness protocol; FakeHarness (tests/key-free) + ClaudeAgentHarness (P1b-iv)
   graph.py       the LangGraph graph: route -> dispatch_turn -> (human_gate | continue)
   wire.py        Go<->Python contract (DispatchRequest / ResumeRequest / StepResult)
   service.py     FastAPI: POST /run, POST /resume, GET /health
-tests/           25 tests: lifecycle round-trip/lossiness/adversarial, graph HITL, service, wire
+tests/           lifecycle round-trip/lossiness/adversarial, graph HITL, service, wire,
+                 harness (classify_outcome / env resolution / degrade-safe)
 ```
 
 ## Run
@@ -55,17 +56,19 @@ uv pip install langgraph langgraph-checkpoint-sqlite fastapi sse-starlette uvico
    `team_task` plan input). When it becomes executable, the broker routes it to
    `POST /run` instead of a headless CLI turn and writes the projection back.
 
-Caveat (P1 stub): with the default `FakeHarness` an interrupted step's projection
-still reads `running`, so a wired langgraph task re-dispatches each tick. P2's real
-`ClaudeAgentHarness` returns a real gate state and resolves this — until then, run
-the E2E with a single task and expect the stubbed turn, not a real agent.
+Caveat (FakeHarness only): without `claude-agent-sdk` installed the service falls
+back to `FakeHarness`, whose interrupted step projects `running`, so a wired task
+re-dispatches each tick. Install the SDK + set a key to get the real
+`ClaudeAgentHarness` (P1b-iv), which returns a real gate state and resolves this.
 
 ## Deferred (next increments — explicit, not hidden)
 
-- **P1b Go side:** a `provider/deepagents`-style dispatch client + the broker-state
-  projection write-back + the per-task `orchestrator=langgraph|broker` flag.
-- **P2:** `ClaudeAgentHarness.run_turn` — drive Claude Code via the Claude Agent SDK,
-  wired to teammcp + broker token; classify the real turn outcome.
+- ~~**P1b Go side**~~ — **done** (PRs: dispatch client, broker routing, E2E loop).
+- ~~**P1b-iv:** `ClaudeAgentHarness.run_turn`~~ — **done.** Drives Claude Code via the
+  Claude Agent SDK (lazy/optional), wired to teammcp; outcome is classified by a
+  pure `classify_outcome` keyed on the agent's real `team_task` actions. Live runs
+  need `pip install claude-agent-sdk` + a key; without the SDK the service degrades
+  to `FakeHarness`.
 - **SSE streaming** of incremental events (the service returns the terminal StepResult today).
 - **CI wiring** (pytest + golden wire fixtures) scoped to `orchestrator/**`.
 
