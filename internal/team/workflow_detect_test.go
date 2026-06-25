@@ -90,6 +90,51 @@ func TestDetectWorkflowsOrderInsensitive(t *testing.T) {
 	}
 }
 
+// TestDetectWorkflowsFuzzyTolerance: two runs whose tool sets differ by one tool
+// (an extra confirm read) cluster under FuzzyToolTolerance=1, but stay separate
+// when exact.
+func TestDetectWorkflowsFuzzyTolerance(t *testing.T) {
+	drift := []TurnManifest{
+		manifestFor("t1", "revops", "crm_fetch_leads", "score_leads"),
+		manifestFor("t2", "revops", "crm_fetch_leads", "score_leads", "log_result"),
+	}
+	if got := DetectWorkflows(drift, DetectOptions{RecurrenceFloor: 2}); len(got) != 0 {
+		t.Fatalf("exact: one-tool drift must not cluster, got %d", len(got))
+	}
+	got := DetectWorkflows(drift, DetectOptions{RecurrenceFloor: 2, FuzzyToolTolerance: 1})
+	if len(got) != 1 || got[0].Count != 2 {
+		t.Fatalf("fuzzy(1): one-tool drift must cluster to count=2, got %d (%+v)", len(got), got)
+	}
+	// A two-tool gap stays separate even at tolerance 1.
+	farther := []TurnManifest{
+		manifestFor("t1", "revops", "crm_fetch_leads", "score_leads"),
+		manifestFor("t2", "revops", "fetch_tickets", "triage_ticket"),
+	}
+	if got := DetectWorkflows(farther, DetectOptions{RecurrenceFloor: 2, FuzzyToolTolerance: 1}); len(got) != 0 {
+		t.Fatalf("fuzzy(1): unrelated shapes must not merge, got %d", len(got))
+	}
+}
+
+// TestDetectWorkflowsCrossAgent: the same shape run by two DIFFERENT agents
+// clusters under CrossAgent (with the agent blanked), but stays per-agent by
+// default.
+func TestDetectWorkflowsCrossAgent(t *testing.T) {
+	twoAgents := []TurnManifest{
+		manifestFor("t1", "revops", "crm_fetch_leads", "score_leads"),
+		manifestFor("t2", "sales", "crm_fetch_leads", "score_leads"),
+	}
+	if got := DetectWorkflows(twoAgents, DetectOptions{RecurrenceFloor: 2}); len(got) != 0 {
+		t.Fatalf("default: different agents must not cluster, got %d", len(got))
+	}
+	got := DetectWorkflows(twoAgents, DetectOptions{RecurrenceFloor: 2, CrossAgent: true})
+	if len(got) != 1 || got[0].Count != 2 {
+		t.Fatalf("cross-agent: want one count=2 candidate, got %d (%+v)", len(got), got)
+	}
+	if got[0].Agent != "" {
+		t.Fatalf("cross-agent candidate must claim no single agent, got %q", got[0].Agent)
+	}
+}
+
 // TestDetectWorkflowsSingleRunExternalizingOnly: with the apps gate set, a single
 // run surfaces only when it EXTERNALIZED (send/email/…); a single run ending in a
 // workspace-internal verb (update/save) does not nag — but still recurs as signal.

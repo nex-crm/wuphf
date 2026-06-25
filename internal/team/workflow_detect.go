@@ -102,6 +102,18 @@ type DetectOptions struct {
 	// apps set it because a read-mostly tool's step order rarely distinguishes
 	// one workflow from another, and exact-order matching loses real recurrence.
 	OrderInsensitive bool
+	// CrossAgent clusters the same shape regardless of WHICH agent ran it, so a
+	// workflow two different agents both perform surfaces as one candidate. For
+	// apps this is a strong shared-tool signal (a tool any agent/human opens);
+	// the reported Agent is blanked since the cluster spans agents. Default false
+	// keeps per-agent clustering.
+	CrossAgent bool
+	// FuzzyToolTolerance merges clusters whose tool SETS differ by at most this
+	// many tools (one added or dropped step), so real shape drift — an extra
+	// confirm read, a skipped lookup — still recurs instead of splitting into
+	// singletons. 0 (default) is exact. Apps use 1. Merging is greedy in
+	// first-seen order, so it stays deterministic and conservative.
+	FuzzyToolTolerance int
 }
 
 // recurrenceFloor is the default recurrence count at which a shape surfaces
@@ -262,6 +274,62 @@ func taskShape(turns []TurnManifest) []string {
 	return shape
 }
 
+// detectCluster is a group of tasks the miner judged to be the same workflow:
+// a representative shape (first member's first-use order), the agent that ran it
+// (the first member's, blanked downstream for cross-agent clusters), and the
+// member task IDs.
+type detectCluster struct {
+	shape   []string
+	agent   string
+	taskIDs []string
+}
+
+// toolSetSymmetricDiff counts the tools that appear in exactly one of the two
+// shapes (treated as sets) — the number of single-tool edits between them.
+func toolSetSymmetricDiff(a, b []string) int {
+	in := make(map[string]int, len(a)+len(b))
+	for _, t := range a {
+		in[t] |= 1
+	}
+	for _, t := range b {
+		in[t] |= 2
+	}
+	diff := 0
+	for _, bits := range in {
+		if bits != 3 { // present in only one set
+			diff++
+		}
+	}
+	return diff
+}
+
+// mergeNearDuplicateClusters greedily folds each cluster into the first earlier
+// cluster whose shape differs by at most tolerance tools (and, unless crossAgent,
+// shares its agent). Greedy + first-seen order keeps it deterministic and
+// conservative — drift accumulates toward an anchor rather than chaining
+// unrelated shapes together. The anchor keeps its representative shape; merged
+// members contribute their task IDs (recurrence count).
+func mergeNearDuplicateClusters(clusters []*detectCluster, tolerance int, crossAgent bool) []*detectCluster {
+	kept := make([]*detectCluster, 0, len(clusters))
+	for _, c := range clusters {
+		merged := false
+		for _, k := range kept {
+			if !crossAgent && k.agent != c.agent {
+				continue
+			}
+			if toolSetSymmetricDiff(k.shape, c.shape) <= tolerance {
+				k.taskIDs = append(k.taskIDs, c.taskIDs...)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
 // DetectWorkflows groups manifests by task, reduces each task to its shape, and
 // returns candidates with at least MinSteps distinct tools that either (a) ran
 // end-to-end to a final outcome (even once) or (b) recurred at least
@@ -292,12 +360,7 @@ func DetectWorkflows(manifests []TurnManifest, opts DetectOptions) []DetectionCa
 	}
 
 	// Cluster tasks by (agent, shape).
-	type cluster struct {
-		shape   []string
-		agent   string
-		taskIDs []string
-	}
-	clusters := make(map[string]*cluster)
+	clusters := make(map[string]*detectCluster)
 	var clusterOrder []string
 	for _, taskID := range taskOrder {
 		g := groups[taskID]
@@ -314,19 +377,34 @@ func DetectWorkflows(manifests []TurnManifest, opts DetectOptions) []DetectionCa
 			keyTools = append([]string(nil), shape...)
 			sort.Strings(keyTools)
 		}
-		key := g.agent + "\x00" + strings.Join(keyTools, ">")
+		// CrossAgent drops the agent from the key so the same shape clusters
+		// regardless of which agent ran it.
+		agentKey := g.agent
+		if opts.CrossAgent {
+			agentKey = ""
+		}
+		key := agentKey + "\x00" + strings.Join(keyTools, ">")
 		c, ok := clusters[key]
 		if !ok {
-			c = &cluster{shape: shape, agent: g.agent}
+			c = &detectCluster{shape: shape, agent: g.agent}
 			clusters[key] = c
 			clusterOrder = append(clusterOrder, key)
 		}
 		c.taskIDs = append(c.taskIDs, taskID)
 	}
 
-	out := make([]DetectionCandidate, 0, len(clusterOrder))
+	// Assemble clusters in first-seen order, then optionally merge near-duplicate
+	// shapes (FuzzyToolTolerance) so one-tool drift recurs instead of splitting.
+	final := make([]*detectCluster, 0, len(clusterOrder))
 	for _, key := range clusterOrder {
-		c := clusters[key]
+		final = append(final, clusters[key])
+	}
+	if opts.FuzzyToolTolerance > 0 {
+		final = mergeNearDuplicateClusters(final, opts.FuzzyToolTolerance, opts.CrossAgent)
+	}
+
+	out := make([]DetectionCandidate, 0, len(final))
+	for _, c := range final {
 		count := len(c.taskIDs)
 		if count < opts.MinRepeats {
 			continue
@@ -344,10 +422,15 @@ func DetectWorkflows(manifests []TurnManifest, opts DetectOptions) []DetectionCa
 		if !surfacesSingleRun && count < opts.RecurrenceFloor {
 			continue
 		}
+		// A cross-agent cluster spans agents, so it claims no single one.
+		agent := c.agent
+		if opts.CrossAgent {
+			agent = ""
+		}
 		out = append(out, DetectionCandidate{
 			Fingerprint: strings.Join(c.shape, ">"),
 			Shape:       c.shape,
-			Agent:       c.agent,
+			Agent:       agent,
 			TaskIDs:     c.taskIDs,
 			Count:       count,
 			Outcome:     outcome,

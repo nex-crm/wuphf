@@ -172,6 +172,8 @@ func detectionCandidateForTask(taskID string) *DetectionCandidate {
 		RecurrenceFloor:                  appWorkflowRecurrenceFloor,
 		SingleRunRequiresExternalOutcome: true,
 		OrderInsensitive:                 true,
+		CrossAgent:                       true,
+		FuzzyToolTolerance:               1,
 	})
 	if err != nil {
 		log.Printf("workflow detect %s: read corpus: %v", taskID, err)
