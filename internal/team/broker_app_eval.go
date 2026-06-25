@@ -47,6 +47,40 @@ const (
 	appScaffoldSentinel = "Replace the columns + resource to build a different tool"
 )
 
+// sweepStalledAppBuildsLocked returns the App Builder build tasks that have gone
+// silently stalled (StalledSince set by the activity watchdog) while still
+// in_progress — the "never reaches done" case the done-triggered acceptance gate
+// misses. It fires the gate at most once per stall episode (keyed by
+// StalledSince) so a still-stuck build is nudged with concrete gaps but not
+// re-graded every tick; the gate's own fail-notice budget bounds total reopens
+// and then halts for a human. Caller holds b.mu; the caller queues the returned
+// IDs OUTSIDE the lock because the gate reads the app store under its own lock.
+func (b *Broker) sweepStalledAppBuildsLocked() []string {
+	var due []string
+	for i := range b.tasks {
+		t := &b.tasks[i]
+		if t.System || !strings.EqualFold(strings.TrimSpace(t.Owner), appBuilderSlug) {
+			continue
+		}
+		stalledSince := strings.TrimSpace(t.StalledSince)
+		if stalledSince == "" || strings.TrimSpace(t.status) != "in_progress" {
+			// Not stalled (or finished): forget any prior episode so a future
+			// stall is acted on again, and keep the dedupe map from growing.
+			delete(b.appBuildStallSwept, t.ID)
+			continue
+		}
+		if b.appBuildStallSwept == nil {
+			b.appBuildStallSwept = map[string]string{}
+		}
+		if b.appBuildStallSwept[t.ID] == stalledSince {
+			continue // already graded this stall episode
+		}
+		b.appBuildStallSwept[t.ID] = stalledSince
+		due = append(due, t.ID)
+	}
+	return due
+}
+
 // queueAppAcceptanceEval fires the post-done acceptance gate for an App Builder
 // build task. No-op unless detection is enabled (the production web path turns it
 // on), so the unit suite — which completes many tasks — never makes a live judge

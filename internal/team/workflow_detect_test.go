@@ -69,6 +69,27 @@ func TestDetectWorkflowsSingleRunOutcome(t *testing.T) {
 	}
 }
 
+// TestDetectWorkflowsOrderInsensitive: two runs of the same tool SET in a
+// different order cluster under the apps OrderInsensitive option, but stay
+// separate under the workflow lane's default exact-sequence contract.
+func TestDetectWorkflowsOrderInsensitive(t *testing.T) {
+	reordered := []TurnManifest{
+		manifestFor("t1", "revops", "crm_fetch_leads", "score_leads"),
+		manifestFor("t2", "revops", "score_leads", "crm_fetch_leads"),
+	}
+
+	// Default (exact order): two distinct single-run shapes, neither recurs to
+	// the floor, so nothing surfaces.
+	if got := DetectWorkflows(reordered, DetectOptions{RecurrenceFloor: 2}); len(got) != 0 {
+		t.Fatalf("exact-order default: reordered runs must NOT cluster, got %d", len(got))
+	}
+	// OrderInsensitive: they cluster into one count=2 candidate.
+	got := DetectWorkflows(reordered, DetectOptions{RecurrenceFloor: 2, OrderInsensitive: true})
+	if len(got) != 1 || got[0].Count != 2 {
+		t.Fatalf("order-insensitive: want one count=2 candidate, got %d (%+v)", len(got), got)
+	}
+}
+
 // TestDetectWorkflowsSingleRunExternalizingOnly: with the apps gate set, a single
 // run surfaces only when it EXTERNALIZED (send/email/…); a single run ending in a
 // workspace-internal verb (update/save) does not nag — but still recurs as signal.

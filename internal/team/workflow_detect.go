@@ -96,6 +96,12 @@ type DetectOptions struct {
 	// remain valid RECURRENCE signal, just not a single-run trigger. Default
 	// false keeps the workflow lane's behavior (any outcome verb surfaces a run).
 	SingleRunRequiresExternalOutcome bool
+	// OrderInsensitive clusters runs that used the SAME set of work tools in a
+	// different order together (fetch->score and score->fetch are the same
+	// workflow). Default false keeps the workflow lane's exact-sequence contract;
+	// apps set it because a read-mostly tool's step order rarely distinguishes
+	// one workflow from another, and exact-order matching loses real recurrence.
+	OrderInsensitive bool
 }
 
 // recurrenceFloor is the default recurrence count at which a shape surfaces
@@ -299,8 +305,16 @@ func DetectWorkflows(manifests []TurnManifest, opts DetectOptions) []DetectionCa
 		if len(shape) < opts.MinSteps {
 			continue
 		}
-		fingerprint := strings.Join(shape, ">")
-		key := g.agent + "\x00" + fingerprint
+		// The cluster key controls what counts as "the same workflow". By default
+		// it is the exact ordered shape; OrderInsensitive keys on the sorted tool
+		// set so reordered runs cluster while the stored shape stays first-use
+		// order for display.
+		keyTools := shape
+		if opts.OrderInsensitive {
+			keyTools = append([]string(nil), shape...)
+			sort.Strings(keyTools)
+		}
+		key := g.agent + "\x00" + strings.Join(keyTools, ">")
 		c, ok := clusters[key]
 		if !ok {
 			c = &cluster{shape: shape, agent: g.agent}

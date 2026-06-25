@@ -346,6 +346,59 @@ func TestAppAcceptanceReopensCorruptBundle(t *testing.T) {
 	}
 }
 
+// Regression (stalled-build backstop): an App Builder build task that stalled
+// in_progress without finalizing is graded by the watchdog sweep — once per stall
+// episode (dedupe), only for App Builder tasks — and an unfinalized one reopens.
+func TestSweepStalledAppBuildsReopensUnfinalized(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return `{"meets":true,"summary":"","gaps":[]}`, nil
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-20"
+	const id = "app_000000000000aa20"
+	seedAcceptanceApp(t, id, ch, 5000, "ready", 1)
+	// Make it an unfinalized build: App.tsx still the scaffold.
+	scaffold := filepath.Join(CustomAppsRootDir(), id, "src", "App.tsx")
+	if err := os.WriteFile(scaffold, []byte("// "+appScaffoldSentinel+"\nexport default function App(){return null}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b.tasks = append(b.tasks,
+		teamTask{ID: "OFFICE-20", Owner: appBuilderSlug, Channel: ch,
+			Title: "Build app: X", Details: "Build a real tool.",
+			status: "in_progress", StalledSince: "2026-06-26T00:00:00Z"},
+		// A non-App-Builder stalled task must be ignored by the sweep.
+		teamTask{ID: "OFFICE-21", Owner: "ceo", Channel: "task-other",
+			status: "in_progress", StalledSince: "2026-06-26T00:00:00Z"},
+	)
+
+	due := b.sweepStalledAppBuildsLocked()
+	if len(due) != 1 || due[0] != "OFFICE-20" {
+		t.Fatalf("sweep should return only the stalled App Builder build, got %v", due)
+	}
+	if again := b.sweepStalledAppBuildsLocked(); len(again) != 0 {
+		t.Fatalf("same stall episode must not re-fire, got %v", again)
+	}
+
+	// Grading the stalled unfinalized build reopens it deterministically.
+	b.evaluateAppAcceptanceForTask("OFFICE-20")
+	if judgeCalled {
+		t.Error("a stalled scaffold build must be caught deterministically, not sent to the judge")
+	}
+	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
+		t.Fatalf("want 1 acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
+	}
+
+	// A NEW stall episode (different StalledSince) is acted on again.
+	b.taskByIDLocked("OFFICE-20").StalledSince = "2026-06-26T01:00:00Z"
+	b.taskByIDLocked("OFFICE-20").status = "in_progress"
+	if due2 := b.sweepStalledAppBuildsLocked(); len(due2) != 1 {
+		t.Fatalf("a new stall episode must re-fire, got %v", due2)
+	}
+}
+
 // Regression (no silent pass): an App Builder build task that reached done with
 // NO app bound to its channel (register_app never called) is the strongest
 // non-delivery and must be reopened + logged, not silently accepted.
