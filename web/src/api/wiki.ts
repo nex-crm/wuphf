@@ -366,6 +366,13 @@ export interface WikiCatalogEntry {
   author_slug: string;
   last_edited_ts: string;
   group: string;
+  /**
+   * Many-to-many category slugs from the article's `categories:` frontmatter
+   * (markdown-authoritative). Always present from the broker (possibly empty);
+   * optional here for older fixtures. `group` (the folder) is the fallback nav
+   * key during the category migration.
+   */
+  categories?: string[];
   /** ISO-8601 timestamp of the last access by any reader. Null if never accessed. */
   last_read?: string | null;
   human_read_count?: number;
@@ -562,6 +569,119 @@ export function subscribeSectionsUpdated(
     if (source && onEvent) {
       source.removeEventListener(
         "wiki:sections_updated",
+        onEvent as EventListener,
+      );
+    }
+    if (source) {
+      source.close();
+      source = null;
+    }
+  };
+}
+
+/**
+ * One category in the Wikipedia-style category nav. Maps 1:1 to Go's
+ * `team.DiscoveredCategory`. Categories are a many-to-many classification
+ * authored in each article's `categories:` frontmatter (markdown-authoritative)
+ * and surfaced from the derived article_categories index.
+ */
+export interface DiscoveredCategory {
+  slug: string;
+  title: string;
+  article_count: number;
+  /**
+   * Parent category slugs (the subcategory tree). Always present from the
+   * broker (possibly empty); optional here for older fixtures. A category's
+   * children are the categories whose `parents` include its slug.
+   */
+  parents?: string[];
+}
+
+/** A member article of a category. Maps to Go's `team.CategoryArticle`. */
+export interface CategoryArticle {
+  path: string;
+  title: string;
+}
+
+/**
+ * GET /wiki/categories/{slug} response. Maps to Go's `team.CategoryDetail`.
+ */
+export interface CategoryDetail {
+  slug: string;
+  title: string;
+  articles: CategoryArticle[];
+}
+
+export interface WikiCategoriesUpdatedEvent {
+  categories: DiscoveredCategory[];
+  timestamp: string;
+}
+
+/**
+ * GET /wiki/categories — the category nav list (slug, title, article count),
+ * sorted by slug. Empty array on backend error so the nav can fall back to the
+ * folder/section IA without blanking.
+ */
+export async function fetchCategories(): Promise<DiscoveredCategory[]> {
+  try {
+    const res = await get<{ categories: DiscoveredCategory[] }>(
+      "/wiki/categories",
+    );
+    return Array.isArray(res?.categories) ? res.categories : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * GET /wiki/categories/{slug} — the member articles of one category. Throws on
+ * backend error so callers can surface a load failure for the category page.
+ */
+export async function fetchCategory(slug: string): Promise<CategoryDetail> {
+  return get<CategoryDetail>(`/wiki/categories/${encodeURIComponent(slug)}`);
+}
+
+/**
+ * Subscribe to `wiki:categories_updated` events on the shared `/events` SSE
+ * stream. Returns an unsubscribe function. Mirrors subscribeSectionsUpdated.
+ */
+export function subscribeCategoriesUpdated(
+  handler: (event: WikiCategoriesUpdatedEvent) => void,
+): () => void {
+  let closed = false;
+  let source: SharedEventStream | null = null;
+  let onEvent: ((ev: MessageEvent) => void) | null = null;
+
+  try {
+    source = openSharedEventStream();
+    if (!source)
+      return () => {
+        closed = true;
+      };
+    onEvent = (ev: MessageEvent) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse(ev.data) as WikiCategoriesUpdatedEvent;
+        if (data && Array.isArray(data.categories)) {
+          handler(data);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+    source.addEventListener(
+      "wiki:categories_updated",
+      onEvent as EventListener,
+    );
+  } catch {
+    source = null;
+  }
+
+  return () => {
+    closed = true;
+    if (source && onEvent) {
+      source.removeEventListener(
+        "wiki:categories_updated",
         onEvent as EventListener,
       );
     }

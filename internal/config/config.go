@@ -89,7 +89,7 @@ type Config struct {
 	PendingCompanySeed  bool     `json:"pending_company_seed,omitempty"`
 
 	// Product analytics consent (PostHog). Two independent channels:
-	// anonymous usage events and fully-masked session recordings. Both
+	// anonymous usage events and session recordings (typed text masked). Both
 	// default ON when unset (nil) so legacy installs keep the documented
 	// default, but the whole analytics layer is dormant unless a PostHog
 	// project key is configured (build-time VITE_PUBLIC_POSTHOG_KEY or
@@ -666,8 +666,9 @@ func (c Config) IsAnalyticsTelemetryEnabled() bool {
 	return c.AnalyticsTelemetryEnabled == nil || *c.AnalyticsTelemetryEnabled
 }
 
-// IsAnalyticsSessionRecordingEnabled reports whether fully-masked session
-// recordings may be captured. Default ON when not explicitly opted out (nil).
+// IsAnalyticsSessionRecordingEnabled reports whether session recordings
+// (with typed text masked) may be captured. Default ON when not explicitly
+// opted out (nil).
 func (c Config) IsAnalyticsSessionRecordingEnabled() bool {
 	return c.AnalyticsSessionRecordingEnabled == nil || *c.AnalyticsSessionRecordingEnabled
 }

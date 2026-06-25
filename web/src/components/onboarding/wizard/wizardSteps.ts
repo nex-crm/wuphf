@@ -85,7 +85,7 @@ export interface OnboardingAnswers {
   /**
    * Product-analytics consent, two independent channels, both default ON.
    * `telemetryConsent` gates anonymous usage events; `recordingConsent` gates
-   * fully-masked session replays. Persisted to config via /onboarding/complete
+   * session replays that mask typed text. Persisted to config via /onboarding/complete
    * and applied live on finish. See docs/specs/product-analytics.md.
    */
   telemetryConsent: boolean;
@@ -187,17 +187,18 @@ export const ONBOARDING_EMAIL_COPY = {
 
 /**
  * Analytics-consent copy for the final step. Two honest, independent toggles,
- * both checked by default. The copy states plainly that we never collect
- * content and that recordings are fully masked, so the promise is visible at
- * the point of consent. Single source of truth; mirrored in the README.
+ * both checked by default. The copy states plainly that analytics never
+ * collects content and that recordings mask everything you type, so the
+ * promise is visible at the point of consent. Single source of truth;
+ * mirrored in the README.
  */
 export const ONBOARDING_ANALYTICS_CONSENT_COPY = {
   heading: "Help improve WUPHF",
-  note: "Both are optional, on by default, and easy to change anytime in Settings. WUPHF never collects your content, customer data, or secrets.",
+  note: "Both are optional, on by default, and easy to change anytime in Settings. Analytics never collects your content, and recordings mask everything you type.",
   telemetryLabel:
     "Share anonymous product analytics. Counts and shapes of what you do, never the content.",
   recordingLabel:
-    "Allow fully-masked session recordings. We see layout and clicks to fix rough edges, never your text, data, or secrets.",
+    "Allow session recordings. We mask everything you type — passwords, keys, form fields — and capture layout, clicks, and navigation to fix rough edges.",
 } as const;
 
 /** UI chrome labels for the wizard host. WUPHF voice, no contractions. */

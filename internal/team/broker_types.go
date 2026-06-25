@@ -772,12 +772,18 @@ type watchdogAlert struct {
 }
 
 type schedulerJob struct {
-	Slug            string `json:"slug"`
-	Kind            string `json:"kind,omitempty"`
-	Label           string `json:"label"`
-	TargetType      string `json:"target_type,omitempty"`
-	TargetID        string `json:"target_id,omitempty"`
-	Channel         string `json:"channel,omitempty"`
+	Slug       string `json:"slug"`
+	Kind       string `json:"kind,omitempty"`
+	Label      string `json:"label"`
+	TargetType string `json:"target_type,omitempty"`
+	TargetID   string `json:"target_id,omitempty"`
+	Channel    string `json:"channel,omitempty"`
+	// Agent is the office agent slug that owns this job (scheduled it / will be
+	// credited as the owner). For workflow jobs this is the scheduling agent —
+	// NOT the integration vendor. The UI surfaces this as the routine's owner;
+	// without it a Composio/One workflow job would fall back to showing the
+	// vendor name ("composio") as if it were an agent.
+	Agent           string `json:"agent,omitempty"`
 	Provider        string `json:"provider,omitempty"`
 	ScheduleExpr    string `json:"schedule_expr,omitempty"`
 	WorkflowKey     string `json:"workflow_key,omitempty"`

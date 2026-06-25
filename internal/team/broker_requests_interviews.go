@@ -159,8 +159,39 @@ func enrichRequestOptions(kind string, options []interviewOption) []interviewOpt
 	return out
 }
 
+// ownChoiceOptionID is the trailing free-text "write your own" option appended
+// to open-ended asks so the human always has the Claude-Code-style escape hatch
+// as the LAST option, even when the agent only proposed concrete suggestions.
+const ownChoiceOptionID = "something_else"
+
+// ensureOwnChoiceOption appends a trailing free-text "Something else" option to
+// interview/choice asks whose options are all concrete one-click suggestions
+// (none already takes free text). This gives every open-ended ask the
+// AskUserQuestion shape: concrete suggestions to accept + a final write-your-own.
+// No-op for fixed-decision kinds (approval/connect/fallback/notice) and when an
+// own-answer affordance already exists.
+func ensureOwnChoiceOption(kind string, options []interviewOption) []interviewOption {
+	switch normalizeRequestKind(kind) {
+	case "interview", "choice":
+	default:
+		return options
+	}
+	for _, o := range options {
+		if o.RequiresText || strings.TrimSpace(o.ID) == ownChoiceOptionID {
+			return options
+		}
+	}
+	return append(options, interviewOption{
+		ID:           ownChoiceOptionID,
+		Label:        "Something else",
+		Description:  "None of these fit — write your own answer.",
+		RequiresText: true,
+		TextHint:     "Type your own answer for the team.",
+	})
+}
+
 func normalizeRequestOptions(kind, recommendedID string, options []interviewOption) ([]interviewOption, string) {
-	normalized := enrichRequestOptions(kind, options)
+	normalized := ensureOwnChoiceOption(kind, enrichRequestOptions(kind, options))
 	recommendedID = strings.TrimSpace(recommendedID)
 	if recommendedID != "" {
 		for _, option := range normalized {
@@ -404,6 +435,16 @@ func (b *Broker) cancelActiveHumanInterviewsLocked(actor, reason, channel, reply
 // Returns the request id ("" when nothing was raised).
 func (b *Broker) raiseDefinitionGapInterviewLocked(task *teamTask, actor string) string {
 	if task == nil || task.Definition == nil || isHumanMessageSender(actor) {
+		return ""
+	}
+	// Plan-first tasks own their own clarifying questions: the owner runs the
+	// read-only planning turn, presents a plan, and asks the human well-formed,
+	// single-threaded questions via human_interview. Firing this deterministic
+	// gap gate during planning pre-empts that — the human would be hit with a
+	// crammed "missing details / connect X" ask BEFORE ever seeing a plan
+	// (exactly the regression the plan-first flow exists to prevent). Defer to
+	// the planning turn; if real gaps survive into execution they surface then.
+	if task.LifecycleState == LifecycleStatePlanning {
 		return ""
 	}
 	gaps := definitionGapMarkers(task.Definition)
@@ -971,6 +1012,9 @@ func (b *Broker) applyRequestAnswerLocked(req *humanInterview, answer *interview
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	pendingCascade = append(pendingCascade, b.unblockTasksForAnsweredRequestLocked(*req)...)
 	b.maybeCreateApprovedSelfHealTaskLocked(*req)
+	// Plan-approval gate: approving a planning task's plan starts it
+	// (Planning→Running + dispatch). Any other answer leaves it in Planning.
+	b.applyPlanApprovalAnswerLocked(*req, answer, actor)
 	b.appendActionLocked("request_answered", "office", req.Channel, actor,
 		truncateSummary(formatRequestAnswerMessage(*req, *answer), 140), req.ID)
 	return pendingCascade

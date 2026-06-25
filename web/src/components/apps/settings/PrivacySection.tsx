@@ -25,8 +25,9 @@ const consentCheckbox: CSSProperties = {
 /**
  * Two independent consent toggles for product analytics. Both default ON and
  * apply live (no reload): a flip stops/starts capture or recording immediately
- * and persists to config. Honest copy states plainly that we never collect
- * content and that recordings are fully masked. See docs/specs/product-analytics.md.
+ * and persists to config. Honest copy states plainly that analytics never
+ * collects content and that recordings mask everything you type (PostHog's
+ * default input masking). See docs/specs/product-analytics.md.
  */
 export function PrivacySection({ cfg, save }: SectionProps) {
   const telemetry = cfg.analytics_telemetry_enabled !== false;
@@ -60,9 +61,10 @@ export function PrivacySection({ cfg, save }: SectionProps) {
     <div>
       <h2 style={styles.sectionTitle}>Privacy &amp; Analytics</h2>
       <p style={styles.sectionDesc}>
-        Two independent, optional controls, both on by default. WUPHF never
-        collects your content, customer data, or secrets, and session recordings
-        are fully masked. Changes take effect immediately.
+        Two independent, optional controls, both on by default. Product
+        analytics never collects your content, and session recordings mask
+        everything you type — passwords, keys, and form fields. Changes take
+        effect immediately.
       </p>
 
       <Field
@@ -83,7 +85,7 @@ export function PrivacySection({ cfg, save }: SectionProps) {
 
       <Field
         label="Session recording"
-        hint="Fully-masked replays: we see layout, clicks, and navigation to fix rough edges, never your text, customer data, or secrets."
+        hint="Replays that mask everything you type — passwords, keys, and form fields — while capturing layout, clicks, and navigation to fix rough edges."
       >
         <label style={consentToggleRow}>
           <input
@@ -93,7 +95,7 @@ export function PrivacySection({ cfg, save }: SectionProps) {
             onChange={(e) => setRecording(e.target.checked)}
             data-testid="settings-recording-toggle"
           />
-          <span>Allow fully-masked session recordings</span>
+          <span>Allow session recordings (typed text masked)</span>
         </label>
       </Field>
 

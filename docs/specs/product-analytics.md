@@ -23,14 +23,16 @@ question, and rich properties let one event answer many.
    README so the policy change is honest and visible.
 2. **Two independent toggles, both default ON, both dormant without a key:**
    - **Product analytics** (anonymous usage events) — `analytics_telemetry_enabled`
-   - **Session recording** (fully-masked replays) — `analytics_session_recording_enabled`
+   - **Session recording** (replays with typed text masked) — `analytics_session_recording_enabled`
    Honest separation: a user can keep usage events on while turning recording
    off, or vice-versa.
-3. **Strict replay masking.** All text and all inputs are masked in every
-   recording (`maskAllInputs: true`, `maskTextSelector: "*"`). Recordings show
-   layout, cursor, clicks, scroll, rage-clicks, and navigation — never readable
-   content, customer data, agent output, or secrets. Stated plainly in the
-   toggle copy and the README to win trust.
+3. **Typed-text masking (PostHog default).** Everything typed into a field is
+   masked in every recording (`maskAllInputs: true`) — passwords, API keys,
+   search terms, form entries. We intentionally do NOT set `maskTextSelector:
+   "*"`, so recordings capture layout, cursor, clicks, scroll, rage-clicks,
+   navigation, and on-screen UI. Operators who need to obscure rendered content
+   can set a stricter `maskTextSelector` in their own build. Stated plainly in
+   the toggle copy and the README to keep the promise honest.
 4. **Dormant by default, preserved.** No PostHog project key configured → every
    analytics call is a no-op. Stock source builds and forks never phone home.
 5. **Full Tier 1–3 event taxonomy** (below).
@@ -47,7 +49,7 @@ question, and rich properties let one event answer many.
 - **No content.** Event properties carry shapes and buckets (e.g.
   `length_bucket`, `mention_count`, `has_details`), never message text, wiki
   bodies, task titles, customer names, or secrets.
-- **Strict-masked recordings** (decision 3).
+- **Typed-text-masked recordings** (decision 3).
 - **Operator control.** A self-hosted operator can point at their own PostHog
   (`WUPHF_POSTHOG_KEY` / `WUPHF_POSTHOG_HOST`) or disable either channel at
   runtime via the toggles — no rebuild needed.
@@ -127,7 +129,7 @@ human-behavior product analytics, and would multiply volume.
 ## Consent surfaces
 
 - **Onboarding wizard:** two toggles on the final step, both default ON, with
-  one-line honest copy ("anonymous usage" / "fully-masked recordings"). Choices
+  one-line honest copy ("anonymous usage" / "recordings mask typed text"). Choices
   ride `/onboarding/complete` and persist to config.
 - **Settings:** the same two toggles, mirrored, so consent is revocable any
   time. Changing either fires `analytics_consent_set` and updates `/config`.
@@ -151,7 +153,7 @@ human-behavior product analytics, and would multiply volume.
       `/api-token` analytics block; Go tests (config + team + onboarding green).
 - [x] **P2 Frontend core** — `posthog-js@1.386` (dynamic-import, code-split into
       its own chunk so dormant builds ship 0 bytes), analytics module rewrite
-      (lazy init, typed `track`/`trackOn`, workspace group, strict-mask
+      (lazy init, typed `track`/`trackOn`, workspace group, typed-text-masked
       recording, live `setAnalyticsConsent`), dormant-default + existing
       onboarding events preserved; analytics.test.ts 17 green.
 - [x] **P3 Instrumentation + toggles** — events wired at the API-client layer

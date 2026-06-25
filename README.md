@@ -264,10 +264,10 @@ Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flow
 
 ## Privacy & Telemetry
 
-WUPHF can send anonymous product analytics and fully-masked session recordings
-to help us improve it. This is **optional**, controlled by you, and **off
-unless a PostHog key is configured** — a stock source build and every fork ship
-with no key, so they never phone home.
+WUPHF can send anonymous product analytics and session recordings (with typed
+text masked) to help us improve it. This is **optional**, controlled by you, and
+**off unless a PostHog key is configured** — a stock source build and every fork
+ship with no key, so they never phone home.
 
 Two independent toggles (onboarding and **Settings → Privacy & Analytics**),
 both on by default, both reversible at any time:
@@ -278,10 +278,11 @@ both on by default, both reversible at any time:
   secrets). Identity is an anonymous device id; workspaces are grouped by a
   hashed id. The single exception is the onboarding email, attached to your
   PostHog person once at finish and only if you leave "keep me posted" checked.
-- **Session recording** — every recording is **fully masked**: all text and all
-  inputs are obscured (`maskAllInputs`, `maskTextSelector: "*"`). We see layout,
-  cursor, clicks, scroll, and navigation to fix rough edges — never your text,
-  data, or secrets.
+- **Session recording** — recordings **mask everything you type**
+  (`maskAllInputs: true`, PostHog's default): passwords, API keys, and any form
+  field are obscured. We capture layout, cursor, clicks, scroll, navigation, and
+  the on-screen UI to fix rough edges. Want to mask more? Self-hosted operators
+  can set a stricter `maskTextSelector` in their own build.
 
 No autocapture, no cookies (localStorage only). Self-hosted operators can point
 at their own PostHog and flip either channel at runtime without rebuilding:

@@ -21,6 +21,7 @@ import (
 // JSON covers exactly this set.
 var wireLifecycleStates = []LifecycleState{
 	LifecycleStateDrafting,
+	LifecycleStatePlanning,
 	LifecycleStateIntake,
 	LifecycleStateReady,
 	LifecycleStateRunning,

@@ -27,7 +27,8 @@ func TestLifecycleStageForAllCanonicalStates(t *testing.T) {
 		{LifecycleStateDrafting, StageBacklog},
 		{LifecycleStateIntake, StageBacklog},
 		{LifecycleStateReady, StageBacklog},
-		// in_progress ← running, review, changes_requested
+		// in_progress ← planning, running, review, changes_requested
+		{LifecycleStatePlanning, StageInProgress},
 		{LifecycleStateRunning, StageInProgress},
 		{LifecycleStateReview, StageInProgress},
 		{LifecycleStateChangesRequested, StageInProgress},

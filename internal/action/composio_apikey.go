@@ -23,7 +23,9 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -255,9 +257,29 @@ func (c *ComposioREST) CompleteAPIKeyConnection(ctx context.Context, platform st
 		return IntegrationConnectResult{}, fmt.Errorf("parse connected account: %w", err)
 	}
 	status := connectionState(result.Status)
-	if status == "available" {
-		// A freshly created API-key account with no explicit status is active.
+
+	// Verify the credential actually works before declaring the toolkit
+	// connected. Composio accepts API-key credentials at creation time WITHOUT
+	// testing them — every API-key account is reported ACTIVE on create — so a
+	// bogus key would otherwise surface as a false "Connected".
+	switch c.validateAPIKeyConnection(ctx, result.ID) {
+	case verdictRejected:
+		// Composio checked the key and it failed. Remove the orphan account so a
+		// retry starts clean, then surface a clear error the UI shows instead of
+		// a fake success.
+		c.deleteConnectedAccountBestEffort(ctx, result.ID)
+		return IntegrationConnectResult{}, fmt.Errorf("%s rejected the credentials — double-check the key and try again", DisplayPlatformName(platform))
+	case verdictValid:
 		status = "connected"
+	case verdictUnverified:
+		// Composio's experimental validation path is unavailable for this
+		// toolkit/plan, so we could not test the key. Fall back to the
+		// create-time status rather than blocking a connection we couldn't
+		// check. A blank/unknown create status for a non-OAuth account is
+		// treated as active, matching prior behavior.
+		if status == "available" {
+			status = "connected"
+		}
 	}
 	return IntegrationConnectResult{
 		Provider:      c.Name(),
@@ -299,6 +321,79 @@ func (c *ComposioREST) createCustomAuthConfig(ctx context.Context, platform, mod
 		return id, nil
 	}
 	return "", fmt.Errorf("custom auth config response did not include id")
+}
+
+// apiKeyVerdict is the outcome of asking Composio to validate a freshly created
+// API-key connected account.
+type apiKeyVerdict int
+
+const (
+	// verdictUnverified: Composio could not (or would not) tell us whether the
+	// credential works. The validate path is experimental and not available for
+	// every toolkit/plan, so the caller keeps the create-time status rather than
+	// blocking a connection it simply could not test.
+	verdictUnverified apiKeyVerdict = iota
+	// verdictValid: Composio confirmed the credential is live.
+	verdictValid
+	// verdictRejected: Composio actively rejected the credential.
+	verdictRejected
+)
+
+// validateAPIKeyConnection asks Composio to verify the credential on a freshly
+// created connected account. Composio marks API-key accounts ACTIVE at creation
+// WITHOUT checking the key, so without this a bogus key reads as "Connected".
+// The refresh endpoint's experimental `validate_credentials` flag re-checks the
+// stored credential for API-key auth schemes specifically.
+func (c *ComposioREST) validateAPIKeyConnection(ctx context.Context, connectedAccountID string) apiKeyVerdict {
+	id := strings.TrimSpace(connectedAccountID)
+	if id == "" {
+		return verdictUnverified
+	}
+	raw, err := c.post(ctx, "/connected_accounts/"+url.PathEscape(id)+"/refresh", map[string]any{
+		"validate_credentials": true,
+	})
+	if err != nil {
+		// A definitive auth rejection (401/403) or unprocessable credential (422)
+		// means the key was checked and failed. Any other failure — 404 (toolkit
+		// has no validation path), 5xx, or a network error — means we could not
+		// test the key, so we treat it as unverified rather than blocking a
+		// connection that may be perfectly valid.
+		var apiErr *ComposioAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusUnauthorized, http.StatusForbidden, http.StatusUnprocessableEntity:
+				return verdictRejected
+			}
+		}
+		return verdictUnverified
+	}
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return verdictUnverified
+	}
+	switch connectionState(result.Status) {
+	case "connected":
+		return verdictValid
+	case "available":
+		// Empty/unknown status — nothing actionable to assert either way.
+		return verdictUnverified
+	default:
+		// failed, pending, disconnected, … — the credential did not come up live.
+		return verdictRejected
+	}
+}
+
+// deleteConnectedAccountBestEffort removes a connected account, ignoring errors.
+// Used to clean up an account whose credential Composio rejected so a retry is
+// not blocked by a dangling, non-working connection.
+func (c *ComposioREST) deleteConnectedAccountBestEffort(ctx context.Context, connectedAccountID string) {
+	id := strings.TrimSpace(connectedAccountID)
+	if id == "" {
+		return
+	}
+	_, _ = c.delete(ctx, "/connected_accounts/"+url.PathEscape(id))
 }
 
 func stringMapToAny(in map[string]string) map[string]any {

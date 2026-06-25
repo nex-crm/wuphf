@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  type DiscoveredCategory,
   type DiscoveredSection,
   fetchCatalogStrict,
+  fetchCategories,
   fetchSections,
+  subscribeCategoriesUpdated,
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
 } from "../../api/wiki";
@@ -122,6 +125,7 @@ export default function Wiki({
   onNavigate,
 }: WikiProps) {
   const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([]);
+  const [categories, setCategories] = useState<DiscoveredCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadNonce, setLoadNonce] = useState(0);
@@ -202,6 +206,26 @@ export default function Wiki({
     return () => unsubscribe();
   }, [refreshCatalog]);
 
+  // Categories drive the category-page tree (parents + subcategories). This is
+  // supplementary to the catalog, so it is best-effort: a failure leaves the
+  // category page on its catalog-derived membership without blanking the wiki.
+  const refreshCategories = useCallback(() => {
+    fetchCategories()
+      .then((c) => setCategories(c))
+      .catch(() => {
+        /* keep last-known categories */
+      });
+  }, []);
+  useEffect(() => {
+    refreshCategories();
+    const unsubscribe = subscribeCategoriesUpdated((event) => {
+      if (Array.isArray(event.categories)) {
+        setCategories(event.categories);
+      }
+    });
+    return () => unsubscribe();
+  }, [refreshCategories]);
+
   const view = wikiViewFor(articlePath);
   const editLogHistoryPath = wikiHistoryPath(articlePath, view);
   // The app view navigates with the APP_NAV_PREFIX sentinel; strip it so the
@@ -255,6 +279,7 @@ export default function Wiki({
           <WikiCategoryPage
             slug={categorySlug}
             catalog={catalog}
+            categories={categories}
             onNavigate={(path) => onNavigate(path)}
           />
         ) : view === "article" && articlePath ? (

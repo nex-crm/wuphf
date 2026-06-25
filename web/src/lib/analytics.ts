@@ -18,10 +18,11 @@
  *   3. NO COOKIES, NO AUTOCAPTURE. `persistence: "localStorage"`, autocapture
  *      off, pageviews captured manually on route change. No surveys, no
  *      heatmaps, no dead-click capture.
- *   4. STRICT-MASKED RECORDINGS. Every recording masks all text and all inputs
- *      (`maskAllInputs: true`, `maskTextSelector: "*"`). Replays show layout,
- *      cursor, clicks, scroll, and navigation — never readable content,
- *      customer data, agent output, or secrets.
+ *   4. TYPED-TEXT MASKING. Recordings mask everything typed into a field
+ *      (`maskAllInputs: true`) — passwords, API keys, search terms, form
+ *      entries — which is PostHog's default. Replays capture layout, cursor,
+ *      clicks, scroll, navigation, and on-screen UI; operators who want to
+ *      mask more can set a stricter `maskTextSelector` via their own build.
  *   5. NO PII IN EVENTS. Event properties carry shapes and buckets, never
  *      content. The only personal datum that ever leaves is the onboarding
  *      email, attached to the PostHog person exactly once at finish and only
@@ -184,8 +185,10 @@ function ensurePostHog(): Promise<PostHog | null> {
         // channel is on (below + setAnalyticsConsent), never automatically.
         disable_session_recording: true,
         session_recording: {
+          // PostHog default: mask everything typed into a field (inputs),
+          // but capture on-screen layout and content. We intentionally do NOT
+          // set maskTextSelector: "*" — that would obscure all rendered text.
           maskAllInputs: true,
-          maskTextSelector: "*",
           blockSelector: undefined,
           recordCrossOriginIframes: false,
         },

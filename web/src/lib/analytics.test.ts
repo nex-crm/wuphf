@@ -116,7 +116,7 @@ describe("configured via runtime injection", () => {
     expect(mockPosthog.startSessionRecording).not.toHaveBeenCalled();
   });
 
-  it("starts recording on load with strict masking when recording is on", async () => {
+  it("starts recording on load masking typed text (inputs) when recording is on", async () => {
     configureAnalytics({
       configured: true,
       posthog_key: "phc_runtime",
@@ -125,8 +125,9 @@ describe("configured via runtime injection", () => {
     });
     await vi.waitFor(() => expect(mockPosthog.init).toHaveBeenCalled());
     const cfg = mockPosthog.init.mock.calls[0][1];
+    // PostHog default: typed text (inputs) is masked, on-screen text is not.
     expect(cfg?.session_recording?.maskAllInputs).toBe(true);
-    expect(cfg?.session_recording?.maskTextSelector).toBe("*");
+    expect(cfg?.session_recording?.maskTextSelector).toBeUndefined();
     await vi.waitFor(() =>
       expect(mockPosthog.startSessionRecording).toHaveBeenCalledTimes(1),
     );

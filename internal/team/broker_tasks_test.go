@@ -316,14 +316,24 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 		"owner":      "fe",
 		"thread_id":  "msg-1",
 	})
-	// Issues (task_type defaults to "issue" since the rule-zero override
-	// landed) with an owner land RUNNING — creation is the authorization;
-	// there is no Approve & Start ceremony.
+	// Owner-set top-level issues now land in Planning (structured planning):
+	// the owner plans read-only and the human approves before execution.
+	// Planning's derived status is in_progress (the owner is actively planning).
 	if created.Status() != "in_progress" || created.Owner != "fe" {
 		t.Fatalf("unexpected created task: %+v", created)
 	}
-	if created.LifecycleState != LifecycleStateRunning {
-		t.Fatalf("expected running lifecycle for new owner-set issue, got %q", created.LifecycleState)
+	if created.LifecycleState != LifecycleStatePlanning {
+		t.Fatalf("expected planning lifecycle for new owner-set issue, got %q", created.LifecycleState)
+	}
+	// Approve the plan (human) so it transitions to Running for the rest of
+	// this lifecycle test.
+	started := post(map[string]any{
+		"action":     "approve",
+		"id":         created.ID,
+		"created_by": "human",
+	})
+	if started.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("expected running after plan approval, got %q", started.LifecycleState)
 	}
 	if created.FollowUpAt == "" || created.ReminderAt == "" || created.RecheckAt == "" {
 		t.Fatalf("expected follow-up timestamps on task create, got %+v", created)
@@ -925,6 +935,9 @@ func TestBrokerSubtaskMintsOwnChannelSeparateFromParent(t *testing.T) {
 	if parent.Channel == "general" || parent.Channel == "" {
 		t.Fatalf("expected parent to mint its own channel, got %q", parent.Channel)
 	}
+	// The parent lands in Planning; approve its plan (human) so the CEO may
+	// decompose it into sub-issues.
+	post(map[string]any{"action": "approve", "id": parent.ID, "created_by": "human"})
 
 	// Sub-issue created by the CEO from inside the parent's channel (the way
 	// the CEO decomposes an Issue) — it arrives carrying the parent's channel.
@@ -3193,11 +3206,17 @@ func TestBrokerUpdatesTaskByIDAcrossChannels(t *testing.T) {
 		t.Fatalf("expected planning task, got %+v", created)
 	}
 
-	// Created issues with an owner land running immediately — creation is
-	// the authorization; no approve step stands before completion.
-	if created.LifecycleState != LifecycleStateRunning {
-		t.Fatalf("expected created owner-set issue to land running, got %+v", created)
+	// Owner-set issues now land in Planning (structured planning); the human
+	// approves the plan to start execution before it can be completed.
+	if created.LifecycleState != LifecycleStatePlanning {
+		t.Fatalf("expected created owner-set issue to land planning, got %+v", created)
 	}
+	post(map[string]any{
+		"action":     "approve",
+		"channel":    "planning",
+		"id":         created.ID,
+		"created_by": "human",
+	})
 
 	completed := post(map[string]any{
 		"action":     "complete",

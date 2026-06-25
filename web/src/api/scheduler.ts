@@ -20,7 +20,12 @@ export interface SchedulerJob {
   interval_minutes?: number;
   /** Cron expression for cron-driven workflow jobs. */
   schedule_expr?: string;
-  /** Provider that owns this job (e.g. "system", "agent", "workflow"). */
+  /** Office agent slug that owns this job (the agent that scheduled it). For
+   * workflow jobs this is the owning agent — distinct from `provider`, which is
+   * the integration vendor and must never be shown as an agent. */
+  agent?: string;
+  /** Integration vendor for workflow jobs ("composio" | "one" | "system"). NOT
+   * an agent slug — use `agent` / `target_id` for the owning agent. */
   provider?: string;
   /** Target type ("workflow" | "skill" | …) when surfaced by the runtime. */
   target_type?: string;

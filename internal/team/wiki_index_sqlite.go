@@ -120,6 +120,27 @@ CREATE TABLE IF NOT EXISTS redirects (
   merged_by   TEXT,
   commit_sha  TEXT
 );
+
+-- article_categories: derived many-to-many article-to-category memberships.
+-- Source of truth is each article's categories frontmatter; this table is a
+-- rebuildable cache (folds into CanonicalHashAll). CREATE TABLE IF NOT EXISTS
+-- is additive so existing DBs gain it on next open.
+CREATE TABLE IF NOT EXISTS article_categories (
+  article_path  TEXT NOT NULL,
+  category_slug TEXT NOT NULL,
+  PRIMARY KEY (article_path, category_slug)
+);
+CREATE INDEX IF NOT EXISTS idx_article_categories_cat ON article_categories(category_slug);
+
+-- category_parents: derived category-to-parent edges (the subcategory tree).
+-- Source of truth is a category page's parent_categories frontmatter at
+-- team/.categories/{slug}.md. Rebuildable cache; folds into CanonicalHashAll.
+CREATE TABLE IF NOT EXISTS category_parents (
+  category_slug TEXT NOT NULL,
+  parent_slug   TEXT NOT NULL,
+  PRIMARY KEY (category_slug, parent_slug)
+);
+CREATE INDEX IF NOT EXISTS idx_category_parents_parent ON category_parents(parent_slug);
 `
 
 func (s *SQLiteFactStore) applySchema(ctx context.Context) error {
@@ -516,6 +537,164 @@ func (s *SQLiteFactStore) ResolveRedirect(ctx context.Context, slug string) (str
 	return to, true, nil
 }
 
+// UpsertArticleCategories replaces the full membership set for articlePath in a
+// single transaction (delete-then-insert), so the derived rows track the
+// article's frontmatter exactly. An empty/nil slice clears the article's rows.
+func (s *SQLiteFactStore) UpsertArticleCategories(ctx context.Context, articlePath string, categories []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite: begin article_categories tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful Commit
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM article_categories WHERE article_path = ?`, articlePath); err != nil {
+		return fmt.Errorf("sqlite: clear categories for %s: %w", articlePath, err)
+	}
+	seen := make(map[string]bool, len(categories))
+	for _, c := range categories {
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO article_categories (article_path, category_slug) VALUES (?, ?)`,
+			articlePath, c); err != nil {
+			return fmt.Errorf("sqlite: insert category %s for %s: %w", c, articlePath, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: commit article_categories for %s: %w", articlePath, err)
+	}
+	return nil
+}
+
+func (s *SQLiteFactStore) ListArticlesInCategory(ctx context.Context, category string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT article_path FROM article_categories
+		 WHERE category_slug = ? ORDER BY article_path ASC`, category)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list articles in category %s: %w", category, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteFactStore) ListCategoriesForArticle(ctx context.Context, articlePath string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT category_slug FROM article_categories
+		 WHERE article_path = ? ORDER BY category_slug ASC`, articlePath)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list categories for %s: %w", articlePath, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteFactStore) ListAllCategories(ctx context.Context) ([]CategoryCount, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT category_slug, COUNT(*) FROM article_categories
+		 GROUP BY category_slug ORDER BY category_slug ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list all categories: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CategoryCount
+	for rows.Next() {
+		var cc CategoryCount
+		if err := rows.Scan(&cc.Slug, &cc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, cc)
+	}
+	return out, rows.Err()
+}
+
+// UpsertCategoryParents replaces a category's parent edges in one transaction
+// (delete-then-insert). An empty/nil slice clears them.
+func (s *SQLiteFactStore) UpsertCategoryParents(ctx context.Context, category string, parents []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite: begin category_parents tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after a successful Commit
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM category_parents WHERE category_slug = ?`, category); err != nil {
+		return fmt.Errorf("sqlite: clear parents for %s: %w", category, err)
+	}
+	seen := make(map[string]bool, len(parents))
+	for _, p := range parents {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO category_parents (category_slug, parent_slug) VALUES (?, ?)`,
+			category, p); err != nil {
+			return fmt.Errorf("sqlite: insert parent %s for %s: %w", p, category, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: commit category_parents for %s: %w", category, err)
+	}
+	return nil
+}
+
+func (s *SQLiteFactStore) ListCategoryParents(ctx context.Context, category string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT parent_slug FROM category_parents
+		 WHERE category_slug = ? ORDER BY parent_slug ASC`, category)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list parents for %s: %w", category, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteFactStore) ListAllCategoryParents(ctx context.Context) ([]CategoryParent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT category_slug, parent_slug FROM category_parents
+		 ORDER BY category_slug ASC, parent_slug ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list all category parents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CategoryParent
+	for rows.Next() {
+		var cp CategoryParent
+		if err := rows.Scan(&cp.Category, &cp.Parent); err != nil {
+			return nil, err
+		}
+		out = append(out, cp)
+	}
+	return out, rows.Err()
+}
+
 // CanonicalHashFacts implements §7.4: sha256 over all fact rows sorted by ID.
 // Serialisation is identical to inMemoryFactStore so the contract test passes
 // against both backends from the same markdown corpus. ReinforcedAt is
@@ -719,6 +898,57 @@ func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) 
 		h.Write([]byte{'\n'})
 	}
 	if err := redRows.Err(); err != nil {
+		return "", err
+	}
+
+	// --- article categories (sorted by article_path, category_slug) ---
+	// Serialised as ArticleCategory rows so the bytes match the in-memory
+	// backend exactly, keeping the §7.4 hash backend-agnostic.
+	catRows, err := s.db.QueryContext(ctx,
+		`SELECT article_path, category_slug FROM article_categories
+		 ORDER BY article_path ASC, category_slug ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll article_categories: %w", err)
+	}
+	defer func() { _ = catRows.Close() }()
+	for catRows.Next() {
+		var ac ArticleCategory
+		if err := catRows.Scan(&ac.ArticlePath, &ac.Category); err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(ac)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	if err := catRows.Err(); err != nil {
+		return "", err
+	}
+
+	// --- category parents (sorted by category_slug, parent_slug) ---
+	// Same CategoryParent serialisation as the in-memory backend.
+	cpRows, err := s.db.QueryContext(ctx,
+		`SELECT category_slug, parent_slug FROM category_parents
+		 ORDER BY category_slug ASC, parent_slug ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll category_parents: %w", err)
+	}
+	defer func() { _ = cpRows.Close() }()
+	for cpRows.Next() {
+		var cp CategoryParent
+		if err := cpRows.Scan(&cp.Category, &cp.Parent); err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(cp)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	if err := cpRows.Err(); err != nil {
 		return "", err
 	}
 

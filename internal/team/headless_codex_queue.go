@@ -427,6 +427,17 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 				l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
 				return
 			}
+			// Guarantee the active slot is released even if the turn body
+			// panics. finishHeadlessTurn clears active[lane] (freeing the
+			// concurrency-cap slot), respawns parked lanes, and wakes the
+			// lead/CEO after a specialist completes. If a panic in
+			// headlessCodexRunTurn, the recovery helpers, or
+			// recordTaskLedgerEntry skipped it, the slot leaked forever:
+			// under a cap every other agent's lane stayed parked and the CEO
+			// never reacted to completions — agents silently stalled with no
+			// reply. recoverPanicTo (deferred above, so it runs last) still
+			// swallows and logs the panic after this cleanup runs.
+			defer l.finishHeadlessTurn(lane)
 			appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
 			l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
 
@@ -445,9 +456,15 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			}
 			switch {
 			case err == nil:
+				// Turn succeeded and is durable (or the durability guard
+				// doesn't apply). If a real person prompted this chat reply and
+				// the agent still posted nothing anywhere, surface one honest
+				// line so a human DM never vanishes into silence.
+				l.noteChatTurnNoReply(slug, turn, startedAt)
 			case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", timeout))
 				l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", timeout), headlessProgressMetrics{})
+				l.noteChatTurnStall(slug, turn, fmt.Sprintf("the reply timed out after %s", timeout))
 				l.recoverTimedOutHeadlessTurn(slug, turn, startedAt, timeout)
 			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
@@ -470,12 +487,18 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 					// to parse raw `signal: killed` exhaust (Wave F2).
 					detail = turnKilledHumanDetail(slug)
 					l.postTurnKilledNote(slug, turn.Channel)
+				} else {
+					// Non-killed failure on a plain chat/DM reply (no task):
+					// surface one honest line so the user isn't left with
+					// silence. Task turns are skipped inside the helper —
+					// their failure already surfaces via BlockTask. The killed
+					// branch above posts its own note, so it's excluded here.
+					l.noteChatTurnStall(slug, turn, "the reply hit an error")
 				}
 				l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), headlessProgressMetrics{})
 				l.recoverFailedHeadlessTurn(slug, turn, startedAt, detail)
 			}
 			l.recordTaskLedgerEntry(slug, turn, startedAt, err)
-			l.finishHeadlessTurn(lane)
 		}()
 		l.headless.mu.Lock()
 		_, stillRunning := l.headless.workers[lane]

@@ -142,6 +142,7 @@ export function TaskActivityStream({
 function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
   switch (state) {
     case "running":
+    case "planning":
     case "intake":
       return "running";
     case "blocked":
@@ -174,6 +175,8 @@ function describeActivity(
   const trimmed = activity?.trim();
   if (trimmed) return trimmed;
   switch (state) {
+    case "planning":
+      return "Planning — drafting a plan for human approval.";
     case "running":
     case "intake":
       return "Idle — waiting for the next event.";

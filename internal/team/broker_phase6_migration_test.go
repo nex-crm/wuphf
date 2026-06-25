@@ -222,14 +222,15 @@ func TestPhase6MigrationLoadsLegacyWorkspaceClean(t *testing.T) {
 		t.Fatalf("legacy task-2 owner must stay %q, not be coerced to auto", "angela")
 	}
 
-	// --- Removed plan mode (core-loop R3): persisted "planning" loads as
-	// Running and the legacy plan_first key is ignored without error. ---
+	// --- Plan mode: persisted "planning" loads as Planning (the owner resumes
+	// the read-only planning phase, awaiting plan approval). The legacy
+	// plan_first key is ignored without error. ---
 	t3, ok := taskByID(t, b, "task-3")
 	if !ok {
 		t.Fatalf("legacy planning task-3 was lost")
 	}
-	if t3.LifecycleState != LifecycleStateRunning {
-		t.Fatalf("legacy planning task-3 should load as Running, got %q", t3.LifecycleState)
+	if t3.LifecycleState != LifecycleStatePlanning {
+		t.Fatalf("legacy planning task-3 should load as Planning, got %q", t3.LifecycleState)
 	}
 
 	// --- #general stays owned by the Backup & Migration system task. ---

@@ -45,16 +45,30 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		return err
 	}
 
+	// Resolve plan posture ONCE for the whole turn. The task could transition
+	// out of Planning (e.g. a concurrent human plan-approval) while this
+	// subprocess runs; capturing it here keeps the sandbox flags and the
+	// end-of-turn plan harvest consistent instead of re-reading mid-flight.
+	planning := l.resolveTurnPosture(ctx, slug) == posturePlan
 	args := make([]string, 0, 16+len(overrides)*2)
 	// Sandbox posture for this turn:
-	//   - local-worktree / unsafe turn: full bypass. The child Codex
+	//   - plan posture (task in LifecycleStatePlanning): -s read-only — Codex's
+	//     native plan/read-only mode. The repo cannot change, so the owner
+	//     explores and writes its plan (via MCP notebook_write + a channel post,
+	//     which read-only does not block) without risk of touching the repo
+	//     before the human approves the plan. Wins over unsafe/worktree bypass: a
+	//     planning turn must stay read-only even for local_worktree coding tasks.
+	//   - local-worktree / unsafe execute turn: full bypass. The child Codex
 	//     sandbox rejects both apply_patch and shell writes even with
 	//     workspace-write, which leaves coding tasks permanently unable to land
 	//     edits.
-	//   - office / non-editing turn: workspace-write.
-	if l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug) {
+	//   - office / non-editing execute turn: workspace-write.
+	switch {
+	case planning:
+		args = append(args, "-a", "never", "-s", "read-only")
+	case l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug):
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	} else {
+	default:
 		args = append(args, "-a", "never", "-s", "workspace-write")
 	}
 	args = append(args, "--disable", "plugins")
@@ -340,14 +354,28 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(ctx, slug), result.Usage)
 	}
 	relay.Flush()
-	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
+	planText := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))
+	if text := planText; text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)
+		// In plan posture (-s read-only) the final message IS the plan; surface
+		// it as a plan card. Codex has no ExitPlanMode, and read-only does not
+		// block MCP, so the owner may also have written its notebook + posted —
+		// the silent-gated post below avoids a duplicate channel message.
+		if planning {
+			emitHeadlessPlan(agentStream, turnID, HeadlessProviderCodex, slug, taskID, text)
+		}
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "fallback-post-error: "+err.Error())
 		} else if posted {
 			appendHeadlessCodexLog(slug, fmt.Sprintf("fallback-post: posted final output to #%s as %s", msg.Channel, msg.ID))
 		}
+	}
+	// A planning turn that produced a plan stops to await human approval — raise
+	// the plan-approval human_interview (idempotent) so execution only starts
+	// after the human says yes.
+	if planning {
+		l.raisePlanApprovalAfterTurn(taskID, slug, planText)
 	}
 	// Flip to idle last: the gist+artifact post above has now landed, so the
 	// frontend's "agent is working" skeleton stays up until the final message

@@ -153,13 +153,13 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if created.Task.ID == "" {
 		t.Fatal("expected task id")
 	}
-	// Creation is the authorization: an owner-set issue lands running
-	// (status=in_progress) immediately — no Approve & Start ceremony.
+	// An owner-set top-level issue lands in Planning (structured planning);
+	// Planning's derived status is in_progress (the owner is actively planning).
 	if created.Task.Status() != "in_progress" {
-		t.Fatalf("created status: want in_progress (running), got %q", created.Task.Status())
+		t.Fatalf("created status: want in_progress, got %q", created.Task.Status())
 	}
-	if created.Task.LifecycleState != LifecycleStateRunning {
-		t.Fatalf("created lifecycle: want running, got %q", created.Task.LifecycleState)
+	if created.Task.LifecycleState != LifecycleStatePlanning {
+		t.Fatalf("created lifecycle: want planning, got %q", created.Task.LifecycleState)
 	}
 	var foundCreated *teamTask
 	for i := range b.tasks {

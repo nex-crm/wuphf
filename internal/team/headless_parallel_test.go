@@ -116,6 +116,78 @@ func TestParallelInstancesRunDistinctWorktreesConcurrently(t *testing.T) {
 	}
 }
 
+// TestHeadlessTurnPanicFreesActiveSlot pins the stall-recovery invariant: if a
+// turn's runner PANICS mid-execution, the lane's active slot must still be
+// released so other agents are not starved behind a zombie in-flight turn.
+//
+// Before the fix, finishHeadlessTurn was the last statement inside the worker's
+// panic-recovered closure, so any panic in headlessCodexRunTurn (or the recovery
+// / ledger calls after it) was swallowed by recoverPanicTo and finishHeadlessTurn
+// never ran. The active slot leaked forever; under a concurrency cap every other
+// agent's lane parked and never drained — the CEO and specialists silently
+// "stalled and never replied". This test reproduces that: eng's turn panics, and
+// a second agent (gtm) enqueued afterward under a global cap of 1 must still get
+// to run because the panicking lane freed its slot.
+func TestHeadlessTurnPanicFreesActiveSlot(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-eng", Title: "eng work", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-gtm", Title: "gtm work", Owner: "gtm", status: "in_progress", ExecutionMode: "office"},
+	)
+	// Register the second owner so its task resolves to a real member lane.
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "gtm", Name: "gtm"})
+	b.memberIndex = nil
+	b.mu.Unlock()
+
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+	l.headless.maxConcurrent = 1 // a leaked slot would starve every other lane
+
+	started := make(chan string, 8)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, slug, _ string, _ ...string) error {
+		select {
+		case started <- slug:
+		default:
+		}
+		if slug == "eng" {
+			// recoverPanicTo (the worker's deferred recover) swallows this and
+			// logs a stack to stderr — expected noise for this regression.
+			panic("simulated provider crash mid-turn")
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	// Drive eng first and wait for its turn to start (and therefore panic),
+	// so the second agent is enqueued only after the slot should have freed.
+	l.enqueueHeadlessCodexTurnRecord("eng", headlessCodexTurn{Prompt: "work #task-eng", Channel: "general", TaskID: "task-eng"})
+	select {
+	case got := <-started:
+		if got != "eng" {
+			t.Fatalf("expected eng turn to start first, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("eng turn never started")
+	}
+
+	l.enqueueHeadlessCodexTurnRecord("gtm", headlessCodexTurn{Prompt: "work #task-gtm", Channel: "general", TaskID: "task-gtm"})
+	select {
+	case got := <-started:
+		if got != "gtm" {
+			t.Fatalf("expected gtm turn to run after the panicking slot freed, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("gtm turn never ran: the panicking turn leaked its active slot and starved the global cap")
+	}
+
+	// Drain the parked gtm turn so the test's idle-wait cleanup can finish.
+	l.headless.mu.Lock()
+	if active := l.headless.active[taskLane("gtm", "task-gtm")]; active != nil && active.Cancel != nil {
+		active.Cancel()
+	}
+	l.headless.mu.Unlock()
+}
+
 // TestParallelInstancesRunNonDependentOfficeTasksConcurrently proves the rule
 // "non-dependent tasks run together" extends to office/external work, not just
 // worktree tasks: one agent with two non-dependent office tasks runs both at

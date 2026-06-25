@@ -24,13 +24,33 @@ export function routineOwner(job: SchedulerJob): {
   if (job.target_type === "agent" && job.target_id) {
     return { slug: job.target_id, kind: "agent" };
   }
-  if (job.provider && job.provider !== "system") {
-    return { slug: job.provider, kind: "agent" };
+  // The owning agent is the office agent that scheduled the job (e.g. "ceo").
+  // This is NOT job.provider, which is the integration vendor ("composio" /
+  // "one"). A workflow job carries both, so resolve the agent first and never
+  // fall back to the vendor as if it were an agent.
+  if (job.agent) {
+    return { slug: job.agent, kind: "agent" };
   }
-  if (job.target_type === "workflow" || job.kind === "workflow") {
+  if (
+    job.target_type === "workflow" ||
+    job.kind === "workflow" ||
+    job.kind?.endsWith("_workflow")
+  ) {
     return { slug: null, kind: "workflow" };
   }
+  // Legacy fallback: some older jobs stored an agent slug in `provider`.
+  // Known integration vendors are NOT agents, so exclude them.
+  if (job.provider && !isVendorProvider(job.provider)) {
+    return { slug: job.provider, kind: "agent" };
+  }
   return { slug: null, kind: "unassigned" };
+}
+
+/** Integration vendors that may appear in `job.provider` but are never agents. */
+const VENDOR_PROVIDERS = new Set(["composio", "one", "system"]);
+
+function isVendorProvider(provider: string): boolean {
+  return VENDOR_PROVIDERS.has(provider.trim().toLowerCase());
 }
 
 /**

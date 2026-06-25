@@ -55,6 +55,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeFacts()
 	sectionsEvents, unsubscribeSections := b.SubscribeWikiSectionsUpdated(16)
 	defer unsubscribeSections()
+	categoriesEvents, unsubscribeCategories := b.SubscribeWikiCategoriesUpdated(16)
+	defer unsubscribeCategories()
 	playbookEvents, unsubscribePlaybook := b.SubscribePlaybookExecutionEvents(64)
 	defer unsubscribePlaybook()
 	playbookSynthEvents, unsubscribePlaybookSynth := b.SubscribePlaybookSynthesizedEvents(64)
@@ -136,6 +138,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-sectionsEvents:
 			if !ok || writeEvent(wikiSectionsEventName, evt) != nil {
+				return
+			}
+		case evt, ok := <-categoriesEvents:
+			if !ok || writeEvent(wikiCategoriesEventName, evt) != nil {
 				return
 			}
 		case evt, ok := <-playbookEvents:
