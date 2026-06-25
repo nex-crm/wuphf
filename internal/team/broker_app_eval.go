@@ -216,11 +216,22 @@ func (b *Broker) appForEditChannel(channel string) (CustomApp, bool) {
 }
 
 // deterministicAppGaps are the cheap, never-wrong checks the judge shouldn't have
-// to reason about: the app actually published a non-trivial, versioned bundle.
+// to reason about — the mechanical "shipcheck" for an App: it actually published
+// a finalized, non-trivial, versioned bundle from real (non-scaffold) source.
+// These are content-grounded proofs, not trust in a declared status flag.
 func (b *Broker) deterministicAppGaps(app CustomApp) []string {
 	var gaps []string
 	if !strings.EqualFold(strings.TrimSpace(app.Status), "ready") || app.Version < 1 {
 		gaps = append(gaps, "The app did not publish a ready, versioned build.")
+	}
+	// Finalization proof: ContentHash is set ONLY when a publish runs to
+	// completion (server-side build + validation succeeded). An empty hash means
+	// the build never finalized — the exact stuck state ("ready/building" with no
+	// committed bytes) that let a 30-minute build that never published stay
+	// "done". This grounds "ready" in real published bytes, not a status flag the
+	// agent set, so a manifest forced to ready without a finished build still fails.
+	if strings.TrimSpace(app.ContentHash) == "" {
+		gaps = append(gaps, "The build never finalized — no published content hash.")
 	}
 	if _, html, err := b.appStore().Get(app.ID); err != nil || len(html) < appAcceptanceMinBundleBytes {
 		gaps = append(gaps, "The published bundle is missing or trivially small.")

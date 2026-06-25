@@ -70,17 +70,21 @@ func seedAcceptanceApp(t *testing.T, id, channel string, bundleBytes int, status
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		t.Fatalf("mkdir app: %v", err)
 	}
+	html := "<!doctype html><html><body>" + strings.Repeat("x", bundleBytes) + "</body></html>"
 	manifest := CustomApp{
 		ID: id, Slug: "probe", Name: "Probe", Entry: "index.html",
 		Version: version, Status: status, EditChannel: channel,
 		CreatedBy: "app-builder", CreatedAt: "2026-06-22T00:00:00Z",
 		UpdatedAt: "2026-06-22T00:00:00Z",
+		// A published app always carries the content hash of its committed bytes;
+		// seed it so the finalization proof in deterministicAppGaps sees a real
+		// build. Tests that exercise the unfinalized case clear it explicitly.
+		ContentHash: customAppContentHash(html),
 	}
 	raw, _ := json.Marshal(manifest)
 	if err := os.WriteFile(filepath.Join(dir, "app.json"), raw, 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	html := "<!doctype html><html><body>" + strings.Repeat("x", bundleBytes) + "</body></html>"
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(html), 0o600); err != nil {
 		t.Fatalf("write bundle: %v", err)
 	}
@@ -248,6 +252,57 @@ func TestAppAcceptanceReopensUnmodifiedScaffold(t *testing.T) {
 	}
 	if task := b.taskByIDLocked("OFFICE-13"); task == nil || task.status != "in_progress" {
 		t.Fatalf("an unmodified scaffold must be reopened; got %+v", task)
+	}
+	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
+		t.Fatalf("want 1 acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
+	}
+}
+
+// Regression: a manifest that claims ready/v1 but never finalized its build
+// (no committed content hash — the stuck "building forever" state that let a
+// 30-minute non-publishing build stay "done") must be reopened deterministically
+// and never reach the judge. The finalization proof grounds "ready" in real
+// published bytes, not the status flag.
+func TestAppAcceptanceReopensUnfinalizedBuild(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return `{"meets":true,"summary":"looks fine","gaps":[]}`, nil
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-15"
+	const id = "app_00000000000000ee"
+	seedAcceptanceApp(t, id, ch, 5000, "ready", 1)
+	// Clear the content hash to simulate a build that published a manifest but
+	// never committed finalized bytes.
+	manifestPath := filepath.Join(CustomAppsRootDir(), id, "app.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m CustomApp
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.ContentHash = ""
+	out, _ := json.Marshal(m)
+	if err := os.WriteFile(manifestPath, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b.tasks = append(b.tasks, teamTask{
+		ID: "OFFICE-15", Owner: appBuilderSlug, Channel: ch,
+		Title: "Build app: Budget Monitor", Details: "Build a SaaS budget monitor.",
+		status: "done",
+	})
+
+	b.evaluateAppAcceptanceForTask("OFFICE-15")
+
+	if judgeCalled {
+		t.Error("an unfinalized build must be caught deterministically, not sent to the judge")
+	}
+	if task := b.taskByIDLocked("OFFICE-15"); task == nil || task.status != "in_progress" {
+		t.Fatalf("an unfinalized build must be reopened; got %+v", task)
 	}
 	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
 		t.Fatalf("want 1 acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
