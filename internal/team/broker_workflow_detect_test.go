@@ -6,15 +6,35 @@ import (
 	"testing"
 )
 
+// seedRecurringShape writes manifests so the deterministic miner yields a
+// candidate for taskID: the same multi-tool shape run by `agent` across taskID
+// plus `priors` sibling tasks. With >= appWorkflowRecurrenceFloor total runs the
+// read-only shape surfaces. Requires WUPHF_RUNTIME_HOME to be set so
+// EventSinkPath resolves to the test's temp dir.
+func seedRecurringShape(t *testing.T, agent, taskID string, priors []string, tools ...string) {
+	t.Helper()
+	path := EventSinkPath()
+	if path == "" {
+		t.Fatal("EventSinkPath empty — set WUPHF_RUNTIME_HOME before seeding")
+	}
+	for _, id := range append(append([]string{}, priors...), taskID) {
+		if err := appendTurnManifest(path, manifestFor(id, agent, tools...)); err != nil {
+			t.Fatalf("seed manifest: %v", err)
+		}
+	}
+}
+
 // TestDetectWorkflowAppRaisesProposal is the core of the post-task discovery
-// rewrite: the BROKER (not an agent) judges a completed task and raises a real,
-// non-blocking propose_app card — so there is no "next turn" deferral and no
-// phantom card. Idempotent: a second pass dedupes onto the same card.
+// rewrite: gated on the deterministic miner (the shape must have actually
+// recurred), the BROKER (not an agent) judges the completed task and raises a
+// real, non-blocking propose_app card — so there is no "next turn" deferral and
+// no phantom card. Idempotent: a second pass dedupes onto the same card.
 func TestDetectWorkflowAppRaisesProposal(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
-	var sawTranscript bool
+	var sawTranscript, sawShape bool
 	withFakeAppsLLM(t, func(_ context.Context, _, prompt string) (string, error) {
 		sawTranscript = strings.Contains(prompt, "every Monday")
+		sawShape = strings.Contains(prompt, "OBSERVED WORKFLOW SHAPE") && strings.Contains(prompt, "score_leads")
 		return `{"worth_building":true,"name":"Lead Scorer","summary":"Score inbound leads against the ICP","description":"Scores leads against the ICP gates every Monday and reports fit","related_app_id":"","reason":"human runs it weekly"}`, nil
 	})
 
@@ -24,11 +44,16 @@ func TestDetectWorkflowAppRaisesProposal(t *testing.T) {
 		channelMessage{From: "you", Channel: "task-1", Content: "Score these 3 leads against our ICP — I run this every Monday."},
 		channelMessage{From: "ceo", Channel: "task-1", Content: "Scored: Acme 7/10, BetaLabs 3/10, Gamma 4/10."},
 	)
+	// The shape recurred: OFFICE-1 plus a prior run by the same agent.
+	seedRecurringShape(t, "ceo", "OFFICE-1", []string{"OFFICE-0"}, "crm_fetch_leads", "score_leads")
 
 	b.detectWorkflowAppForTask("OFFICE-1")
 
 	if !sawTranscript {
 		t.Error("judge prompt should carry the task transcript")
+	}
+	if !sawShape {
+		t.Error("judge prompt should carry the mined OBSERVED WORKFLOW SHAPE")
 	}
 	var proposal *humanInterview
 	for i := range b.requests {
@@ -60,20 +85,55 @@ func TestDetectWorkflowAppRaisesProposal(t *testing.T) {
 	}
 }
 
-// TestDetectWorkflowAppSkipsWhenNotWorth: a one-off task yields no card.
+// TestDetectWorkflowAppSkipsWhenNotWorth: even a recurring shape yields no card
+// when the judge decides an App is not the right surface (worth_building=false).
 func TestDetectWorkflowAppSkipsWhenNotWorth(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	judged := false
 	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
-		return `{"worth_building":false,"reason":"one-off, not repeatable"}`, nil
+		judged = true
+		return `{"worth_building":false,"reason":"better as unattended automation"}`, nil
 	})
 	b := newTestBroker(t)
-	b.tasks = append(b.tasks, teamTask{ID: "OFFICE-2", Owner: "ceo", Channel: "task-2", Title: "One-off", status: "done"})
-	b.messages = append(b.messages, channelMessage{From: "you", Channel: "task-2", Content: "do this odd one-time thing"})
+	b.tasks = append(b.tasks, teamTask{ID: "OFFICE-2", Owner: "ceo", Channel: "task-2", Title: "Recurring", status: "done"})
+	b.messages = append(b.messages, channelMessage{From: "you", Channel: "task-2", Content: "run this again"})
+	seedRecurringShape(t, "ceo", "OFFICE-2", []string{"OFFICE-1b"}, "crm_fetch_leads", "score_leads")
 
 	b.detectWorkflowAppForTask("OFFICE-2")
+	if !judged {
+		t.Fatal("judge should be reached when the shape recurred")
+	}
 	for i := range b.requests {
 		if b.requests[i].AppProposal != nil {
 			t.Fatal("no proposal expected when the judge says worth_building=false")
+		}
+	}
+}
+
+// TestDetectWorkflowAppSkipsWithoutRecurrenceEvidence is the precision win: a
+// completed task whose shape neither recurred nor reached an outcome never even
+// reaches the judge — the deterministic miner gates it out, killing the per-task
+// LLM noise the old transcript-only judge produced.
+func TestDetectWorkflowAppSkipsWithoutRecurrenceEvidence(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	called := false
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		called = true
+		return `{"worth_building":true,"name":"x","description":"y"}`, nil
+	})
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks, teamTask{ID: "OFFICE-9", Owner: "ceo", Channel: "task-9", Title: "One-off", status: "done"})
+	b.messages = append(b.messages, channelMessage{From: "you", Channel: "task-9", Content: "do this odd one-time thing"})
+	// A single non-outcome run: below the recurrence floor, so no candidate.
+	seedRecurringShape(t, "ceo", "OFFICE-9", nil, "crm_fetch_leads", "score_leads")
+
+	b.detectWorkflowAppForTask("OFFICE-9")
+	if called {
+		t.Fatal("judge must not be called without recurrence/outcome evidence")
+	}
+	for i := range b.requests {
+		if b.requests[i].AppProposal != nil {
+			t.Fatal("no proposal expected without recurrence evidence")
 		}
 	}
 }

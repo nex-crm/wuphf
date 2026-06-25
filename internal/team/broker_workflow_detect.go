@@ -9,9 +9,15 @@ package team
 // completes:
 //
 //   - The broker (not an agent) fires this on every task that reaches done.
-//   - It assembles the completed task's transcript + the existing-apps catalog and
-//     runs ONE bounded LLM call that only JUDGES + DRAFTS — it returns structured
-//     JSON, it cannot call tools.
+//   - It GATES on real evidence first: the deterministic workflow miner
+//     (workflow_detect.go) clusters the persisted per-turn tool manifests
+//     (event_sink.go) and only yields a candidate when this task's tool-shape
+//     either recurred across tasks or ran end-to-end to a final outcome. No
+//     candidate → no judge call, no proposal. This replaces "ask an LLM to
+//     infer repeatability from one transcript" with proven recurrence.
+//   - When a candidate exists, it assembles the proven shape + the task
+//     transcript + the existing-apps catalog and runs ONE bounded LLM call that
+//     only JUDGES + DRAFTS — it returns structured JSON, it cannot call tools.
 //   - If the judge says "worth building", the BROKER raises the propose_app card.
 //
 // Because the broker does the raising, a card either exists or it doesn't — the
@@ -33,6 +39,15 @@ const (
 	workflowDetectMaxTranscriptMsgs  = 40
 	workflowDetectMaxTranscriptBytes = 12 << 10
 	workflowDetectMaxAppsListed      = 40
+	// appWorkflowRecurrenceFloor is how many times a no-outcome shape must
+	// recur before it is App-worthy. Apps are read-mostly tools that may never
+	// "send" anything, so unlike the workflow miner's default floor (3) a shape
+	// the agent rebuilt twice already justifies a tool. A single task that ran
+	// end-to-end to a real outcome verb still surfaces below this floor.
+	appWorkflowRecurrenceFloor = 2
+	// appWorkflowMinSteps is the distinct work-tool count that makes a task
+	// shape a "workflow" worth turning into a tool (below it is a one-liner).
+	appWorkflowMinSteps = 2
 )
 
 // queueWorkflowAppDetection fires post-completion workflow→App detection for a
@@ -82,7 +97,11 @@ func (b *Broker) detectWorkflowAppForTask(taskID string) {
 	leadSlug := strings.TrimSpace(officeLeadSlugFrom(b.members))
 	b.mu.Unlock()
 
-	if strings.TrimSpace(transcript) == "" {
+	// Evidence gate: only continue when the deterministic miner shows this
+	// task's tool-shape recurred or ran end-to-end. No candidate → no judge.
+	cand := detectionCandidateForTask(taskID)
+	if cand == nil {
+		log.Printf("workflow detect %s: no recurring/end-to-end shape in corpus — skipping", taskID)
 		return
 	}
 
@@ -90,7 +109,7 @@ func (b *Broker) detectWorkflowAppForTask(taskID string) {
 	// the judge so it improves a related app instead of proposing a duplicate.
 	existing := b.existingAppsForDetection()
 
-	system, prompt := buildWorkflowDetectPrompt(t, transcript, existing)
+	system, prompt := buildWorkflowDetectPrompt(t, transcript, *cand, existing)
 	ctx, cancel := context.WithTimeout(context.Background(), workflowDetectTimeout)
 	defer cancel()
 	out, err := currentAppsLLMCompleter()(ctx, system, prompt)
@@ -127,6 +146,35 @@ func (b *Broker) detectWorkflowAppForTask(taskID string) {
 		from = appBuilderSlug
 	}
 	b.raiseDetectedAppProposal(channel, from, *spec, existing)
+}
+
+// detectionCandidateForTask runs the deterministic miner over the persisted
+// tool-manifest corpus and returns the candidate whose cluster includes taskID,
+// or nil when this task's shape neither recurred (>= appWorkflowRecurrenceFloor)
+// nor ran end-to-end to a final outcome. Read-only; the corpus has its own
+// append lock. A missing/empty sink yields nil (no candidates, no error).
+func detectionCandidateForTask(taskID string) *DetectionCandidate {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	cands, err := DetectWorkflowsFromSink(EventSinkPath(), DetectOptions{
+		MinSteps:        appWorkflowMinSteps,
+		RecurrenceFloor: appWorkflowRecurrenceFloor,
+	})
+	if err != nil {
+		log.Printf("workflow detect %s: read corpus: %v", taskID, err)
+		return nil
+	}
+	for i := range cands {
+		for _, id := range cands[i].TaskIDs {
+			if strings.TrimSpace(id) == taskID {
+				c := cands[i]
+				return &c
+			}
+		}
+	}
+	return nil
 }
 
 // renderTaskTranscriptLocked renders the recent human+agent messages in a task's
@@ -285,15 +333,17 @@ func (b *Broker) raiseDetectedAppProposal(channel, from string, spec appProposal
 
 // buildWorkflowDetectPrompt composes the judge's system + user prompt. The judge
 // only decides + drafts; it never calls a tool. The strict JSON contract is what
-// the broker actuates.
-func buildWorkflowDetectPrompt(task teamTask, transcript string, existing []detectedApp) (system, user string) {
-	system = "You analyze a COMPLETED office task to decide whether it represents a REPEATABLE workflow worth turning into a small internal tool (an \"App\"). " +
+// the broker actuates. Recurrence is ALREADY established by the mined shape
+// (cand) — the judge's job is whether an App is the right surface for it and to
+// draft it grounded in the proven steps.
+func buildWorkflowDetectPrompt(task teamTask, transcript string, cand DetectionCandidate, existing []detectedApp) (system, user string) {
+	system = "You analyze a COMPLETED office task whose tool-shape was ALREADY proven to recur or run end-to-end, to decide whether it is worth turning into a small internal tool (an \"App\"). " +
 		"An App is a read-mostly React tool over the workspace's own data, the user's connected integrations (read actions), and a bounded one-shot ai() step; it can also create a task on a button. " +
-		"Propose ONLY when BOTH hold: (1) the work is genuinely repeatable — the human signalled recurrence (\"every week/month/sprint\", \"again\", \"each morning\") or it is plainly periodic; and (2) an App would meaningfully cut the manual effort. " +
+		"Repeatability is NOT yours to re-judge — the OBSERVED WORKFLOW SHAPE below is deterministic evidence the work recurs. Decide instead: (1) would an App over this exact shape meaningfully cut the manual effort, and (2) is it App-shaped (a tool a human opens and reads/acts on) rather than pure unattended automation. " +
 		"If an existing app in the list already covers it, set related_app_id to that app's id to propose an IMPROVEMENT instead of a duplicate; if an existing app ALREADY fully covers it, set worth_building=false. " +
-		"Ground the draft in what the transcript shows actually happened — name the real inputs, rules, and outputs you observed. Do NOT invent capabilities or data the workspace does not have. " +
+		"Ground the draft in the observed shape AND what the transcript shows actually happened — name the real inputs, rules, and outputs you observed. Do NOT invent capabilities or data the workspace does not have. " +
 		"Respond with EXACTLY ONE JSON object and nothing else: {\"worth_building\": boolean, \"name\": string, \"summary\": string, \"description\": string, \"related_app_id\": string, \"reason\": string}. " +
-		"name: short tool name. summary: one line. description: what it does + the workflow it automates + the key inputs/rules/outputs from the transcript. related_app_id: an existing app id to improve, else \"\". reason: one line on the recurrence signal. " +
+		"name: short tool name. summary: one line. description: what it does + the workflow it automates + the key inputs/rules/outputs from the shape and transcript. related_app_id: an existing app id to improve, else \"\". reason: one line tying the proposal to the observed shape. " +
 		"When in doubt, set worth_building=false — a missed suggestion is cheaper than a noisy one."
 
 	var u strings.Builder
@@ -301,8 +351,30 @@ func buildWorkflowDetectPrompt(task teamTask, transcript string, existing []dete
 	if d := strings.TrimSpace(task.Details); d != "" {
 		fmt.Fprintf(&u, "Brief: %s\n", d)
 	}
+
+	u.WriteString("\nOBSERVED WORKFLOW SHAPE (mined deterministically from real tool calls)\n")
+	if len(cand.Shape) > 0 {
+		fmt.Fprintf(&u, "Steps: %s\n", strings.Join(cand.Shape, " -> "))
+	}
+	switch {
+	case cand.Count > 1:
+		agentLabel := strings.TrimSpace(cand.Agent)
+		if agentLabel == "" {
+			agentLabel = "the same agent"
+		}
+		fmt.Fprintf(&u, "Evidence: this exact shape recurred across %d tasks by %s.\n", cand.Count, agentLabel)
+	case strings.TrimSpace(cand.Outcome) != "":
+		fmt.Fprintf(&u, "Evidence: this task ran end-to-end to a final outcome step (%s).\n", strings.TrimSpace(cand.Outcome))
+	default:
+		u.WriteString("Evidence: this shape met the recurrence floor.\n")
+	}
+
 	u.WriteString("\nTRANSCRIPT (human + agents)\n")
-	u.WriteString(transcript)
+	if strings.TrimSpace(transcript) == "" {
+		u.WriteString("(no chat transcript — ground the draft in the observed shape and task brief)\n")
+	} else {
+		u.WriteString(transcript)
+	}
 	u.WriteString("\nEXISTING APPS (improve one of these instead of duplicating)\n")
 	if len(existing) == 0 {
 		u.WriteString("(none)\n")

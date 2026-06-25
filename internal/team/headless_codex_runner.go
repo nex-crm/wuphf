@@ -249,7 +249,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			appendHeadlessCodexLog(slug, line)
 			heartbeat.Note() // suppress the coarse heartbeat: a real tool event just landed.
 			l.updateHeadlessProgress(slug, "active", "tool_use", codexToolProgressDetail(event.ToolName), snapshotMetrics())
-			turnToolNames = append(turnToolNames, event.ToolName)
+			// Unwrap the proxy action_id into a domain token for the detection
+			// substrate (see manifestToolToken). The live event keeps the name.
+			turnToolNames = append(turnToolNames, manifestToolToken(event.ToolName, event.ToolInput))
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderCodex, slug, taskID, event.ToolName, event.ToolInput, event.RawType)
 		case "tool_result":
 			line := "tool_result: " + truncate(event.Text, 140)

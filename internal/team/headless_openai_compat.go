@@ -192,7 +192,9 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		onToolUse: func(name, rawInput string) {
 			state.onToolUseChunk(name, rawInput)
 			l.updateHeadlessProgress(slug, "active", "tool", "running "+name, metrics)
-			turnToolNames = append(turnToolNames, name)
+			// Unwrap the proxy action_id into a domain token for the detection
+			// substrate (see manifestToolToken). The live event keeps the name.
+			turnToolNames = append(turnToolNames, manifestToolToken(name, rawInput))
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, name, rawInput, kind+".tool_use")
 		},
 		onError: state.onError,
