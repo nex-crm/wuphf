@@ -36,6 +36,11 @@ type appProposalSpec struct {
 	// creating a new one — the agent is expected to have checked list_apps
 	// first and found a related app to extend instead of duplicating.
 	AppID string `json:"app_id,omitempty"`
+	// ObservedSteps is the deterministic tool-shape the detector mined for this
+	// proposal (e.g. ["crm_fetch_leads", "score_leads"]). Empty for agent-raised
+	// proposals. Passed through to the App Builder's brief as concrete, proven
+	// build targets so the generator works from the real steps, not just prose.
+	ObservedSteps []string `json:"observed_steps,omitempty"`
 }
 
 // sanitizeAppProposalSpec trims the proposal and drops it entirely when it has
@@ -50,6 +55,11 @@ func sanitizeAppProposalSpec(in *appProposalSpec) *appProposalSpec {
 		Summary:     strings.TrimSpace(in.Summary),
 		Description: strings.TrimSpace(in.Description),
 		AppID:       strings.TrimSpace(in.AppID),
+	}
+	for _, step := range in.ObservedSteps {
+		if step = strings.TrimSpace(step); step != "" {
+			out.ObservedSteps = append(out.ObservedSteps, step)
+		}
 	}
 	if out.Name == "" {
 		return nil
@@ -147,6 +157,10 @@ func appBuilderTaskBrief(spec appProposalSpec, humanNote string) (string, string
 	d.WriteString("What it should do:\n")
 	d.WriteString(spec.Description)
 	d.WriteString("\n")
+	if len(spec.ObservedSteps) > 0 {
+		fmt.Fprintf(&d, "\nObserved workflow steps (mined from the repeated work — implement these as the tool's backbone):\n%s\n",
+			strings.Join(spec.ObservedSteps, " -> "))
+	}
 	if note := strings.TrimSpace(humanNote); note != "" {
 		fmt.Fprintf(&d, "\nHuman constraints / added context:\n%s\n", note)
 	}

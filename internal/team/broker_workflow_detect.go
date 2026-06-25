@@ -129,10 +129,11 @@ func (b *Broker) detectWorkflowAppForTask(taskID string) {
 	log.Printf("workflow detect %s: proposing %q (improve=%q)", taskID, decision.Name, decision.RelatedAppID)
 
 	spec := sanitizeAppProposalSpec(&appProposalSpec{
-		Name:        decision.Name,
-		Summary:     decision.Summary,
-		Description: decision.Description,
-		AppID:       decision.RelatedAppID,
+		Name:          decision.Name,
+		Summary:       decision.Summary,
+		Description:   decision.Description,
+		AppID:         decision.RelatedAppID,
+		ObservedSteps: cand.Shape,
 	})
 	if spec == nil || strings.TrimSpace(spec.Description) == "" {
 		return
@@ -158,9 +159,18 @@ func detectionCandidateForTask(taskID string) *DetectionCandidate {
 	if taskID == "" {
 		return nil
 	}
-	cands, err := DetectWorkflowsFromSink(EventSinkPath(), DetectOptions{
-		MinSteps:        appWorkflowMinSteps,
-		RecurrenceFloor: appWorkflowRecurrenceFloor,
+	sinkPath := EventSinkPath()
+	if sinkPath == "" {
+		// No runtime home → the manifest corpus is never written, so detection
+		// can never fire. Log it once-per-task so a silently-disabled detector is
+		// diagnosable rather than looking like correct precision.
+		log.Printf("workflow detect %s: no runtime home — detection corpus unavailable", taskID)
+		return nil
+	}
+	cands, err := DetectWorkflowsFromSink(sinkPath, DetectOptions{
+		MinSteps:                         appWorkflowMinSteps,
+		RecurrenceFloor:                  appWorkflowRecurrenceFloor,
+		SingleRunRequiresExternalOutcome: true,
 	})
 	if err != nil {
 		log.Printf("workflow detect %s: read corpus: %v", taskID, err)

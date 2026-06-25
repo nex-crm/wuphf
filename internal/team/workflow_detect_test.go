@@ -69,6 +69,28 @@ func TestDetectWorkflowsSingleRunOutcome(t *testing.T) {
 	}
 }
 
+// TestDetectWorkflowsSingleRunExternalizingOnly: with the apps gate set, a single
+// run surfaces only when it EXTERNALIZED (send/email/…); a single run ending in a
+// workspace-internal verb (update/save) does not nag — but still recurs as signal.
+func TestDetectWorkflowsSingleRunExternalizingOnly(t *testing.T) {
+	internalRun := []TurnManifest{manifestFor("t1", "ops", "fetch_metrics", "update_dashboard")}
+	externalRun := []TurnManifest{manifestFor("t1", "ops", "fetch_metrics", "post_to_slack")}
+
+	apps := DetectOptions{RecurrenceFloor: 2, SingleRunRequiresExternalOutcome: true}
+
+	if got := DetectWorkflows(internalRun, apps); len(got) != 0 {
+		t.Fatalf("single internal-write run must NOT surface under apps gate, got %d", len(got))
+	}
+	if got := DetectWorkflows(externalRun, apps); len(got) != 1 {
+		t.Fatalf("single externalizing run must surface, got %d", len(got))
+	}
+	// Without the gate (workflow lane default), the internal single run DOES
+	// surface — the narrowing is opt-in.
+	if got := DetectWorkflows(internalRun, DetectOptions{RecurrenceFloor: 2}); len(got) != 1 {
+		t.Fatalf("workflow-lane default should still surface the internal single run, got %d", len(got))
+	}
+}
+
 // TestDetectWorkflowsFiltersOrchestration: plumbing tools (bash/read/edit, the
 // office MCP) never count toward a shape, so a chatty turn is not a "workflow".
 func TestDetectWorkflowsFiltersOrchestration(t *testing.T) {

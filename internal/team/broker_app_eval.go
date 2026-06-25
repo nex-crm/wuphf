@@ -101,7 +101,17 @@ func (b *Broker) evaluateAppAcceptanceForTask(taskID string) {
 
 	app, ok := b.appForEditChannel(channel)
 	if !ok {
-		return // no published app bound to this task → nothing to grade
+		// An App Builder build task that reached done with NO app bound to its
+		// channel is the STRONGEST non-delivery — register_app was never called,
+		// so nothing shipped. Don't pass silently (the prior behavior, which let
+		// the least-deserving task sail through): log it and reopen for a bounded
+		// auto-fix so it's visible and recoverable.
+		log.Printf("app acceptance %s: no app bound to channel %q — treating as non-delivery", taskID, channel)
+		action, gaps := decideAppAcceptance(appAcceptanceDecision{Meets: false},
+			[]string{"No app was registered for this build — build the tool, then call register_app so it ships."},
+			priorFails)
+		b.applyAppAcceptanceAction(action, taskID, channel, CustomApp{Name: "the requested app"}, gaps, priorFails, "")
+		return
 	}
 
 	// Deterministic checks gate the app FIRST and INDEPENDENTLY of the LLM judge.
@@ -224,17 +234,21 @@ func (b *Broker) deterministicAppGaps(app CustomApp) []string {
 	if !strings.EqualFold(strings.TrimSpace(app.Status), "ready") || app.Version < 1 {
 		gaps = append(gaps, "The app did not publish a ready, versioned build.")
 	}
-	// Finalization proof: ContentHash is set ONLY when a publish runs to
-	// completion (server-side build + validation succeeded). An empty hash means
-	// the build never finalized — the exact stuck state ("ready/building" with no
-	// committed bytes) that let a 30-minute build that never published stay
-	// "done". This grounds "ready" in real published bytes, not a status flag the
-	// agent set, so a manifest forced to ready without a finished build still fails.
-	if strings.TrimSpace(app.ContentHash) == "" {
-		gaps = append(gaps, "The build never finalized — no published content hash.")
-	}
-	if _, html, err := b.appStore().Get(app.ID); err != nil || len(html) < appAcceptanceMinBundleBytes {
+	// Finalization + integrity proof. A current build commits the manifest
+	// ContentHash and the bundle bytes atomically (custom_app.go Save), so:
+	//   - a missing/trivial bundle means the publish never finalized;
+	//   - a RECORDED hash that disagrees with the on-disk bytes means a corrupt or
+	//     partial publish (the bytes are not the build that was validated).
+	// A legacy app published before ContentHash existed carries an empty recorded
+	// hash but real bytes — that IS finalized, so an empty hash is NOT itself a
+	// gap (the status/version + scaffold checks still catch a true non-delivery).
+	// This grounds "ready" in the actual published bytes, not a flag the agent set.
+	_, html, err := b.appStore().Get(app.ID)
+	switch {
+	case err != nil || len(html) < appAcceptanceMinBundleBytes:
 		gaps = append(gaps, "The published bundle is missing or trivially small.")
+	case strings.TrimSpace(app.ContentHash) != "" && customAppContentHash(html) != strings.TrimSpace(app.ContentHash):
+		gaps = append(gaps, "The published bundle does not match its recorded build hash (corrupt or partial publish).")
 	}
 	// The agent must REPLACE the starter scaffold. An App.tsx that still carries
 	// the scaffold's instruction sentinel means it shipped (or stalled on) the

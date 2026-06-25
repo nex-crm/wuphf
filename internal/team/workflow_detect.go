@@ -88,6 +88,14 @@ type DetectOptions struct {
 	// detection lowers this to 2 because a read-mostly tool the agent rebuilt
 	// twice is already app-worthy even though it never "sends" anything.
 	RecurrenceFloor int
+	// SingleRunRequiresExternalOutcome narrows what lets a SINGLE run surface
+	// below the recurrence floor: when set, only a genuinely externalizing
+	// outcome (send/post/email/publish/…) qualifies, not a workspace-internal
+	// verb (create/update/save/record/report). Apps set this so one task that
+	// merely "saved a view" or "updated a record" once does not nag — those
+	// remain valid RECURRENCE signal, just not a single-run trigger. Default
+	// false keeps the workflow lane's behavior (any outcome verb surfaces a run).
+	SingleRunRequiresExternalOutcome bool
 }
 
 // recurrenceFloor is the default recurrence count at which a shape surfaces
@@ -160,13 +168,40 @@ func tokenizeTool(name string) []string {
 	return tokens
 }
 
+// externalizingVerbs are the subset of outcomeVerbs that leave the workspace —
+// the run actually delivered something to a third party (an email, a Slack post,
+// a published doc), as opposed to a workspace-internal write (create/update/
+// save/record/report). A SINGLE run only justifies a suggestion on its own when
+// it externalized; internal writes are far weaker single-run signal (a chatty
+// task that "saved a view" once is not a workflow), though they remain valid
+// RECURRENCE signal. See DetectOptions.SingleRunRequiresExternalOutcome.
+var externalizingVerbs = map[string]bool{
+	"send": true, "sent": true, "post": true, "posted": true,
+	"deliver": true, "delivered": true, "email": true, "emailed": true,
+	"notify": true, "notified": true, "publish": true, "published": true,
+	"reply": true, "replied": true, "submit": true, "submitted": true,
+	"dispatch": true, "dispatched": true, "message": true,
+	"charge": true, "invoice": true, "book": true, "booked": true,
+	"upload": true, "uploaded": true,
+}
+
 // terminalOutcome reports the outcome-producing tool a shape reached, scanning
 // from the end so a confirming read after the send (send -> log) still counts.
 // Returns the matched tool and true when the shape led to a final outcome.
 func terminalOutcome(shape []string) (string, bool) {
+	return terminalOutcomeIn(shape, outcomeVerbs)
+}
+
+// terminalExternalizingOutcome is terminalOutcome restricted to the
+// externalizing subset — the gate for surfacing a single run.
+func terminalExternalizingOutcome(shape []string) (string, bool) {
+	return terminalOutcomeIn(shape, externalizingVerbs)
+}
+
+func terminalOutcomeIn(shape []string, verbs map[string]bool) (string, bool) {
 	for i := len(shape) - 1; i >= 0; i-- {
 		for _, tok := range tokenizeTool(shape[i]) {
-			if outcomeVerbs[tok] {
+			if verbs[tok] {
 				return shape[i], true
 			}
 		}
@@ -285,8 +320,14 @@ func DetectWorkflows(manifests []TurnManifest, opts DetectOptions) []DetectionCa
 		outcome, hasOutcome := terminalOutcome(c.shape)
 		// Surface a single end-to-end run only when it reached a final outcome.
 		// A shape with no recognized outcome step still needs recurrence
-		// (RecurrenceFloor) before it is worth suggesting.
-		if !hasOutcome && count < opts.RecurrenceFloor {
+		// (RecurrenceFloor) before it is worth suggesting. When the consumer asks
+		// for it, a SINGLE run must have EXTERNALIZED (send/post/email/…), not
+		// just written something internal, to surface on its own.
+		surfacesSingleRun := hasOutcome
+		if opts.SingleRunRequiresExternalOutcome {
+			_, surfacesSingleRun = terminalExternalizingOutcome(c.shape)
+		}
+		if !surfacesSingleRun && count < opts.RecurrenceFloor {
 			continue
 		}
 		out = append(out, DetectionCandidate{

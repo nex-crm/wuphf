@@ -258,24 +258,10 @@ func TestAppAcceptanceReopensUnmodifiedScaffold(t *testing.T) {
 	}
 }
 
-// Regression: a manifest that claims ready/v1 but never finalized its build
-// (no committed content hash — the stuck "building forever" state that let a
-// 30-minute non-publishing build stay "done") must be reopened deterministically
-// and never reach the judge. The finalization proof grounds "ready" in real
-// published bytes, not the status flag.
-func TestAppAcceptanceReopensUnfinalizedBuild(t *testing.T) {
-	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
-	var judgeCalled bool
-	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
-		judgeCalled = true
-		return `{"meets":true,"summary":"looks fine","gaps":[]}`, nil
-	})
-	b := newTestBroker(t)
-	const ch = "task-app-15"
-	const id = "app_00000000000000ee"
-	seedAcceptanceApp(t, id, ch, 5000, "ready", 1)
-	// Clear the content hash to simulate a build that published a manifest but
-	// never committed finalized bytes.
+// setManifestContentHash rewrites a seeded app's recorded ContentHash on disk so
+// a test can simulate the legacy (empty) or corrupt (mismatched) cases.
+func setManifestContentHash(t *testing.T, id, hash string) {
+	t.Helper()
 	manifestPath := filepath.Join(CustomAppsRootDir(), id, "app.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -285,11 +271,28 @@ func TestAppAcceptanceReopensUnfinalizedBuild(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	m.ContentHash = ""
+	m.ContentHash = hash
 	out, _ := json.Marshal(m)
 	if err := os.WriteFile(manifestPath, out, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Regression (legacy false-reopen fix): an app published before the ContentHash
+// field existed carries an empty recorded hash but real bytes — it IS finalized
+// and must NOT be reopened by the finalization check; it reaches the judge.
+func TestAppAcceptanceLegacyEmptyHashReachesJudge(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return `{"meets":true,"summary":"meets the brief","gaps":[]}`, nil
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-15"
+	const id = "app_00000000000000ee"
+	seedAcceptanceApp(t, id, ch, 5000, "ready", 1)
+	setManifestContentHash(t, id, "") // legacy: real bytes, no recorded hash
 	b.tasks = append(b.tasks, teamTask{
 		ID: "OFFICE-15", Owner: appBuilderSlug, Channel: ch,
 		Title: "Build app: Budget Monitor", Details: "Build a SaaS budget monitor.",
@@ -298,11 +301,77 @@ func TestAppAcceptanceReopensUnfinalizedBuild(t *testing.T) {
 
 	b.evaluateAppAcceptanceForTask("OFFICE-15")
 
-	if judgeCalled {
-		t.Error("an unfinalized build must be caught deterministically, not sent to the judge")
+	if !judgeCalled {
+		t.Error("a legacy app with real bytes but no recorded hash must reach the judge, not be reopened")
 	}
-	if task := b.taskByIDLocked("OFFICE-15"); task == nil || task.status != "in_progress" {
-		t.Fatalf("an unfinalized build must be reopened; got %+v", task)
+	if task := b.taskByIDLocked("OFFICE-15"); task == nil || task.status != "done" {
+		t.Fatalf("a legacy finalized app that meets the brief must stay done; got %+v", task)
+	}
+	if n := countMessagesOfKind(b, ch, appAcceptanceFailKind); n != 0 {
+		t.Fatalf("no fail notice expected for a legacy finalized app, got %d", n)
+	}
+}
+
+// Regression (integrity proof): a published bundle whose bytes disagree with the
+// recorded build hash is a corrupt/partial publish — reopened deterministically,
+// never sent to the judge.
+func TestAppAcceptanceReopensCorruptBundle(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return `{"meets":true,"summary":"looks fine","gaps":[]}`, nil
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-16"
+	const id = "app_00000000000000ef"
+	seedAcceptanceApp(t, id, ch, 5000, "ready", 1)
+	setManifestContentHash(t, id, "deadbeefdeadbeef") // does not match the bundle
+	b.tasks = append(b.tasks, teamTask{
+		ID: "OFFICE-16", Owner: appBuilderSlug, Channel: ch,
+		Title: "Build app: Budget Monitor", Details: "Build a SaaS budget monitor.",
+		status: "done",
+	})
+
+	b.evaluateAppAcceptanceForTask("OFFICE-16")
+
+	if judgeCalled {
+		t.Error("a corrupt bundle must be caught deterministically, not sent to the judge")
+	}
+	if task := b.taskByIDLocked("OFFICE-16"); task == nil || task.status != "in_progress" {
+		t.Fatalf("a corrupt-bundle build must be reopened; got %+v", task)
+	}
+	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
+		t.Fatalf("want 1 acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
+	}
+}
+
+// Regression (no silent pass): an App Builder build task that reached done with
+// NO app bound to its channel (register_app never called) is the strongest
+// non-delivery and must be reopened + logged, not silently accepted.
+func TestAppAcceptanceReopensWhenNoAppRegistered(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	var judgeCalled bool
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalled = true
+		return `{"meets":true,"summary":"","gaps":[]}`, nil
+	})
+	b := newTestBroker(t)
+	const ch = "task-app-17"
+	// No seedAcceptanceApp: nothing is bound to this channel.
+	b.tasks = append(b.tasks, teamTask{
+		ID: "OFFICE-17", Owner: appBuilderSlug, Channel: ch,
+		Title: "Build app: Nothing Shipped", Details: "Build a tool.",
+		status: "done",
+	})
+
+	b.evaluateAppAcceptanceForTask("OFFICE-17")
+
+	if judgeCalled {
+		t.Error("no app bound → must be caught deterministically, not sent to the judge")
+	}
+	if task := b.taskByIDLocked("OFFICE-17"); task == nil || task.status != "in_progress" {
+		t.Fatalf("a build that registered no app must be reopened; got %+v", task)
 	}
 	if countMessagesOfKind(b, ch, appAcceptanceFailKind) != 1 {
 		t.Fatalf("want 1 acceptance-fail notice, got %d", countMessagesOfKind(b, ch, appAcceptanceFailKind))
