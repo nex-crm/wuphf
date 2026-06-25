@@ -14,6 +14,8 @@ src/orchestrator/
   lifecycle.py   real lifecycle model (13 states, forward/migration maps, migrate_record)
                  + P1 orchestration policy (route / outcome+decision transitions)
   runstate.py    TaskRun schema; from_broker_record (re-hydrate) + to_projection (-> Go)
+  coordination.py multi-task dependency/sequencing kernel (P2): TaskGraph re-hydrate,
+                 plan()/ready_to_dispatch (parallel batch), topological_layers, detect_cycle
   harness.py     Harness protocol; FakeHarness (tests/key-free) + ClaudeAgentHarness (P1b-iv)
   graph.py       the LangGraph graph: route -> dispatch_turn -> (human_gate | continue)
   wire.py        Go<->Python contract (DispatchRequest / ResumeRequest / StepResult)
