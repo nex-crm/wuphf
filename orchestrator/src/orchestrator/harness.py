@@ -50,10 +50,23 @@ class Harness(Protocol):
 @dataclass(frozen=True)
 class ToolCall:
     """One tool invocation observed during a turn. `action` is the `team_task`
-    action argument when present (empty for other tools/args)."""
+    action argument when present (empty for other tools/args); `args` is the raw
+    tool input (used to read a decompose call's title/depends_on)."""
 
     name: str
     action: str = ""
+    args: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ChildSpec:
+    """A child task a decompose turn asked the broker to create. The broker is the
+    one that actually creates it (via the team_task MCP call); this is the
+    orchestrator's structured view of the decomposition for classification +
+    observability."""
+
+    title: str
+    depends_on: tuple[str, ...] = ()
 
 
 @dataclass
@@ -64,9 +77,26 @@ class TurnTranscript:
     tool_calls: list[ToolCall] = field(default_factory=list)
     text: str = ""
 
-    def team_task_actions(self) -> set[str]:
+    def _team_task_calls(self) -> list[ToolCall]:
         # Match the MCP-namespaced tool name (mcp__<server>__team_task) by suffix.
-        return {tc.action for tc in self.tool_calls if tc.name.endswith("team_task") and tc.action}
+        return [tc for tc in self.tool_calls if tc.name.endswith("team_task")]
+
+    def team_task_actions(self) -> set[str]:
+        return {tc.action for tc in self._team_task_calls() if tc.action}
+
+    def decomposed_children(self) -> list[ChildSpec]:
+        """The child specs from this turn's team_task create calls, in order. The
+        broker has already created them as a side effect of the calls; this is the
+        decomposition the orchestrator observed."""
+        specs: list[ChildSpec] = []
+        for tc in self._team_task_calls():
+            if tc.action not in _DECOMPOSE_ACTIONS:
+                continue
+            title = str(tc.args.get("title", "")).strip()
+            raw_deps = tc.args.get("depends_on") or []
+            deps = tuple(str(d).strip() for d in raw_deps if str(d).strip())
+            specs.append(ChildSpec(title=title, depends_on=deps))
+        return specs
 
 
 # team_task actions that terminate a turn, grouped by the outcome they imply.
@@ -74,16 +104,18 @@ class TurnTranscript:
 _COMPLETE_ACTIONS = frozenset({"complete", "done"})
 _SUBMIT_ACTIONS = frozenset({"submit_for_review"})
 _BLOCK_ACTIONS = frozenset({"block"})
+# create == the broker's sub-task creation action (server_tasks.go -> /tasks).
+_DECOMPOSE_ACTIONS = frozenset({"create"})
 
 
 def classify_outcome(state: State, transcript: TurnTranscript) -> TurnOutcome:
     """Map one turn's observable signals to a TurnOutcome.
 
     Priority: an explicit terminal team_task action wins (complete > submit >
-    block); otherwise a PLANNING turn that ran without one produced a plan to
-    approve (PLAN_READY); any other turn needs more work (CONTINUE). This is the
-    P1b-iv policy — deliberately driven by the agent's real tool calls, not by
-    parsing prose. Refined alongside the broker's gates in later phases.
+    block); then a turn that CREATED child tasks is a decomposition (DECOMPOSED);
+    then a PLANNING turn that ran without any of those produced a plan to approve
+    (PLAN_READY); any other turn needs more work (CONTINUE). Deliberately driven
+    by the agent's real tool calls, not by parsing prose.
     """
     actions = transcript.team_task_actions()
     if actions & _COMPLETE_ACTIONS:
@@ -92,6 +124,8 @@ def classify_outcome(state: State, transcript: TurnTranscript) -> TurnOutcome:
         return TurnOutcome.SUBMITTED_FOR_REVIEW
     if actions & _BLOCK_ACTIONS:
         return TurnOutcome.BLOCKED
+    if actions & _DECOMPOSE_ACTIONS:
+        return TurnOutcome.DECOMPOSED
     if state is State.PLANNING:
         return TurnOutcome.PLAN_READY
     return TurnOutcome.CONTINUE
@@ -194,8 +228,9 @@ class ClaudeAgentHarness:
                 kind = type(block).__name__
                 if kind == "ToolUseBlock":
                     raw = getattr(block, "input", None)
-                    action = str(raw.get("action", "")) if isinstance(raw, dict) else ""
-                    tool_calls.append(ToolCall(name=getattr(block, "name", ""), action=action))
+                    args = raw if isinstance(raw, dict) else {}
+                    action = str(args.get("action", ""))
+                    tool_calls.append(ToolCall(name=getattr(block, "name", ""), action=action, args=args))
                 elif kind == "TextBlock":
                     text = getattr(block, "text", "")
                     if text:

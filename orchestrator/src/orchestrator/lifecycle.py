@@ -174,6 +174,7 @@ class TurnOutcome(str, Enum):
     COMPLETED = "completed"
     CONTINUE = "continue"                      # needs another work turn
     BLOCKED = "blocked"
+    DECOMPOSED = "decomposed"                  # the turn created child tasks (a decomposition)
 
 
 class HumanDecision(str, Enum):
@@ -217,10 +218,18 @@ def gate_pending_state(gate: GateKind) -> State:
 
 
 def apply_turn_outcome(state: State, outcome: TurnOutcome) -> State:
-    """Non-gated outcomes only (CONTINUE/BLOCKED). Gated outcomes go through a
-    human gate first (see apply_human_decision)."""
+    """Non-gated outcomes only (CONTINUE/BLOCKED/DECOMPOSED). Gated outcomes go
+    through a human gate first (see apply_human_decision)."""
     if outcome is TurnOutcome.BLOCKED:
         return State.BLOCKED
+    if outcome is TurnOutcome.DECOMPOSED:
+        # The goal created its children; it now coordinates them rather than running
+        # more turns of its own. RUNNING (non-gated): on the next tick the broker
+        # sees children and routes the goal to the coordinate path (P2-ii). The
+        # children carry their own review gates, so the decomposition is not
+        # separately gated here (the broker already gated plan approval before
+        # sub-task creation was allowed).
+        return State.RUNNING
     if outcome is TurnOutcome.CONTINUE:
         # A continuation keeps the working state it was in: a planning turn stays
         # PLANNING, a changes-requested turn stays CHANGES_REQUESTED (so a later

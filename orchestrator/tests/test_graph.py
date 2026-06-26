@@ -54,6 +54,14 @@ def test_blocked_outcome_transitions_to_blocked():
     assert step["state"]["lifecycle_state"] == State.BLOCKED.value
 
 
+def test_decomposed_outcome_stays_running_no_gate():
+    # A goal that decomposed runs to the coordinate path on the next tick; the
+    # decompose turn itself is non-gated and leaves the goal RUNNING.
+    step = _run({"task_id": "t5b", "lifecycle_state": "running"}, FakeHarness(TurnOutcome.DECOMPOSED))
+    assert step["status"] == "done"
+    assert step["state"]["lifecycle_state"] == State.RUNNING.value
+
+
 def test_terminal_task_is_idle():
     step = _run({"task_id": "t6", "lifecycle_state": "approved"}, FakeHarness(TurnOutcome.CONTINUE))
     assert step["status"] == "done"

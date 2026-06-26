@@ -95,6 +95,14 @@ def test_continue_preserves_working_state():
     assert lc.apply_turn_outcome(State.RUNNING, TurnOutcome.CONTINUE) is State.RUNNING
 
 
+def test_decomposed_is_non_gated_and_runs():
+    # A decompose turn is not human-gated and leaves the goal RUNNING (it now
+    # coordinates its children) regardless of the source state.
+    assert lc.gate_for_outcome(State.RUNNING, TurnOutcome.DECOMPOSED) is None
+    assert lc.apply_turn_outcome(State.RUNNING, TurnOutcome.DECOMPOSED) is State.RUNNING
+    assert lc.apply_turn_outcome(State.PLANNING, TurnOutcome.DECOMPOSED) is State.RUNNING
+
+
 def test_gate_pending_state_maps_to_human_states():
     assert lc.gate_pending_state(GateKind.PLAN) is State.DECISION
     assert lc.gate_pending_state(GateKind.REVIEW) is State.REVIEW

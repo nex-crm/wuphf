@@ -37,6 +37,13 @@ def tc(action: str, name: str = TEAM_TASK) -> ToolCall:
         (State.RUNNING, [tc("block")], TurnOutcome.BLOCKED),
         # Priority: complete beats a same-turn submit.
         (State.RUNNING, [tc("submit_for_review"), tc("complete")], TurnOutcome.COMPLETED),
+        # A turn that created child tasks is a decomposition.
+        (State.RUNNING, [tc("create"), tc("create")], TurnOutcome.DECOMPOSED),
+        # Decompose ranks below an explicit terminal action...
+        (State.RUNNING, [tc("create"), tc("complete")], TurnOutcome.COMPLETED),
+        (State.RUNNING, [tc("create"), tc("block")], TurnOutcome.BLOCKED),
+        # ...but above PLAN_READY: a planning turn that decomposed is DECOMPOSED.
+        (State.PLANNING, [tc("create")], TurnOutcome.DECOMPOSED),
         # A planning turn with no terminal action produced a plan to approve.
         (State.PLANNING, [], TurnOutcome.PLAN_READY),
         (State.PLANNING, [tc("comment")], TurnOutcome.PLAN_READY),
@@ -67,6 +74,37 @@ def test_classify_ignores_non_team_task_action():
     # A different tool that happens to carry action="complete" must NOT terminate.
     t = TurnTranscript(tool_calls=[ToolCall(name="mcp__wuphf-office__wiki_write", action="complete")])
     assert classify_outcome(State.RUNNING, t) == TurnOutcome.CONTINUE
+
+
+def test_decomposed_children_extracts_specs_in_order():
+    t = TurnTranscript(tool_calls=[
+        ToolCall(name=TEAM_TASK, action="create", args={"title": "scaffold", "parent_issue_id": "G"}),
+        ToolCall(name=TEAM_TASK, action="create", args={"title": "tests", "depends_on": ["c1", " "]}),
+        ToolCall(name=TEAM_TASK, action="comment", args={"body": "noise"}),  # not a create
+        ToolCall(name="Bash", action="", args={"title": "ignored"}),         # not team_task
+    ])
+    specs = t.decomposed_children()
+    assert [s.title for s in specs] == ["scaffold", "tests"]
+    assert specs[0].depends_on == ()
+    assert specs[1].depends_on == ("c1",)  # blank dep is dropped
+
+
+def test_decomposed_children_empty_when_no_create():
+    t = TurnTranscript(tool_calls=[tc("submit_for_review"), tc("comment")])
+    assert t.decomposed_children() == []
+
+
+def test_decompose_turn_transitions_goal_to_running():
+    # End-to-end of the decompose policy: a turn that created children classifies
+    # DECOMPOSED and (non-gated) leaves the goal RUNNING so the broker coordinates
+    # the children on the next tick.
+    from orchestrator.lifecycle import apply_turn_outcome, gate_for_outcome
+
+    t = TurnTranscript(tool_calls=[ToolCall(name=TEAM_TASK, action="create", args={"title": "x"})])
+    outcome = classify_outcome(State.RUNNING, t)
+    assert outcome is TurnOutcome.DECOMPOSED
+    assert gate_for_outcome(State.RUNNING, outcome) is None  # not human-gated
+    assert apply_turn_outcome(State.RUNNING, outcome) is State.RUNNING
 
 
 def test_mcp_servers_config_resolves_env_names_to_values():
