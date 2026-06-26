@@ -56,7 +56,17 @@ func TestGBrainCompoundingCycle(t *testing.T) {
 	}
 	slug := DeriveSourceID(job.Kind, job.Origin, job.Title, job.Content)
 
-	// 2) PROCESS INTO GBRAIN — the real G4 capture writer (chat -> put_page).
+	// Seed a RELATED page first so auto-association on capture has a target.
+	const relatedSlug = "pricing-strategy"
+	if _, err := client.PutPage(ctx,
+		"---\ntitle: Pricing Strategy\ntags: [pricing]\n---\n\nOur pricing strategy favors premium tiers, annual billing defaults, and free trials to drive conversion.",
+		gbrain.PutOptions{Slug: relatedSlug}); err != nil {
+		t.Fatalf("seed related page: %v", err)
+	}
+	time.Sleep(2 * time.Second)
+
+	// 2) PROCESS INTO GBRAIN — the real G4 capture writer (chat -> put_page),
+	// which also auto-associates the new page with related pages.
 	writer := newGBrainSourceWriter()
 	if err := writer.WriteSource(ctx, job); err != nil {
 		t.Fatalf("capture WriteSource: %v", err)
@@ -83,6 +93,30 @@ func TestGBrainCompoundingCycle(t *testing.T) {
 		if got, _ := page.Frontmatter[k].(string); got != want {
 			t.Errorf("captured page frontmatter[%q] = %q, want %q", k, got, want)
 		}
+	}
+	// Provenance is ALSO queryable in the body (not only the frontmatter map).
+	if !strings.Contains(page.Content, "Captured from WUPHF office") {
+		t.Errorf("captured page body missing the queryable provenance line:\n%s", page.Content)
+	}
+
+	// 3b) ASSOCIATIONS ON CAPTURE — the writer auto-linked to the related page,
+	// so the graph is populated immediately (not only via gbrain's dream-cycle).
+	links, err := client.GetLinks(ctx, slug)
+	if err != nil {
+		t.Fatalf("GetLinks(%q): %v", slug, err)
+	}
+	t.Logf("auto-associations from %q: %+v", slug, links)
+	foundRelated := false
+	for _, l := range links {
+		if l.To == relatedSlug {
+			foundRelated = true
+			if l.Source != captureLinkSource {
+				t.Errorf("auto-link source = %q, want %q", l.Source, captureLinkSource)
+			}
+		}
+	}
+	if !foundRelated {
+		t.Errorf("expected an auto-association from %q to %q on capture, got %+v", slug, relatedSlug, links)
 	}
 
 	// 4) RETRIEVE IN A NEW CHAT AS CONTEXT — NO PROMPTING.

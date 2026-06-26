@@ -13,13 +13,15 @@ import (
 
 // fakeGBrainCaptureClient is a fake put_page sink. It records every PutPage call
 // so tests can assert the page body, slug, source_kind, and ingested_via the
-// dispatcher writes. It satisfies both gbrainPutPager (the writer's seam) and
-// gbrainMemoryClient (so it can be injected via setSharedGBrainClient to drive
-// the full broker -> dispatcher -> gbrain path).
+// dispatcher writes, plus the AddLink edges the auto-association step creates.
+// It satisfies gbrainMemoryClient, so it can be injected via setSharedGBrainClient
+// to drive the full broker -> dispatcher -> gbrain path.
 type fakeGBrainCaptureClient struct {
-	mu    sync.Mutex
-	calls []capturedPut
-	err   error // when set, PutPage returns it
+	mu        sync.Mutex
+	calls     []capturedPut
+	err       error                 // when set, PutPage returns it
+	queryHits []gbrain.SearchResult // returned by Query (for auto-association)
+	links     []capturedLink        // every AddLink call
 }
 
 type capturedPut struct {
@@ -27,8 +29,29 @@ type capturedPut struct {
 	opts    gbrain.PutOptions
 }
 
+type capturedLink struct {
+	from, to, linkType, linkSource string
+}
+
 func (f *fakeGBrainCaptureClient) Query(ctx context.Context, query string, limit int) ([]gbrain.SearchResult, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.queryHits, nil
+}
+
+func (f *fakeGBrainCaptureClient) AddLink(ctx context.Context, from, to, linkType, linkSource, note string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.links = append(f.links, capturedLink{from: from, to: to, linkType: linkType, linkSource: linkSource})
+	return nil
+}
+
+func (f *fakeGBrainCaptureClient) linkSnapshot() []capturedLink {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]capturedLink, len(f.links))
+	copy(out, f.links)
+	return out
 }
 
 func (f *fakeGBrainCaptureClient) PutPage(ctx context.Context, content string, opts gbrain.PutOptions) (gbrain.PutResult, error) {
@@ -82,7 +105,7 @@ func (f *fakeGBrainCaptureClient) lastFor(slug string) (capturedPut, bool) {
 // sink, returning both so a test can drive the writer and assert the calls.
 func newFakeCaptureWriter() (*gbrainSourceWriter, *fakeGBrainCaptureClient) {
 	fake := &fakeGBrainCaptureClient{}
-	w := &gbrainSourceWriter{resolve: func() gbrainPutPager { return fake }}
+	w := &gbrainSourceWriter{resolve: func() gbrainMemoryClient { return fake }}
 	return w, fake
 }
 
@@ -213,6 +236,70 @@ func TestSourceCaptureDispatcher_StopIsCleanAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestRenderGBrainSourcePage_HasQueryableProvenanceLine(t *testing.T) {
+	job := SourceCaptureJob{
+		Kind:       SourceKindChat,
+		Title:      "pricing",
+		Origin:     "pricing-2026-06-26",
+		Content:    "Pro plan is $49/mo.",
+		CapturedAt: time.Date(2026, 6, 26, 17, 0, 0, 0, time.UTC),
+	}
+	page, err := renderGBrainSourcePage(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Provenance is in the BODY (queryable by gbrain search), not only frontmatter.
+	if !strings.Contains(page, "> Captured from WUPHF office · chat · pricing-2026-06-26 · 2026-06-26") {
+		t.Errorf("missing queryable provenance line:\n%s", page)
+	}
+	if !strings.Contains(page, "Pro plan is $49/mo.") {
+		t.Error("provenance line clobbered the body")
+	}
+}
+
+func TestGBrainSourceWriter_AutoAssociatesRelatedPages(t *testing.T) {
+	writer, fake := newFakeCaptureWriter()
+	job := SourceCaptureJob{
+		Kind:       SourceKindChat,
+		Title:      "pricing",
+		Origin:     "pricing-2026-06-26",
+		Content:    "Pro plan is $49/mo.",
+		CapturedAt: time.Now().UTC(),
+	}
+	slug := captureSlug(job)
+	// Self (skip), three strong matches (linked up to the cap), one below
+	// threshold (skip), one over the cap (skip).
+	fake.queryHits = []gbrain.SearchResult{
+		{Slug: slug, Score: 0.99},                 // self → skipped
+		{Slug: "pricing-strategy", Score: 0.88},   // linked
+		{Slug: "weakly-related", Score: 0.50},     // below threshold → skipped
+		{Slug: "competitor-pricing", Score: 0.82}, // linked
+		{Slug: "annual-billing", Score: 0.79},     // linked (3rd, hits cap)
+		{Slug: "fourth-strong", Score: 0.78},      // over cap → skipped
+	}
+	if err := writer.WriteSource(context.Background(), job); err != nil {
+		t.Fatalf("WriteSource: %v", err)
+	}
+	links := fake.linkSnapshot()
+	if len(links) != maxCaptureLinks {
+		t.Fatalf("created %d links, want %d (cap): %+v", len(links), maxCaptureLinks, links)
+	}
+	for _, l := range links {
+		if l.from != slug {
+			t.Errorf("link from %q, want %q", l.from, slug)
+		}
+		if l.to == slug {
+			t.Error("must not self-link")
+		}
+		if l.to == "weakly-related" {
+			t.Error("linked a below-threshold page")
+		}
+		if l.linkSource != captureLinkSource || l.linkType != captureLinkType {
+			t.Errorf("link tagged %q/%q, want %q/%q", l.linkSource, l.linkType, captureLinkSource, captureLinkType)
+		}
+	}
+}
+
 // TestGBrainSourceWriter_RendersFrontmatterAndKinds drives WriteSource directly
 // for each source kind and asserts the slug, source_kind, ingested_via, and the
 // rendered frontmatter + body that land in gbrain.
@@ -316,7 +403,7 @@ func TestGBrainSourceWriter_NilClientLogsAndDrops(t *testing.T) {
 		Content: "no backend\n",
 	}
 
-	nilResolver := &gbrainSourceWriter{resolve: func() gbrainPutPager { return nil }}
+	nilResolver := &gbrainSourceWriter{resolve: func() gbrainMemoryClient { return nil }}
 	if err := nilResolver.WriteSource(context.Background(), job); err != nil {
 		t.Fatalf("nil-resolver WriteSource returned error: %v", err)
 	}

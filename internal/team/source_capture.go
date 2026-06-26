@@ -59,6 +59,17 @@ const (
 	gbrainCaptureSourceKindPrefix = "wuphf_office_"
 	// gbrainCaptureIngestedVia is the put_page ingested_via provenance.
 	gbrainCaptureIngestedVia = "wuphf-capture"
+
+	// Auto-association tuning: after capturing a page, link it to related
+	// existing pages so associations form on capture, not only via gbrain's
+	// async dream-cycle. captureLinkSource tags these edges so they are
+	// distinguishable from gbrain's reconciliation-managed links.
+	captureLinkCandidates     = 5
+	maxCaptureLinks           = 3
+	captureLinkScoreThreshold = 0.70
+	captureLinkQueryMaxLen    = 400
+	captureLinkType           = "related"
+	captureLinkSource         = "wuphf-capture"
 )
 
 // SourceCaptureJob is a pre-built source payload. Assembly happens at the hook
@@ -203,20 +214,13 @@ func (d *SourceCaptureDispatcher) commit(ctx context.Context, job SourceCaptureJ
 
 // ── gbrain-backed writer ─────────────────────────────────────────────────────
 
-// gbrainPutPager is the one-method slice of *gbrain.Client the source writer
-// needs. Reducing the dependency to put_page lets tests inject a fake without a
-// live gbrain subprocess. The broker-owned gbrainMemoryClient (Query + PutPage)
-// satisfies it.
-type gbrainPutPager interface {
-	PutPage(ctx context.Context, content string, opts gbrain.PutOptions) (gbrain.PutResult, error)
-}
-
 // gbrainSourceWriter writes office-activity capture jobs into gbrain as
-// upsert-by-slug pages. The client is resolved lazily per write so the writer
-// always sees the current broker-owned client and degrades to a log-and-drop
-// no-op when gbrain is absent (resolve returns nil).
+// upsert-by-slug pages and associates each one with related pages on capture.
+// The broker-owned gbrainMemoryClient (Query + PutPage + AddLink) is resolved
+// lazily per write so the writer always sees the current client and degrades to
+// a log-and-drop no-op when gbrain is absent (resolve returns nil).
 type gbrainSourceWriter struct {
-	resolve func() gbrainPutPager
+	resolve func() gbrainMemoryClient
 }
 
 // newGBrainSourceWriter builds the production writer. It resolves the
@@ -225,7 +229,7 @@ type gbrainSourceWriter struct {
 // (nil) cleanly degrades to log-and-drop.
 func newGBrainSourceWriter() *gbrainSourceWriter {
 	return &gbrainSourceWriter{
-		resolve: func() gbrainPutPager {
+		resolve: func() gbrainMemoryClient {
 			if c := sharedGBrainClient(); c != nil {
 				return c
 			}
@@ -259,7 +263,44 @@ func (w *gbrainSourceWriter) WriteSource(ctx context.Context, job SourceCaptureJ
 	}); err != nil {
 		return fmt.Errorf("put_page %q: %w", slug, err)
 	}
+	// Associate the new page with related existing pages immediately, so the
+	// graph is populated on capture rather than only after gbrain's async
+	// dream-cycle. Best-effort: link failures never fail the capture.
+	autoAssociateGBrainPage(ctx, client, slug, job)
 	return nil
+}
+
+// autoAssociateGBrainPage queries gbrain for pages related to the just-written
+// page and wires up to maxCaptureLinks edges (above captureLinkScoreThreshold),
+// tagged with the link_source "wuphf-capture" so they are distinguishable from
+// gbrain's reconciliation-managed edges. Best-effort and bounded.
+func autoAssociateGBrainPage(ctx context.Context, client gbrainMemoryClient, slug string, job SourceCaptureJob) {
+	q := strings.TrimSpace(strings.TrimSpace(job.Title) + " " + job.Content)
+	if q == "" {
+		return
+	}
+	if len(q) > captureLinkQueryMaxLen {
+		q = q[:captureLinkQueryMaxLen]
+	}
+	hits, err := client.Query(ctx, q, captureLinkCandidates)
+	if err != nil {
+		return // best-effort; the dream-cycle still links later
+	}
+	linked := 0
+	for _, h := range hits {
+		if linked >= maxCaptureLinks {
+			break
+		}
+		target := strings.TrimSpace(h.Slug)
+		if target == "" || target == slug || h.Score < captureLinkScoreThreshold {
+			continue
+		}
+		if err := client.AddLink(ctx, slug, target, captureLinkType, captureLinkSource, "auto-linked on capture"); err != nil {
+			log.Printf("source_capture: add_link %s->%s failed: %v", slug, target, err)
+			continue
+		}
+		linked++
+	}
 }
 
 // captureSlug returns the stable gbrain slug for a job: the job's pre-derived ID
@@ -320,6 +361,19 @@ func renderGBrainSourcePage(job SourceCaptureJob) (string, error) {
 		return "", fmt.Errorf("yaml close: %w", err)
 	}
 	buf.WriteString("---\n\n")
+	// Queryable provenance line. gbrain server-stamps its own source_kind for
+	// MCP callers and does not full-text-index the frontmatter map, so we also
+	// record provenance in the body where gbrain's search/query can find it and
+	// the reader shows it.
+	buf.WriteString("> Captured from WUPHF office · ")
+	buf.WriteString(string(job.Kind))
+	if o := strings.TrimSpace(job.Origin); o != "" {
+		buf.WriteString(" · ")
+		buf.WriteString(o)
+	}
+	buf.WriteString(" · ")
+	buf.WriteString(capturedAt.UTC().Format("2006-01-02"))
+	buf.WriteString("\n\n")
 	buf.WriteString(strings.TrimRight(job.Content, "\n"))
 	buf.WriteString("\n")
 	return buf.String(), nil

@@ -176,6 +176,10 @@ func (nexMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite)
 type gbrainMemoryClient interface {
 	Query(ctx context.Context, query string, limit int) ([]gbrain.SearchResult, error)
 	PutPage(ctx context.Context, content string, opts gbrain.PutOptions) (gbrain.PutResult, error)
+	// AddLink wires a graph edge; used by capture to associate a freshly
+	// written page with related pages immediately (not only via gbrain's async
+	// dream-cycle).
+	AddLink(ctx context.Context, from, to, linkType, linkSource, note string) error
 }
 
 // gbrainSharedMemorySourceKind labels shared-memory writes for provenance on

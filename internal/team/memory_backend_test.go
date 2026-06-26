@@ -40,6 +40,8 @@ func (f *fakeGBrainClient) PutPage(_ context.Context, content string, opts gbrai
 	return f.putResult, f.putErr
 }
 
+func (f *fakeGBrainClient) AddLink(_ context.Context, _, _, _, _, _ string) error { return nil }
+
 func TestGBrainBackendQuerySharedMapsInjectedHits(t *testing.T) {
 	fake := &fakeGBrainClient{queryResults: []gbrain.SearchResult{{
 		Slug:        "people/nazz",

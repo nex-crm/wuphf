@@ -24,6 +24,8 @@ const (
 	toolPutPage          = "put_page"
 	toolFindExperts      = "find_experts"
 	toolGetBrainIdentity = "get_brain_identity"
+	toolAddLink          = "add_link"
+	toolGetLinks         = "get_links"
 )
 
 // Client default timeouts. Per-call work is short; spawning `gbrain serve` and
@@ -499,6 +501,67 @@ func (c *Client) Identity(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return raw, nil
+}
+
+// Link is a tolerant view of one graph edge as returned by get_links. Note the
+// asymmetry with add_link: the write tool takes from/to, but get_links returns
+// from_slug/to_slug.
+type Link struct {
+	From   string `json:"from_slug"`
+	To     string `json:"to_slug"`
+	Type   string `json:"link_type"`
+	Source string `json:"link_source"`
+}
+
+// AddLink creates a directed edge from -> to in gbrain's knowledge graph.
+// linkType is the edge kind (e.g. "related"); linkSource is a kebab-case
+// provenance tag (e.g. "wuphf-capture") — gbrain rejects its reconciliation-
+// managed built-ins (markdown/frontmatter/mentions/wikilink-resolved). note is
+// optional free-text context. Empty optional fields are omitted.
+func (c *Client) AddLink(ctx context.Context, from, to, linkType, linkSource, note string) error {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	if from == "" || to == "" {
+		return fmt.Errorf("gbrain add_link: from and to are required")
+	}
+	args := map[string]any{"from": from, "to": to}
+	if s := strings.TrimSpace(linkType); s != "" {
+		args["link_type"] = s
+	}
+	if s := strings.TrimSpace(linkSource); s != "" {
+		args["link_source"] = s
+	}
+	if s := strings.TrimSpace(note); s != "" {
+		args["context"] = s
+	}
+	if _, err := c.CallTool(ctx, toolAddLink, args); err != nil {
+		return fmt.Errorf("gbrain add_link %s->%s: %w", from, to, err)
+	}
+	return nil
+}
+
+// GetLinks lists the outgoing edges from a page. Tolerant of gbrain returning
+// either a bare array or a {"links":[...]} envelope.
+func (c *Client) GetLinks(ctx context.Context, slug string) ([]Link, error) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return nil, fmt.Errorf("gbrain get_links: slug is required")
+	}
+	raw, err := c.CallTool(ctx, toolGetLinks, map[string]any{"slug": slug})
+	if err != nil {
+		return nil, err
+	}
+	var links []Link
+	if err := decodeJSON(raw, &links); err == nil {
+		return links, nil
+	}
+	var env struct {
+		Links []Link `json:"links"`
+	}
+	if err := decodeJSON(raw, &env); err != nil {
+		return nil, fmt.Errorf("decode gbrain get_links: %w", err)
+	}
+	return env.Links, nil
 }
 
 // decodeJSON unmarshals a flattened tool payload into v. It surfaces a clear

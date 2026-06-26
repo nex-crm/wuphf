@@ -23,6 +23,7 @@ type fakeServerConfig struct {
 	putPageText    string
 	identityText   string
 	findExpertsTxt string
+	getLinksText   string
 }
 
 // startFakeClient stands up an in-memory MCP server exposing canned gbrain
@@ -46,6 +47,8 @@ func startFakeClient(t *testing.T, cfg fakeServerConfig) *Client {
 	mcp.AddTool(server, &mcp.Tool{Name: toolPutPage, Description: "put"}, text(cfg.putPageText))
 	mcp.AddTool(server, &mcp.Tool{Name: toolFindExperts, Description: "experts"}, text(cfg.findExpertsTxt))
 	mcp.AddTool(server, &mcp.Tool{Name: toolGetBrainIdentity, Description: "identity"}, text(cfg.identityText))
+	mcp.AddTool(server, &mcp.Tool{Name: toolGetLinks, Description: "links"}, text(cfg.getLinksText))
+	mcp.AddTool(server, &mcp.Tool{Name: toolAddLink, Description: "add link"}, text(`{"status":"ok"}`))
 
 	clientTr, serverTr := mcp.NewInMemoryTransports()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -142,6 +145,35 @@ func TestClient_GetPageRequiresSlug(t *testing.T) {
 	c := startFakeClient(t, fakeServerConfig{})
 	if _, err := c.GetPage(context.Background(), "  "); err == nil {
 		t.Fatal("expected error for empty slug")
+	}
+}
+
+func TestClient_GetLinksMapsSlugFields(t *testing.T) {
+	// get_links returns from_slug/to_slug (NOT from/to, which is add_link's
+	// input shape). Verified against live gbrain serve. Regression guard.
+	c := startFakeClient(t, fakeServerConfig{
+		getLinksText: `[{"from_slug":"chat-pricing","to_slug":"pricing-strategy","link_type":"related","link_source":"wuphf-capture"}]`,
+	})
+	links, err := c.GetLinks(context.Background(), "chat-pricing")
+	if err != nil {
+		t.Fatalf("GetLinks: %v", err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("got %d links, want 1", len(links))
+	}
+	l := links[0]
+	if l.From != "chat-pricing" || l.To != "pricing-strategy" || l.Type != "related" || l.Source != "wuphf-capture" {
+		t.Errorf("link mismapped: %+v", l)
+	}
+}
+
+func TestClient_AddLinkRequiresEndpoints(t *testing.T) {
+	c := startFakeClient(t, fakeServerConfig{})
+	if err := c.AddLink(context.Background(), "a", "b", "related", "wuphf-capture", ""); err != nil {
+		t.Fatalf("AddLink: %v", err)
+	}
+	if err := c.AddLink(context.Background(), "", "b", "", "", ""); err == nil {
+		t.Fatal("expected error when from is empty")
 	}
 }
 
