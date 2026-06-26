@@ -125,6 +125,60 @@ func TestOrchestratorE2E_RealClientThroughBroker(t *testing.T) {
 	}
 }
 
+// TestCoordinateE2E_RealClientThroughBroker proves the goal-coordination path
+// (P2-ii) end-to-end: a real goal with two children, routed through the REAL
+// provider.DispatchClient over REAL HTTP to a stand-in for POST /coordinate, and
+// the returned action plan applied to the children. Only the orchestrator's
+// coordination logic is faked; child enumeration, union-dep marshal, HTTP, plan
+// decode, and the START transition are production code.
+func TestCoordinateE2E_RealClientThroughBroker(t *testing.T) {
+	var sawPath string
+	var sawChildIDs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		var req provider.CoordinateRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Errorf("coordinate: undecodable CoordinateRequest: %v", err)
+		}
+		for _, child := range req.Children {
+			if id, _ := child["task_id"].(string); id != "" {
+				sawChildIDs = append(sawChildIDs, id)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(provider.CoordinationPlan{
+			GoalID:  req.GoalID,
+			Actions: map[string]string{"c1": provider.CoordStart, "c2": provider.CoordBlock},
+			Ready:   []string{"c1"},
+		})
+	}))
+	defer srv.Close()
+
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks,
+		teamTask{ID: "GOAL", Owner: "ceo", Title: "ship", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c1", ParentIssueID: "GOAL", Owner: "eng", Title: "one", LifecycleState: LifecycleStateReady, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c2", ParentIssueID: "GOAL", Owner: "eng", Title: "two", LifecycleState: LifecycleStateReady, Orchestrator: orchestratorLangGraph, DependsOn: []string{"c1"}},
+	)
+	l := &Launcher{broker: b}
+	l.SetTaskOrchestrator(provider.NewDispatchClient(srv.URL, provider.WithHTTPClient(srv.Client())))
+
+	l.coordinateGoalViaOrchestrator("ceo", *b.TaskByID("GOAL"))
+
+	if sawPath != "/coordinate" {
+		t.Fatalf("orchestrator path = %q, want /coordinate", sawPath)
+	}
+	if len(sawChildIDs) != 2 {
+		t.Fatalf("orchestrator saw %d children, want 2", len(sawChildIDs))
+	}
+	if got, _ := taskByID(t, b, "c1"); got.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("c1 (START) = %q, want running", got.LifecycleState)
+	}
+	if got, _ := taskByID(t, b, "c2"); got.LifecycleState != LifecycleStateReady {
+		t.Fatalf("c2 (BLOCK) = %q, want unchanged ready", got.LifecycleState)
+	}
+}
+
 // taskByID lives in broker_phase6_migration_test.go (returns teamTask, bool).
 
 // TestEnsurePlannedTask_RejectsBadOrchestrator locks the create-time validation:

@@ -9,6 +9,7 @@ from orchestrator.coordination import (
     CoordAction,
     TaskGraph,
     TaskNode,
+    coordinate,
     coordination_action,
     dependency_resolved,
     detect_cycle,
@@ -165,3 +166,37 @@ def test_topological_layers_raises_on_cycle():
 def test_no_cycle_returns_none():
     g = graph(node("a", State.READY), node("b", State.READY, "a"))
     assert detect_cycle(g) is None
+
+
+# --- coordinate(): the whole-goal decision the broker applies -------------------- #
+
+
+def test_coordinate_serial_chain_dispatches_only_the_unblocked_head():
+    # a ready, b depends on a -> only a is ready; b BLOCKs behind it.
+    g = graph(node("a", State.READY), node("b", State.READY, "a"))
+    result = coordinate(g)
+    assert result.cycle is None
+    assert result.actions == {"a": CoordAction.START.value, "b": CoordAction.BLOCK.value}
+    assert result.ready == ["a"]
+
+
+def test_coordinate_parallel_children_all_ready():
+    g = graph(node("a", State.READY), node("b", State.RUNNING))
+    result = coordinate(g)
+    assert result.ready == ["a", "b"]
+    assert result.actions == {"a": CoordAction.START.value, "b": CoordAction.DISPATCH.value}
+
+
+def test_coordinate_cycle_blocks_everything_and_surfaces_path():
+    g = graph(node("a", State.READY, "b"), node("b", State.READY, "a"))
+    result = coordinate(g)
+    assert result.ready == []
+    assert result.cycle is not None and result.cycle[0] == result.cycle[-1]
+    assert set(result.actions.values()) == {CoordAction.BLOCK.value}
+
+
+def test_coordinate_rejected_upstream_keeps_dependent_out_of_ready():
+    g = graph(node("a", State.REJECTED), node("b", State.READY, "a"))
+    result = coordinate(g)
+    assert result.ready == []  # a is terminal (idle), b is blocked by the rejection
+    assert result.actions["b"] == CoordAction.BLOCK.value

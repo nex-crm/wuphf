@@ -20,6 +20,7 @@ package team
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -44,6 +45,7 @@ const orchestratorStepTimeout = 10 * time.Minute
 type taskOrchestrator interface {
 	Run(ctx context.Context, req provider.DispatchRequest) (*provider.StepResult, error)
 	Resume(ctx context.Context, req provider.ResumeRequest) (*provider.StepResult, error)
+	Coordinate(ctx context.Context, req provider.CoordinateRequest) (*provider.CoordinationPlan, error)
 }
 
 // newConfiguredTaskOrchestrator returns a live dispatch client when
@@ -124,6 +126,158 @@ func (l *Launcher) dispatchTaskViaOrchestrator(slug string, task teamTask) {
 		return
 	}
 	l.applyOrchestratorProjection(taskID, result)
+}
+
+// taskGoalChildren returns the child tasks of goalID (ParentIssueID == goalID).
+// Linear scan — there is no indexed children lookup in the broker — but it only
+// runs on an orchestrator-owned goal tick, behind the per-task flag.
+func (l *Launcher) taskGoalChildren(goalID string) []teamTask {
+	if l == nil || l.broker == nil {
+		return nil
+	}
+	var kids []teamTask
+	for _, t := range l.broker.AllTasks() {
+		if strings.TrimSpace(t.ParentIssueID) == goalID {
+			kids = append(kids, t)
+		}
+	}
+	return kids
+}
+
+// taskIsGoal reports whether this task is a goal the orchestrator should
+// COORDINATE (a top-level task that has children) rather than dispatch as a
+// single agent turn. A child task (one level deep) is never a goal.
+func (l *Launcher) taskIsGoal(task teamTask) bool {
+	if strings.TrimSpace(task.ParentIssueID) != "" {
+		return false
+	}
+	return len(l.taskGoalChildren(task.ID)) > 0
+}
+
+// coordinateGoalViaOrchestrator re-hydrates a goal's children, asks the
+// orchestrator for the per-child action plan, and applies it. START activates a
+// child to running (the notify loop dispatches it on the next tick); DISPATCH
+// runs a child turn now; BLOCK/IDLE/AWAIT leave the child alone; a dependency
+// cycle or an UNKNOWN action fails loud and acts on nothing for that child.
+// Safe in a goroutine — it takes no Launcher locks (broker calls take their own).
+func (l *Launcher) coordinateGoalViaOrchestrator(slug string, goal teamTask) {
+	if l == nil || l.orchestrator == nil {
+		return
+	}
+	goalID := strings.TrimSpace(goal.ID)
+	if goalID == "" {
+		return
+	}
+	// Single-flight per goal, in a key space distinct from per-task dispatch so a
+	// goal and a same-named child can never collide.
+	key := "coord:" + goalID
+	if _, inFlight := l.orchestratorInFlight.LoadOrStore(key, struct{}{}); inFlight {
+		log.Printf("team: goal coordination for %q (owner %q) already in flight — skipping duplicate", goalID, slug)
+		return
+	}
+	defer l.orchestratorInFlight.Delete(key)
+
+	children := l.taskGoalChildren(goalID)
+	if len(children) == 0 {
+		return
+	}
+
+	baseCtx := l.headless.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, orchestratorStepTimeout)
+	defer cancel()
+
+	plan, err := l.orchestrator.Coordinate(ctx, provider.CoordinateRequest{
+		GoalID:   goalID,
+		Children: orchestratorChildRecords(children),
+	})
+	if err != nil {
+		log.Printf("team: orchestrator Coordinate failed for goal %q (owner %q): %v", goalID, slug, err)
+		return
+	}
+	l.applyCoordinationPlan(slug, goalID, children, plan)
+}
+
+// applyCoordinationPlan acts on the orchestrator's per-child plan. A cycle is a
+// deadlocked decomposition: log loud and coordinate nothing.
+func (l *Launcher) applyCoordinationPlan(slug, goalID string, children []teamTask, plan *provider.CoordinationPlan) {
+	if l == nil || l.broker == nil || plan == nil {
+		return
+	}
+	if len(plan.Cycle) > 0 {
+		log.Printf("team: goal %q has a dependency cycle %v — coordinating nothing", goalID, plan.Cycle)
+		return
+	}
+	byID := make(map[string]teamTask, len(children))
+	for _, c := range children {
+		byID[c.ID] = c
+	}
+	for childID, action := range plan.Actions {
+		child, ok := byID[childID]
+		if !ok {
+			// The orchestrator returned an id we did not send. Ignore defensively
+			// rather than act on a task outside this goal.
+			log.Printf("team: coordinate returned action %q for unknown child %q of goal %q — ignoring", action, childID, goalID)
+			continue
+		}
+		switch action {
+		case provider.CoordStart:
+			if err := l.broker.TransitionLifecycle(childID, LifecycleStateRunning, "orchestrator:coordinate"); err != nil {
+				log.Printf("team: coordinate START for child %q (goal %q) failed: %v", childID, goalID, err)
+			}
+		case provider.CoordDispatch:
+			c := child
+			go func() {
+				defer recoverPanicTo("dispatchTaskViaOrchestrator", fmt.Sprintf("slug=%s task=%s (coordinate)", slug, c.ID))
+				l.dispatchTaskViaOrchestrator(slug, c)
+			}()
+		case provider.CoordBlock, provider.CoordIdle, provider.CoordAwait:
+			// Nothing for the orchestrator to do this tick.
+		case provider.CoordUnknown:
+			log.Printf("team: coordinate returned UNKNOWN for child %q (goal %q) — leaving for operator triage", childID, goalID)
+		default:
+			log.Printf("team: coordinate returned unrecognized action %q for child %q (goal %q) — ignoring", action, childID, goalID)
+		}
+	}
+}
+
+// orchestratorChildRecords builds the re-hydrate records for a goal's children.
+// depends_on is the UNION of DependsOn and BlockedOn so the kernel's release rule
+// matches the broker's unblock cascade (which sweeps both); orchestratorRecord
+// for a single task omits these, so coordination sends them explicitly.
+func orchestratorChildRecords(children []teamTask) []map[string]any {
+	out := make([]map[string]any, 0, len(children))
+	for _, c := range children {
+		out = append(out, map[string]any{
+			"task_id":         c.ID,
+			"lifecycle_state": string(c.LifecycleState),
+			"depends_on":      unionDeps(c.DependsOn, c.BlockedOn),
+		})
+	}
+	return out
+}
+
+// unionDeps merges two dependency lists, trimming blanks and de-duplicating
+// while preserving first-seen order (deterministic for the kernel).
+func unionDeps(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, d := range list {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			if _, dup := seen[d]; dup {
+				continue
+			}
+			seen[d] = struct{}{}
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // applyOrchestratorProjection maps the orchestrator's one-way projection back

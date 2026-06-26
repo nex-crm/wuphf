@@ -186,6 +186,17 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		// crash the whole broker process (Finding D1). Mirrors every other
 		// background goroutine in this package (see launcher_boot.go,
 		// headless_codex_queue.go, notifier_loops.go).
+		//
+		// A goal (a top-level task with children) is COORDINATED — the orchestrator
+		// returns a per-child start/block/dispatch plan (P2-ii). A leaf task is
+		// dispatched as a single agent turn (P1b). Single ownership either way.
+		if l.taskIsGoal(task) {
+			go func() {
+				defer recoverPanicTo("coordinateGoalViaOrchestrator", fmt.Sprintf("slug=%s goal=%s", target.Slug, task.ID))
+				l.coordinateGoalViaOrchestrator(target.Slug, task)
+			}()
+			return
+		}
 		go func() {
 			defer recoverPanicTo("dispatchTaskViaOrchestrator", fmt.Sprintf("slug=%s task=%s", target.Slug, task.ID))
 			l.dispatchTaskViaOrchestrator(target.Slug, task)

@@ -15,7 +15,8 @@ src/orchestrator/
                  + P1 orchestration policy (route / outcome+decision transitions)
   runstate.py    TaskRun schema; from_broker_record (re-hydrate) + to_projection (-> Go)
   coordination.py multi-task dependency/sequencing kernel (P2): TaskGraph re-hydrate,
-                 plan()/ready_to_dispatch (parallel batch), topological_layers, detect_cycle
+                 plan()/ready_to_dispatch (parallel batch), topological_layers, detect_cycle,
+                 coordinate() -> the per-child action plan POST /coordinate returns (P2-ii)
   harness.py     Harness protocol; FakeHarness (tests/key-free) + ClaudeAgentHarness (P1b-iv)
   graph.py       the LangGraph graph: route -> dispatch_turn -> (human_gate | continue)
   wire.py        Go<->Python contract (DispatchRequest / ResumeRequest / StepResult)

@@ -59,4 +59,16 @@ UNK=$(curl -fsS -X POST "$BASE/run" -H 'Content-Type: application/json' -d '{
 echo "$UNK" | python3 -m json.tool
 echo "$UNK" | python3 -c 'import sys,json; d=json.load(sys.stdin); p=d["projection"]; assert p["lifecycle_state"]=="unknown" and p["status"]=="unknown", d; assert set(p)=={"task_id","lifecycle_state","pipeline_stage","review_state","status","blocked"}, p' || fail "unmappable record did not fail loud to unknown with full shape"
 
+echo "== /coordinate: a goal's children return a per-child action plan =="
+# c2 depends on c1, so only c1 is ready this tick; c2 blocks behind it.
+COORD=$(curl -fsS -X POST "$BASE/coordinate" -H 'Content-Type: application/json' -d '{
+  "schema_version": 1, "goal_id": "G1",
+  "children": [
+    {"task_id":"c1","lifecycle_state":"ready"},
+    {"task_id":"c2","lifecycle_state":"ready","depends_on":["c1"]}
+  ]
+}')
+echo "$COORD" | python3 -m json.tool
+echo "$COORD" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["actions"]=={"c1":"start","c2":"block"}, d; assert d["ready"]==["c1"], d; assert d["cycle"] is None, d' || fail "coordinate action plan drifted from the Go decode"
+
 echo "SMOKE OK"

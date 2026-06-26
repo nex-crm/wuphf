@@ -15,8 +15,11 @@ import (
 type fakeTaskOrchestrator struct {
 	runCalls    int
 	resumeCalls int
+	coordCalls  int
 	lastRun     provider.DispatchRequest
+	lastCoord   provider.CoordinateRequest
 	result      *provider.StepResult
+	plan        *provider.CoordinationPlan
 	err         error
 }
 
@@ -29,6 +32,12 @@ func (f *fakeTaskOrchestrator) Run(_ context.Context, req provider.DispatchReque
 func (f *fakeTaskOrchestrator) Resume(_ context.Context, _ provider.ResumeRequest) (*provider.StepResult, error) {
 	f.resumeCalls++
 	return f.result, f.err
+}
+
+func (f *fakeTaskOrchestrator) Coordinate(_ context.Context, req provider.CoordinateRequest) (*provider.CoordinationPlan, error) {
+	f.coordCalls++
+	f.lastCoord = req
+	return f.plan, f.err
 }
 
 func lifecycleOf(t *testing.T, b *Broker, taskID string) LifecycleState {
@@ -249,6 +258,10 @@ func (f *blockingOrchestrator) Resume(_ context.Context, _ provider.ResumeReques
 	return nil, nil
 }
 
+func (f *blockingOrchestrator) Coordinate(_ context.Context, _ provider.CoordinateRequest) (*provider.CoordinationPlan, error) {
+	return nil, nil
+}
+
 // TestDispatchViaOrchestrator_SingleFlightSkipsConcurrent pins Finding D3: while
 // a dispatch for a task is in flight, a second concurrent dispatch for the same
 // task is skipped (no duplicate /run), and a fresh dispatch is allowed once the
@@ -300,5 +313,110 @@ func TestNilOrchestrator_NoOp(t *testing.T) {
 	l.dispatchTaskViaOrchestrator("eng", b.AllTasks()[0])
 	if got := lifecycleOf(t, b, "task-6"); got != LifecycleStateRunning {
 		t.Fatalf("nil dispatcher must be a no-op; got %q", got)
+	}
+}
+
+// goalBroker builds an orchestrator-owned goal (parent) with two children: c1
+// ready, c2 ready-but-depends-on-c1.
+func goalBroker(t *testing.T) (*Launcher, *Broker) {
+	t.Helper()
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks,
+		teamTask{ID: "GOAL", Owner: "ceo", Title: "ship it", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c1", ParentIssueID: "GOAL", Owner: "eng", Title: "step one", LifecycleState: LifecycleStateReady, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c2", ParentIssueID: "GOAL", Owner: "eng", Title: "step two", LifecycleState: LifecycleStateReady, Orchestrator: orchestratorLangGraph, DependsOn: []string{"c1"}},
+	)
+	return &Launcher{broker: b}, b
+}
+
+func TestTaskIsGoal(t *testing.T) {
+	t.Parallel()
+	l, b := goalBroker(t)
+	goal := b.TaskByID("GOAL")
+	child := b.TaskByID("c1")
+	if !l.taskIsGoal(*goal) {
+		t.Fatal("a parent with children must be a goal")
+	}
+	if l.taskIsGoal(*child) {
+		t.Fatal("a child task must never be a goal")
+	}
+	// A childless top-level task is a leaf, not a goal.
+	b.tasks = append(b.tasks, teamTask{ID: "solo", LifecycleState: LifecycleStateRunning})
+	if l.taskIsGoal(*b.TaskByID("solo")) {
+		t.Fatal("a childless top-level task is a leaf, not a goal")
+	}
+}
+
+func TestCoordinateGoal_AppliesActionPlan(t *testing.T) {
+	t.Parallel()
+	l, b := goalBroker(t)
+	fake := &fakeTaskOrchestrator{plan: &provider.CoordinationPlan{
+		GoalID:  "GOAL",
+		Actions: map[string]string{"c1": provider.CoordStart, "c2": provider.CoordBlock},
+		Ready:   []string{"c1"},
+	}}
+	l.SetTaskOrchestrator(fake)
+
+	l.coordinateGoalViaOrchestrator("ceo", *b.TaskByID("GOAL"))
+
+	if fake.coordCalls != 1 {
+		t.Fatalf("Coordinate calls = %d, want 1", fake.coordCalls)
+	}
+	// The children were sent with task_id + lifecycle_state + union deps.
+	if got := len(fake.lastCoord.Children); got != 2 {
+		t.Fatalf("sent %d children, want 2", got)
+	}
+	// START activated c1 to running.
+	if got := lifecycleOf(t, b, "c1"); got != LifecycleStateRunning {
+		t.Fatalf("c1 (START) = %q, want running", got)
+	}
+	// BLOCK left c2 untouched.
+	if got := lifecycleOf(t, b, "c2"); got != LifecycleStateReady {
+		t.Fatalf("c2 (BLOCK) = %q, want unchanged ready", got)
+	}
+}
+
+func TestCoordinateGoal_SendsUnionOfDependsOnAndBlockedOn(t *testing.T) {
+	t.Parallel()
+	l, b := goalBroker(t)
+	// c2 already depends_on c1; also block it on an external id (c1 dup collapses).
+	for i := range b.tasks {
+		if b.tasks[i].ID == "c2" {
+			b.tasks[i].BlockedOn = []string{"ext-1", "c1"}
+		}
+	}
+	fake := &fakeTaskOrchestrator{plan: &provider.CoordinationPlan{GoalID: "GOAL", Actions: map[string]string{}, Ready: []string{}}}
+	l.SetTaskOrchestrator(fake)
+
+	l.coordinateGoalViaOrchestrator("ceo", *b.TaskByID("GOAL"))
+
+	var c2Deps []string
+	for _, rec := range fake.lastCoord.Children {
+		if rec["task_id"] == "c2" {
+			c2Deps, _ = rec["depends_on"].([]string)
+		}
+	}
+	// Union, first-seen order: DependsOn(["c1"]) then BlockedOn(["ext-1","c1"]).
+	want := []string{"c1", "ext-1"}
+	if len(c2Deps) != len(want) || c2Deps[0] != want[0] || c2Deps[1] != want[1] {
+		t.Fatalf("c2 depends_on = %v, want union %v", c2Deps, want)
+	}
+}
+
+func TestCoordinateGoal_CycleCoordinatesNothing(t *testing.T) {
+	t.Parallel()
+	l, b := goalBroker(t)
+	fake := &fakeTaskOrchestrator{plan: &provider.CoordinationPlan{
+		GoalID:  "GOAL",
+		Actions: map[string]string{"c1": provider.CoordBlock, "c2": provider.CoordBlock},
+		Ready:   []string{},
+		Cycle:   []string{"c1", "c2", "c1"},
+	}}
+	l.SetTaskOrchestrator(fake)
+
+	l.coordinateGoalViaOrchestrator("ceo", *b.TaskByID("GOAL"))
+
+	if got := lifecycleOf(t, b, "c1"); got != LifecycleStateReady {
+		t.Fatalf("a cycle must coordinate nothing; c1 = %q, want ready", got)
 	}
 }

@@ -57,3 +57,27 @@ class StepResult(BaseModel):
     thread_id: str
     projection: dict[str, Any]            # one-way -> Go store (task status shape)
     interrupt: dict[str, Any] | None = None
+
+
+class CoordinateRequest(BaseModel):
+    """Goal-level coordination input: the goal's CHILD records, re-hydrated from the
+    broker each tick (like a single task). Each child carries task_id +
+    lifecycle_state + depends_on (the broker sends DependsOn ∪ BlockedOn so the
+    kernel's release rule matches the broker's unblock cascade)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = SCHEMA_VERSION
+    goal_id: str
+    children: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CoordinationPlan(BaseModel):
+    """The per-child action plan the broker applies: start / dispatch each child in
+    `ready`, leave the rest. `cycle` (a dependency path) is a deadlocked
+    decomposition — the broker fails loud and dispatches nothing."""
+
+    goal_id: str
+    actions: dict[str, str]               # task_id -> idle|await|block|start|dispatch|unknown
+    ready: list[str]                      # the parallel batch to act on this tick
+    cycle: list[str] | None = None
