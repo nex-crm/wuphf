@@ -116,7 +116,12 @@ type wikiWriteRequest struct {
 	// wiki/facts/**/*.jsonl. Used by the extractor to close the substrate
 	// guarantee (§7.4): every successfully-submitted fact lands in markdown
 	// so a wipe + reconcile rebuilds to a logically-identical index.
-	IsFactLogAppend         bool
+	IsFactLogAppend bool
+	// IsSource routes the request to Repo.CommitSource — writes one immutable
+	// source record to sources/{kind}/{id}.md (the raw material the wiki is
+	// compiled FROM). Write-once; non-team/ path; NOT a wiki article, so it
+	// skips the catalog/index-reconcile and extractor fan-out below.
+	IsSource                bool
 	IsArtifact              bool
 	IsRichArtifact          bool
 	IsRichArtifactPromotion bool
@@ -375,6 +380,8 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// attribution. Zero-value HumanIdentity falls back to the
 		// synthetic `human` author inside CommitHuman.
 		sha, n, err = w.repo.CommitHuman(writeCtx, req.Path, req.Content, req.ExpectedSHA, req.CommitMsg, req.HumanIdentity)
+	} else if req.IsSource {
+		sha, n, err = w.repo.CommitSource(writeCtx, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsArtifact {
 		sha, n, err = w.repo.CommitArtifact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsRichArtifact || req.IsRichArtifactPromotion {
@@ -452,6 +459,12 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// failure lands in the DLQ — the commit itself is already durable.
 		w.maybeRunExtractor(ctx, req.Path)
 	case req.IsRichArtifact, req.IsEntityFact:
+	case req.IsSource:
+		// Sources are immutable raw material, not curated wiki articles. No
+		// SSE wiki:write event, no extractor hook, and — by blanking
+		// reconcilePath — no derived-index reconcile. The compile engine reads
+		// sources/ on its own schedule (later slice).
+		reconcilePath = ""
 	case req.IsEntityGraph:
 		// Graph log appends are internal bookkeeping triggered by fact
 		// writes — no dedicated SSE event. Subscribers that care hear
@@ -909,6 +922,44 @@ func (w *WikiWorker) EnqueueLintReport(ctx context.Context, slug, path, content,
 		return result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
 		return "", 0, fmt.Errorf("wiki: lint report write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueSource renders an immutable source record and submits it to the
+// shared single-writer queue, routed to Repo.CommitSource (write-once,
+// non-team/ path, no catalog/index regen). The commit is attributed to the
+// librarian identity — capture is a system act, not an agent edit. Re-enqueuing
+// the same record (same origin-keyed id) is an idempotent no-op at the repo
+// layer. Returns (commitSHA, bytesWritten, err).
+func (w *WikiWorker) EnqueueSource(ctx context.Context, rec SourceRecord) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	body, err := RenderSourceMarkdown(rec)
+	if err != nil {
+		return "", 0, fmt.Errorf("wiki: render source %q: %w", rec.ID, err)
+	}
+	req := wikiWriteRequest{
+		Slug:      LibrarianSlug,
+		Path:      rec.RelPath(),
+		Content:   string(body),
+		Mode:      "create",
+		CommitMsg: "source: capture " + rec.ID,
+		IsSource:  true,
+		ReplyCh:   make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: source write timed out after %s", wikiWriteTimeout)
 	}
 }
 
