@@ -168,6 +168,8 @@ type Broker struct {
 	factSubscribers           map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers   map[int]chan WikiSectionsUpdatedEvent
 	wikiCategoriesSubscribers map[int]chan WikiCategoriesUpdatedEvent
+	governorSubscribers       map[int]chan governorStatus
+	governor                  *governor
 	wikiWorker                *WikiWorker
 	wikiInitMu                sync.Mutex
 	wikiInitErr               error
@@ -469,6 +471,7 @@ func NewBrokerAt(statePath string) *Broker {
 	// existing (or default) prefix if the registry isn't readable.
 	b.refreshIDPrefixFromWorkspaceLocked()
 	b.mu.Unlock()
+	b.initGovernor()
 	b.stopCh = make(chan struct{})
 	if activityWatchdogEnabled {
 		// Watchdog: reap agents stuck in "active"/"thinking" when the spawn

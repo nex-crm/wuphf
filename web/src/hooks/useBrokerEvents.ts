@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { initApi } from "../api/client";
 import { openSharedEventStream } from "../api/eventStream";
+import { GOVERNOR_QUERY_KEY } from "../api/governor";
 import {
   type AgentActivitySnapshot,
   directChannelSlug,
@@ -183,6 +184,9 @@ export function useBrokerEvents(enabled: boolean) {
     source.addEventListener("action", () => {
       void queryClient.invalidateQueries({ queryKey: ["actions"] });
       void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
+    });
+    source.addEventListener("governor", () => {
+      void queryClient.invalidateQueries({ queryKey: GOVERNOR_QUERY_KEY });
     });
     source.onerror = () => {
       setBrokerConnected(false);

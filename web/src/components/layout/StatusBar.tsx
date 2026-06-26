@@ -15,6 +15,7 @@ import { useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
 import { deriveStatus } from "../ui/VersionModal";
 import { StatusPill } from "../workspaces/StatusPill";
+import { GovernorControl } from "./GovernorControl";
 import { formatVersion } from "./upgradeBanner.utils";
 
 /**
@@ -166,6 +167,7 @@ export function StatusBar() {
       <span className="status-bar-item">{channelLabel}</span>
       <span className="status-bar-item">{modeLabel}</span>
       <span className="status-bar-spacer" />
+      <GovernorControl />
       <button
         type="button"
         className="status-bar-shortcut"

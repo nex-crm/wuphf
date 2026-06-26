@@ -12,6 +12,7 @@ import { VersionModalHost } from "../ui/VersionModal";
 import { WorkspaceRail } from "../workspaces/WorkspaceRail";
 import { ChannelHeader } from "./ChannelHeader";
 import { DisconnectBanner } from "./DisconnectBanner";
+import { GovernorBanner } from "./GovernorBanner";
 import { RuntimeStrip } from "./RuntimeStrip";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
@@ -32,6 +33,7 @@ export function Shell({ children }: ShellProps) {
       <Sidebar />
       <main className="main">
         <DisconnectBanner />
+        <GovernorBanner />
         <TeamMemberWelcome />
         <ChannelHeader />
         <RuntimeStrip />
