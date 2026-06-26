@@ -135,6 +135,11 @@ func (l *Launcher) notifyTaskActionsLoop() {
 					action.Kind, action.Actor, action.Channel, task.ID, task.status))
 			l.deliverTaskNotification(action, task)
 		}()
+		// When this action is for a child of an orchestrator-owned goal, re-tick
+		// the goal so it re-coordinates (dispatch the next child / complete the
+		// goal). No-op unless the orchestrator path is wired and the parent is an
+		// executable orchestrator goal.
+		l.retickOrchestratorGoalParent(task)
 	}
 }
 
