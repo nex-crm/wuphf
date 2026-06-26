@@ -195,7 +195,6 @@ type Broker struct {
 	teamLearningLog     *LearningLog
 	playbookSynthesizer *PlaybookSynthesizer
 	pamDispatcher       *PamDispatcher
-	compileSweep        *CompileSweep
 	// sourceCaptureDispatcher drains S2 source-capture jobs off-lock (see
 	// source_capture.go). Held as an atomic pointer so captureSource can read
 	// it WITHOUT b.mu — capture hooks fire while b.mu is held, so the read
@@ -654,11 +653,6 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/history/", b.requireAuth(b.handleWikiHistory))
 	mux.HandleFunc("/wiki/diff", b.requireAuth(b.handleWikiDiff))
 	mux.HandleFunc("/wiki/restore", b.requireAuth(b.handleWikiRestore))
-	mux.HandleFunc("/sources/list", b.requireAuth(b.handleSourcesList))
-	mux.HandleFunc("/sources/read", b.requireAuth(b.handleSourcesRead))
-	mux.HandleFunc("/sources/ingest", b.requireAuth(b.handleSourcesIngest))
-	// S3 compile engine: deterministic source → cited article compiler.
-	mux.HandleFunc("/wiki/compile", b.requireAuth(b.handleWikiCompile))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
@@ -844,7 +838,6 @@ func (b *Broker) Stop() {
 	synth := b.entitySynthesizer
 	pbSynth := b.playbookSynthesizer
 	pamDisp := b.pamDispatcher
-	compileSweep := b.compileSweep
 	compressor := b.wikiCompressor
 	humanWikiWriter := b.humanWikiWriter
 	b.mu.Unlock()
@@ -856,9 +849,6 @@ func (b *Broker) Stop() {
 	}
 	if pamDisp != nil {
 		pamDisp.Stop()
-	}
-	if compileSweep != nil {
-		compileSweep.Stop(2 * time.Second)
 	}
 	if compressor != nil {
 		compressor.Stop()

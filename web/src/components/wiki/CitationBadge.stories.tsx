@@ -1,16 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import { ApiError } from "../../api/client";
-import type { SourceKind, SourceRecord } from "../../api/sources";
 import CitationBadge, { CitationNumberContext } from "./CitationBadge";
 import "../../styles/wiki.css";
 import "../../styles/wiki-reader.css";
 
 /**
- * Inline citation badge for a compiled-article `^[source-id]` marker. Hover
- * or focus the pill to reveal the source popover (title + kind + origin +
- * "View source"). The three stories inject different fetch behaviors:
- * resolved, perpetually loading, and not-found.
+ * Inline citation badge for a compiled-article `^[source-id]` marker. Hover or
+ * focus the pill to reveal a lightweight popover with the raw citation id. The
+ * WUPHF source store has been retired (gbrain owns the knowledge backend), so
+ * the badge no longer fetches a source record — it degrades to showing the id.
  */
 const meta: Meta<typeof CitationBadge> = {
   title: "Features/Wiki/CitationBadge",
@@ -25,7 +23,7 @@ const meta: Meta<typeof CitationBadge> = {
             style={{ fontSize: 15, lineHeight: 1.8 }}
           >
             The renewal motion shipped in Q2 after the pilot converted.{" "}
-            <Story /> Hover the pill to see the cited source.
+            <Story /> Hover the pill to see the cited source id.
           </p>
         </div>
       </CitationNumberContext.Provider>
@@ -33,46 +31,30 @@ const meta: Meta<typeof CitationBadge> = {
   ],
   args: {
     sourceId: "task-wup-12",
-    onViewSource: () => {},
   },
 };
 
 export default meta;
 type Story = StoryObj<typeof CitationBadge>;
 
-const RESOLVED: SourceRecord = {
-  id: "task-wup-12",
-  kind: "task",
-  title: "Ship the Brex × Nex referral pilot",
-  origin: "task/wup-12",
-  captured_at: "2026-06-20T12:00:00Z",
-  content_hash: "abc123",
-  content: "Full task deliverables…",
-};
+/** A numbered citation: the pill renders `[1]` and reveals its id on hover. */
+export const Numbered: Story = {};
 
-/** A resolved source: popover shows title, kind, origin, and View source. */
-export const Resolved: Story = {
-  args: {
-    fetchSource: async (_kind: SourceKind, _id: string) => RESOLVED,
-  },
-};
-
-/** A source still loading: popover shows the loading state. */
-export const Loading: Story = {
-  args: {
-    fetchSource: () => new Promise<SourceRecord>(() => {}),
-  },
-};
-
-/** A missing source: popover degrades to "Source not found". */
-export const NotFound: Story = {
-  args: {
-    fetchSource: async (_kind: SourceKind, _id: string) => {
-      throw new ApiError({
-        status: 404,
-        statusText: "Not Found",
-        bodyText: '{"error":"source not found"}',
-      });
-    },
-  },
+/** An unnumbered citation (not in the numbering context): renders `[cite]`. */
+export const Unnumbered: Story = {
+  decorators: [
+    (Story) => (
+      <CitationNumberContext.Provider value={new Map()}>
+        <div className="wiki-root" style={{ padding: 32 }}>
+          <p
+            className="wk-article-body wiki-reader"
+            style={{ fontSize: 15, lineHeight: 1.8 }}
+          >
+            A claim with an unnumbered source <Story /> renders a generic
+            marker.
+          </p>
+        </div>
+      </CitationNumberContext.Provider>
+    ),
+  ],
 };

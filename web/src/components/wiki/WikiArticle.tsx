@@ -57,7 +57,7 @@ import VersionHistory from "./VersionHistory";
 import WikiEditor from "./WikiEditor";
 import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
 import { CollapsedPanelRail, PanelCollapseButton } from "./WikiPanelChrome";
-import { categoryPath, sourceRecordPath } from "./wikiPaths";
+import { categoryPath } from "./wikiPaths";
 
 const STALENESS_STALE_DAYS = 30;
 const STALENESS_AGING_DAYS = 7;
@@ -981,7 +981,6 @@ function ArticleTabPanels({
           resolver={resolver}
           onNavigate={onNavigate}
           onEditSection={onEditSection}
-          onViewSource={(kind, id) => onNavigate(sourceRecordPath(kind, id))}
           visualArtifact={visualArtifact}
           inlineArtifacts={inlineArtifacts}
         />

@@ -193,21 +193,6 @@ func (b *Broker) initWikiWorker() {
 	b.startSkillCompileCron(lifecycleCtx)
 	b.startSkillCompileEventListener(lifecycleCtx)
 
-	// Self-maintaining wiki (S5): a CompileSweep recompiles the source layer
-	// into team/ articles on the WUPHF_COMPILE_INTERVAL cadence (default 15m).
-	// The S4 compile engine is idempotent, so an idle tick makes zero LLM
-	// calls. Default ON; set WUPHF_COMPILE_INTERVAL=0 (or "disabled") to turn
-	// the sweep off. Cancelled by the lifecycle context on broker shutdown and
-	// drained by Broker.Stop().
-	if interval := compileSweepIntervalFromEnv(); interval > 0 {
-		sweep := NewCompileSweep(repo, worker, interval)
-		sweep.Start(lifecycleCtx)
-		b.mu.Lock()
-		b.compileSweep = sweep
-		b.mu.Unlock()
-	} else {
-		log.Printf("compile sweep: disabled (WUPHF_COMPILE_INTERVAL=0)")
-	}
 }
 
 // requireWikiWorker is the standard retry-and-503 helper for HTTP handlers

@@ -195,12 +195,6 @@ func (b *Broker) ensurePamDispatcher() *PamDispatcher {
 	}
 
 	disp := NewPamDispatcher(worker, b, PamDispatcherConfig{})
-	// Wire the global recompile hook for PamActionCompileWiki. A nil runner
-	// defaults to HeadlessPamRunner (real LLM at runtime), matching the manual
-	// POST /wiki/compile trigger.
-	disp.SetCompileHook(func(ctx context.Context) (CompileResult, error) {
-		return NewCompiler(worker.Repo(), worker, nil).Compile(ctx)
-	})
 	disp.Start(context.Background())
 
 	b.mu.Lock()
@@ -290,10 +284,7 @@ func (b *Broker) handlePamAction(w http.ResponseWriter, r *http.Request) {
 	actionID := PamActionID(actionRaw)
 
 	path := strings.TrimSpace(body.Path)
-	// Global actions (e.g. compile_wiki) operate on the whole wiki and carry no
-	// article path; Enqueue fills in the synthetic target. Per-article actions
-	// still require a path.
-	if path == "" && !pamActionIsGlobal(actionID) {
+	if path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
 		return
 	}

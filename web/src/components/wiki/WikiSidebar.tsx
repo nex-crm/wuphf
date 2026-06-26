@@ -1,11 +1,6 @@
 import WikiTree from "./tree/WikiTree";
 import { CollapsedPanelRail, PanelCollapseButton } from "./WikiPanelChrome";
-import {
-  AUDIT_PATH,
-  isSourcesPath,
-  LINT_PATH,
-  SOURCES_PATH,
-} from "./wikiPaths";
+import { AUDIT_PATH, LINT_PATH } from "./wikiPaths";
 
 /**
  * The wiki's persistent left navigation: a page tree as THE way around
@@ -42,17 +37,12 @@ interface SidebarLink {
 
 const MENU_LINKS: SidebarLink[] = [
   { label: "Overview", path: "", testId: "wk-sidebar-home" },
-  { label: "Sources", path: SOURCES_PATH, testId: "wk-sidebar-sources" },
   { label: "Recent changes", path: AUDIT_PATH, testId: "wk-sidebar-audit" },
   { label: "Wiki health", path: LINT_PATH, testId: "wk-sidebar-lint" },
 ];
 
-/**
- * Whether a menu link is the active surface. The Sources link stays lit on
- * record detail (`_sources/<kind>/<id>`), not just the bare list.
- */
+/** Whether a menu link is the active surface. */
 function isMenuLinkActive(linkPath: string, current: string): boolean {
-  if (linkPath === SOURCES_PATH) return isSourcesPath(current);
   return current === linkPath;
 }
 

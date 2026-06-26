@@ -9,7 +9,6 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import type { PluggableList } from "unified";
 
 import type { RichArtifactDetail } from "../../api/richArtifacts";
-import type { SourceKind } from "../../api/sources";
 import { citationRemarkPlugin, extractCitationIds } from "../../lib/citation";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import {
@@ -57,8 +56,6 @@ interface ArticleReadViewProps {
   onNavigate?: (slug: string) => void;
   /** Opens the editor; wires Wikipedia's per-section [ edit ] link. */
   onEditSection?: () => void;
-  /** Open the Sources view for a cited record (citation popover affordance). */
-  onViewSource?: (kind: SourceKind, id: string) => void;
   /** Promoted visual artifact (fetched by the article shell). */
   visualArtifact?: RichArtifactDetail | null;
   /** Inline `visual-artifact:<id>` embeds (fetched by the article shell). */
@@ -76,7 +73,6 @@ export default function ArticleReadView({
   resolver,
   onNavigate,
   onEditSection,
-  onViewSource,
   visualArtifact = null,
   inlineArtifacts = [],
   fetchPreview,
@@ -104,16 +100,13 @@ export default function ArticleReadView({
   const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), []);
   const markdownComponents = useMemo(
     () =>
-      buildReadViewComponents(
-        {
-          resolver,
-          onNavigate,
-          articlePath,
-          onEditSection,
-        },
-        onViewSource,
-      ),
-    [resolver, onNavigate, articlePath, onEditSection, onViewSource],
+      buildReadViewComponents({
+        resolver,
+        onNavigate,
+        articlePath,
+        onEditSection,
+      }),
+    [resolver, onNavigate, articlePath, onEditSection],
   );
   // The GFM footnote section becomes the article's References section —
   // visible heading (mdast-to-hast hides it with sr-only by default).
@@ -213,7 +206,6 @@ interface ReadViewComponentOptions {
  */
 function buildReadViewComponents(
   options: ReadViewComponentOptions,
-  onViewSource?: (kind: SourceKind, id: string) => void,
 ): Partial<Components> {
   const base = buildMarkdownComponents(options);
   const BaseAnchor = base.a;
@@ -223,9 +215,7 @@ function buildReadViewComponents(
       const record = props as Record<string, unknown>;
       if (record["data-citation"] === "true") {
         const sourceId = String(record["data-source-id"] ?? "");
-        return (
-          <CitationBadge sourceId={sourceId} onViewSource={onViewSource} />
-        );
+        return <CitationBadge sourceId={sourceId} />;
       }
       if (typeof BaseAnchor === "function") {
         const Anchor = BaseAnchor as (p: typeof props) => ReactElement;

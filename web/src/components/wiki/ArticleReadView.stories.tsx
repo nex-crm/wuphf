@@ -70,13 +70,12 @@ export const PlainArticle: Story = {
  * A compiled article (Karpathy-style): YAML frontmatter is stripped, the lead
  * H1 is dropped, `^[source-id]` markers render as citation badges, a fenced
  * mermaid block renders as a diagram, and the warm-paper `.wiki-reader`
- * measure applies. Hover a citation pill to see its source popover.
+ * measure applies. Hover a citation pill to see its citation id.
  */
 export const CompiledArticle: Story = {
   args: {
     title: "Reciprocal Rank Fusion",
     articlePath: "team/concepts/reciprocal-rank-fusion.md",
-    onViewSource: () => {},
     content: `---
 title: Reciprocal Rank Fusion
 kind: concept
