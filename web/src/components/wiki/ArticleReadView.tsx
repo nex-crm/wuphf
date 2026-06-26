@@ -9,7 +9,6 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import type { PluggableList } from "unified";
 
 import type { RichArtifactDetail } from "../../api/richArtifacts";
-import { citationRemarkPlugin, extractCitationIds } from "../../lib/citation";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import {
   extractRichArtifactIds,
@@ -26,7 +25,6 @@ import ArticleHoverPreviews, {
 } from "./ArticleHoverPreviews";
 import ArticleInfobox from "./ArticleInfobox";
 import { prepareArticleMarkdown } from "./articleContent";
-import CitationBadge, { CitationNumberContext } from "./CitationBadge";
 import Hatnote from "./Hatnote";
 import MermaidBlock from "./MermaidBlock";
 import "../../styles/wiki-reader.css";
@@ -36,8 +34,8 @@ import "../../styles/wiki-reader.css";
  *
  * Takes the raw markdown body and renders:
  * - a right-floating infobox lifted from B2's `## Summary` definition list
- * - `[^n]` citations as superscript `[1]` markers with a hover popover,
- *   and the footnote block relabeled "References" with backref carets
+ * - standard GFM `[^n]` footnotes (rendered natively via remark-gfm) with the
+ *   footnote block relabeled "References" and backref carets
  * - blue/red wikilinks with hover page-preview cards
  * - a hatnote (italic, muted) when the body carries a generated-article
  *   marker comment — instead of the raw HTML comment leaking or hiding
@@ -82,19 +80,8 @@ export default function ArticleReadView({
 
   const prepared = useMemo(() => prepareArticleMarkdown(content), [content]);
 
-  // The compile engine ends every cited claim with a `^[source-id]` marker.
-  // Number them Wikipedia-style by first appearance so each badge shows `[n]`.
-  const citationNumbers = useMemo(() => {
-    const map = new Map<string, number>();
-    const ids = extractCitationIds(prepared.markdown);
-    for (let i = 0; i < ids.length; i++) {
-      map.set(ids[i], i + 1);
-    }
-    return map;
-  }, [prepared.markdown]);
-
   const remarkPlugins: PluggableList = useMemo(
-    () => [...buildRemarkPlugins(resolver), citationRemarkPlugin()],
+    () => buildRemarkPlugins(resolver),
     [resolver],
   );
   const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), []);
@@ -133,60 +120,58 @@ export default function ArticleReadView({
     visualArtifact !== null && !referencedIds.has(visualArtifact.artifact.id);
 
   return (
-    <CitationNumberContext.Provider value={citationNumbers}>
-      <div
-        className={
-          prepared.compiled ? "wk-article-body wiki-reader" : "wk-article-body"
-        }
-        data-testid="wk-article-body"
-        data-compiled={prepared.compiled ? "true" : undefined}
-        ref={bodyRef}
-      >
-        {prepared.generated ? (
-          <Hatnote>
-            This article is auto-generated from team activity. See the commit
-            history for the full trail.
-          </Hatnote>
-        ) : null}
-        {prepared.infobox ? (
-          <ArticleInfobox
-            title={title}
-            rows={prepared.infobox}
-            resolver={resolver}
-            onNavigate={onNavigate}
-            articlePath={articlePath}
-          />
-        ) : null}
-        {showPromoted && visualArtifact ? (
-          <RichArtifactEmbed
-            title={visualArtifact.artifact.title}
-            html={visualArtifact.html}
-          />
-        ) : null}
-        {keyedByOccurrence(inlineArtifacts, (detail) => detail.artifact.id).map(
-          ({ key, value: detail }) => (
-            <RichArtifactEmbed
-              key={key}
-              title={detail.artifact.title}
-              html={detail.html}
-            />
-          ),
-        )}
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          remarkRehypeOptions={remarkRehypeOptions}
-          components={markdownComponents}
-        >
-          {renderedContent}
-        </ReactMarkdown>
-        <ArticleHoverPreviews
-          containerRef={bodyRef}
-          fetchPreview={fetchPreview}
-          delayMs={previewDelayMs}
+    <div
+      className={
+        prepared.compiled ? "wk-article-body wiki-reader" : "wk-article-body"
+      }
+      data-testid="wk-article-body"
+      data-compiled={prepared.compiled ? "true" : undefined}
+      ref={bodyRef}
+    >
+      {prepared.generated ? (
+        <Hatnote>
+          This article is auto-generated from team activity. See the commit
+          history for the full trail.
+        </Hatnote>
+      ) : null}
+      {prepared.infobox ? (
+        <ArticleInfobox
+          title={title}
+          rows={prepared.infobox}
+          resolver={resolver}
+          onNavigate={onNavigate}
+          articlePath={articlePath}
         />
-      </div>
-    </CitationNumberContext.Provider>
+      ) : null}
+      {showPromoted && visualArtifact ? (
+        <RichArtifactEmbed
+          title={visualArtifact.artifact.title}
+          html={visualArtifact.html}
+        />
+      ) : null}
+      {keyedByOccurrence(inlineArtifacts, (detail) => detail.artifact.id).map(
+        ({ key, value: detail }) => (
+          <RichArtifactEmbed
+            key={key}
+            title={detail.artifact.title}
+            html={detail.html}
+          />
+        ),
+      )}
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        remarkRehypeOptions={remarkRehypeOptions}
+        components={markdownComponents}
+      >
+        {renderedContent}
+      </ReactMarkdown>
+      <ArticleHoverPreviews
+        containerRef={bodyRef}
+        fetchPreview={fetchPreview}
+        delayMs={previewDelayMs}
+      />
+    </div>
   );
 }
 
@@ -198,31 +183,19 @@ interface ReadViewComponentOptions {
 }
 
 /**
- * Compose the shared wiki markdown components, then layer two read-view-only
- * overrides on top:
- *  - `a`: intercept `data-citation` links and mount a {@link CitationBadge}
- *    (everything else delegates to the shared anchor renderer).
+ * Compose the shared wiki markdown components, then layer one read-view-only
+ * override on top:
  *  - `pre`: intercept fenced ```mermaid blocks and render them as diagrams.
+ *
+ * GFM footnotes (`[^n]`) render natively through remark-gfm in the shared
+ * pipeline, so the read view no longer wires any custom citation handling.
  */
 function buildReadViewComponents(
   options: ReadViewComponentOptions,
 ): Partial<Components> {
   const base = buildMarkdownComponents(options);
-  const BaseAnchor = base.a;
   return {
     ...base,
-    a: (props): ReactElement => {
-      const record = props as Record<string, unknown>;
-      if (record["data-citation"] === "true") {
-        const sourceId = String(record["data-source-id"] ?? "");
-        return <CitationBadge sourceId={sourceId} />;
-      }
-      if (typeof BaseAnchor === "function") {
-        const Anchor = BaseAnchor as (p: typeof props) => ReactElement;
-        return Anchor(props);
-      }
-      return <a {...props} />;
-    },
     pre: (props): ReactElement => {
       const mermaid = mermaidSourceFromPre(props.children);
       if (mermaid !== null) return <MermaidBlock code={mermaid} />;

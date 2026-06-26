@@ -47,7 +47,7 @@ func TestNewSourceRecordValidation(t *testing.T) {
 	}
 }
 
-func TestSourceRecordRoundTrip(t *testing.T) {
+func TestSourceRecordHashComputed(t *testing.T) {
 	now := time.Date(2026, 6, 26, 9, 30, 0, 0, time.UTC)
 	body := "# Launch retro\n\nDecided to ship Friday.\n\n- risk: infra"
 	rec, err := NewSourceRecord("decision-launch-42", SourceKindDecision, "Ship date: Friday", "task-WUP-42", body, now)
@@ -57,48 +57,8 @@ func TestSourceRecordRoundTrip(t *testing.T) {
 	if rec.ContentHash != ContentHashHex(body) {
 		t.Fatal("hash not computed")
 	}
-
-	data, err := RenderSourceMarkdown(rec)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	if !strings.HasPrefix(string(data), "---\n") {
-		t.Fatal("expected leading frontmatter delimiter")
-	}
-
-	got, err := ParseSourceMarkdown(data)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if got.ID != rec.ID || got.Kind != rec.Kind || got.Title != rec.Title ||
-		got.Origin != rec.Origin || got.ContentHash != rec.ContentHash {
-		t.Fatalf("frontmatter mismatch: %+v vs %+v", got, rec)
-	}
-	if !got.CapturedAt.Equal(rec.CapturedAt) {
-		t.Fatalf("time mismatch: %v vs %v", got.CapturedAt, rec.CapturedAt)
-	}
-	if strings.TrimRight(got.Content, "\n") != strings.TrimRight(body, "\n") {
-		t.Fatalf("body mismatch:\n%q\nvs\n%q", got.Content, body)
-	}
-}
-
-func TestSourceRelPathAndDetection(t *testing.T) {
-	rec, err := NewSourceRecord("task-wup-7", SourceKindTask, "T", "WUP-7", "b", time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "sources/task/task-wup-7.md"
-	if rec.RelPath() != want {
-		t.Fatalf("relpath = %q want %q", rec.RelPath(), want)
-	}
-	if !IsSourcePath(want) {
-		t.Fatal("expected IsSourcePath true for sources path")
-	}
-	if IsSourcePath("team/people/nazz.md") {
-		t.Fatal("expected IsSourcePath false for team article")
-	}
-	if IsSourcePath("sources/task/x.txt") {
-		t.Fatal("expected IsSourcePath false for non-md")
+	if !rec.CapturedAt.Equal(now) {
+		t.Fatalf("captured_at not normalized: %v vs %v", rec.CapturedAt, now)
 	}
 }
 

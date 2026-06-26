@@ -1,33 +1,23 @@
 package team
 
-// wiki_source.go defines the immutable "source" layer for the Karpathy-style
+// wiki_source.go defines the "source" identity layer for the Karpathy-style
 // LLM wiki. Sources are the raw material the wiki is compiled FROM — captured
 // office activity (completed tasks + deliverables, decisions, chat-thread
 // digests) and explicit ingests (pasted docs, fetched URLs, freeform notes).
 //
-// Three-layer model (Karpathy "LLM wiki"):
-//
-//	sources/   immutable raw records — the compiler reads, never writes here
-//	team/      compiled wiki articles — owned by the compiler
-//	(index.md / log.md come later, with the compile engine)
-//
-// On-disk a source is a markdown file at sources/{kind}/{id}.md with a small
-// YAML frontmatter block (id, kind, title, origin, captured_at, content_hash)
-// followed by the immutable body. Records are write-once: the worker commits
-// them in "create" mode, so re-capturing identical content is a clean no-op
-// and the content_hash gives the compiler a stable change-detection key.
+// The standalone on-disk source STORE was retired (G6): sources now flow
+// through the gbrain capture path rather than being committed to a sources/
+// subtree. What remains here is the stable identity surface that path relies
+// on — SourceKind classification, DeriveSourceID for write-once dedupe keys,
+// and ContentHashHex for stable change detection.
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"path"
 	"regexp"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // SourceKind enumerates where a source record came from. The first three are
@@ -42,11 +32,6 @@ const (
 	SourceKindURL      SourceKind = "url"      // explicit ingest: fetched URL
 	SourceKindNote     SourceKind = "note"     // explicit ingest: freeform note
 )
-
-// sourcesDir is the repo-root subtree that holds the immutable source layer,
-// sibling to team/. Kept out of team/ so the wiki catalog never mistakes a raw
-// source for a curated article.
-const sourcesDir = "sources"
 
 var validSourceKinds = map[SourceKind]struct{}{
 	SourceKindTask:     {},
@@ -74,17 +59,6 @@ type SourceRecord struct {
 	CapturedAt  time.Time  `yaml:"captured_at"`
 	ContentHash string     `yaml:"content_hash"`
 	Content     string     `yaml:"-"`
-}
-
-// sourceFrontmatter mirrors SourceRecord minus the body, so the YAML
-// encoder/decoder never touches Content.
-type sourceFrontmatter struct {
-	ID          string     `yaml:"id"`
-	Kind        SourceKind `yaml:"kind"`
-	Title       string     `yaml:"title"`
-	Origin      string     `yaml:"origin,omitempty"`
-	CapturedAt  time.Time  `yaml:"captured_at"`
-	ContentHash string     `yaml:"content_hash"`
 }
 
 // ContentHashHex returns the lowercase hex SHA-256 of content after trimming
@@ -147,89 +121,5 @@ func NewSourceRecord(id string, kind SourceKind, title, origin, content string, 
 		CapturedAt:  capturedAt.UTC(),
 		ContentHash: ContentHashHex(content),
 		Content:     content,
-	}, nil
-}
-
-// RelPath returns the repo-relative on-disk path for the record:
-// sources/{kind}/{id}.md.
-func (s SourceRecord) RelPath() string {
-	return SourceRelPath(s.Kind, s.ID)
-}
-
-// SourceRelPath maps (kind, id) to sources/{kind}/{id}.md.
-func SourceRelPath(kind SourceKind, id string) string {
-	return path.Join(sourcesDir, string(kind), id+".md")
-}
-
-// IsSourcePath reports whether relPath lives under the sources/ subtree and is
-// a markdown file.
-func IsSourcePath(relPath string) bool {
-	clean := path.Clean(strings.ReplaceAll(relPath, "\\", "/"))
-	return strings.HasPrefix(clean, sourcesDir+"/") && strings.HasSuffix(clean, ".md")
-}
-
-// RenderSourceMarkdown serializes the record to its on-disk form: a YAML
-// frontmatter block followed by the immutable body.
-func RenderSourceMarkdown(s SourceRecord) ([]byte, error) {
-	if strings.TrimSpace(s.ID) == "" {
-		return nil, fmt.Errorf("source: id is required")
-	}
-	if !s.Kind.IsValid() {
-		return nil, fmt.Errorf("source: invalid kind %q", s.Kind)
-	}
-	var buf bytes.Buffer
-	buf.WriteString("---\n")
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(sourceFrontmatter{
-		ID:          s.ID,
-		Kind:        s.Kind,
-		Title:       s.Title,
-		Origin:      s.Origin,
-		CapturedAt:  s.CapturedAt.UTC(),
-		ContentHash: s.ContentHash,
-	}); err != nil {
-		return nil, fmt.Errorf("source: yaml encode: %w", err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("source: yaml close: %w", err)
-	}
-	buf.WriteString("---\n\n")
-	buf.WriteString(strings.TrimRight(s.Content, "\n"))
-	buf.WriteString("\n")
-	return buf.Bytes(), nil
-}
-
-// ParseSourceMarkdown is the inverse of RenderSourceMarkdown.
-func ParseSourceMarkdown(data []byte) (SourceRecord, error) {
-	text := string(data)
-	if !strings.HasPrefix(text, "---\n") {
-		return SourceRecord{}, fmt.Errorf("source: missing frontmatter")
-	}
-	rest := text[len("---\n"):]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return SourceRecord{}, fmt.Errorf("source: unterminated frontmatter")
-	}
-	fmText := rest[:end]
-	body := rest[end+len("\n---"):]
-	body = strings.TrimPrefix(body, "\n")
-	body = strings.TrimLeft(body, "\n")
-
-	var fm sourceFrontmatter
-	if err := yaml.Unmarshal([]byte(fmText), &fm); err != nil {
-		return SourceRecord{}, fmt.Errorf("source: yaml decode: %w", err)
-	}
-	if !fm.Kind.IsValid() {
-		return SourceRecord{}, fmt.Errorf("source: invalid kind %q", fm.Kind)
-	}
-	return SourceRecord{
-		ID:          fm.ID,
-		Kind:        fm.Kind,
-		Title:       fm.Title,
-		Origin:      fm.Origin,
-		CapturedAt:  fm.CapturedAt.UTC(),
-		ContentHash: fm.ContentHash,
-		Content:     strings.TrimRight(body, "\n"),
 	}, nil
 }
