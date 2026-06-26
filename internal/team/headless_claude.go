@@ -227,7 +227,10 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 					planArtifact = plan
 				}
 			}
-			turnToolNames = append(turnToolNames, event.ToolName)
+			// Record the domain token (proxy action_id unwrapped) for the
+			// detection substrate; the live tool_use event below keeps the true
+			// tool name for the UI. See manifestToolToken (workflow_detect.go).
+			turnToolNames = append(turnToolNames, manifestToolToken(event.ToolName, event.ToolInput))
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
@@ -365,6 +368,13 @@ func (l *Launcher) headlessClaudeModel(ctx context.Context, slug string) string 
 func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 	if slug == l.targeter().LeadSlug() {
 		return "30"
+	}
+	// The App Builder's single "task" is a multi-step BUILD — copy the scaffold,
+	// write several files, bun install, run the verify gate, fix, then publish —
+	// which blows past a chat specialist's budget. Observed: it hit the 15-turn
+	// cap mid-build, before register_app. Give it real build headroom.
+	if strings.EqualFold(strings.TrimSpace(slug), appBuilderSlug) {
+		return "60"
 	}
 	return "15"
 }

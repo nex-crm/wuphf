@@ -202,6 +202,14 @@ var mutatingActionVerbs = map[string]struct{}{
 	"charge": {}, "pay": {}, "enable": {}, "disable": {}, "revoke": {},
 	"grant": {}, "set": {}, "draft": {}, "schedule": {}, "upload": {},
 	"replace": {}, "transfer": {}, "merge": {}, "split": {},
+	// Additional unambiguous state-changing verbs (security review M1). The veto
+	// design means adding a verb here only ever makes classification MORE
+	// conservative: a composite name like "FETCH_AND_REPLY" is vetoed to
+	// not-read-only and routes through the approval gate. Kept to verbs with no
+	// read-only meaning, so they cannot over-veto a genuine read.
+	"reply": {}, "forward": {}, "close": {}, "assign": {}, "import": {},
+	"upsert": {}, "enroll": {}, "fulfill": {}, "rename": {},
+	"duplicate": {}, "clone": {}, "fork": {},
 }
 
 func actionIDTokenBoundary(r rune) bool {

@@ -338,15 +338,16 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	// Lead-only warning: the wizard sent agents=[] (explicit empty = every
 	// toggle unchecked). The seed helper fell back to lead-only; surface
 	// that via a system message so the user knows the team is minimal. The
-	// built-in Librarian is always present and doesn't count as a specialist,
-	// so a roster of lead + Librarian is still "lead only".
-	nonLibrarianMembers := 0
+	// built-in Librarian and App Builder are always present and don't count as
+	// specialists, so a roster of lead + Librarian + App Builder is still
+	// "lead only".
+	specialistMembers := 0
 	for i := range b.members {
-		if !isLibrarianSlug(b.members[i].Slug) {
-			nonLibrarianMembers++
+		if !isLibrarianSlug(b.members[i].Slug) && !isAppBuilderSlug(b.members[i].Slug) {
+			specialistMembers++
 		}
 	}
-	if selectedAgents != nil && len(selectedAgents) == 0 && nonLibrarianMembers == 1 {
+	if selectedAgents != nil && len(selectedAgents) == 0 && specialistMembers == 1 {
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -506,19 +507,23 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 		members = blankSlateOfficeMembersFromAgents(agents, leadSlug, nil)
 	}
 	if len(members) > 0 {
-		// The Librarian is built-in, like the lead — present in every workspace
-		// regardless of blueprint or agent selection.
-		return ensureLibrarianMember(members)
+		// The Librarian and App Builder are built-in, like the lead — present in
+		// every workspace regardless of blueprint or agent selection. Without the
+		// App Builder here, an onboarded office has no app-builder roster member,
+		// so app-builder-owned tasks fall back to the CEO — which lacks the
+		// register_app tool (gated to the app-builder slug) and bypasses the
+		// host-owned build + publish gates.
+		return ensureAppBuilderOfficeMember(ensureLibrarianMember(members))
 	}
 	// Defensive fallback used only when the blueprint had zero parseable
 	// agents. Keeps the broker from crashing on empty rosters.
 	now := time.Now().UTC().Format(time.RFC3339)
-	return ensureLibrarianMember([]officeMember{
+	return ensureAppBuilderOfficeMember(ensureLibrarianMember([]officeMember{
 		{Slug: "founder", Name: "Founder", Role: "Founder", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
 		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
 		{Slug: "builder", Name: "Builder", Role: "Builder", CreatedBy: "wuphf", CreatedAt: now},
 		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", CreatedBy: "wuphf", CreatedAt: now},
-	})
+	}))
 }
 
 func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlug string, filter func(string) bool) []officeMember {

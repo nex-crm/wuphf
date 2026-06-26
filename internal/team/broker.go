@@ -171,6 +171,10 @@ type Broker struct {
 	wikiWorker                *WikiWorker
 	wikiInitMu                sync.Mutex
 	wikiInitErr               error
+	customApps                *customAppStore
+	customAppOnce             sync.Once
+	appDev                    *appDevManager
+	appDevOnce                sync.Once
 	autoNotebookWriter        *AutoNotebookWriter
 	humanWikiWriter           *HumanWikiIntentWriter
 	obsidianWatcher           *ObsidianWatcher
@@ -197,6 +201,14 @@ type Broker struct {
 	scanTracker               *scanStatusTracker
 	nextSubscriberID          int
 	agentStreams              map[string]*agentStreamBuffer
+	// appBuildStallSwept dedupes the stalled-build acceptance sweep: taskID ->
+	// the StalledSince it was last acted on, so a still-stuck App Builder build
+	// is nudged at most once per stall episode (broker_app_eval.go).
+	appBuildStallSwept map[string]string
+	// inlineDetectActive single-flights inline workflow→App detection so a burst
+	// of task-less turns cannot spawn unbounded goroutines / corpus reads / judge
+	// calls (broker_workflow_detect.go). Guarded by mu.
+	inlineDetectActive bool
 	// mu is the broker's single big lock. contendedMutex == sync.Mutex
 	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
 	// long holder wedging every endpoint is visible in the log.
@@ -265,6 +277,22 @@ type Broker struct {
 	agentRateLimitRequests  int
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
+
+	// App budget buckets — the broker token exempts the web host from the IP
+	// bucket, so a hostile or buggy App could otherwise loop POST /apps/ai or
+	// /apps/integrations/call and burn LLM credits / upstream rate limits
+	// unthrottled (security review H2). Keyed PER-APP (appBudgetKey), enforced on
+	// a per-minute AND a per-day window. Initialized in NewBroker.
+	appAIRateLimitBuckets        map[string]ipRateLimitBucket // ai(): per-minute
+	appAIDailyBuckets            map[string]ipRateLimitBucket // ai(): per-day
+	appIntegrationReadBuckets    map[string]ipRateLimitBucket // reads: per-minute
+	appIntegrationReadDayBuckets map[string]ipRateLimitBucket // reads: per-day
+	lastAppBudgetPrune           time.Time                    // throttles the idle-key sweep
+
+	// workflowDetectionEnabled gates post-task App discovery (broker_workflow_detect.go).
+	// On only in the production web-serve path so the unit suite never fires a live
+	// LLM judge when a test completes a task.
+	workflowDetectionEnabled bool
 
 	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
 	// transport is started in-process — at boot by RegisterTransports and at
@@ -417,6 +445,11 @@ func NewBrokerAt(statePath string) *Broker {
 		agentRateLimitBuckets:  make(map[string]ipRateLimitBucket),
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
+
+		appAIRateLimitBuckets:        make(map[string]ipRateLimitBucket),
+		appAIDailyBuckets:            make(map[string]ipRateLimitBucket),
+		appIntegrationReadBuckets:    make(map[string]ipRateLimitBucket),
+		appIntegrationReadDayBuckets: make(map[string]ipRateLimitBucket),
 
 		statePath:       statePath,
 		lifecycleCtx:    lifecycleCtx,
@@ -651,6 +684,18 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	// Apps: agent-generated internal tools. Reached only via the /api proxy, so
+	// these never shadow the SPA's client-side /apps/<id> route.
+	mux.HandleFunc("/apps", b.requireAuth(b.handleApps))
+	// Bridge v2: GENERIC integration + LLM surface for sandboxed Apps. Registered
+	// as longer, more specific patterns than "/apps/" so ServeMux routes them
+	// here rather than to handleAppByID (which would mis-read "integrations" or
+	// "ai" as an app id). These replace the bespoke per-feature Gmail endpoint —
+	// see broker_apps_integrations.go for the widened-surface security notes.
+	mux.HandleFunc("/apps/integrations/call", b.requireAuth(b.handleAppsIntegrationsCall))
+	mux.HandleFunc("/apps/integrations/catalog", b.requireAuth(b.handleAppsIntegrationsCatalog))
+	mux.HandleFunc("/apps/ai", b.requireAuth(b.handleAppsAI))
+	mux.HandleFunc("/apps/", b.requireAuth(b.handleAppByID))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
@@ -813,9 +858,15 @@ func (b *Broker) Stop() {
 	// pending WaitGroup, so this is the only correct order.
 	b.mu.Lock()
 	obsidianWatcher := b.obsidianWatcher
+	appDev := b.appDev
 	b.mu.Unlock()
 	if obsidianWatcher != nil {
 		_ = obsidianWatcher.Stop()
+	}
+	// Tear down any live app-preview dev servers (bun processes + proxies) so
+	// they don't outlive the broker.
+	if appDev != nil {
+		appDev.StopAll()
 	}
 
 	if b.lifecycleCancel != nil {

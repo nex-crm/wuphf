@@ -218,9 +218,9 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	// Lead + the always-present built-in Librarian.
-	if len(slugs) != 2 || slugs[0] != "ceo" || slugs[1] != LibrarianSlug {
-		t.Fatalf("expected lead + librarian roster [ceo %s], got %v", LibrarianSlug, slugs)
+	// Lead + the always-present built-in Librarian and App Builder.
+	if len(slugs) != 3 || slugs[0] != "ceo" || slugs[1] != LibrarianSlug || slugs[2] != appBuilderSlug {
+		t.Fatalf("expected lead + librarian + app-builder roster [ceo %s %s], got %v", LibrarianSlug, appBuilderSlug, slugs)
 	}
 	if !foundSystemMsg {
 		t.Errorf("expected system message explaining lead-only fallback; messages seen")
@@ -270,8 +270,8 @@ func TestOnboardingCompleteFromScratchHonorsSelectedFoundingAgents(t *testing.T)
 	b.mu.Unlock()
 
 	// Selected founding agents, plus the always-present built-in Librarian
-	// (appended last).
-	want := []string{"ceo", "founding-engineer", LibrarianSlug}
+	// and App Builder (appended last, in that order).
+	want := []string{"ceo", "founding-engineer", LibrarianSlug, appBuilderSlug}
 	if len(slugs) != len(want) {
 		t.Fatalf("from-scratch selected roster got %v, want %v", slugs, want)
 	}
@@ -320,9 +320,16 @@ func TestBlankSlateMembersExplicitLeadOnlySelectionStaysLeadOnly(t *testing.T) {
 	members := blankSlateOfficeMembersFromBlueprint(blueprint, []string{"operator"})
 
 	// Lead-only selection keeps just the lead — plus the always-present
-	// built-in Librarian (appended last).
-	if len(members) != 2 || members[0].Slug != "operator" || members[1].Slug != LibrarianSlug {
-		t.Fatalf("explicit lead-only selection got %+v, want [operator %s]", members, LibrarianSlug)
+	// built-in Librarian and App Builder (appended last, in that order).
+	// Regression: the onboarding seed path previously ensured only the
+	// Librarian, so an onboarded office had no app-builder roster member and
+	// app-builder-owned tasks fell back to the CEO (which lacks register_app
+	// and bypasses the host-owned build + publish gates).
+	if len(members) != 3 ||
+		members[0].Slug != "operator" ||
+		members[1].Slug != LibrarianSlug ||
+		members[2].Slug != appBuilderSlug {
+		t.Fatalf("explicit lead-only selection got %+v, want [operator %s %s]", members, LibrarianSlug, appBuilderSlug)
 	}
 }
 

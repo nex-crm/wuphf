@@ -559,6 +559,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 	}
 	b.mu.Unlock()
 
+	// Pre-scaffold a new App Builder app (outside b.mu — the app store has its
+	// own lock) so its live preview boots a running scaffold in seconds. This
+	// also appends the pre-created app id to the task brief so the agent
+	// publishes onto the same app. No-op for every non-app create. Runs AFTER the
+	// auth check above: the scaffold writes ~a dozen files to disk, so an
+	// unauthorized create must not leave an orphan draft behind.
+	body = b.maybePrescaffoldAppForCreate(action, channel, body)
+
 	// Resubmission artifact-delta gate (done-integrity): an agent re-landing
 	// changes-requested work must have actually changed the delivered
 	// artifact. Runs BEFORE the lock below because it reads artifact files
@@ -732,6 +740,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				channel = ch.Slug
 			}
 		}
+		// Bind the owning app to this task's channel so the FE can mount the
+		// per-app "chat to edit" panel on it. No-op for non-app-builder creates;
+		// best-effort (a parse miss or store error never blocks task creation).
+		b.stampAppEditChannelForTaskLocked(strings.TrimSpace(body.Owner), channel, body.Details)
 		verification, verr := normalizeTaskVerification(body.VerificationKind, body.VerificationSpec, body.VerificationRequired)
 		if verr != nil {
 			rollbackTask()
@@ -1459,6 +1471,15 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		// releases (same hazard class that killed the old auto-notebook-writer).
 		if reachedDone {
 			b.queueTaskDistillation(task.ID)
+			// Post-task App discovery: a deterministic, broker-actuated judge that
+			// proposes an App only when the completed work looks repeatable. No-op
+			// unless enabled (production web path).
+			b.queueWorkflowAppDetection(task.ID)
+			// App acceptance gate: for an App Builder build task, verify the built
+			// app actually meets the brief (regular checks + an LLM judge) BEFORE
+			// "done" sticks; on a shortfall it reopens the task with the gaps for an
+			// auto-fix. No-op for non-app-build tasks and when detection is off.
+			b.queueAppAcceptanceEval(task.ID)
 		}
 		return TaskResponse{Task: *task}, nil
 	}

@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 
 import type { TaskDefinition, TaskVerification } from "../../api/tasks";
+import { TaskActivity } from "../apps/TaskActivity";
 import { ChannelParticipants } from "../messages/ChannelParticipants";
 import { SubTasksList } from "./SubTasksList";
 import { TaskActivityFeed } from "./TaskActivityFeed";
@@ -18,6 +19,11 @@ interface TaskContextRailProps {
   verification?: TaskVerification;
   /** Structured intake contract (R4); leads the Details section. */
   definition?: TaskDefinition;
+  /**
+   * The task's owner agent. Drives the live "Task activity" feed (what the
+   * agent is doing right now). Null/unstaffed renders no feed.
+   */
+  ownerSlug?: string | null;
 }
 
 interface RailSectionProps {
@@ -75,6 +81,7 @@ export function TaskContextRail({
   showSubTasks,
   verification,
   definition,
+  ownerSlug,
 }: TaskContextRailProps) {
   const hasCheck = Boolean(verification && verification.kind !== "none");
   return (
@@ -89,6 +96,11 @@ export function TaskContextRail({
       >
         <ChannelParticipants channelSlug={channel} />
       </div>
+      {/* Live "Task activity": the owner agent's tool-call stream for this task
+       *  (reading, running, writing) — the same feed App Builder tasks show,
+       *  now on every task. Self-collapsing; renders nothing until the owner
+       *  streams activity. */}
+      <TaskActivity taskId={taskId} agentSlug={ownerSlug} />
       <RailSection
         title="Details"
         defaultOpen={isDrafting}

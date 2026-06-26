@@ -126,6 +126,20 @@ export function directChannelSlug(
  */
 export const HOME_COMPOSER_DRAFT_CHANNEL = "@home";
 
+export interface AppBuilderDialogState {
+  mode: "create" | "update";
+  /** Set in "update" mode — the app being improved. */
+  appId?: string;
+  /** App name, prefilled in "update" mode for display. */
+  name?: string;
+  /**
+   * Optional prefill for the description textarea. "Select to edit" seeds a
+   * concise instruction stub (e.g. the element + its source location) so the
+   * human only types the actual change.
+   */
+  seed?: string;
+}
+
 export interface AppStore {
   // Connection
   brokerConnected: boolean;
@@ -224,6 +238,21 @@ export interface AppStore {
   telegramConnectMode: "provider" | "telegram";
   openConnectWizard: (mode: "provider" | "telegram") => void;
   setTelegramConnectOpen: (v: boolean) => void;
+
+  // App Builder dialog: /create-app, /update-app, and the Edit button on an
+  // app screen open this NL-description dialog, which kicks off an App Builder
+  // task. null when closed.
+  appBuilderDialog: AppBuilderDialogState | null;
+  openCreateAppDialog: () => void;
+  openUpdateAppDialog: (appId: string, name?: string, seed?: string) => void;
+  closeAppBuilderDialog: () => void;
+
+  // Optimistic "building…" rows for the Apps sidebar: a 20-60s App Builder
+  // build would otherwise be dead air between submit and the app appearing.
+  // Keyed by lowercased app name -> { display name, started-at epoch ms }.
+  appBuilds: Record<string, { name: string; startedAt: number }>;
+  noteAppBuilding: (name: string) => void;
+  clearAppBuilding: (name: string) => void;
 
   // Onboarding
   onboardingComplete: boolean;
@@ -401,6 +430,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openConnectWizard: (mode) =>
     set({ telegramConnectOpen: true, telegramConnectMode: mode }),
   setTelegramConnectOpen: (v) => set({ telegramConnectOpen: v }),
+
+  appBuilderDialog: null,
+  openCreateAppDialog: () => set({ appBuilderDialog: { mode: "create" } }),
+  openUpdateAppDialog: (appId, name, seed) =>
+    set({ appBuilderDialog: { mode: "update", appId, name, seed } }),
+  closeAppBuilderDialog: () => set({ appBuilderDialog: null }),
+
+  appBuilds: {},
+  noteAppBuilding: (name) =>
+    set((state) => ({
+      appBuilds: {
+        ...state.appBuilds,
+        [name.trim().toLowerCase()]: {
+          name: name.trim(),
+          startedAt: Date.now(),
+        },
+      },
+    })),
+  clearAppBuilding: (name) =>
+    set((state) => {
+      const key = name.trim().toLowerCase();
+      if (!(key in state.appBuilds)) return {};
+      const next = { ...state.appBuilds };
+      delete next[key];
+      return { appBuilds: next };
+    }),
 
   agentActivitySnapshots: {},
   agentActivityHistory: {},

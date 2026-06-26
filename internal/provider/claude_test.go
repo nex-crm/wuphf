@@ -32,7 +32,7 @@ func TestBuildClaudePromptsSeparatesSystemMessages(t *testing.T) {
 }
 
 func TestBuildClaudeArgsIncludesResume(t *testing.T) {
-	args := buildClaudeArgs("system instructions", "sess-123")
+	args := buildClaudeArgs("system instructions", "sess-123", false)
 	joined := strings.Join(args, " ")
 
 	if !strings.Contains(joined, "--print -") {
@@ -52,6 +52,39 @@ func TestBuildClaudeArgsIncludesResume(t *testing.T) {
 	}
 	if strings.Contains(joined, "--no-session-persistence") {
 		t.Fatalf("unexpected no-session-persistence flag: %q", joined)
+	}
+	// An agent turn keeps full tool access and many turns.
+	if !strings.Contains(joined, "--max-turns 20") {
+		t.Fatalf("expected agent turn to keep --max-turns 20, got %q", joined)
+	}
+	if strings.Contains(joined, "--allowedTools") {
+		t.Fatalf("agent turn must NOT restrict tools, got %q", joined)
+	}
+}
+
+// TestBuildClaudeArgsOneShotIsolatesTools: the one-shot judge must run with no
+// tools and a single turn, so a prompt-injected transcript can't make it touch
+// the filesystem/shell before a human reviews its output.
+func TestBuildClaudeArgsOneShotIsolatesTools(t *testing.T) {
+	args := buildClaudeArgs("judge instructions", "", true)
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "--allowedTools ") {
+		t.Fatalf("one-shot must pass an empty tool allow-list, got %q", joined)
+	}
+	// --allowedTools is immediately followed by an empty value.
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--allowedTools" {
+			if i+1 >= len(args) || args[i+1] != "" {
+				t.Fatalf("one-shot --allowedTools must be empty, got %v", args)
+			}
+		}
+	}
+	if !strings.Contains(joined, "--max-turns 1") {
+		t.Fatalf("one-shot must cap at a single turn, got %q", joined)
+	}
+	if strings.Contains(joined, "--max-turns 20") {
+		t.Fatalf("one-shot must not use the agent turn budget, got %q", joined)
 	}
 }
 

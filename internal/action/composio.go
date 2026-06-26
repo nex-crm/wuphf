@@ -17,6 +17,11 @@ import (
 
 const defaultComposioBaseURL = "https://backend.composio.dev/api/v3"
 
+// composioMaxResponseBytes is the security bound on a single Composio HTTP read.
+// It is a modest cap, not a content shaper: a read that exceeds it returns a
+// clean error (the caller narrows the query), never silently-truncated bytes.
+const composioMaxResponseBytes = 4 << 20 // 4 MiB
+
 type ComposioREST struct {
 	// APIKey is a project-scoped `ak_` key (sent as x-api-key). When set it
 	// takes precedence over the user-key fields below.
@@ -743,7 +748,21 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	// Cap the response read at a modest security bound. The old code read with a
+	// LimitReader and silently kept the truncated prefix — a response larger than
+	// the cap was cut mid-JSON, yielding invalid bytes that surfaced downstream as
+	// an empty/failed result. Read one byte past the cap and treat any overflow as
+	// a CLEAN ERROR instead of truncating to corrupt JSON, so every successful read
+	// is valid-JSON-or-error. An app that needs less data should narrow its query
+	// (e.g. request metadata + snippet, not full bodies); the platform does not
+	// grow to accommodate an over-fetch.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, composioMaxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > composioMaxResponseBytes {
+		return nil, fmt.Errorf("composio: %s %s response exceeded %d bytes; narrow the query", method, path, composioMaxResponseBytes)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &ComposioAPIError{
 			Method:     method,

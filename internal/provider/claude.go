@@ -111,7 +111,7 @@ func CreateClaudeCodeStreamFn(agentSlug string) agent.StreamFn {
 			}
 
 			resumeID := sessionStore.resumeSessionID(agentSlug, cwd)
-			attempt := runClaudeAttempt(ch, prompt, systemPrompt, cwd, resumeID)
+			attempt := runClaudeAttempt(ch, prompt, systemPrompt, cwd, resumeID, false)
 			if attempt.sessionID != "" {
 				sessionStore.save(agentSlug, attempt.sessionID, cwd)
 			}
@@ -125,7 +125,7 @@ func CreateClaudeCodeStreamFn(agentSlug string) agent.StreamFn {
 					Type:    "thinking",
 					Content: fmt.Sprintf("%s session expired; retrying with a fresh Claude session.", agentSlug),
 				}
-				retry := runClaudeAttempt(ch, prompt, systemPrompt, cwd, "")
+				retry := runClaudeAttempt(ch, prompt, systemPrompt, cwd, "", false)
 				if retry.sessionID != "" {
 					sessionStore.save(agentSlug, retry.sessionID, cwd)
 				}
@@ -142,14 +142,14 @@ func CreateClaudeCodeStreamFn(agentSlug string) agent.StreamFn {
 	}
 }
 
-func runClaudeAttempt(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string, resumeID string) claudeAttemptResult {
-	args := buildClaudeArgs(systemPrompt, resumeID)
+func runClaudeAttempt(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string, resumeID string, oneShot bool) claudeAttemptResult {
+	args := buildClaudeArgs(systemPrompt, resumeID, oneShot)
 	cmd := claudeCommand("claude", args...)
 	return runClaudeAttemptCommand(context.Background(), cmd, ch, prompt, cwd)
 }
 
-func runClaudeAttemptCtx(ctx context.Context, ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string, resumeID string) claudeAttemptResult {
-	args := buildClaudeArgs(systemPrompt, resumeID)
+func runClaudeAttemptCtx(ctx context.Context, ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string, resumeID string, oneShot bool) claudeAttemptResult {
+	args := buildClaudeArgs(systemPrompt, resumeID, oneShot)
 	cmd := claudeCommandContext(ctx, "claude", args...)
 	return runClaudeAttemptCommand(ctx, cmd, ch, prompt, cwd)
 }
@@ -273,15 +273,30 @@ func runClaudeAttemptCommand(ctx context.Context, cmd *exec.Cmd, ch chan<- agent
 	return result
 }
 
-func buildClaudeArgs(systemPrompt string, resumeID string) []string {
+func buildClaudeArgs(systemPrompt string, resumeID string, oneShot bool) []string {
+	// A one-shot call (the workspace judge: workflow/app detection + acceptance)
+	// does pure generation — it must emit JSON and nothing else. An agent turn
+	// needs many turns and tools; a judge needs neither, and must NOT, since its
+	// prompt can carry untrusted transcript content that could otherwise steer it
+	// to execute a built-in tool (Bash/Write/…) before any human sees the output.
+	maxTurns := "20"
+	if oneShot {
+		maxTurns = "1"
+	}
 	args := []string{
 		"--print", "-",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--max-turns", "20",
+		"--max-turns", maxTurns,
 		"--disable-slash-commands",
 		"--strict-mcp-config",
 		"--setting-sources", "user",
+	}
+	if oneShot {
+		// Empty allow-list = no tools at all. --strict-mcp-config with no
+		// --mcp-config already blocks MCP servers; this also blocks the built-in
+		// tools, so a prompt-injected judge cannot touch the filesystem or shell.
+		args = append(args, "--allowedTools", "")
 	}
 	if shouldUseClaudeBareMode() {
 		args = append(args, "--bare")
