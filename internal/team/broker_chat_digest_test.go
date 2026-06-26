@@ -1,8 +1,6 @@
 package team
 
 import (
-	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -71,9 +69,10 @@ func TestBuildChatDigestJobs_StableIDAcrossRuns(t *testing.T) {
 }
 
 // TestSweepChatDigests_CapturesAndDedupes drives the sweep function directly
-// (not the ticker) through a real broker + wiki worker + capture dispatcher,
-// and asserts a meaningful thread produces exactly one chat source even after
-// re-running the sweep (write-once dedupe).
+// (not the ticker) through a real broker + capture dispatcher with a fake gbrain
+// client, and asserts a meaningful thread produces exactly one chat page (one
+// distinct slug) even after re-running the sweep — gbrain put_page is an upsert,
+// so a re-sweep overwrites the same slug rather than duplicating it.
 func TestSweepChatDigests_CapturesAndDedupes(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("WUPHF_RUNTIME_HOME", dir)
@@ -89,46 +88,45 @@ func TestSweepChatDigests_CapturesAndDedupes(t *testing.T) {
 	)
 	b.mu.Unlock()
 
-	wikiRoot := filepath.Join(dir, "wiki-repo")
-	repo := NewRepoAt(wikiRoot, filepath.Join(dir, "wiki-backup"))
-	if err := repo.Init(context.Background()); err != nil {
-		t.Fatalf("repo.Init: %v", err)
-	}
-	worker := NewWikiWorker(repo, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	worker.Start(ctx)
-	b.mu.Lock()
-	b.wikiWorker = worker
-	b.mu.Unlock()
+	fake := &fakeGBrainCaptureClient{}
+	setSharedGBrainClient(fake)
+	t.Cleanup(func() { setSharedGBrainClient(nil) })
 	b.startSourceCaptureDispatcher()
 	t.Cleanup(func() {
 		if disp := b.sourceCaptureDispatcher.Load(); disp != nil {
 			disp.Stop(2 * time.Second)
 		}
-		worker.Stop()
-		<-worker.Done()
-		cancel()
 	})
 
-	b.sweepChatDigests(base.Add(time.Hour))
-	chatDir := filepath.Join(wikiRoot, "sources", "chat")
-	testTickUntil(t, 5*time.Second, func() bool { return countMarkdown(t, chatDir) == 1 })
+	wantSlug := DeriveSourceID(SourceKindChat, "general:2026-06-25", "", "")
 
-	// Re-running the sweep is a write-once no-op: still exactly one source.
+	b.sweepChatDigests(base.Add(time.Hour))
+	testTickUntil(t, 5*time.Second, func() bool {
+		_, ok := fake.lastFor(wantSlug)
+		return ok
+	})
+
+	// Re-running the sweep upserts the same slug: still exactly one distinct page.
 	b.sweepChatDigests(base.Add(2 * time.Hour))
-	// Give the drain a moment; the count must remain 1.
+	// Give the drain a moment to process the second sweep.
 	time.Sleep(300 * time.Millisecond)
-	if got := countMarkdown(t, chatDir); got != 1 {
-		t.Fatalf("re-sweep changed source count: got %d, want 1", got)
+	if slugs := fake.distinctSlugs(); len(slugs) != 1 {
+		t.Fatalf("re-sweep changed distinct page count: got %d (%v), want 1", len(slugs), slugs)
 	}
 
-	body := readOnlyMarkdown(t, chatDir)
+	put, ok := fake.lastFor(wantSlug)
+	if !ok {
+		t.Fatalf("no chat page for slug %q; slugs=%v", wantSlug, fake.distinctSlugs())
+	}
+	if put.opts.SourceKind != gbrainCaptureSourceKindPrefix+string(SourceKindChat) {
+		t.Errorf("source_kind = %q, want %q", put.opts.SourceKind, gbrainCaptureSourceKindPrefix+string(SourceKindChat))
+	}
 	for _, want := range []string{"kind: chat", "ship it?", "green, go"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("chat source missing %q\n%s", want, body)
+		if !strings.Contains(put.content, want) {
+			t.Errorf("chat page missing %q\n%s", want, put.content)
 		}
 	}
-	if strings.Contains(body, "random") || strings.Contains(body, "dwight") {
-		t.Errorf("chat source leaked chatter channel:\n%s", body)
+	if strings.Contains(put.content, "random") || strings.Contains(put.content, "dwight") {
+		t.Errorf("chat page leaked chatter channel:\n%s", put.content)
 	}
 }

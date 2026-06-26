@@ -3,46 +3,100 @@ package team
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/gbrain"
 )
 
-// newStartedSourceWorker stands up a real Repo + started WikiWorker rooted in
-// t.TempDir(), so EnqueueSource lands real files on disk. Returns the worker,
-// its repo root, and a teardown that drains the worker before TempDir cleanup.
-func newStartedSourceWorker(t *testing.T) (*WikiWorker, string, func()) {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), "wiki")
-	backup := filepath.Join(t.TempDir(), "wiki.bak")
-	repo := NewRepoAt(root, backup)
-	if err := repo.Init(context.Background()); err != nil {
-		t.Fatalf("repo init: %v", err)
-	}
-	worker := NewWikiWorker(repo, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	worker.Start(ctx)
-	return worker, root, func() {
-		worker.Stop()
-		<-worker.Done()
-		cancel()
-	}
+// fakeGBrainCaptureClient is a fake put_page sink. It records every PutPage call
+// so tests can assert the page body, slug, source_kind, and ingested_via the
+// dispatcher writes. It satisfies both gbrainPutPager (the writer's seam) and
+// gbrainMemoryClient (so it can be injected via setSharedGBrainClient to drive
+// the full broker -> dispatcher -> gbrain path).
+type fakeGBrainCaptureClient struct {
+	mu    sync.Mutex
+	calls []capturedPut
+	err   error // when set, PutPage returns it
 }
 
-// blockingSourceWorker satisfies sourceCaptureWorker but blocks every
-// EnqueueSource call until release is closed. Used to prove that
-// SourceCaptureDispatcher.Enqueue never runs EnqueueSource on the caller's
+type capturedPut struct {
+	content string
+	opts    gbrain.PutOptions
+}
+
+func (f *fakeGBrainCaptureClient) Query(ctx context.Context, query string, limit int) ([]gbrain.SearchResult, error) {
+	return nil, nil
+}
+
+func (f *fakeGBrainCaptureClient) PutPage(ctx context.Context, content string, opts gbrain.PutOptions) (gbrain.PutResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return gbrain.PutResult{}, f.err
+	}
+	f.calls = append(f.calls, capturedPut{content: content, opts: opts})
+	return gbrain.PutResult{Slug: opts.Slug, Status: "ok"}, nil
+}
+
+func (f *fakeGBrainCaptureClient) snapshot() []capturedPut {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]capturedPut, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+func (f *fakeGBrainCaptureClient) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+// distinctSlugs returns the set of slugs PutPage was called with.
+func (f *fakeGBrainCaptureClient) distinctSlugs() map[string]struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	slugs := map[string]struct{}{}
+	for _, c := range f.calls {
+		slugs[c.opts.Slug] = struct{}{}
+	}
+	return slugs
+}
+
+// lastFor returns the most recent captured put for a slug (ok=false if none).
+func (f *fakeGBrainCaptureClient) lastFor(slug string) (capturedPut, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.calls) - 1; i >= 0; i-- {
+		if f.calls[i].opts.Slug == slug {
+			return f.calls[i], true
+		}
+	}
+	return capturedPut{}, false
+}
+
+// newFakeCaptureWriter builds a gbrain-backed writer wired to a fake put_page
+// sink, returning both so a test can drive the writer and assert the calls.
+func newFakeCaptureWriter() (*gbrainSourceWriter, *fakeGBrainCaptureClient) {
+	fake := &fakeGBrainCaptureClient{}
+	w := &gbrainSourceWriter{resolve: func() gbrainPutPager { return fake }}
+	return w, fake
+}
+
+// blockingSourceWriter satisfies sourceCaptureWriter but blocks every
+// WriteSource call until release is closed. Used to prove that
+// SourceCaptureDispatcher.Enqueue never runs WriteSource on the caller's
 // goroutine (the calling goroutine would otherwise block here).
-type blockingSourceWorker struct {
+type blockingSourceWriter struct {
 	release chan struct{}
 	mu      sync.Mutex
 	calls   int
 }
 
-func (w *blockingSourceWorker) EnqueueSource(ctx context.Context, rec SourceRecord) (string, int, error) {
+func (w *blockingSourceWriter) WriteSource(ctx context.Context, job SourceCaptureJob) error {
 	w.mu.Lock()
 	w.calls++
 	w.mu.Unlock()
@@ -50,14 +104,12 @@ func (w *blockingSourceWorker) EnqueueSource(ctx context.Context, rec SourceReco
 	case <-w.release:
 	case <-ctx.Done():
 	}
-	return "sha", len(rec.Content), nil
+	return nil
 }
 
 func TestSourceCaptureDispatcher_DrainsAllJobs(t *testing.T) {
-	worker, root, teardown := newStartedSourceWorker(t)
-	defer teardown()
-
-	disp := NewSourceCaptureDispatcher(worker)
+	writer, fake := newFakeCaptureWriter()
+	disp := NewSourceCaptureDispatcher(writer)
 	disp.Start(context.Background())
 	defer disp.Stop(2 * time.Second)
 
@@ -75,27 +127,36 @@ func TestSourceCaptureDispatcher_DrainsAllJobs(t *testing.T) {
 		}
 	}
 
-	noteDir := filepath.Join(root, "sources", "note")
-	testTickUntil(t, 5*time.Second, func() bool {
-		return countMarkdown(t, noteDir) == n
-	})
-	if got := countMarkdown(t, noteDir); got != n {
-		t.Fatalf("drained %d sources, want %d", got, n)
+	testTickUntil(t, 5*time.Second, func() bool { return fake.count() == n })
+	calls := fake.snapshot()
+	if len(calls) != n {
+		t.Fatalf("drained %d puts, want %d", len(calls), n)
+	}
+	for i, c := range calls {
+		if strings.TrimSpace(c.opts.Slug) == "" {
+			t.Errorf("call %d has empty slug", i)
+		}
+		if c.opts.IngestedVia != gbrainCaptureIngestedVia {
+			t.Errorf("call %d ingested_via = %q, want %q", i, c.opts.IngestedVia, gbrainCaptureIngestedVia)
+		}
+		if c.opts.SourceKind != gbrainCaptureSourceKindPrefix+string(SourceKindNote) {
+			t.Errorf("call %d source_kind = %q, want %q", i, c.opts.SourceKind, gbrainCaptureSourceKindPrefix+string(SourceKindNote))
+		}
 	}
 }
 
 func TestSourceCaptureDispatcher_SaturationReturnsFalseWithoutBlocking(t *testing.T) {
-	worker := &blockingSourceWorker{release: make(chan struct{})}
-	defer close(worker.release)
+	writer := &blockingSourceWriter{release: make(chan struct{})}
+	defer close(writer.release)
 
-	disp := NewSourceCaptureDispatcher(worker)
+	disp := NewSourceCaptureDispatcher(writer)
 	disp.Start(context.Background())
 	defer disp.Stop(2 * time.Second)
 
 	// Enqueue well past the buffer. The drain pulls one job and blocks in the
-	// fake worker; the rest fill the buffer; the overflow returns false. The
+	// fake writer; the rest fill the buffer; the overflow returns false. The
 	// whole loop must stay fast — Enqueue is a non-blocking send, so the
-	// calling goroutine never enters EnqueueSource.
+	// calling goroutine never enters WriteSource.
 	start := time.Now()
 	sawFalse := false
 	for i := 0; i < SourceCaptureQueue+50; i++ {
@@ -119,10 +180,8 @@ func TestSourceCaptureDispatcher_SaturationReturnsFalseWithoutBlocking(t *testin
 }
 
 func TestSourceCaptureDispatcher_StopIsCleanAndIdempotent(t *testing.T) {
-	worker, root, teardown := newStartedSourceWorker(t)
-	defer teardown()
-
-	disp := NewSourceCaptureDispatcher(worker)
+	writer, fake := newFakeCaptureWriter()
+	disp := NewSourceCaptureDispatcher(writer)
 	disp.Start(context.Background())
 
 	if ok := disp.Enqueue(SourceCaptureJob{
@@ -134,8 +193,7 @@ func TestSourceCaptureDispatcher_StopIsCleanAndIdempotent(t *testing.T) {
 	}); !ok {
 		t.Fatal("Enqueue returned false")
 	}
-	noteDir := filepath.Join(root, "sources", "note")
-	testTickUntil(t, 5*time.Second, func() bool { return countMarkdown(t, noteDir) == 1 })
+	testTickUntil(t, 5*time.Second, func() bool { return fake.count() == 1 })
 
 	done := make(chan struct{})
 	go func() {
@@ -155,9 +213,136 @@ func TestSourceCaptureDispatcher_StopIsCleanAndIdempotent(t *testing.T) {
 	}
 }
 
+// TestGBrainSourceWriter_RendersFrontmatterAndKinds drives WriteSource directly
+// for each source kind and asserts the slug, source_kind, ingested_via, and the
+// rendered frontmatter + body that land in gbrain.
+func TestGBrainSourceWriter_RendersFrontmatterAndKinds(t *testing.T) {
+	writer, fake := newFakeCaptureWriter()
+
+	cases := []struct {
+		kind   SourceKind
+		origin string
+		title  string
+		body   string
+	}{
+		{SourceKindTask, "task-42", "Ship the capture layer", "Spec and session report.\n"},
+		{SourceKindChat, "general:2026-06-25", "general digest", "jim: ship it?\npam: green, go\n"},
+		{SourceKindNote, "team-learnings", "Team Learnings", "- always drain off-lock\n"},
+		{SourceKindDecision, "decision-7", "Pick gbrain", "We chose put_page.\n"},
+	}
+
+	for _, tc := range cases {
+		job := SourceCaptureJob{
+			Kind:       tc.kind,
+			ID:         DeriveSourceID(tc.kind, tc.origin, tc.title, tc.body),
+			Title:      tc.title,
+			Origin:     tc.origin,
+			Content:    tc.body,
+			CapturedAt: time.Date(2026, 6, 25, 9, 0, 0, 0, time.UTC),
+		}
+		if err := writer.WriteSource(context.Background(), job); err != nil {
+			t.Fatalf("WriteSource(%s): %v", tc.kind, err)
+		}
+
+		wantSlug := DeriveSourceID(tc.kind, tc.origin, tc.title, tc.body)
+		put, ok := fake.lastFor(wantSlug)
+		if !ok {
+			t.Fatalf("%s: no PutPage for slug %q", tc.kind, wantSlug)
+		}
+		if put.opts.SourceKind != gbrainCaptureSourceKindPrefix+string(tc.kind) {
+			t.Errorf("%s: source_kind = %q, want %q", tc.kind, put.opts.SourceKind, gbrainCaptureSourceKindPrefix+string(tc.kind))
+		}
+		if put.opts.IngestedVia != gbrainCaptureIngestedVia {
+			t.Errorf("%s: ingested_via = %q, want %q", tc.kind, put.opts.IngestedVia, gbrainCaptureIngestedVia)
+		}
+		for _, want := range []string{
+			"---\n",
+			"title: " + tc.title,
+			"kind: " + string(tc.kind),
+			"origin: " + tc.origin,
+			"captured_at:",
+			"2026-06-25T09:00:00Z",
+			"source: " + gbrainCaptureSource,
+			"- " + gbrainCaptureTag,
+			"- " + string(tc.kind),
+			strings.TrimRight(tc.body, "\n"),
+		} {
+			if !strings.Contains(put.content, want) {
+				t.Errorf("%s: page body missing %q\n---\n%s", tc.kind, want, put.content)
+			}
+		}
+	}
+
+	// Exactly one PutPage per case (distinct origins => distinct slugs).
+	if got := fake.count(); got != len(cases) {
+		t.Fatalf("got %d puts, want %d", got, len(cases))
+	}
+}
+
+// TestGBrainSourceWriter_IdempotentBySlug proves re-capturing the same office
+// event upserts the same gbrain slug rather than duplicating it.
+func TestGBrainSourceWriter_IdempotentBySlug(t *testing.T) {
+	writer, fake := newFakeCaptureWriter()
+	job := SourceCaptureJob{
+		Kind:       SourceKindTask,
+		ID:         DeriveSourceID(SourceKindTask, "task-99", "title", "body\n"),
+		Title:      "title",
+		Origin:     "task-99",
+		Content:    "body\n",
+		CapturedAt: time.Now().UTC(),
+	}
+	for i := 0; i < 3; i++ {
+		if err := writer.WriteSource(context.Background(), job); err != nil {
+			t.Fatalf("WriteSource %d: %v", i, err)
+		}
+	}
+	if got := fake.count(); got != 3 {
+		t.Fatalf("expected 3 PutPage calls, got %d", got)
+	}
+	if slugs := fake.distinctSlugs(); len(slugs) != 1 {
+		t.Fatalf("expected 1 distinct slug (upsert), got %d: %v", len(slugs), slugs)
+	}
+}
+
+// TestGBrainSourceWriter_NilClientLogsAndDrops proves an absent gbrain client is
+// a graceful no-op: no panic, no error, and no put. Covers both an explicit nil
+// resolver and the production newGBrainSourceWriter when no broker has
+// registered a shared client.
+func TestGBrainSourceWriter_NilClientLogsAndDrops(t *testing.T) {
+	job := SourceCaptureJob{
+		Kind:    SourceKindNote,
+		Title:   "orphan",
+		Origin:  "orphan",
+		Content: "no backend\n",
+	}
+
+	nilResolver := &gbrainSourceWriter{resolve: func() gbrainPutPager { return nil }}
+	if err := nilResolver.WriteSource(context.Background(), job); err != nil {
+		t.Fatalf("nil-resolver WriteSource returned error: %v", err)
+	}
+
+	// Production writer with no shared client registered: must not panic.
+	setSharedGBrainClient(nil)
+	prod := newGBrainSourceWriter()
+	if err := prod.WriteSource(context.Background(), job); err != nil {
+		t.Fatalf("prod writer (no shared client) returned error: %v", err)
+	}
+
+	// And the whole drain must survive a nil backend without spinning.
+	disp := NewSourceCaptureDispatcher(prod)
+	disp.Start(context.Background())
+	defer disp.Stop(2 * time.Second)
+	if ok := disp.Enqueue(job); !ok {
+		t.Fatal("Enqueue returned false")
+	}
+	// Give the drain a moment to process-and-drop; no assertion beyond no-panic.
+	time.Sleep(100 * time.Millisecond)
+}
+
 // TestSourceCapture_Feeder1_CompletedTask drives a real RecordTaskDecision
-// approval on a temp broker and asserts a sources/task/{id}.md lands carrying
-// the spec, session report, reviewer grade, feedback, and deliverable path.
+// approval on a temp broker with a fake gbrain client injected, and asserts a
+// single task page is upserted carrying the spec, session report, reviewer
+// grade, feedback, and deliverable path — plus the office-capture frontmatter.
 func TestSourceCapture_Feeder1_CompletedTask(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("WUPHF_RUNTIME_HOME", dir)
@@ -199,37 +384,36 @@ func TestSourceCapture_Feeder1_CompletedTask(t *testing.T) {
 		t.Fatalf("AppendReviewerGrade: %v", err)
 	}
 
-	// Stand up a real wiki worker + capture dispatcher on the broker.
-	wikiRoot := filepath.Join(dir, "wiki-repo")
-	wikiBackup := filepath.Join(dir, "wiki-backup")
-	repo := NewRepoAt(wikiRoot, wikiBackup)
-	if err := repo.Init(context.Background()); err != nil {
-		t.Fatalf("repo.Init: %v", err)
-	}
-	worker := NewWikiWorker(repo, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	worker.Start(ctx)
-	b.mu.Lock()
-	b.wikiWorker = worker
-	b.mu.Unlock()
+	// Inject a fake gbrain client and start the capture dispatcher against it.
+	fake := &fakeGBrainCaptureClient{}
+	setSharedGBrainClient(fake)
+	t.Cleanup(func() { setSharedGBrainClient(nil) })
 	b.startSourceCaptureDispatcher()
 	t.Cleanup(func() {
 		if disp := b.sourceCaptureDispatcher.Load(); disp != nil {
 			disp.Stop(2 * time.Second)
 		}
-		worker.Stop()
-		<-worker.Done()
-		cancel()
 	})
 
 	if err := b.RecordTaskDecision(taskID, string(RecordDecisionApprove), "test-human"); err != nil {
 		t.Fatalf("RecordTaskDecision: %v", err)
 	}
 
-	taskDir := filepath.Join(wikiRoot, "sources", "task")
-	testTickUntil(t, 5*time.Second, func() bool { return countMarkdown(t, taskDir) >= 1 })
-
-	body := readOnlyMarkdown(t, taskDir)
+	wantSlug := DeriveSourceID(SourceKindTask, taskID, "Office activity is never snapshotted", "")
+	testTickUntil(t, 5*time.Second, func() bool {
+		_, ok := fake.lastFor(wantSlug)
+		return ok
+	})
+	put, ok := fake.lastFor(wantSlug)
+	if !ok {
+		t.Fatalf("no task page upserted for slug %q; slugs=%v", wantSlug, fake.distinctSlugs())
+	}
+	if put.opts.SourceKind != gbrainCaptureSourceKindPrefix+string(SourceKindTask) {
+		t.Errorf("source_kind = %q, want %q", put.opts.SourceKind, gbrainCaptureSourceKindPrefix+string(SourceKindTask))
+	}
+	if put.opts.IngestedVia != gbrainCaptureIngestedVia {
+		t.Errorf("ingested_via = %q, want %q", put.opts.IngestedVia, gbrainCaptureIngestedVia)
+	}
 	for _, want := range []string{
 		"Office activity is never snapshotted", // spec problem (title)
 		"## Spec",
@@ -241,99 +425,10 @@ func TestSourceCapture_Feeder1_CompletedTask(t *testing.T) {
 		"team/decisions/task-src.md",
 		"kind: task",
 		"origin: task-src",
+		"source: " + gbrainCaptureSource,
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("task source missing %q\n---\n%s", want, body)
+		if !strings.Contains(put.content, want) {
+			t.Errorf("task page missing %q\n---\n%s", want, put.content)
 		}
 	}
-}
-
-// TestSourceCapture_Feeder4_TeamLearningFiresNoteHook verifies the worker
-// invokes the source-capture hook (kind=note) after a successful team-learnings
-// commit, carrying the regenerated markdown page as the source body.
-func TestSourceCapture_Feeder4_TeamLearningFiresNoteHook(t *testing.T) {
-	worker, _, teardown := newStartedSourceWorker(t)
-	defer teardown()
-
-	var (
-		mu   sync.Mutex
-		jobs []SourceCaptureJob
-	)
-	worker.SetSourceCaptureHook(func(job SourceCaptureJob) {
-		mu.Lock()
-		jobs = append(jobs, job)
-		mu.Unlock()
-	})
-
-	page := "# Team Learnings\n\n- always drain off-lock\n"
-	if _, _, err := worker.EnqueueTeamLearning(
-		context.Background(),
-		"librarian",
-		TeamLearningsJSONLPath,
-		`{"id":"l1","body":"always drain off-lock"}`+"\n",
-		page,
-		"learning: capture",
-	); err != nil {
-		t.Fatalf("EnqueueTeamLearning: %v", err)
-	}
-
-	testTickUntil(t, 3*time.Second, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(jobs) == 1
-	})
-	mu.Lock()
-	defer mu.Unlock()
-	if len(jobs) != 1 {
-		t.Fatalf("expected 1 note-capture job, got %d", len(jobs))
-	}
-	job := jobs[0]
-	if job.Kind != SourceKindNote {
-		t.Errorf("kind = %q, want note", job.Kind)
-	}
-	if job.Origin != teamLearningsSourceOrigin {
-		t.Errorf("origin = %q, want %q", job.Origin, teamLearningsSourceOrigin)
-	}
-	if !strings.Contains(job.Content, "always drain off-lock") {
-		t.Errorf("note content missing learning body:\n%s", job.Content)
-	}
-}
-
-// countMarkdown counts *.md files directly under dir (0 if dir is missing).
-func countMarkdown(t *testing.T, dir string) int {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0
-		}
-		t.Fatalf("ReadDir %s: %v", dir, err)
-	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-			n++
-		}
-	}
-	return n
-}
-
-// readOnlyMarkdown returns the contents of the single *.md file under dir.
-func readOnlyMarkdown(t *testing.T, dir string) string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir %s: %v", dir, err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-			if err != nil {
-				t.Fatalf("ReadFile: %v", err)
-			}
-			return string(data)
-		}
-	}
-	t.Fatalf("no markdown file under %s", dir)
-	return ""
 }
