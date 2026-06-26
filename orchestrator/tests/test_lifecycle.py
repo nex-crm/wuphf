@@ -95,6 +95,18 @@ def test_continue_preserves_working_state():
     assert lc.apply_turn_outcome(State.RUNNING, TurnOutcome.CONTINUE) is State.RUNNING
 
 
+def test_resolve_turn_matches_graph_gate_and_continue():
+    # Gated outcomes -> the gate state + interrupted; non-gated -> the continued
+    # state + done. Composed from the same functions the graph uses.
+    s, status, interrupt = lc.resolve_turn(State.RUNNING, TurnOutcome.SUBMITTED_FOR_REVIEW)
+    assert (s, status) == (State.REVIEW, "interrupted") and interrupt["gate_kind"] == "review"
+    s, status, interrupt = lc.resolve_turn(State.PLANNING, TurnOutcome.PLAN_READY)
+    assert (s, status) == (State.DECISION, "interrupted") and interrupt["gate_kind"] == "plan"
+    assert lc.resolve_turn(State.RUNNING, TurnOutcome.CONTINUE) == (State.RUNNING, "done", None)
+    assert lc.resolve_turn(State.RUNNING, TurnOutcome.DECOMPOSED) == (State.RUNNING, "done", None)
+    assert lc.resolve_turn(State.RUNNING, TurnOutcome.BLOCKED) == (State.BLOCKED, "done", None)
+
+
 def test_decomposed_is_non_gated_and_runs():
     # A decompose turn is not human-gated and leaves the goal RUNNING (it now
     # coordinates its children) regardless of the source state.

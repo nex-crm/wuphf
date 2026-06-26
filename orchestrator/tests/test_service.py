@@ -1,4 +1,6 @@
-"""Service-surface tests: /health, /run (dispatch + interrupt), /resume, fail-loud."""
+"""Service-surface tests: /health, /run (dispatch + interrupt), /resume, fail-loud, /run/stream."""
+
+import json
 
 from fastapi.testclient import TestClient
 
@@ -119,3 +121,46 @@ def test_coordinate_schema_version_mismatch_rejected():
     c = _client()
     resp = c.post("/coordinate", json={"schema_version": 999, "goal_id": "G3", "children": []})
     assert resp.status_code == 400
+
+
+def _sse_events(client, body):
+    """POST /run/stream and parse the SSE stream into (event, json-data) pairs."""
+    events = []
+    with client.stream("POST", "/run/stream", json=body) as r:
+        assert r.status_code == 200
+        name = None
+        for line in r.iter_lines():
+            if line.startswith("event:"):
+                name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                events.append((name, json.loads(line.split(":", 1)[1].strip())))
+    return events
+
+
+def test_run_stream_emits_turn_then_review_gate():
+    c = _client(TurnOutcome.SUBMITTED_FOR_REVIEW)
+    evs = _sse_events(c, {"task_id": "s1", "record": {"task_id": "s1", "lifecycle_state": "running"}})
+    names = [n for n, _ in evs]
+    assert names[0] == "start"
+    assert "turn" in names  # live progress streamed
+    assert names[-1] == "result"
+    result = evs[-1][1]
+    assert result["status"] == "interrupted"
+    assert result["projection"]["lifecycle_state"] == "review"
+
+
+def test_run_stream_continue_projects_running():
+    c = _client(TurnOutcome.CONTINUE)
+    evs = _sse_events(c, {"task_id": "s2", "record": {"task_id": "s2", "lifecycle_state": "running"}})
+    result = evs[-1][1]
+    assert result["status"] == "done"
+    assert result["projection"]["lifecycle_state"] == "running"
+
+
+def test_run_stream_non_dispatch_state_runs_no_turn():
+    # A task already in review has nothing to dispatch: stream just projects it.
+    c = _client(TurnOutcome.SUBMITTED_FOR_REVIEW)
+    evs = _sse_events(c, {"task_id": "s3", "record": {"task_id": "s3", "lifecycle_state": "review"}})
+    names = [n for n, _ in evs]
+    assert "turn" not in names
+    assert evs[-1][1]["projection"]["lifecycle_state"] == "review"

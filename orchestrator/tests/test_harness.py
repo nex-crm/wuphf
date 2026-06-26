@@ -96,6 +96,22 @@ def test_decomposed_children_extracts_specs_in_order():
     assert specs[1].depends_on == ("c1",)  # blank dep is dropped
 
 
+def test_fake_harness_stream_turn_yields_text_then_complete():
+    import asyncio
+
+    from orchestrator.harness import FakeHarness
+
+    async def collect():
+        out = []
+        async for ev in FakeHarness(TurnOutcome.SUBMITTED_FOR_REVIEW, text="hi").stream_turn({"lifecycle_state": "running"}):
+            out.append(ev)
+        return out
+
+    evs = asyncio.run(collect())
+    assert evs[0] == {"type": "text", "text": "hi"}
+    assert evs[-1] == {"type": "turn_complete", "outcome": "submitted_for_review", "text": "hi"}
+
+
 def test_decomposed_children_empty_when_no_create():
     t = TurnTranscript(tool_calls=[tc("submit_for_review"), tc("comment")])
     assert t.decomposed_children() == []
