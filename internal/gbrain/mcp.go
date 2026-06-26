@@ -300,12 +300,16 @@ type Hit = SearchResult
 // are tolerant: gbrain returns a superset and missing fields decode to zero
 // values.
 type Page struct {
-	Slug        string         `json:"slug"`
-	Title       string         `json:"title"`
-	Content     string         `json:"content"`
-	Type        string         `json:"type"`
-	Tags        []string       `json:"tags"`
-	Frontmatter map[string]any `json:"frontmatter"`
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+	// Content is the page body. gbrain's get_page returns the body under
+	// "compiled_truth"; "content" is accepted as a fallback for forward
+	// compatibility. GetPage folds compiled_truth into Content after decode.
+	Content       string         `json:"content"`
+	CompiledTruth string         `json:"compiled_truth"`
+	Type          string         `json:"type"`
+	Tags          []string       `json:"tags"`
+	Frontmatter   map[string]any `json:"frontmatter"`
 }
 
 // PageMeta is page metadata as returned by list_pages (no body).
@@ -396,6 +400,9 @@ func (c *Client) GetPage(ctx context.Context, slug string) (Page, error) {
 	}
 	if err := decodeJSON(raw, &page); err != nil {
 		return page, fmt.Errorf("decode gbrain get_page: %w", err)
+	}
+	if page.Content == "" {
+		page.Content = page.CompiledTruth
 	}
 	return page, nil
 }

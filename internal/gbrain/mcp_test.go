@@ -122,6 +122,22 @@ func TestClient_GetPage(t *testing.T) {
 	}
 }
 
+func TestClient_GetPageCompiledTruth(t *testing.T) {
+	// gbrain's real get_page returns the body under "compiled_truth", not
+	// "content" (verified against live gbrain serve). GetPage must fold it into
+	// Content. Regression guard for the live-validation fix.
+	c := startFakeClient(t, fakeServerConfig{
+		getPageText: `{"slug":"rrf","title":"RRF","compiled_truth":"Reciprocal Rank Fusion blends rankings.","type":"concept","tags":["retrieval"]}`,
+	})
+	page, err := c.GetPage(context.Background(), "rrf")
+	if err != nil {
+		t.Fatalf("GetPage: %v", err)
+	}
+	if page.Content != "Reciprocal Rank Fusion blends rankings." {
+		t.Errorf("expected Content folded from compiled_truth, got %q", page.Content)
+	}
+}
+
 func TestClient_GetPageRequiresSlug(t *testing.T) {
 	c := startFakeClient(t, fakeServerConfig{})
 	if _, err := c.GetPage(context.Background(), "  "); err == nil {
