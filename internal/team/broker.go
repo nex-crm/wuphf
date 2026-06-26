@@ -170,7 +170,6 @@ type Broker struct {
 	wikiCategoriesSubscribers map[int]chan WikiCategoriesUpdatedEvent
 	governorSubscribers       map[int]chan governorStatus
 	governor                  *governor
-	headlessCtl               headlessDispatchController
 	wikiWorker                *WikiWorker
 	wikiInitMu                sync.Mutex
 	wikiInitErr               error
@@ -437,8 +436,6 @@ func NewBrokerAt(statePath string) *Broker {
 		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
-		governorSubscribers: make(map[int]chan governorStatus),
-		governor:            newGovernor(loadGovernorConfig(), 0, 0),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		userInboxCursors:    make(map[string]InboxCursor),
 		memberPresence:      make(map[string]memberPresenceRecord),
@@ -474,12 +471,7 @@ func NewBrokerAt(statePath string) *Broker {
 	// existing (or default) prefix if the registry isn't readable.
 	b.refreshIDPrefixFromWorkspaceLocked()
 	b.mu.Unlock()
-	// Baseline the governor to any usage restored from the state file so a new
-	// session doesn't trip an instant budget pause on its first turn.
-	if b.governor != nil {
-		tok, cost := b.sessionUsageSnapshot()
-		b.governor.rebaseline(tok, cost)
-	}
+	b.initGovernor()
 	b.stopCh = make(chan struct{})
 	if activityWatchdogEnabled {
 		// Watchdog: reap agents stuck in "active"/"thinking" when the spawn

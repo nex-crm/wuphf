@@ -25,30 +25,25 @@ const (
 	governorMaxAddCostUsd = 1000.0
 )
 
-// headlessDispatchController is the narrow cancellation surface the governor's
-// Stop action uses to interrupt in-flight headless turns. The Launcher
-// implements it (CancelHeadlessTurns); wired via SetHeadlessDispatchController.
-// Deliberately separate from launcherDrainer (which fully drains + exits) so
-// Stop is resumable — it cancels the current turn but leaves workers parked on
-// the governor gate, ready to continue.
-type headlessDispatchController interface {
-	// CancelHeadlessTurns cancels in-flight turns. slug == "" cancels all.
-	CancelHeadlessTurns(slug string)
-}
-
-// SetHeadlessDispatchController wires the launcher's cancel hook. Called at
-// startup before HTTP traffic; nil means Stop still pauses dispatch but cannot
-// cancel an already-running turn (it drains at its per-turn timeout instead).
+// SetHeadlessDispatchController wires the launcher's cancel hook (used by Stop
+// to interrupt in-flight turns). Deliberately separate from launcherDrainer
+// (which fully drains + exits) so Stop is resumable — it cancels the current
+// turn but leaves workers parked on the governor gate. nil means Stop still
+// pauses dispatch but cannot cancel an already-running turn.
 func (b *Broker) SetHeadlessDispatchController(c headlessDispatchController) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.headlessCtl = c
+	if b == nil || b.governor == nil {
+		return
+	}
+	b.governor.setController(c)
 }
 
-func (b *Broker) headlessController() headlessDispatchController {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.headlessCtl
+// initGovernor creates the session governor and baselines it to any usage
+// restored from the state file, so a new session doesn't trip an instant budget
+// pause on its first turn. Called once from NewBrokerAt after state load.
+func (b *Broker) initGovernor() {
+	b.governor = newGovernor(loadGovernorConfig(), 0, 0)
+	tok, cost := b.sessionUsageSnapshot()
+	b.governor.rebaseline(tok, cost)
 }
 
 // sessionUsageSnapshot returns the current session's cumulative tokens and cost
@@ -107,9 +102,7 @@ func (b *Broker) GovernorStop(slug string) {
 		return
 	}
 	b.governor.pauseManual(pauseStop)
-	if ctl := b.headlessController(); ctl != nil {
-		ctl.CancelHeadlessTurns(strings.TrimSpace(slug))
-	}
+	b.governor.cancelInFlight(strings.TrimSpace(slug))
 	b.publishGovernorEvent()
 }
 

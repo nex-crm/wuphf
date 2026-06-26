@@ -30,6 +30,16 @@ import (
 	"time"
 )
 
+// headlessDispatchController is the narrow cancellation surface the governor's
+// Stop uses to interrupt in-flight headless turns. The Launcher implements it
+// (CancelHeadlessTurns); wired via Broker.SetHeadlessDispatchController. It
+// lives on the governor (not the broker) so the "stop cancels in-flight"
+// mechanism is co-located with the pause state it belongs to.
+type headlessDispatchController interface {
+	// CancelHeadlessTurns cancels in-flight turns. slug == "" cancels all.
+	CancelHeadlessTurns(slug string)
+}
+
 // pauseReason tags why dispatch is paused so the UI can explain it.
 type pauseReason string
 
@@ -123,6 +133,28 @@ type governor struct {
 	turns      int
 	baseTokens int
 	baseCost   float64
+
+	// ctl cancels in-flight turns on Stop. nil in unit tests and until the
+	// launcher wires it.
+	ctl headlessDispatchController
+}
+
+// setController wires the in-flight cancellation hook used by Stop.
+func (g *governor) setController(c headlessDispatchController) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ctl = c
+}
+
+// cancelInFlight cancels in-flight turns (slug == "" = all) if a controller is
+// wired. Safe to call when none is.
+func (g *governor) cancelInFlight(slug string) {
+	g.mu.Lock()
+	ctl := g.ctl
+	g.mu.Unlock()
+	if ctl != nil {
+		ctl.CancelHeadlessTurns(slug)
+	}
 }
 
 func newGovernor(cfg governorConfig, baseTokens int, baseCost float64) *governor {
