@@ -95,8 +95,12 @@ key-free; install the SDK + set a key for real `ClaudeAgentHarness` turns.
   pure `classify_outcome` keyed on the agent's real `team_task` actions. Live runs
   need `pip install claude-agent-sdk` + a key; without the SDK the service degrades
   to `FakeHarness`.
-- **SSE streaming** of incremental events (the service returns the terminal StepResult today).
-- **CI wiring** (pytest + golden wire fixtures) scoped to `orchestrator/**`.
+- ~~**SSE streaming**~~ — **done.** `POST /run/stream` emits SSE: `start`, live `turn`
+  events (tool_use/text as the agent acts), then a terminal `result` carrying the same
+  projection `/run` returns. Turn→state resolution is shared via `lifecycle.resolve_turn`
+  (composes the same gate/continue functions the graph uses), so streamed and non-streamed
+  results agree. Go consumer: `DispatchClient.RunStream`.
+- **CI wiring** (pytest) scoped to `orchestrator/**`.
 
 ## P1 policy deviations (revisited in P2/P3)
 

@@ -20,6 +20,7 @@ package provider
 // SlackProviderBinding.BotTokenEnv.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -211,6 +212,87 @@ func (c *DispatchClient) Run(ctx context.Context, req DispatchRequest) (*StepRes
 		req.SchemaVersion = OrchestratorSchemaVersion
 	}
 	return c.postStep(ctx, "/run", req)
+}
+
+// RunStream dispatches a step against the streaming endpoint (POST /run/stream)
+// and consumes the SSE event stream. onEvent (optional) is called for each
+// intermediate "turn" event with its raw JSON data, for live observability; the
+// terminal "result" event is decoded into the returned StepResult. The result is
+// identical to what Run would return — streaming only adds the live events.
+func (c *DispatchClient) RunStream(ctx context.Context, req DispatchRequest, onEvent func(event string, data []byte)) (*StepResult, error) {
+	if strings.TrimSpace(req.TaskID) == "" {
+		return nil, errors.New("deepagents: RunStream requires a task_id")
+	}
+	if req.SchemaVersion == 0 {
+		req.SchemaVersion = OrchestratorSchemaVersion
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("deepagents: marshal /run/stream request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/run/stream", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("deepagents: build /run/stream request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("deepagents: POST %s/run/stream: %w (is the orchestrator sidecar running?)", c.baseURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return nil, fmt.Errorf("deepagents: HTTP %d from %s/run/stream: %s", resp.StatusCode, c.baseURL, strings.TrimSpace(string(snippet)))
+	}
+
+	// Parse the SSE stream: "event:" + "data:" lines, dispatched on a blank line.
+	var result *StepResult
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	var event string
+	var data string
+	flush := func() error {
+		if data == "" {
+			event = ""
+			return nil
+		}
+		if event == "result" {
+			var sr StepResult
+			if err := json.Unmarshal([]byte(data), &sr); err != nil {
+				return fmt.Errorf("deepagents: decode /run/stream result: %w", err)
+			}
+			result = &sr
+		} else if onEvent != nil {
+			onEvent(event, []byte(data))
+		}
+		event, data = "", ""
+		return nil
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "":
+			if err := flush(); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(line, "event:"):
+			event = strings.TrimSpace(line[len("event:"):])
+		case strings.HasPrefix(line, "data:"):
+			data = strings.TrimSpace(line[len("data:"):])
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("deepagents: read /run/stream: %w", err)
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, errors.New("deepagents: /run/stream ended without a result event")
+	}
+	return result, nil
 }
 
 // Resume resolves a pending human gate on an interrupted thread (POST /resume)

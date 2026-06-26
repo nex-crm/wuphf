@@ -22,6 +22,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
 from typing import Protocol
 
 from .lifecycle import State, TurnOutcome
@@ -39,6 +40,12 @@ class TurnResult:
 
 class Harness(Protocol):
     def run_turn(self, task: TaskRun) -> TurnResult:  # pragma: no cover - protocol
+        ...
+
+    def stream_turn(self, task: TaskRun) -> AsyncIterator[dict]:  # pragma: no cover - protocol
+        """Async-iterate a turn's events. Each yielded dict has a "type": "tool_use"
+        / "text" for live progress, and a final {"type": "turn_complete", "outcome",
+        "text"} carrying the classified outcome. Powers POST /run/stream (SSE)."""
         ...
 
 
@@ -168,6 +175,10 @@ class FakeHarness:
     def run_turn(self, task: TaskRun) -> TurnResult:
         return TurnResult(outcome=self._outcome, text=self._text)
 
+    async def stream_turn(self, task: TaskRun) -> AsyncIterator[dict]:
+        yield {"type": "text", "text": self._text}
+        yield {"type": "turn_complete", "outcome": self._outcome.value, "text": self._text}
+
 
 class ClaudeAgentHarness:
     """Drives Claude Code for one turn via the Claude Agent SDK, wired to teammcp.
@@ -254,6 +265,33 @@ class ClaudeAgentHarness:
         options = self._build_options(task.get("system_prompt", ""), _permission_mode_for(state))  # pragma: no cover
         transcript = asyncio.run(self._collect_transcript(prompt, options))  # pragma: no cover - needs SDK + key
         return TurnResult(outcome=classify_outcome(state, transcript), text=transcript.text)  # pragma: no cover
+
+    async def stream_turn(self, task: TaskRun) -> AsyncIterator[dict]:  # pragma: no cover - needs SDK + key
+        from claude_agent_sdk import query  # lazy
+
+        self._require_sdk()
+        state = State(task["lifecycle_state"])
+        prompt = _prompt_for(task)
+        options = self._build_options(task.get("system_prompt", ""), _permission_mode_for(state))
+        tool_calls: list[ToolCall] = []
+        texts: list[str] = []
+        async for message in query(prompt=prompt, options=options):
+            for block in getattr(message, "content", None) or []:
+                kind = type(block).__name__
+                if kind == "ToolUseBlock":
+                    raw = getattr(block, "input", None)
+                    args = raw if isinstance(raw, dict) else {}
+                    action = str(args.get("action", ""))
+                    name = getattr(block, "name", "")
+                    tool_calls.append(ToolCall(name=name, action=action, args=args))
+                    yield {"type": "tool_use", "name": name, "action": action}
+                elif kind == "TextBlock":
+                    text = getattr(block, "text", "")
+                    if text:
+                        texts.append(text)
+                        yield {"type": "text", "text": text}
+        transcript = TurnTranscript(tool_calls=tool_calls, text="\n".join(texts))
+        yield {"type": "turn_complete", "outcome": classify_outcome(state, transcript).value, "text": transcript.text}
 
 
 def build_harness(model: str, mcp: dict[str, McpServer]) -> Harness:

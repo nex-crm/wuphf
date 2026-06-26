@@ -240,6 +240,21 @@ def apply_turn_outcome(state: State, outcome: TurnOutcome) -> State:
     raise ValueError(f"{outcome} is a gated outcome; route through a human gate")
 
 
+def resolve_turn(state: State, outcome: TurnOutcome) -> tuple[State, str, dict | None]:
+    """Map (current state, turn outcome) -> (new_state, status, interrupt). Composes
+    the same gate/continue functions the graph nodes use (gate_for_outcome +
+    gate_pending_state, else apply_turn_outcome), so the streaming path and the
+    graph agree by construction. status is 'interrupted' at a human gate (with an
+    interrupt payload), else 'done'."""
+    gate = gate_for_outcome(state, outcome)
+    if gate is not None:
+        return gate_pending_state(gate), "interrupted", {
+            "type": "approval_required",
+            "gate_kind": gate.value,
+        }
+    return apply_turn_outcome(state, outcome), "done", None
+
+
 def apply_human_decision(gate: GateKind, decision: HumanDecision) -> State:
     if decision is HumanDecision.REJECT:
         return State.REJECTED

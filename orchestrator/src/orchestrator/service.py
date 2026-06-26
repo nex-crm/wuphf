@@ -13,14 +13,16 @@ next increments; this skeleton is the contract surface they target.
 
 from __future__ import annotations
 
+import json
 from typing import Callable
 
 from fastapi import FastAPI, HTTPException
+from sse_starlette.sse import EventSourceResponse
 
 from .coordination import TaskGraph, coordinate
 from .graph import build_graph, drive
 from .harness import FakeHarness, Harness, build_harness
-from .lifecycle import State
+from .lifecycle import Route, State, TurnOutcome, resolve_turn, route
 from .runstate import from_broker_record, to_projection
 from .wire import (
     SCHEMA_VERSION,
@@ -88,6 +90,53 @@ def create_app(harness_factory: HarnessFactory = _default_harness_factory) -> Fa
             projection=to_projection(result["state"]),
             interrupt=result.get("interrupt"),
         )
+
+    @app.post("/run/stream")
+    async def run_stream(req: DispatchRequest) -> EventSourceResponse:
+        # Streaming twin of /run: emits SSE events as the turn progresses (tool_use,
+        # text), then a terminal `result` event carrying the same projection /run
+        # returns. The turn-to-state resolution uses lifecycle.resolve_turn, which
+        # composes the same gate/continue functions the graph uses, so the streamed
+        # result matches /run. Re-hydrate model: a gate is projected (review/decision),
+        # not held — the broker resolves it and re-dispatches.
+        _check_schema_version(req.schema_version)
+        run_state = from_broker_record(req.record)
+        run_state["system_prompt"] = req.system_prompt or run_state.get("system_prompt", "")
+        if req.messages:
+            run_state["messages"] = req.messages
+        harness = harness_factory(req)
+
+        def _event(name: str, payload: dict) -> dict:
+            return {"event": name, "data": json.dumps(payload)}
+
+        def _result_event(status: str, state_value: str, interrupt: dict | None) -> dict:
+            run_state["lifecycle_state"] = state_value
+            payload: dict = {
+                "status": status,
+                "thread_id": req.task_id,
+                "projection": to_projection(run_state),
+            }
+            if interrupt is not None:
+                payload["interrupt"] = interrupt
+            return _event("result", payload)
+
+        async def generate():
+            yield _event("start", {"task_id": req.task_id})
+            state = State(run_state["lifecycle_state"])
+            # Fail loud / nothing-to-run paths project the current state, no turn.
+            if state is State.UNKNOWN or route(state) is not Route.DISPATCH:
+                yield _result_event("done", state.value, None)
+                return
+            outcome = TurnOutcome.CONTINUE
+            async for ev in harness.stream_turn(run_state):
+                if ev.get("type") == "turn_complete":
+                    outcome = TurnOutcome(ev["outcome"])
+                else:
+                    yield _event("turn", ev)
+            new_state, status, interrupt = resolve_turn(state, outcome)
+            yield _result_event(status, new_state.value, interrupt)
+
+        return EventSourceResponse(generate())
 
     @app.post("/coordinate", response_model=CoordinationPlan)
     def coordinate_goal(req: CoordinateRequest) -> CoordinationPlan:

@@ -326,6 +326,59 @@ func TestDispatchClientCoordinate_SurfacesCycle(t *testing.T) {
 	}
 }
 
+func TestDispatchClientRunStream_ConsumesSSE(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/run/stream" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// Mirror the orchestrator's SSE shape: start, a turn event, then result.
+		io.WriteString(w, "event: start\ndata: {\"task_id\":\"t1\"}\n\n")
+		io.WriteString(w, "event: turn\ndata: {\"type\":\"tool_use\",\"name\":\"mcp__office__team_task\",\"action\":\"submit_for_review\"}\n\n")
+		io.WriteString(w, "event: result\ndata: {\"status\":\"interrupted\",\"thread_id\":\"t1\",\"projection\":{\"task_id\":\"t1\",\"lifecycle_state\":\"review\"},\"interrupt\":{\"gate_kind\":\"review\"}}\n\n")
+	}))
+	defer srv.Close()
+	c := NewDispatchClient(srv.URL, WithHTTPClient(srv.Client()))
+
+	var turnActions []string
+	res, err := c.RunStream(context.Background(),
+		DispatchRequest{TaskID: "t1", Record: map[string]any{"lifecycle_state": "running"}},
+		func(event string, data []byte) {
+			var ev map[string]any
+			_ = json.Unmarshal(data, &ev)
+			if event == "turn" {
+				if a, _ := ev["action"].(string); a != "" {
+					turnActions = append(turnActions, a)
+				}
+			}
+		})
+	if err != nil {
+		t.Fatalf("RunStream: %v", err)
+	}
+	if res.Status != StepStatusInterrupted || res.Projection.LifecycleState != "review" {
+		t.Fatalf("result = %+v, want interrupted/review", res)
+	}
+	if len(turnActions) != 1 || turnActions[0] != "submit_for_review" {
+		t.Fatalf("turn events = %v, want [submit_for_review]", turnActions)
+	}
+}
+
+func TestDispatchClientRunStream_NoResultFailsLoud(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: start\ndata: {\"task_id\":\"t1\"}\n\n")
+	}))
+	defer srv.Close()
+	c := NewDispatchClient(srv.URL, WithHTTPClient(srv.Client()))
+	if _, err := c.RunStream(context.Background(), DispatchRequest{TaskID: "t1", Record: map[string]any{}}, nil); err == nil {
+		t.Fatal("expected error when the stream ends without a result event")
+	}
+}
+
 func TestProjectionWireShape(t *testing.T) {
 	t.Parallel()
 	const fromPython = `{"task_id":"t","lifecycle_state":"approved","pipeline_stage":"ship","review_state":"approved","status":"done","blocked":false}`
