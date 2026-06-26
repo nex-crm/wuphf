@@ -113,10 +113,11 @@ func (l *Launcher) dispatchTaskViaOrchestrator(slug string, task teamTask) {
 	defer cancel()
 
 	req := provider.DispatchRequest{
-		TaskID: taskID,
-		Record: orchestratorRecord(task),
-		Model:  strings.TrimSpace(task.Model),
-		MCP:    orchestratorMCPServers(),
+		TaskID:   taskID,
+		Record:   orchestratorRecord(task),
+		Model:    strings.TrimSpace(task.Model),
+		Messages: orchestratorTaskMessages(task),
+		MCP:      orchestratorMCPServers(),
 	}
 	result, err := l.orchestrator.Run(ctx, req)
 	if err != nil {
@@ -423,6 +424,30 @@ func orchestratorRecord(task teamTask) map[string]any {
 	}
 }
 
+// orchestratorTaskMessages carries the task's actual instructions to the inner
+// harness as the turn prompt. Without this the agent only gets the harness's
+// generic fallback directive and cannot act on (or decompose) the specific task.
+// Empty when the task has neither a title nor details (the harness then falls
+// back to its default directive).
+func orchestratorTaskMessages(task teamTask) []map[string]any {
+	parts := make([]string, 0, 3)
+	// Lead with the task's own id so the agent can self-reference it — e.g. to set
+	// parent_issue_id when decomposing into sub-tasks.
+	if id := strings.TrimSpace(task.ID); id != "" {
+		parts = append(parts, "You are the owner of task "+id+".")
+	}
+	if t := strings.TrimSpace(task.Title); t != "" {
+		parts = append(parts, t)
+	}
+	if d := strings.TrimSpace(task.Details); d != "" {
+		parts = append(parts, d)
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return []map[string]any{{"role": "user", "content": strings.Join(parts, "\n\n")}}
+}
+
 // orchestratorMCPServers names the teammcp server the orchestrator launches for
 // the inner harness. Secrets cross by env-var NAME only (EnvPassthrough): the
 // orchestrator process forwards these from its own env to the teammcp
@@ -436,9 +461,14 @@ func orchestratorMCPServers() map[string]provider.McpServer {
 	}
 	return map[string]provider.McpServer{
 		"wuphf-office": {
-			Command:        command,
-			Args:           []string{"mcp-team"},
-			EnvPassthrough: []string{"WUPHF_BROKER_TOKEN", "WUPHF_BROKER_BASE", "WUPHF_BROKER_STATE"},
+			Command: command,
+			Args:    []string{"mcp-team"},
+			// Names the mcp-team subprocess actually reads to reach the broker
+			// (server_broker_client.go: authHeaders + brokerBaseURL via brokeraddr).
+			// The orchestrator resolves these from its own env and injects the
+			// values — never the values on the wire. Mirrors the headless path
+			// (prompts.go / headless_*_runner.go), which sets the same two.
+			EnvPassthrough: []string{"WUPHF_BROKER_TOKEN", "WUPHF_BROKER_BASE_URL"},
 		},
 	}
 }
