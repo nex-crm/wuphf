@@ -186,6 +186,7 @@ type Broker struct {
 	teamLearningLog           *LearningLog
 	playbookSynthesizer       *PlaybookSynthesizer
 	pamDispatcher             *PamDispatcher
+	compileSweep              *CompileSweep
 	// sourceCaptureDispatcher drains S2 source-capture jobs off-lock (see
 	// source_capture.go). Held as an atomic pointer so captureSource can read
 	// it WITHOUT b.mu — capture hooks fire while b.mu is held, so the read
@@ -830,6 +831,7 @@ func (b *Broker) Stop() {
 	synth := b.entitySynthesizer
 	pbSynth := b.playbookSynthesizer
 	pamDisp := b.pamDispatcher
+	compileSweep := b.compileSweep
 	compressor := b.wikiCompressor
 	humanWikiWriter := b.humanWikiWriter
 	b.mu.Unlock()
@@ -841,6 +843,9 @@ func (b *Broker) Stop() {
 	}
 	if pamDisp != nil {
 		pamDisp.Stop()
+	}
+	if compileSweep != nil {
+		compileSweep.Stop(2 * time.Second)
 	}
 	if compressor != nil {
 		compressor.Stop()

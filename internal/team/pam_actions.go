@@ -21,7 +21,26 @@ const (
 	// PamActionEnrichArticle: pull fresh info + media from the web and fold it
 	// into the article body. First action shipped — v1 of Pam's desk menu.
 	PamActionEnrichArticle PamActionID = "enrich_article"
+
+	// PamActionCompileWiki: recompile the whole source layer into team/
+	// articles via the deterministic compile engine. Unlike enrich_article,
+	// this is NOT an LLM sub-process over a single article — it is a global
+	// engine call (NewCompiler / Compile) handled by the dispatcher's compile
+	// hook, so it has no article path and its prompt fields are unused.
+	PamActionCompileWiki PamActionID = "compile_wiki"
 )
+
+// pamGlobalTarget is the synthetic path used for global (article-less) Pam
+// actions so the existing event/coalesce plumbing — which keys on a non-empty
+// path — works unchanged.
+const pamGlobalTarget = "wiki"
+
+// pamActionIsGlobal reports whether an action operates on the whole wiki rather
+// than a single article. Global actions do not require an article path and are
+// dispatched through the compile hook instead of the per-article LLM path.
+func pamActionIsGlobal(id PamActionID) bool {
+	return id == PamActionCompileWiki
+}
 
 // PamAction describes a single job Pam can run. The prompt template is a
 // plain fmt.Sprintf template: %s is replaced with the article body.
@@ -62,6 +81,15 @@ var pamActions = []PamAction{
 Use web search and web fetch to find new, reliable information and relevant media for this article. Update the body with what you find. Output the full updated markdown.`,
 		AllowedTools:  []string{"WebSearch", "WebFetch", "Read"},
 		CommitMsgTmpl: "archivist: enrich %s with web data",
+	},
+	{
+		ID:    PamActionCompileWiki,
+		Label: "Recompile the wiki",
+		// Prompt fields are intentionally empty: compile_wiki is a global
+		// engine call dispatched through the compile hook, never the LLM
+		// one-shot path, so no system/user prompt is rendered. The commit
+		// messages are authored inside the compile engine itself.
+		CommitMsgTmpl: "archivist: recompile wiki",
 	},
 }
 

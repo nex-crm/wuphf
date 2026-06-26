@@ -45,6 +45,17 @@ const MaxPamQueue = 16
 // LLM produces runaway output and to keep git objects small.
 const MaxPamOutputSize = 128 * 1024
 
+// PamCompileTimeout bounds a Pam-triggered full wiki recompile. A compile fans
+// out bounded-concurrency LLM calls across every changed source + page, so it
+// needs far more headroom than a single-article enrichment. Mirrors the
+// archive-sweep ceiling.
+const PamCompileTimeout = 10 * time.Minute
+
+// ErrPamCompileUnavailable is returned when a compile_wiki job runs but no
+// compile hook was wired (e.g. the wiki worker wasn't ready at dispatcher
+// construction).
+var ErrPamCompileUnavailable = errors.New("pam: compile hook not configured")
+
 // ErrPamQueueSaturated is returned by Enqueue when the buffered channel is
 // full. Callers surface as 429.
 var ErrPamQueueSaturated = errors.New("pam: queue saturated")
@@ -140,6 +151,13 @@ type PamDispatcher struct {
 	publisher pamEventPublisher
 	cfg       PamDispatcherConfig
 
+	// compile runs a full wiki recompile for the global PamActionCompileWiki
+	// action. It bypasses the per-article LLM runner because compile is a
+	// deterministic engine call, not a single-article sub-process. nil until
+	// the broker wires it via SetCompileHook; a compile_wiki job with no hook
+	// fails with ErrPamCompileUnavailable. Guarded by mu.
+	compile func(context.Context) (CompileResult, error)
+
 	mu sync.Mutex
 	// jobs is the buffered channel the drain goroutine pulls from.
 	jobs chan PamJob
@@ -174,6 +192,15 @@ func NewPamDispatcher(worker pamWiki, publisher pamEventPublisher, cfg PamDispat
 		inflight:  make(map[string]uint64),
 		queued:    make(map[string]uint64),
 	}
+}
+
+// SetCompileHook wires the full-wiki recompile used by PamActionCompileWiki.
+// The broker sets this to a live Compiler's Compile method. Safe to call
+// before or after Start.
+func (d *PamDispatcher) SetCompileHook(fn func(context.Context) (CompileResult, error)) {
+	d.mu.Lock()
+	d.compile = fn
+	d.mu.Unlock()
 }
 
 // Start launches the drain goroutine. Idempotent.
@@ -213,11 +240,18 @@ func pamJobKey(action PamActionID, path string) string {
 // the existing job's id is returned — zero is reserved for errors.
 func (d *PamDispatcher) Enqueue(action PamActionID, articlePath, requestBy string) (uint64, error) {
 	articlePath = strings.TrimSpace(articlePath)
-	if articlePath == "" {
-		return 0, fmt.Errorf("pam: empty article path")
-	}
 	if _, err := LookupPamAction(action); err != nil {
 		return 0, err
+	}
+	// Global actions (e.g. compile_wiki) operate on the whole wiki, so they
+	// carry no article path. Use the synthetic target so the event + coalesce
+	// plumbing — which keys on a non-empty path — works unchanged. The
+	// per-article path requirement still applies to enrich and friends.
+	if pamActionIsGlobal(action) && articlePath == "" {
+		articlePath = pamGlobalTarget
+	}
+	if articlePath == "" {
+		return 0, fmt.Errorf("pam: empty article path")
 	}
 	d.mu.Lock()
 	if !d.running {
@@ -337,6 +371,12 @@ func (d *PamDispatcher) execute(ctx context.Context, job PamJob) error {
 		return err
 	}
 
+	// Global engine action: route through the compile hook instead of the
+	// per-article LLM runner. The compile engine owns its own reads/commits.
+	if job.Action == PamActionCompileWiki {
+		return d.executeCompile(ctx, job)
+	}
+
 	articleBytes, err := d.worker.ReadArticle(job.ArticlePath)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrPamArticleMissing, job.ArticlePath)
@@ -381,6 +421,56 @@ func (d *PamDispatcher) execute(ctx context.Context, job PamJob) error {
 			ArticlePath: job.ArticlePath,
 			CommitSHA:   sha,
 			FinishedAt:  time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+	return nil
+}
+
+// executeCompile handles the global PamActionCompileWiki job: it invokes the
+// wired compile hook (a real Compiler.Compile in production) instead of the
+// LLM one-shot runner, then publishes the standard Pam started/done events. The
+// compile engine performs its own article reads + commits, so there is no
+// ReadArticle / Enqueue here. A nil hook (worker wasn't ready at construction)
+// is surfaced as ErrPamCompileUnavailable.
+func (d *PamDispatcher) executeCompile(ctx context.Context, job PamJob) error {
+	d.mu.Lock()
+	compile := d.compile
+	d.mu.Unlock()
+	if compile == nil {
+		return ErrPamCompileUnavailable
+	}
+
+	if d.publisher != nil {
+		d.publisher.PublishPamActionStarted(PamActionStartedEvent{
+			JobID:       job.ID,
+			Action:      string(job.Action),
+			ArticlePath: job.ArticlePath,
+			RequestBy:   job.RequestBy,
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, PamCompileTimeout)
+	defer cancel()
+
+	result, err := compile(callCtx)
+	if err != nil {
+		return fmt.Errorf("compile: %w", err)
+	}
+
+	log.Printf("pam: recompile complete - sources=%d concepts=%d pages_written=%d pages_skipped=%d errors=%d",
+		result.SourcesRead, result.Concepts, result.PagesWritten, result.PagesSkipped, len(result.Errors))
+
+	if d.publisher != nil {
+		d.publisher.PublishPamActionDone(PamActionDoneEvent{
+			JobID:       job.ID,
+			Action:      string(job.Action),
+			ArticlePath: job.ArticlePath,
+			// No single commit SHA: a recompile writes many article commits via
+			// the worker queue. The done event signals completion; the tally is
+			// logged server-side.
+			CommitSHA:  "",
+			FinishedAt: time.Now().UTC().Format(time.RFC3339),
 		})
 	}
 	return nil
