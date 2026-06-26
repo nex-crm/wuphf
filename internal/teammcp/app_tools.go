@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/nex-crm/wuphf/internal/config"
 )
 

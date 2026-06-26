@@ -9,8 +9,8 @@
 // minutes of "Building…" dead air. The same files remain on disk for the agent
 // to read directly; this embed is the single source of truth either way.
 //
-// go:embed cannot reference parent directories, so this package lives in
-// templates/ alongside the assets it embeds.
+// The go:embed directive cannot reference parent directories, so this package
+// lives in templates/ alongside the assets it embeds.
 package templates
 
 import "embed"

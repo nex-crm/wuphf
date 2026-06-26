@@ -244,7 +244,7 @@ func (m *appDevManager) gcLoop() {
 // known before the dev server — or even its install — is done) and serves it.
 // The dev process is spawned in run().
 func (s *appDevServer) start() error {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("allocate preview port: %w", err)
 	}
@@ -284,7 +284,7 @@ func (s *appDevServer) installIfNeeded() error {
 	// --ignore-scripts: agent-authored package.json is not host-protected, so a
 	// lifecycle hook would run arbitrary agent code in the broker process. Matches
 	// buildAppBundle's install step.
-	cmd := exec.Command("bun", "install", "--ignore-scripts")
+	cmd := exec.CommandContext(context.Background(), "bun", "install", "--ignore-scripts")
 	cmd.Dir = s.srcDir
 	configureHeadlessProcess(cmd)
 	return s.pipeAndWait(cmd, nil)
@@ -312,7 +312,7 @@ func devTreeFresh(srcDir string) bool {
 
 // runDev spawns `bun run dev`, scrapes the Vite origin (flips ready), and waits.
 func (s *appDevServer) runDev() {
-	cmd := exec.Command("bun", "run", "dev")
+	cmd := exec.CommandContext(context.Background(), "bun", "run", "dev")
 	cmd.Dir = s.srcDir
 	cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_HMR_CLIENT_PORT=%d", s.proxyPortValue()))
 	configureHeadlessProcess(cmd)
