@@ -124,6 +124,7 @@ describe("<GovernorControlView>", () => {
       <GovernorControlView
         status={status({ paused: false, reason: "" })}
         busy={false}
+        showMeter={true}
         onPause={onPause}
         onStop={onStop}
       />,
@@ -133,5 +134,20 @@ describe("<GovernorControlView>", () => {
     fireEvent.click(screen.getByText("Stop"));
     expect(onPause).toHaveBeenCalledOnce();
     expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("hides the meter but keeps Pause/Stop when checkpoints are disabled", () => {
+    render(
+      <GovernorControlView
+        status={status({ paused: false, reason: "", disabled: true })}
+        busy={false}
+        showMeter={false}
+        onPause={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/turns ·/)).toBeNull();
+    expect(screen.getByText("Pause")).toBeTruthy();
+    expect(screen.getByText("Stop")).toBeTruthy();
   });
 });

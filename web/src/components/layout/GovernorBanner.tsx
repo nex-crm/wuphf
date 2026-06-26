@@ -4,13 +4,6 @@ import type { GovernorStatus } from "../../api/governor";
 import { useGovernor, useGovernorAction } from "../../hooks/useGovernor";
 import { reasonDetail, reasonHeadline } from "./governorFormat";
 
-// How much extra budget "Continue +budget" grants per click. Matches the
-// session defaults so one click roughly doubles a fresh window. The reason
-// "budget" covers both the token and cost ceilings, so bump both — otherwise a
-// cost-triggered pause would re-trip on the next turn.
-const BUDGET_BUMP_TOKENS = 150_000;
-const BUDGET_BUMP_COST_USD = 3;
-
 interface GovernorBannerViewProps {
   status: GovernorStatus;
   busy: boolean;
@@ -102,16 +95,19 @@ export function GovernorBanner() {
   const { mutate, isPending } = useGovernorAction();
 
   const onResume = useCallback(() => mutate({ action: "resume" }), [mutate]);
+  // Grant another full window from the live (configurable) limits rather than a
+  // hardcoded amount, so the bump tracks ops changes and relieves both the
+  // token and cost ceilings.
   const onResumeMore = useCallback(
     () =>
       mutate({
         action: "resume_more",
         options: {
-          addTokens: BUDGET_BUMP_TOKENS,
-          addCostUsd: BUDGET_BUMP_COST_USD,
+          addTokens: status?.maxTokens ?? 0,
+          addCostUsd: status?.maxCostUsd ?? 0,
         },
       }),
-    [mutate],
+    [mutate, status?.maxTokens, status?.maxCostUsd],
   );
   const onStop = useCallback(() => mutate({ action: "stop" }), [mutate]);
 

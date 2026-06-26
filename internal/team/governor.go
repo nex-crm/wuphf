@@ -198,11 +198,18 @@ func (g *governor) pauseManual(reason pauseReason) {
 // pauseLocked flips into the paused state. resumeCh is already open (from
 // construction or the previous resume), so parked workers will block on it.
 func (g *governor) pauseLocked(reason pauseReason) {
+	if reason == pauseNone {
+		return
+	}
 	if !g.paused {
 		g.paused = true
 		g.pausedAt = time.Now()
 	}
-	g.reason = reason
+	// Never downgrade a Stop: a later or stale pause/budget/turn reason must not
+	// lose the stopped state (Stop already cancelled in-flight work).
+	if g.reason != pauseStop || reason == pauseStop {
+		g.reason = reason
+	}
 }
 
 // resume clears any pause, wakes parked workers, and rebaselines the checkpoint
@@ -238,10 +245,13 @@ func (g *governor) rebaseline(tokens int, cost float64) {
 func (g *governor) bumpBudget(addTokens int, addCost float64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if addTokens > 0 {
+	// Only raise a threshold that is currently enabled. A 0 threshold means
+	// "this gate is disabled" (config contract); resume_more must not silently
+	// turn it on.
+	if addTokens > 0 && g.cfg.MaxSessionTokens > 0 {
 		g.cfg.MaxSessionTokens += addTokens
 	}
-	if addCost > 0 {
+	if addCost > 0 && g.cfg.MaxSessionCostUsd > 0 {
 		g.cfg.MaxSessionCostUsd += addCost
 	}
 }

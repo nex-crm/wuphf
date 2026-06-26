@@ -81,7 +81,11 @@ func (b *Broker) governorNoteTurn() {
 	if !tripped {
 		return
 	}
-	b.PostSystemMessage("general", governorPauseMessage(reason, tok, cost), "governor")
+	// Report spend SINCE the last checkpoint, not lifetime session totals — a
+	// rebaseline on resume/startup would otherwise make the notice overstate
+	// "this stretch".
+	st := b.governor.status(tok, cost)
+	b.PostSystemMessage("general", governorPauseMessage(reason, st.TokensSinceCheckpoint, st.CostSinceCheckpoint), "governor")
 	b.publishGovernorEvent()
 }
 
@@ -121,13 +125,21 @@ func (b *Broker) GovernorResume() {
 }
 
 // GovernorResumeMore is "Continue +budget": raise the thresholds for this
-// session, then resume.
-func (b *Broker) GovernorResumeMore(addTokens int, addCost float64) {
+// session, then resume. Bounds are enforced here (not just in the HTTP handler)
+// so every caller gets the same rejection for negative or oversized values.
+func (b *Broker) GovernorResumeMore(addTokens int, addCost float64) error {
 	if b == nil || b.governor == nil {
-		return
+		return nil
+	}
+	if addTokens < 0 || addTokens > governorMaxAddTokens {
+		return fmt.Errorf("addTokens out of range (0..%d)", governorMaxAddTokens)
+	}
+	if addCost < 0 || addCost > governorMaxAddCostUsd {
+		return fmt.Errorf("addCostUsd out of range (0..%g)", governorMaxAddCostUsd)
 	}
 	b.governor.bumpBudget(addTokens, addCost)
 	b.GovernorResume()
+	return nil
 }
 
 // GovernorStatus snapshots the current control state for the HTTP/SSE surface.
@@ -238,15 +250,10 @@ func (b *Broker) handleGovernor(w http.ResponseWriter, r *http.Request) {
 		case "resume":
 			b.GovernorResume()
 		case "resume_more":
-			if req.AddTokens < 0 || req.AddTokens > governorMaxAddTokens {
-				http.Error(w, "addTokens out of range", http.StatusBadRequest)
+			if err := b.GovernorResumeMore(req.AddTokens, req.AddCostUsd); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if req.AddCostUsd < 0 || req.AddCostUsd > governorMaxAddCostUsd {
-				http.Error(w, "addCostUsd out of range", http.StatusBadRequest)
-				return
-			}
-			b.GovernorResumeMore(req.AddTokens, req.AddCostUsd)
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)
 			return

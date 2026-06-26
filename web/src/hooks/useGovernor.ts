@@ -30,12 +30,19 @@ function actionVerb(action: GovernorAction): string {
  */
 export function useGovernor() {
   const brokerConnected = useAppStore((s) => s.brokerConnected);
-  return useQuery<GovernorStatus>({
+  const query = useQuery<GovernorStatus>({
     queryKey: GOVERNOR_QUERY_KEY,
     queryFn: () => getGovernor(),
     enabled: brokerConnected,
     refetchInterval: 30_000,
   });
+  // `enabled: false` stops refetches but still returns the last cached status.
+  // While disconnected, the user can't act on the governor (actions would
+  // fail), so suppress the stale data rather than render a dead control.
+  if (!brokerConnected) {
+    return { ...query, data: undefined };
+  }
+  return query;
 }
 
 interface GovernorActionInput {

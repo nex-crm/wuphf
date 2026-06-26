@@ -155,6 +155,36 @@ func TestGovernorBumpBudget(t *testing.T) {
 	}
 }
 
+func TestGovernorStopNotDowngradedByLaterPause(t *testing.T) {
+	t.Parallel()
+	g := newGovernor(governorConfig{}, 0, 0)
+	g.pauseManual(pauseStop)
+	// A stale/late manual pause must not downgrade the stopped reason.
+	g.pauseManual(pauseManual)
+	if got := g.status(0, 0).Reason; got != pauseStop {
+		t.Fatalf("reason downgraded to %q, want stop preserved", got)
+	}
+	// A turn-count trip while stopped must also not clobber it.
+	g.noteTurnComplete(0, 0)
+	if got := g.status(0, 0).Reason; got != pauseStop {
+		t.Fatalf("reason changed to %q after turn, want stop preserved", got)
+	}
+}
+
+func TestGovernorBumpBudgetDoesNotEnableDisabledGate(t *testing.T) {
+	t.Parallel()
+	// Token gate disabled (0); cost gate enabled.
+	g := newGovernor(governorConfig{MaxSessionTokens: 0, MaxSessionCostUsd: 5}, 0, 0)
+	g.bumpBudget(50_000, 2)
+	st := g.status(0, 0)
+	if st.MaxTokens != 0 {
+		t.Fatalf("disabled token gate was re-enabled to %d", st.MaxTokens)
+	}
+	if st.MaxCostUsd != 7 {
+		t.Fatalf("enabled cost gate = %v, want 7 after +2", st.MaxCostUsd)
+	}
+}
+
 func TestLoadGovernorConfigEnv(t *testing.T) {
 	t.Setenv("WUPHF_BUDGET_MAX_TOKENS", "42000")
 	t.Setenv("WUPHF_BUDGET_MAX_COST_USD", "9.5")

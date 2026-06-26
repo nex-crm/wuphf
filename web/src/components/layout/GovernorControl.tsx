@@ -7,6 +7,9 @@ import { meterSummary } from "./governorFormat";
 interface GovernorControlViewProps {
   status: GovernorStatus;
   busy: boolean;
+  // When auto-pausing is disabled there is no checkpoint window, so the meter is
+  // noise — but the manual Pause/Stop levers must stay available.
+  showMeter: boolean;
   onPause: () => void;
   onStop: () => void;
 }
@@ -18,12 +21,15 @@ interface GovernorControlViewProps {
 export function GovernorControlView({
   status,
   busy,
+  showMeter,
   onPause,
   onStop,
 }: GovernorControlViewProps) {
   return (
     <div className="governor-control" title="Session run control">
-      <span className="governor-control-meter">{meterSummary(status)}</span>
+      {showMeter ? (
+        <span className="governor-control-meter">{meterSummary(status)}</span>
+      ) : null}
       <button
         className="governor-control-btn"
         onClick={onPause}
@@ -49,8 +55,9 @@ export function GovernorControlView({
 /**
  * GovernorControl is the always-available interrupt: a compact live meter
  * (turns · tokens · cost since the last checkpoint) plus Pause and Stop. Lives
- * in the StatusBar. Hidden while paused — the GovernorBanner owns that state —
- * and when auto-pausing is disabled, where the meter would be noise.
+ * in the StatusBar. Hidden while paused — the GovernorBanner owns that state.
+ * When auto-pausing is disabled the meter is suppressed but Pause/Stop remain so
+ * the user can still interrupt the team manually.
  */
 export function GovernorControl() {
   const { data: status } = useGovernor();
@@ -59,14 +66,13 @@ export function GovernorControl() {
   const onPause = useCallback(() => mutate({ action: "pause" }), [mutate]);
   const onStop = useCallback(() => mutate({ action: "stop" }), [mutate]);
 
-  // Hidden while paused (the banner owns that state) and when auto-pausing is
-  // disabled, where the meter would be noise and Pause/Stop are the only levers.
-  if (!status || status.paused || status.disabled) return null;
+  if (!status || status.paused) return null;
 
   return (
     <GovernorControlView
       status={status}
       busy={isPending}
+      showMeter={!status.disabled}
       onPause={onPause}
       onStop={onStop}
     />
