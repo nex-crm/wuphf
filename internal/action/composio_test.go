@@ -782,6 +782,40 @@ func TestWorkflowStepsExposeGenericResult(t *testing.T) {
 	}
 }
 
+// TestComposioRESTResponseCapErrorsCleanly pins the security bound on a single
+// Composio HTTP read: a response larger than composioMaxResponseBytes must
+// surface a CLEAN ERROR, never silently-truncated (and therefore invalid) JSON.
+// The old code kept the truncated prefix, which downstream parsed as an empty /
+// failed result.
+func TestComposioRESTResponseCapErrorsCleanly(t *testing.T) {
+	// One valid-JSON body that, encoded, exceeds the cap. We never want the
+	// caller to receive a truncated prefix of this.
+	huge := strings.Repeat("x", composioMaxResponseBytes+1024)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{"id": "ca_1", "blob": huge}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := &ComposioREST{
+		APIKey:  "cmp_test",
+		UserID:  "ceo@example.com",
+		BaseURL: server.URL,
+		Client:  server.Client(),
+	}
+
+	_, err := client.ListConnections(context.Background(), ListConnectionsOptions{})
+	if err == nil {
+		t.Fatal("oversized response must return a clean error, not truncated JSON")
+	}
+	if !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("expected a size-bound error, got %v", err)
+	}
+}
+
 func TestComposioApplyAuthHeaders(t *testing.T) {
 	t.Run("project key wins and suppresses user-key headers", func(t *testing.T) {
 		c := &ComposioREST{APIKey: "ak_proj", UserAPIKey: "uak_x", OrgID: "ok_1", ProjectID: "pr_1"}

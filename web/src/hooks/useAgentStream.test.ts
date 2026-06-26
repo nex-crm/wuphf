@@ -193,6 +193,22 @@ describe("appendStreamLine", () => {
     }
     expect(lines.length).toBeLessThanOrEqual(50);
   });
+
+  it("honors a raised maxLines so a long build keeps every event", () => {
+    // The build-activity feed reduces the FULL ordered log; with the default 50
+    // cap a tool_use evicted before its tool_result renders a phantom row. A
+    // raised cap must retain all structured events.
+    let lines: StreamLine[] = [];
+    let nextId = 1;
+    for (let i = 0; i < 300; i++) {
+      const result = appendStreamLine(lines, `{"i":${i}}`, { i }, nextId, 5000);
+      lines = result.lines;
+      if (result.usedId) nextId += 1;
+    }
+    expect(lines.length).toBe(300);
+    expect(lines[0]?.parsed).toEqual({ i: 0 });
+    expect(lines[299]?.parsed).toEqual({ i: 299 });
+  });
 });
 
 describe("useAgentStream phase + idle behavior", () => {

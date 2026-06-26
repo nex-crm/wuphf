@@ -1,0 +1,1076 @@
+/* Apps — agent-generated internal tools. Token-driven so it tracks all themes. */
+
+.custom-app-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-card, #fff);
+  color: var(--text);
+}
+
+.custom-app-view--state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.custom-app-view__loading {
+  color: var(--text-secondary, #687083);
+  font-size: 14px;
+}
+
+.custom-app-view__error {
+  max-width: 480px;
+  text-align: center;
+  color: var(--text);
+}
+
+.custom-app-view__error-detail {
+  margin-top: 8px;
+  color: var(--text-secondary, #687083);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.custom-app-view__header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  background: var(--bg-card, #fff);
+}
+
+.custom-app-view__icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.custom-app-view__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.custom-app-view__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+.custom-app-view__summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary, #687083);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-app-view__version {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-secondary, #687083);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.custom-app-view__action {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.custom-app-view__action:hover {
+  background: var(--bg-subtle);
+}
+
+.custom-app-view__action--danger:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.custom-app-view__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.custom-app-view__icon-btn:hover {
+  background: var(--bg-subtle);
+}
+
+.custom-app-view__menu-wrap {
+  position: relative;
+}
+
+.custom-app-view__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 210px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.custom-app-view__menu-section {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.custom-app-view__menu-empty {
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.custom-app-view__menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-app-view__menu-item:hover {
+  background: var(--bg-subtle);
+}
+
+.custom-app-view__menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.custom-app-view__menu-item--danger {
+  color: var(--red);
+}
+
+.custom-app-view__menu-item--danger:hover {
+  background: var(--red-bg);
+}
+
+.custom-app-view__menu-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+/* In-flight build row in the Apps sidebar (optimistic, until the app appears). */
+.sidebar-app-building {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+}
+
+.sidebar-app-building__spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: sidebar-app-spin 0.7s linear infinite;
+}
+
+.sidebar-app-building__label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.sidebar-app-building__meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+@keyframes sidebar-app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-app-building__spinner {
+    animation: none;
+  }
+}
+
+.custom-app-view__body {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* History open: a version-timeline rail to the left of the live preview. */
+.custom-app-view__body--history {
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+/* Edit open: a per-app chat rail to the RIGHT of the app stage. The stage stays
+   the primary surface; the chat is a side conversation. */
+.custom-app-view__body--edit {
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 32%, 420px);
+}
+
+/* Both rails open: timeline (left) · stage · edit chat (right). */
+.custom-app-view__body--history.custom-app-view__body--edit {
+  grid-template-columns: 248px minmax(0, 1fr) clamp(300px, 32%, 420px);
+}
+
+/* Per-app edit chat side rail. Reuses the shared conversation-chat layout
+   (feed + composer) so it matches every other chat surface. */
+.app-edit-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  background: var(--bg-card, #fff);
+}
+
+.app-edit-panel__header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+}
+
+.app-edit-panel__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-edit-panel__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #687083);
+}
+
+.app-edit-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-edit-panel__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.app-edit-panel__close:hover {
+  background: var(--bg-subtle);
+}
+
+/* Stack the edit chat under the stage on narrow viewports. */
+@media (max-width: 880px) {
+  .custom-app-view__body--edit,
+  .custom-app-view__body--history.custom-app-view__body--edit {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+
+  .app-edit-panel {
+    border-left: 0;
+    border-top: 1px solid var(--border, rgba(20, 24, 31, 0.14));
+  }
+}
+
+.custom-app-view__stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The frame / live preview / loader fills the stage below any banner. */
+.custom-app-view__stage > * {
+  min-height: 0;
+}
+
+.custom-app-view__stage > *:last-child {
+  flex: 1 1 auto;
+}
+
+.custom-app-view__preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.custom-app-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* Read-only banner over a non-destructive version preview. */
+.custom-app-view__banner {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.custom-app-view__banner-text strong {
+  font-family: var(--font-mono, monospace);
+}
+
+.custom-app-view__banner-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.custom-app-view__banner-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.custom-app-view__banner-btn:hover {
+  background: var(--bg-card);
+}
+
+.custom-app-view__banner-btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.custom-app-view__banner-btn--primary:hover {
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.custom-app-view__banner-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Version timeline rail. */
+.app-version-timeline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-card);
+  overflow-y: auto;
+}
+
+.app-version-timeline__header {
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.app-version-timeline__empty {
+  padding: 4px 14px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.app-version-timeline__list {
+  margin: 0;
+  padding: 0 6px 8px;
+  list-style: none;
+}
+
+.app-version-timeline__row {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.app-version-timeline__row:hover {
+  background: var(--bg-subtle);
+}
+
+.app-version-timeline__row--active {
+  background: var(--bg-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.app-version-timeline__badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-version-timeline__current {
+  justify-self: start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.app-version-timeline__meta {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* App Builder dialog body — the Radix Dialog primitive handles the shell. */
+/*
+ * Create/Improve App modal. Rides the app's canonical modal frame (.help-overlay
+ * / .help-modal / .help-header / .help-body from search.css) and native .input /
+ * .btn controls, so it matches every other modal. Only the form-specific spacing
+ * and a token-styled textarea live here.
+ */
+.app-builder-modal {
+  width: min(92%, 520px);
+}
+
+.app-builder-modal__body {
+  /* Tighter than the default .help-body gap (22px) — these are stacked form
+     fields, not distinct sections. */
+  gap: 16px;
+}
+
+.app-builder-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.app-builder-modal__label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Matches the native .input token surface, but sized + padded as a textarea
+   (the shared .input is a fixed 44px height with no vertical padding). */
+.app-builder-modal__textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 10px 12px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: var(--text-md, 14px);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  resize: vertical;
+  transition:
+    border-color var(--duration-slow),
+    box-shadow var(--duration-slow);
+}
+
+.app-builder-modal__textarea:hover:not(:focus-visible) {
+  border-color: var(--border-strong, var(--border));
+}
+
+.app-builder-modal__textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.app-builder-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+/* ─── App Builder task: chat ↔ live preview split ───────────────────────── */
+/* Mirrors .issue-doc-body--split's flex/height model so the preview fills the
+   task surface; the inner ResizableSplit owns the column widths. */
+.issue-doc-body--app-build {
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+
+.resizable-split {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.resizable-split__pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left width is driven by the --rs-left-basis custom property the divider sets
+   inline (a var, not flex-basis directly, so the narrow-stack media query can
+   override it without !important). */
+.resizable-split__pane--left {
+  flex-grow: 0;
+  flex-shrink: 0;
+  flex-basis: var(--rs-left-basis, 55%);
+}
+
+.resizable-split__pane--right {
+  flex: 1 1 0;
+}
+
+.resizable-split__pane > * {
+  width: 100%;
+}
+
+.resizable-split__divider {
+  flex: 0 0 auto;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 7px hit target that doesn't consume layout width (negative margins pull
+     the neighbouring panes back over the padding). */
+  width: 7px;
+  margin: 0 -3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizable-split__grip {
+  width: 1px;
+  height: 100%;
+  background: var(--border);
+  transition:
+    background-color 120ms ease,
+    width 120ms ease;
+}
+
+.resizable-split__divider:hover .resizable-split__grip,
+.resizable-split__divider:focus-visible .resizable-split__grip,
+.resizable-split--dragging .resizable-split__grip {
+  width: 2px;
+  background: var(--accent);
+}
+
+.resizable-split__divider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Mid-drag: stop the preview iframe (or any pane content) from swallowing
+   pointer moves, and suppress text selection so the drag stays smooth. */
+.resizable-split--dragging {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.resizable-split--dragging .resizable-split__pane {
+  pointer-events: none;
+}
+
+/* ─── Build pane: live activity feed stacked above the live preview ──────── */
+.app-build-pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.app-build-pane .app-build-preview {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.app-build-activity {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 40%;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.app-build-activity[data-open="false"] {
+  max-height: none;
+}
+
+.app-build-activity__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.app-build-activity__chevron {
+  color: var(--text-secondary);
+  transition: transform 120ms ease;
+}
+
+.app-build-activity__chevron.open {
+  transform: rotate(90deg);
+}
+
+.app-build-activity__title {
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.app-build-activity__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.app-build-activity__dot.live {
+  background: var(--accent);
+}
+
+.app-build-activity__count {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-build-activity__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-build-activity__row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 0;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.app-build-activity__icon {
+  flex: 0 0 auto;
+  width: 13px;
+  text-align: center;
+  color: var(--green);
+}
+
+.app-build-activity__row--error .app-build-activity__icon {
+  color: var(--red);
+}
+
+.app-build-activity__spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: sidebar-app-spin 0.7s linear infinite;
+}
+
+.app-build-activity__verb {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.app-build-activity__row--error .app-build-activity__verb {
+  color: var(--red);
+}
+
+.app-build-activity__target {
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-build-activity__note {
+  flex: 0 1 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-build-activity__spinner {
+    animation: none;
+  }
+}
+
+/* ─── Live preview pane ─────────────────────────────────────────────────── */
+.app-build-preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-card);
+}
+
+.app-build-preview__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-build-preview__icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.app-build-preview__title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-build-preview__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.app-build-preview__live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green, #2ea043);
+  animation: app-build-live-pulse 1.8s ease-out infinite;
+}
+
+@keyframes app-build-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 5px rgba(46, 160, 67, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-build-preview__live-dot {
+    animation: none;
+  }
+}
+
+.app-build-preview__version {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.app-build-preview__open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.app-build-preview__open:hover {
+  background: var(--bg-subtle);
+}
+
+.app-build-preview__frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-build-preview__frame .custom-app-frame {
+  width: 100%;
+  height: 100%;
+}
+
+/* Building / waiting placeholder — keeps the 20–60s build from being dead air. */
+.app-build-preview__state {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px;
+  text-align: center;
+}
+
+.app-build-preview__spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: sidebar-app-spin 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-build-preview__spinner {
+    animation: none;
+  }
+}
+
+.app-build-preview__state-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.app-build-preview__state-detail {
+  margin: 0;
+  max-width: 320px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Streaming install/boot log while the live dev server warms up. */
+.app-build-preview__bootlog {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.app-build-preview__bootlog-text {
+  margin: 0;
+  max-width: 100%;
+  max-height: 240px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* "Select to edit" / "History" / "Edit" share .custom-app-view__action; the
+   pressed state reads as an active toggle without a new control. */
+.custom-app-view__action[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--bg-subtle));
+  color: var(--accent);
+}
+
+/* Dismissible runtime-error banner over the live preview. Text-only: the
+   app-supplied message is rendered as React children, never as HTML. */
+.custom-app-view__app-error {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--red, #d64545);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--red-soft, rgba(214, 69, 69, 0.08));
+  color: var(--red, #d64545);
+}
+
+.custom-app-view__app-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.custom-app-view__app-error-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.custom-app-view__app-error-dismiss:hover {
+  background: var(--red-soft, rgba(214, 69, 69, 0.16));
+}
+
+/* Narrow: stack chat over preview and retire the drag handle. */
+@media (max-width: 720px) {
+  .issue-doc-body--app-build .resizable-split {
+    flex-direction: column;
+  }
+  .issue-doc-body--app-build .resizable-split__pane--left,
+  .issue-doc-body--app-build .resizable-split__pane--right {
+    /* Overrides the base flex-basis var above (stylesheet vs stylesheet, later
+       rule wins) so each pane takes an equal share when stacked. */
+    flex: 1 1 auto;
+  }
+  .issue-doc-body--app-build .resizable-split__divider {
+    display: none;
+  }
+}

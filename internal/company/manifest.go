@@ -222,6 +222,29 @@ func SaveManifest(manifest Manifest) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
+// AppBuilderSlug is the canonical slug of the built-in App Builder agent — the
+// special teammate that turns repeatable workflows into Apps (internal tools).
+// It is seeded into every office (see ensureAppBuilderMember) and is immutable
+// like the CEO.
+const AppBuilderSlug = "app-builder"
+
+func appBuilderMemberSpec() MemberSpec {
+	return MemberSpec{Slug: AppBuilderSlug, Name: "App Builder", Role: "App Builder", System: true}
+}
+
+// ensureAppBuilderMember guarantees the App Builder is present in the roster.
+// Runs inside normalizeManifest so it covers the default, from-scratch, AND
+// blueprint-materialized paths — and back-fills existing offices on next load
+// (legacy-safe migration, the same shape used to roll out the Librarian).
+func ensureAppBuilderMember(members []MemberSpec) []MemberSpec {
+	for _, m := range members {
+		if normalizeSlug(m.Slug) == AppBuilderSlug {
+			return members
+		}
+	}
+	return append(members, appBuilderMemberSpec())
+}
+
 func DefaultManifest() Manifest {
 	now := time.Now().UTC().Format(time.RFC3339)
 	cfg, _ := config.Load()
@@ -248,6 +271,7 @@ func DefaultManifest() Manifest {
 	}
 	manifest.Members = []MemberSpec{
 		{Slug: "ceo", Name: "CEO", Role: "CEO", System: true},
+		appBuilderMemberSpec(),
 		{Slug: "planner", Name: "Planner", Role: "Planner"},
 		{Slug: "executor", Name: "Executor", Role: "Executor"},
 		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer"},
@@ -278,6 +302,7 @@ func fromScratchDefaultManifest(now string) Manifest {
 	members := []MemberSpec{
 		{Slug: "founder", Name: "Founder", Role: "Founder", System: true},
 		{Slug: "operator", Name: "Operator", Role: "Operator", System: true},
+		appBuilderMemberSpec(),
 		{Slug: "builder", Name: "Builder", Role: "Builder"},
 		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer"},
 	}
@@ -339,6 +364,10 @@ func normalizeManifest(manifest Manifest) Manifest {
 		}
 		return DefaultManifest()
 	}
+	// Guarantee the built-in App Builder exists in every office — including
+	// blueprint-materialized ones — and back-fill it for existing offices on
+	// load. Appended last so it never displaces the lead or a blueprint roster.
+	members = ensureAppBuilderMember(members)
 	manifest.Members = members
 
 	seenChannels := make(map[string]struct{}, len(manifest.Channels))

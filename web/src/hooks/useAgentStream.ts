@@ -8,6 +8,11 @@ export interface StreamLine {
   parsed?: Record<string, unknown>;
 }
 
+// MAX_LINES is the default ring-buffer cap for the raw Live Output panel, which
+// only renders the recent tail. Consumers that REDUCE the full ordered event log
+// (the App build-activity feed: reduceBuildActivity pairs tool_use→tool_result
+// across the whole stream) must raise it — a tool_use evicted from the window
+// leaves its result unpaired, rendering a phantom blank "done" row.
 const MAX_LINES = 50;
 
 // appendStreamLine is the pure update used by useAgentStream's
@@ -24,6 +29,7 @@ export function appendStreamLine(
   eventData: string,
   parsed: Record<string, unknown> | undefined,
   nextId: number,
+  maxLines: number = MAX_LINES,
 ): { lines: StreamLine[]; usedId: boolean } {
   const isRaw = parsed === undefined;
   const last = prev[prev.length - 1];
@@ -35,14 +41,14 @@ export function appendStreamLine(
     };
     const next = [...prev.slice(0, -1), merged];
     return {
-      lines: next.length > MAX_LINES ? next.slice(-MAX_LINES) : next,
+      lines: next.length > maxLines ? next.slice(-maxLines) : next,
       usedId: false,
     };
   }
   const line: StreamLine = { id: nextId, data: eventData, parsed };
   const next = [...prev, line];
   return {
-    lines: next.length > MAX_LINES ? next.slice(-MAX_LINES) : next,
+    lines: next.length > maxLines ? next.slice(-maxLines) : next,
     usedId: true,
   };
 }
@@ -71,7 +77,16 @@ export type StreamPhase = "replay" | "live";
 export function useAgentStream(
   slug: string | null,
   taskId: string | null = null,
+  opts: { keepAlive?: boolean; maxLines?: number } = {},
 ) {
+  // keepAlive keeps the SSE source open across turn boundaries (idle events).
+  // A single-turn view (the agent's Live Stream tab) wants the connection to
+  // close when the turn goes idle; a long-running build feed wants to keep
+  // receiving the NEXT turn's tool activity without a remount.
+  const keepAlive = opts.keepAlive ?? false;
+  // maxLines bounds the in-memory buffer. The build feed raises it so the
+  // reducer sees every tool_use/tool_result pair (see MAX_LINES note).
+  const maxLines = opts.maxLines ?? MAX_LINES;
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
@@ -129,6 +144,7 @@ export function useAgentStream(
         e.data,
         parsed,
         nextId,
+        maxLines,
       );
       linesRef.current = nextLines;
       if (usedId) counterRef.current = nextId;
@@ -145,6 +161,7 @@ export function useAgentStream(
       //      mcp_tool_event audit lines, pane-capture noise) may carry
       //      unrelated `status` strings and must not trigger close.
       if (
+        !keepAlive &&
         phaseRef.current === "live" &&
         parsed?.kind === "headless_event" &&
         parsed?.status === "idle"
@@ -168,7 +185,7 @@ export function useAgentStream(
       sourceRef.current = null;
       setConnected(false);
     };
-  }, [slug, taskId]);
+  }, [slug, taskId, keepAlive, maxLines]);
 
   return { lines, connected };
 }

@@ -33,6 +33,24 @@ func minimalLauncher(opusCEO bool) *Launcher {
 	}
 }
 
+// ─── headlessClaudeMaxTurns ───────────────────────────────────────────────
+
+// TestHeadlessClaudeMaxTurns_AppBuilderGetsBuildHeadroom pins the fix for the
+// App Builder running out of turns mid-build: a coding/build agent needs far
+// more than a chat specialist's budget.
+func TestHeadlessClaudeMaxTurns_AppBuilderGetsBuildHeadroom(t *testing.T) {
+	l := minimalLauncher(false)
+	if got := l.headlessClaudeMaxTurns(appBuilderSlug); got != "60" {
+		t.Fatalf("app-builder max turns = %s, want 60 (build headroom)", got)
+	}
+	if got := l.headlessClaudeMaxTurns("ceo"); got != "30" {
+		t.Fatalf("lead max turns = %s, want 30", got)
+	}
+	if got := l.headlessClaudeMaxTurns("pm"); got != "15" {
+		t.Fatalf("chat specialist max turns = %s, want 15", got)
+	}
+}
+
 // ─── headlessClaudeModel ──────────────────────────────────────────────────
 
 // TestHeadlessClaudeModel_SonnetByDefault verifies that every agent, including

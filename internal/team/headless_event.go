@@ -140,6 +140,13 @@ func pushHeadlessEvent(stream *agentStreamBuffer, event HeadlessEvent) {
 	// SSE serializer in handleAgentStream can keep its `data: %s\n\n`
 	// framing without special-casing event lines.
 	stream.PushTask(strings.TrimSpace(event.TaskID), string(data)+"\n")
+
+	// Persist per-turn tool manifests as the durable workflow-detection
+	// substrate. Best-effort and only for manifest events (once per turn),
+	// so this never adds load to the hot per-event path. See event_sink.go.
+	if event.Type == HeadlessEventTypeManifest {
+		persistTurnManifest(event)
+	}
 }
 
 // headlessProgressEventMetrics adapts the runner-side
