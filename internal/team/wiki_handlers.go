@@ -87,7 +87,9 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	}
 	worker := b.WikiWorker()
 	if worker == nil {
-		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		// No markdown worker → gbrain-backed deployment. Route the read through
+		// gbrain (or degrade gracefully when gbrain is unreachable).
+		b.serveWikiReadFromGBrain(w, r)
 		return
 	}
 	relPath := strings.TrimSpace(r.URL.Query().Get("path"))
@@ -129,7 +131,8 @@ func (b *Broker) handleWikiSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	worker := b.WikiWorker()
 	if worker == nil {
-		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		// No markdown worker → gbrain-backed deployment.
+		b.serveWikiSearchFromGBrain(w, r)
 		return
 	}
 	pattern := strings.TrimSpace(r.URL.Query().Get("pattern"))
@@ -155,7 +158,8 @@ func (b *Broker) handleWikiList(w http.ResponseWriter, r *http.Request) {
 	}
 	worker := b.WikiWorker()
 	if worker == nil {
-		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		// No markdown worker → gbrain-backed deployment.
+		b.serveWikiListFromGBrain(w, r)
 		return
 	}
 	bytes, err := readIndexAll(worker.Repo())
@@ -181,7 +185,8 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	worker := b.WikiWorker()
 	if worker == nil {
-		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		// No markdown worker → gbrain-backed deployment.
+		b.serveWikiCatalogFromGBrain(w, r)
 		return
 	}
 	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
