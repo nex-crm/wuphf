@@ -132,30 +132,11 @@ func TestGovernorCountsOnlyRealTurns(t *testing.T) {
 
 	// Let the worker drain NATURALLY to empty (the idle-drain iteration) rather
 	// than calling stopHeadlessWorkers, which would preempt that iteration at
-	// the top-of-loop stop check and hide the phantom count. We wait until the
-	// worker has deregistered itself (set inside beginHeadlessCodexTurn on the
-	// empty queue), then join its goroutine so any trailing governorNoteTurn has
-	// run before we read the count.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		l.headless.mu.Lock()
-		running := false
-		for lane := range l.headless.workers {
-			if lane.slug == "fe" {
-				running = true
-				break
-			}
-		}
-		l.headless.mu.Unlock()
-		if !running {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("worker did not drain to idle in time")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	l.stopHeadlessWorkers() // join the (already-exiting) worker goroutine
+	// the top-of-loop stop check and hide the phantom count. Joining the worker
+	// WaitGroup blocks until the goroutine returns — after the empty-queue
+	// iteration and any trailing governorNoteTurn have run — so the count we
+	// read is final and the wait is deterministic (no sleep).
+	l.headless.workerWg.Wait()
 
 	if got := l.broker.GovernorStatus().TurnsSinceCheckpoint; got != 2 {
 		t.Fatalf("governor counted %d turns, want exactly 2 (idle drain must not count)", got)
