@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gbrain"
 	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/runtimebin"
@@ -190,14 +192,17 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 func (f InitFlowModel) advanceAfterMemoryChoice() (InitFlowModel, tea.Cmd) {
 	switch f.memory {
 	case config.MemoryBackendGBrain:
-		// GBrain requires an OpenAI key for embeddings.
-		if config.ResolveOpenAIAPIKey() == "" {
-			f.phase = InitGBrainOpenAIKey
-			return f, f.emitPhase(InitGBrainOpenAIKey)
+		// GBrain needs a semantic embedder. OpenAI is the strongest (one key
+		// serves chat + embeddings), but a local Ollama embedding model works
+		// with no cloud key at all. Only prompt for an OpenAI key when neither
+		// is available — and even then keyword-only is possible.
+		if config.ResolveOpenAIAPIKey() != "" || gbrain.OllamaEmbeddingModel() != "" {
+			ensureGBrainBrain()
+			f.phase = InitBlueprintChoice
+			return f, f.emitPhase(InitBlueprintChoice)
 		}
-		// Key already configured, skip to blueprint.
-		f.phase = InitBlueprintChoice
-		return f, f.emitPhase(InitBlueprintChoice)
+		f.phase = InitGBrainOpenAIKey
+		return f, f.emitPhase(InitGBrainOpenAIKey)
 	case config.MemoryBackendNex:
 		// Nex requires a Nex identity. If no API key is configured, prompt
 		// the user to register via email.
@@ -267,17 +272,21 @@ func (f InitFlowModel) submitTextInput(value string) (InitFlowModel, tea.Cmd) {
 		return f, f.emitPhase(InitProviderChoice)
 
 	case InitGBrainOpenAIKey:
-		if value == "" {
-			f.keyError = "OpenAI API key is required for GBrain."
-			return f, nil
+		// An OpenAI key is the path to cloud embeddings, but it is optional:
+		// pressing Enter proceeds on a local Ollama embedder if present, or
+		// keyword-only search otherwise. GBrain stays usable with no cloud key.
+		if value != "" {
+			// Persist immediately so gbrain can use it.
+			cfg, _ := config.Load()
+			cfg.OpenAIAPIKey = value
+			_ = config.Save(cfg)
 		}
-		// Persist immediately so gbrain can use it.
-		cfg, _ := config.Load()
-		cfg.OpenAIAPIKey = value
-		_ = config.Save(cfg)
+		// Initialize the brain now with the best available embedder (the OpenAI
+		// key just entered, else a local Ollama model, else keyword-only).
+		ensureGBrainBrain()
 		f.keyError = ""
 		f.keyInput = nil
-		// Optional: ask for Anthropic key too.
+		// Optional: ask for Anthropic key too (chat provider, not embeddings).
 		if config.ResolveAnthropicAPIKey() == "" {
 			f.phase = InitGBrainAnthropKey
 			return f, f.emitPhase(InitGBrainAnthropKey)
@@ -360,6 +369,20 @@ func (f InitFlowModel) submitTextInput(value string) (InitFlowModel, tea.Cmd) {
 		)
 	}
 	return f, nil
+}
+
+// ensureGBrainBrain initializes a gbrain brain with the best available embedder
+// during explicit /init setup. It is best-effort and never blocks onboarding:
+// when gbrain is not installed it is a no-op, and gbrain.EnsureBrain is strictly
+// idempotent, so a brain that already exists is left untouched. Errors are
+// surfaced later by the readiness/doctor reports rather than failing setup.
+func ensureGBrainBrain() {
+	if !gbrain.IsInstalled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	_, _ = gbrain.EnsureBrain(ctx)
 }
 
 // finish saves config and transitions to done.
@@ -525,7 +548,7 @@ func (f InitFlowModel) renderAPIKeyInput() string {
 	var label string
 	switch f.phase {
 	case InitGBrainOpenAIKey:
-		label = "OpenAI Key: "
+		label = "OpenAI Key (Enter to skip): "
 	case InitGBrainAnthropKey:
 		label = "Anthropic Key (Enter to skip): "
 	case InitNexRegister:
@@ -784,7 +807,7 @@ func (f InitFlowModel) phaseText() (heading, instructions string) {
 	case InitMemoryChoice:
 		return "Choose Memory Backend", "Where should the office remember what it learns? Nex is hosted org memory, GBrain is a local knowledge graph, or skip for no shared memory."
 	case InitGBrainOpenAIKey:
-		return "Enter OpenAI API Key", "GBrain uses OpenAI for embeddings. Paste your OpenAI API key (starts with sk-)."
+		return "Enter OpenAI API Key (optional)", "GBrain uses OpenAI for cloud embeddings. Paste your OpenAI API key (starts with sk-), or press Enter to use a local Ollama embedding model if present, or keyword-only search."
 	case InitGBrainAnthropKey:
 		return "Enter Anthropic API Key (optional)", "GBrain can optionally use Anthropic for reasoning. Press Enter to skip, or paste your key."
 	case InitNexRegister:

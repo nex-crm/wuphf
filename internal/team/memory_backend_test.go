@@ -181,38 +181,44 @@ func TestResolveMemoryBackendStatusGBrainReadyUnderNoNex(t *testing.T) {
 	}
 }
 
-func TestResolveMemoryBackendStatusGBrainNeedsProviderKey(t *testing.T) {
+func TestResolveMemoryBackendStatusGBrainNeedsEmbedder(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+	// Force no embedding provider deterministically: empty PATH (no ollama
+	// binary) and no OpenAI key, regardless of host environment.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WUPHF_GBRAIN_COMMAND", "")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 
 	status := ResolveMemoryBackendStatus()
 	if status.SelectedKind != config.MemoryBackendGBrain {
 		t.Fatalf("expected gbrain to stay selected, got %+v", status)
 	}
 	if status.ActiveKind != config.MemoryBackendNone {
-		t.Fatalf("expected gbrain to remain inactive without provider key, got %+v", status)
+		t.Fatalf("expected gbrain to remain inactive without an embedder, got %+v", status)
 	}
 	if !strings.Contains(status.Detail, "OpenAI") || !strings.Contains(status.Detail, "vector search") {
-		t.Fatalf("expected provider-key guidance, got %+v", status)
+		t.Fatalf("expected embedder guidance, got %+v", status)
 	}
 }
 
-func TestResolveMemoryBackendStatusGBrainAnthropicOnlyShowsReducedMode(t *testing.T) {
+func TestResolveMemoryBackendStatusGBrainAnthropicOnlyIsNotSemantic(t *testing.T) {
+	// An Anthropic key has no embeddings API. With no OpenAI key and no local
+	// ollama embedder, gbrain cannot do semantic retrieval, so it is reported
+	// inactive rather than "active in reduced mode" (the old, wrong behavior).
 	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
 	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "sk-ant-test-anthropic")
-
-	binDir := t.TempDir()
-	gbrainBin := filepath.Join(binDir, "gbrain")
-	if err := os.WriteFile(gbrainBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("create fake gbrain: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WUPHF_GBRAIN_COMMAND", "")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 
 	status := ResolveMemoryBackendStatus()
-	if status.ActiveKind != config.MemoryBackendGBrain {
-		t.Fatalf("expected gbrain to stay active with anthropic-only mode, got %+v", status)
+	if status.ActiveKind != config.MemoryBackendNone {
+		t.Fatalf("expected gbrain inactive with anthropic-only, got %+v", status)
 	}
-	if !strings.Contains(status.Detail, "Anthropic-only mode") || !strings.Contains(status.Detail, "OpenAI") {
-		t.Fatalf("expected reduced-mode detail, got %+v", status)
+	if !strings.Contains(status.Detail, "Anthropic") || !strings.Contains(status.Detail, "embeddings") {
+		t.Fatalf("expected anthropic-no-embeddings detail, got %+v", status)
 	}
 }
 

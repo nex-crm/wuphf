@@ -251,7 +251,7 @@ func (b gbrainMemoryBackend) Label() string {
 	return config.MemoryBackendLabel(config.MemoryBackendGBrain)
 }
 func (b gbrainMemoryBackend) Ready() bool {
-	return gbrain.IsInstalled() && gbrainProviderKeyConfigured()
+	return gbrain.IsInstalled() && gbrain.EmbeddingAvailable()
 }
 func (b gbrainMemoryBackend) MCPServer() (*memoryMCPServer, error) {
 	bin := gbrain.BinaryPath()
@@ -377,17 +377,11 @@ func (b gbrainMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryW
 	return slug, nil
 }
 
-func gbrainProviderKeyConfigured() bool {
-	return strings.TrimSpace(config.ResolveOpenAIAPIKey()) != "" ||
-		strings.TrimSpace(config.ResolveAnthropicAPIKey()) != ""
-}
-
+// gbrainOpenAIConfigured reports whether an OpenAI key is configured. OpenAI is
+// the strongest gbrain embedder (one key serves both chat and embeddings); it
+// distinguishes the OpenAI status detail from the local-Ollama detail.
 func gbrainOpenAIConfigured() bool {
 	return strings.TrimSpace(config.ResolveOpenAIAPIKey()) != ""
-}
-
-func gbrainAnthropicConfigured() bool {
-	return strings.TrimSpace(config.ResolveAnthropicAPIKey()) != ""
 }
 
 func ResolveMemoryBackendStatus() MemoryBackendStatus {
@@ -433,9 +427,14 @@ func ResolveMemoryBackendStatus() MemoryBackendStatus {
 		status.ActiveLabel = config.MemoryBackendLabel(config.MemoryBackendMarkdown)
 		status.Detail = "Markdown-backed team wiki at ~/.wuphf/wiki is configured. Every edit commits to git with per-agent authorship."
 	case config.MemoryBackendGBrain:
-		if !gbrainProviderKeyConfigured() {
-			status.Detail = "GBrain backend selected, but no provider key is configured. OpenAI is required for embeddings and vector search; Anthropic alone only enables reduced-mode retrieval."
-			status.NextStep = "Run /init and add an OpenAI key for full GBrain search, or add an Anthropic key for reduced mode."
+		if !gbrain.EmbeddingAvailable() {
+			// gbrain needs an embedding provider for semantic retrieval.
+			// Anthropic has no embeddings API, so an Anthropic key alone does
+			// not qualify. Without an embedder gbrain can only run keyword-only,
+			// which is ~equivalent to the markdown wiki, so we report it
+			// inactive and steer the user toward a real embedder.
+			status.Detail = "GBrain backend selected, but no embedding provider is configured. Semantic vector search needs an OpenAI key or a local Ollama embedding model; an Anthropic key alone has no embeddings API."
+			status.NextStep = "Run /init and add an OpenAI key for full GBrain vector search, or pull a local Ollama embedding model (e.g. nomic-embed-text)."
 			return status
 		}
 		if !gbrain.IsInstalled() {
@@ -445,14 +444,10 @@ func ResolveMemoryBackendStatus() MemoryBackendStatus {
 		}
 		status.ActiveKind = config.MemoryBackendGBrain
 		status.ActiveLabel = config.MemoryBackendLabel(config.MemoryBackendGBrain)
-		switch {
-		case gbrainOpenAIConfigured():
+		if gbrainOpenAIConfigured() {
 			status.Detail = "GBrain-backed organizational context is configured with an OpenAI key, so embeddings and vector search are available."
-		case gbrainAnthropicConfigured():
-			status.Detail = "GBrain-backed organizational context is configured in Anthropic-only mode. Keyword search and query expansion work, but embeddings and vector search still require OpenAI."
-			status.NextStep = "Add WUPHF_OPENAI_API_KEY if you want full GBrain embeddings and vector search."
-		default:
-			status.Detail = "GBrain-backed organizational context is configured with provider credentials."
+		} else {
+			status.Detail = "GBrain-backed organizational context is configured with a local Ollama embedding model, so embeddings and vector search run on your machine."
 		}
 	default:
 		status.SelectedKind = config.MemoryBackendNone

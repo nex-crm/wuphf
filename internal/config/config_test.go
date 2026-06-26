@@ -213,10 +213,20 @@ func TestResolveAPIKeyConfigFile(t *testing.T) {
 	})
 }
 
+// setGBrainOllamaEmbedder overrides the ollama-embedder probe seam so the
+// implicit-default resolution is deterministic regardless of whether the host
+// running the suite has ollama installed with an embedding model pulled.
+func setGBrainOllamaEmbedder(t *testing.T, available bool) {
+	t.Helper()
+	prev := gbrainOllamaEmbedderAvailable
+	gbrainOllamaEmbedderAvailable = func() bool { return available }
+	t.Cleanup(func() { gbrainOllamaEmbedderAvailable = prev })
+}
+
 // clearGBrainReadiness forces gbrainBackendReady() to report false within a
-// test: an empty PATH (no gbrain binary) plus no provider keys. Use it when a
-// test wants the implicit default to fall back to markdown deterministically,
-// regardless of whether the host running the suite has gbrain installed.
+// test: an empty PATH (no gbrain binary), no provider keys, and no local ollama
+// embedder. Use it when a test wants the implicit default to fall back to
+// markdown deterministically, regardless of the host environment.
 func clearGBrainReadiness(t *testing.T) {
 	t.Helper()
 	t.Setenv("PATH", t.TempDir())
@@ -225,6 +235,7 @@ func clearGBrainReadiness(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	setGBrainOllamaEmbedder(t, false)
 }
 
 // fakeGBrainOnPath puts an executable named "gbrain" on PATH so
@@ -282,10 +293,11 @@ func TestResolveMemoryBackendDefaultsToGBrainWhenReady(t *testing.T) {
 	})
 }
 
-func TestResolveMemoryBackendDefaultsToMarkdownWhenGBrainInstalledButNoProviderKey(t *testing.T) {
-	// Installed but unkeyed gbrain is not "ready": embeddings/vector search
-	// need a provider key, so the default falls back to markdown rather than
-	// selecting a backend that cannot function.
+func TestResolveMemoryBackendDefaultsToMarkdownWhenGBrainInstalledButNoEmbedder(t *testing.T) {
+	// Installed but with no embedding provider (no OpenAI key, no local ollama
+	// embedder) gbrain is not "ready": semantic search cannot run, and a
+	// keyword-only gbrain is ~equivalent to markdown, so the default falls back
+	// to markdown rather than selecting a backend that adds nothing.
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_NO_NEX", "")
 		t.Setenv("WUPHF_MEMORY_BACKEND", "")
@@ -294,8 +306,46 @@ func TestResolveMemoryBackendDefaultsToMarkdownWhenGBrainInstalledButNoProviderK
 		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
 		t.Setenv("ANTHROPIC_API_KEY", "")
 		fakeGBrainOnPath(t)
+		setGBrainOllamaEmbedder(t, false)
 		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
-			t.Fatalf("expected markdown when gbrain installed but unkeyed, got %q", got)
+			t.Fatalf("expected markdown when gbrain installed but no embedder, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToMarkdownWhenAnthropicOnly(t *testing.T) {
+	// An Anthropic key alone does not make gbrain ready: Anthropic has no
+	// embeddings API. Without OpenAI or a local ollama embedder, the implicit
+	// default stays on the markdown wiki.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		t.Setenv("WUPHF_OPENAI_API_KEY", "")
+		t.Setenv("OPENAI_API_KEY", "")
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "sk-ant-test")
+		fakeGBrainOnPath(t)
+		setGBrainOllamaEmbedder(t, false)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
+			t.Fatalf("expected markdown when only an Anthropic key is set, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToGBrainWithLocalOllamaEmbedder(t *testing.T) {
+	// No cloud key, but gbrain is installed and a local ollama embedding model
+	// is pulled: gbrain can do semantic retrieval entirely on-device, so it is
+	// the strong default even without an OpenAI key.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		t.Setenv("WUPHF_OPENAI_API_KEY", "")
+		t.Setenv("OPENAI_API_KEY", "")
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		fakeGBrainOnPath(t)
+		setGBrainOllamaEmbedder(t, true)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendGBrain {
+			t.Fatalf("expected gbrain default with local ollama embedder, got %q", got)
 		}
 	})
 }

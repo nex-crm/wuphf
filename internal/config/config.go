@@ -3,6 +3,8 @@
 package config
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // RuntimeHomeDir returns the home directory WUPHF should use for persisted
@@ -274,11 +277,13 @@ func NormalizeMemoryBackend(value string) string {
 //  1. Explicit --memory-backend flag value.
 //  2. WUPHF_MEMORY_BACKEND env var.
 //  3. config-file `memory_backend`.
-//  4. Default: `gbrain` when gbrain is ready (installed on PATH + an OpenAI or
-//     Anthropic provider key configured), otherwise `markdown`. gbrain is the
-//     strong-default organizational memory backend; the markdown fallback keeps
-//     a fresh OSS clone with no gbrain installed booting with a zero-config,
-//     git-native wiki at ~/.wuphf/wiki.
+//  4. Default: `gbrain` when gbrain is ready (installed on PATH + a semantic
+//     embedding provider available — an OpenAI key or a local Ollama embedding
+//     model), otherwise `markdown`. gbrain is the strong-default organizational
+//     memory backend, but only when it can do semantic retrieval; a
+//     keyword-only gbrain is ~equivalent to the markdown wiki, so the markdown
+//     fallback keeps a fresh OSS clone with no embedder booting with a
+//     zero-config, git-native wiki at ~/.wuphf/wiki.
 //
 // After selection, `--no-nex` forces a `nex` selection to `none` (it disables
 // the Nex backend itself) but never blocks gbrain or markdown.
@@ -303,14 +308,19 @@ func ResolveMemoryBackend(flagValue string) string {
 	return backend
 }
 
-// gbrainBackendReady reports whether gbrain can serve as the default backend:
-// the gbrain binary is on PATH and at least one provider key (OpenAI or
-// Anthropic) is configured. It is intentionally implemented here rather than
-// via internal/gbrain to avoid an import cycle (internal/gbrain imports this
-// package); it mirrors gbrain.BinaryPath's lookup. Only consulted for the
-// implicit default — an explicit backend selection bypasses it entirely.
+// gbrainBackendReady reports whether gbrain can serve as the implicit default
+// backend: the gbrain binary is on PATH and a semantic embedding provider is
+// available (an OpenAI key or a local Ollama embedding model). A no-embedding /
+// keyword-only gbrain is ~equivalent to the markdown wiki, so it does NOT make
+// gbrain the default — the markdown fallback stays in that case. Anthropic
+// alone does not count: Anthropic has no embeddings API.
+//
+// This is intentionally implemented here rather than via internal/gbrain to
+// avoid an import cycle (internal/gbrain imports this package); the Ollama probe
+// mirrors gbrain.OllamaEmbeddingModel's logic. Only consulted for the implicit
+// default — an explicit backend selection bypasses it entirely.
 func gbrainBackendReady() bool {
-	return gbrainBinaryInstalled() && gbrainProviderKeyConfigured()
+	return gbrainBinaryInstalled() && gbrainEmbeddingAvailable()
 }
 
 func gbrainBinaryInstalled() bool {
@@ -325,9 +335,50 @@ func gbrainBinaryInstalled() bool {
 	return false
 }
 
-func gbrainProviderKeyConfigured() bool {
-	return strings.TrimSpace(ResolveOpenAIAPIKey()) != "" ||
-		strings.TrimSpace(ResolveAnthropicAPIKey()) != ""
+// gbrainEmbeddingAvailable reports whether gbrain can do semantic retrieval:
+// an OpenAI key is configured, or a local Ollama embedding model is pulled.
+func gbrainEmbeddingAvailable() bool {
+	if strings.TrimSpace(ResolveOpenAIAPIKey()) != "" {
+		return true
+	}
+	return gbrainOllamaEmbedderAvailable()
+}
+
+// gbrainOllamaEmbedderAvailable is a seam: defaults to the real probe and is
+// overridden in tests so the implicit-default resolution is deterministic
+// regardless of whether the host running the suite has ollama installed.
+var gbrainOllamaEmbedderAvailable = detectGBrainOllamaEmbedder
+
+// ollamaListTimeout bounds the `ollama list` probe so a wedged ollama never
+// stalls backend resolution at launch.
+const ollamaListTimeout = 3 * time.Second
+
+// detectGBrainOllamaEmbedder reports whether ollama is on PATH and has at least
+// one embedding model pulled. It never pulls a model (no network side effects)
+// — it only inspects what is already present. Mirrors
+// gbrain.OllamaEmbeddingModel; duplicated here to avoid an import cycle.
+func detectGBrainOllamaEmbedder() bool {
+	if _, err := exec.LookPath("ollama"); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ollamaListTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ollama", "list")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.Contains(strings.ToLower(fields[0]), "embed") {
+			return true
+		}
+	}
+	return false
 }
 
 // MemoryBackendLabel returns a short user-facing label for the backend.
