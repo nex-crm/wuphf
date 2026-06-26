@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe("rich artifact API", () => {
-  it("creates notebook visual artifacts with backend snake_case fields", async () => {
+  it("creates visual artifacts with backend snake_case fields", async () => {
     const postSpy = vi
       .spyOn(client, "post")
       .mockResolvedValue({ artifact: ARTIFACT });
@@ -46,7 +46,7 @@ describe("rich artifact API", () => {
       relatedReceiptIds: ["rcpt-1"],
     });
 
-    expect(postSpy).toHaveBeenCalledWith("/notebook/visual-artifacts", {
+    expect(postSpy).toHaveBeenCalledWith("/visual-artifacts", {
       slug: "pm",
       title: "Visual plan",
       summary: "A richer plan.",
@@ -69,7 +69,7 @@ describe("rich artifact API", () => {
       sourceMarkdownPath: "agents/pm/notebook/plan.md",
     });
 
-    expect(getSpy).toHaveBeenCalledWith("/notebook/visual-artifacts", {
+    expect(getSpy).toHaveBeenCalledWith("/visual-artifacts", {
       source_path: "agents/pm/notebook/plan.md",
     });
     expect(artifacts).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("rich artifact API", () => {
     });
 
     expect(postSpy).toHaveBeenCalledWith(
-      "/notebook/visual-artifacts/ra_0123456789abcdef/promote",
+      "/visual-artifacts/ra_0123456789abcdef/promote",
       {
         target_wiki_path: "team/drafts/visual-plan.md",
         markdown_summary: "# Visual plan\n",

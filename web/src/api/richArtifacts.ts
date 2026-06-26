@@ -5,10 +5,10 @@ export type RichArtifactTrustLevel = "draft" | "reviewed" | "promoted";
 
 // ArtifactPromotion is the canonical "where does this artifact live now?"
 // signal that drives link routing in chat bubbles and embed wiring in the
-// notebook + wiki detail views. Backend contract (agreed with the Go side):
+// wiki detail views. Backend contract (agreed with the Go side):
 //
 //   { status: "draft" }                                            // unpromoted, only at /articles/$id
-//   { status: "promoted_to_notebook", owner_slug, entry_slug }     // attached to a notebook entry
+//   { status: "promoted_to_notebook", owner_slug, entry_slug }     // legacy wire field (surface retired); resolves to /articles/$id
 //   { status: "promoted_to_wiki", wiki_path }                      // promoted into the team wiki
 //
 // wiki_path is relative to the wiki root, e.g.
@@ -85,20 +85,17 @@ export interface PromoteRichArtifactParams {
 export async function createRichArtifact(
   params: CreateRichArtifactParams,
 ): Promise<RichArtifact> {
-  const res = await post<{ artifact: RichArtifact }>(
-    "/notebook/visual-artifacts",
-    {
-      slug: params.slug,
-      title: params.title,
-      summary: params.summary ?? "",
-      html: params.html,
-      source_markdown_path: params.sourceMarkdownPath,
-      related_task_id: params.relatedTaskId,
-      related_message_id: params.relatedMessageId,
-      related_receipt_ids: params.relatedReceiptIds ?? [],
-      commit_message: params.commitMessage,
-    },
-  );
+  const res = await post<{ artifact: RichArtifact }>("/visual-artifacts", {
+    slug: params.slug,
+    title: params.title,
+    summary: params.summary ?? "",
+    html: params.html,
+    source_markdown_path: params.sourceMarkdownPath,
+    related_task_id: params.relatedTaskId,
+    related_message_id: params.relatedMessageId,
+    related_receipt_ids: params.relatedReceiptIds ?? [],
+    commit_message: params.commitMessage,
+  });
   return res.artifact;
 }
 
@@ -112,7 +109,7 @@ export async function fetchRichArtifacts(params: {
     query.source_path = params.sourceMarkdownPath;
   }
   const res = await get<{ artifacts: RichArtifact[] }>(
-    "/notebook/visual-artifacts",
+    "/visual-artifacts",
     query,
   );
   return Array.isArray(res.artifacts) ? res.artifacts : [];
@@ -122,7 +119,7 @@ export async function fetchRichArtifact(
   id: string,
 ): Promise<RichArtifactDetail> {
   return await get<RichArtifactDetail>(
-    `/notebook/visual-artifacts/${encodeURIComponent(id)}`,
+    `/visual-artifacts/${encodeURIComponent(id)}`,
   );
 }
 
@@ -131,7 +128,7 @@ export async function promoteRichArtifact(
   params: PromoteRichArtifactParams,
 ): Promise<RichArtifact> {
   const res = await post<{ artifact: RichArtifact }>(
-    `/notebook/visual-artifacts/${encodeURIComponent(id)}/promote`,
+    `/visual-artifacts/${encodeURIComponent(id)}/promote`,
     {
       target_wiki_path: params.targetWikiPath,
       markdown_summary: params.markdownSummary,

@@ -130,7 +130,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/wiki/categories",
 			path == "/wiki/diff",
 			path == "/agent-files/read",
-			path == "/notebook/visual-artifacts",
+			path == "/visual-artifacts",
 			path == "/review/list",
 			path == "/entity/facts",
 			path == "/entity/briefs",
@@ -166,7 +166,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			// opt in explicitly so we do not grant privilege by
 			// default to every new /tasks/* GET handler.
 			return true
-		case strings.HasPrefix(path, "/notebook/visual-artifacts/"):
+		case strings.HasPrefix(path, "/visual-artifacts/"):
 			return true
 		}
 		return false
@@ -210,10 +210,10 @@ func humanRouteAllowed(r *http.Request) bool {
 			// POST /agent-files/generate — human-triggered LLM authoring of a
 			// prose instruction file (returns a draft for review, never commits).
 			"/agent-files/generate",
-			"/notebook/visual-artifacts":
+			"/visual-artifacts":
 			return true
 		}
-		if strings.HasPrefix(path, "/notebook/visual-artifacts/") {
+		if strings.HasPrefix(path, "/visual-artifacts/") {
 			return true
 		}
 	}

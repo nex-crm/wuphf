@@ -1057,8 +1057,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/wiki/extract/replay",
 		"/wiki/dlq",
 		// rich artifacts (visual artifact surface)
-		"/notebook/visual-artifacts",
-		"/notebook/visual-artifacts/ra_0123456789abcdef",
+		"/visual-artifacts",
+		"/visual-artifacts/ra_0123456789abcdef",
 		// entity
 		"/entity/fact",
 		"/entity/brief/synthesize",

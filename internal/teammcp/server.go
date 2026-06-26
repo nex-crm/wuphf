@@ -102,7 +102,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// Rich-artifact (visual artifact) tools: agents author self-contained
 		// HTML articles that promote into the wiki. They share the markdown
 		// backend gate with team_wiki_*.
-		registerNotebookVisualArtifactTools(server)
+		registerVisualArtifactTools(server)
 		// Entity brief tools (v1.2) — fact log + broker-level synthesis.
 		// Same backend gate: entity briefs live in the wiki subtree.
 		registerEntityTools(server)

@@ -50,7 +50,7 @@ func TestTeamVoiceForSlug_UnknownSlugFallsBack(t *testing.T) {
 func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 	block := markdownKnowledgeToolBlock()
 	for _, tool := range []string{
-		"notebook_visual_artifact_create", "notebook_visual_artifact_promote",
+		"visual_artifact_create", "visual_artifact_promote",
 		"team_wiki_read", "team_wiki_write", "wuphf_wiki_lookup",
 		"team_learning_search", "team_learning_record",
 	} {
@@ -116,7 +116,7 @@ func TestMarkdownKnowledgeToolBlock_HTMLArticleIsSingleTool(t *testing.T) {
 	// Finding 2: markdownKnowledgeToolBlock used to instruct the deprecated
 	// "after notebook_write, create an HTML companion" pattern, which
 	// contradicted the visualArtifactForcingBlock single-tool flow (HTML
-	// article = one notebook_visual_artifact_create call with empty
+	// article = one visual_artifact_create call with empty
 	// source_path, no companion notebook_write). The two blocks must tell one
 	// consistent story.
 	block := markdownKnowledgeToolBlock()
@@ -244,7 +244,7 @@ func TestPromptBuilder_OneOnOneMarkdownMemoryMentionsHTMLArtifacts(t *testing.T)
 	got := pb.Build("ceo")
 	for _, want := range []string{
 		"Markdown wiki memory is active in this 1:1",
-		"notebook_visual_artifact_create",
+		"visual_artifact_create",
 		"diagram, mockup, report, comparison grid, code explainer, PR review, or interactive tuning surface",
 		"visual-artifact:ra_...",
 	} {
@@ -313,7 +313,7 @@ func TestPromptBuilder_MarkdownMemoryPromptsNaturalHTMLArtifactsDuringWork(t *te
 	for _, slug := range []string{"ceo", "pm"} {
 		got := pb.Build(slug)
 		for _, want := range []string{
-			"notebook_visual_artifact_create",
+			"visual_artifact_create",
 			"complex specs",
 			"implementation plans",
 			"comparison grids",
@@ -396,7 +396,7 @@ func TestPromptBuilder_VisualArtifactSelectivityRulePresentOnEverySurface(t *tes
 		"ATOMIC-TURN RULE (only when HTML IS warranted)",
 		"SAME assistant response",
 		"Do NOT narrate the process between steps",
-		"notebook_visual_artifact_create",
+		"visual_artifact_create",
 		"visual-artifact:ra_...",
 		"full breakdown below.",
 		// Broadcast budget — at most 2 for artifact turns, at most 1 otherwise.
@@ -470,7 +470,7 @@ func TestPromptBuilder_HTMLArtifactFlowIsConsistentAcrossBlocks(t *testing.T) {
 			if strings.Contains(got, "After notebook_write, create a self-contained HTML companion") {
 				t.Fatalf("%s prompt still carries the deprecated notebook_write-then-companion instruction", tc.name)
 			}
-			if strings.Contains(got, "create an HTML visual companion with notebook_visual_artifact_create") {
+			if strings.Contains(got, "create an HTML visual companion with visual_artifact_create") {
 				t.Fatalf("%s prompt still describes the HTML artifact as a companion to notebook_write", tc.name)
 			}
 		})

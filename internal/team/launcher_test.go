@@ -1325,7 +1325,7 @@ func TestBuildPromptIncludesMarkdownWikiAndArtifactGuidance(t *testing.T) {
 	for _, slug := range []string{"ceo", "builder"} {
 		prompt := l.buildPrompt(slug)
 		for _, want := range []string{
-			"notebook_visual_artifact_create",
+			"visual_artifact_create",
 			"wuphf_wiki_lookup",
 			"self-contained HTML article",
 			"visual-artifact:ra_...",

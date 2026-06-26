@@ -48,10 +48,10 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 			},
 		},
 		{
-			Name:        "notebook_visual_artifact_create",
+			Name:        "visual_artifact_create",
 			Description: "Produce a self-contained HTML article for complex specs, PR reviews, diagrams, reports, and interactive tuning surfaces. The HTML article IS the deliverable; leave source_path empty and do not also call notebook_write for the same content.",
 			Execute: func(params map[string]any, _ context.Context, _ func(string)) (string, error) {
-				calls = append(calls, "notebook_visual_artifact_create")
+				calls = append(calls, "visual_artifact_create")
 				if got := fmt.Sprint(params["source_path"]); got != sourcePath {
 					return "", fmt.Errorf("source_path=%q, want %q", got, sourcePath)
 				}
@@ -94,7 +94,7 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 						t.Fatalf("turn 1 messages=%d, want system+user", len(msgs))
 					}
 					for _, want := range []string{
-						"notebook_visual_artifact_create",
+						"visual_artifact_create",
 						"self-contained HTML article",
 						"interactive tuning surfaces",
 						"HTML visual artifact",
@@ -122,7 +122,7 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 				},
 				chunks: []agent.StreamChunk{{
 					Type:     "tool_use",
-					ToolName: "notebook_visual_artifact_create",
+					ToolName: "visual_artifact_create",
 					ToolParams: map[string]any{
 						"source_path": sourcePath,
 						"title":       "Launch Risk Dial",
@@ -135,7 +135,7 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 				expectMessages: func(t *testing.T, msgs []agent.Message) {
 					t.Helper()
 					last := msgs[len(msgs)-1].Content
-					if !strings.Contains(last, `Tool "notebook_visual_artifact_create" returned`) || !strings.Contains(last, artifactID) {
+					if !strings.Contains(last, `Tool "visual_artifact_create" returned`) || !strings.Contains(last, artifactID) {
 						t.Fatalf("turn 3 missing artifact create result:\n%s", last)
 					}
 				},
@@ -168,14 +168,14 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 	if final != "Done." || iterations != 4 {
 		t.Fatalf("final=%q iterations=%d, want Done./4", final, iterations)
 	}
-	if want := []string{"notebook_write", "notebook_visual_artifact_create", "team_broadcast"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"notebook_write", "visual_artifact_create", "team_broadcast"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("tool call sequence=%v, want %v", calls, want)
 	}
 	if !strings.Contains(broadcast, "visual-artifact:"+artifactID) {
 		t.Fatalf("broadcast lost artifact marker: %q", broadcast)
 	}
-	if !toolListIncludes(stream.turns[0].recordedTools, "notebook_visual_artifact_create", "interactive tuning surfaces") {
-		t.Fatalf("model did not receive notebook_visual_artifact_create tool guidance: %+v", stream.turns[0].recordedTools)
+	if !toolListIncludes(stream.turns[0].recordedTools, "visual_artifact_create", "interactive tuning surfaces") {
+		t.Fatalf("model did not receive visual_artifact_create tool guidance: %+v", stream.turns[0].recordedTools)
 	}
 }
 

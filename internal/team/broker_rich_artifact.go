@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// handleNotebookVisualArtifacts owns the collection route:
+// handleVisualArtifacts owns the collection route:
 //
-//	GET  /notebook/visual-artifacts?slug=&source_path=
-//	POST /notebook/visual-artifacts
-func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Request) {
+//	GET  /visual-artifacts?slug=&source_path=
+//	POST /visual-artifacts
+func (b *Broker) handleVisualArtifacts(w http.ResponseWriter, r *http.Request) {
 	worker := b.requireWikiWorker(w, "visual artifact")
 	if worker == nil {
 		return
@@ -91,16 +91,16 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// handleNotebookVisualArtifactSubpath owns:
+// handleVisualArtifactSubpath owns:
 //
-//	GET  /notebook/visual-artifacts/{id}
-//	POST /notebook/visual-artifacts/{id}/promote
-func (b *Broker) handleNotebookVisualArtifactSubpath(w http.ResponseWriter, r *http.Request) {
+//	GET  /visual-artifacts/{id}
+//	POST /visual-artifacts/{id}/promote
+func (b *Broker) handleVisualArtifactSubpath(w http.ResponseWriter, r *http.Request) {
 	worker := b.requireWikiWorker(w, "visual artifact")
 	if worker == nil {
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/notebook/visual-artifacts/")
+	rest := strings.TrimPrefix(r.URL.Path, "/visual-artifacts/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "visual artifact not found"})

@@ -12,6 +12,13 @@ import (
 // with the (now removed) notebook worker; the validators themselves are
 // generic guards over agents/{slug}/... paths and are kept here so the
 // surviving callers keep compiling.
+//
+// Note on the "notebook" name: the user/agent-facing surface is now called
+// "visual artifact" (tools visual_artifact_*, routes /visual-artifacts), but
+// the on-disk storage dir is deliberately still agents/{slug}/notebook/ and
+// these validators still say "notebook". Renaming the path would orphan every
+// already-stored artifact, so the legacy dir name is retained for data
+// compatibility while only the public surface was renamed.
 
 // ErrNotebookPathNotAuthorOwned is returned when a write path does not live
 // under the caller's own agents/{my_slug}/notebook/ subtree.
