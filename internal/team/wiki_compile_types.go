@@ -49,11 +49,21 @@ type MergedConcept struct {
 // CompileResult is the tally returned by Compiler.Compile. Errors collects
 // non-fatal per-source / per-page failures so a single bad source or page
 // never aborts the whole run.
+//
+// S4 finalize fields:
+//   - PagesSkipped counts pages whose Phase-2 input was unchanged AND whose
+//     file still existed, so no author call was made (the idempotency win).
+//   - PagesLinked counts pages the deterministic interlink pass rewrote.
+//   - CitationWarnings surfaces non-fatal citation problems (unknown ids,
+//     uncited pages) found after authoring; they never fail the run.
 type CompileResult struct {
-	PagesWritten int      `json:"pages_written"`
-	Concepts     int      `json:"concepts"`
-	SourcesRead  int      `json:"sources_read"`
-	Errors       []string `json:"errors,omitempty"`
+	PagesWritten     int      `json:"pages_written"`
+	PagesSkipped     int      `json:"pages_skipped"`
+	PagesLinked      int      `json:"pages_linked"`
+	Concepts         int      `json:"concepts"`
+	SourcesRead      int      `json:"sources_read"`
+	Errors           []string `json:"errors,omitempty"`
+	CitationWarnings []string `json:"citation_warnings,omitempty"`
 }
 
 // conceptKind normalizes a free-form kind string to one of the two valid
