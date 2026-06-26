@@ -8,7 +8,19 @@ import {
   getGovernor,
   postGovernor,
 } from "../api/governor";
+import { showNotice } from "../components/ui/Toast";
 import { useAppStore } from "../stores/app";
+
+function actionVerb(action: GovernorAction): string {
+  switch (action) {
+    case "pause":
+      return "pause";
+    case "stop":
+      return "stop";
+    default:
+      return "resume";
+  }
+}
 
 /**
  * useGovernor reads the session run-control state (budget/turn checkpoints and
@@ -43,6 +55,15 @@ export function useGovernorAction() {
       postGovernor(action, options),
     onSuccess: (status) => {
       queryClient.setQueryData(GOVERNOR_QUERY_KEY, status);
+    },
+    onError: (error: unknown, { action }) => {
+      // A control action (Pause/Stop/Resume) failing silently is dangerous —
+      // the user may believe the team stopped when it is still running.
+      const detail = error instanceof Error ? error.message : "request failed";
+      showNotice(
+        `Could not ${actionVerb(action)} the team: ${detail}`,
+        "error",
+      );
     },
   });
 }

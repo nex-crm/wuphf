@@ -5,8 +5,11 @@ import { useGovernor, useGovernorAction } from "../../hooks/useGovernor";
 import { reasonDetail, reasonHeadline } from "./governorFormat";
 
 // How much extra budget "Continue +budget" grants per click. Matches the
-// session defaults so one click roughly doubles a fresh window.
+// session defaults so one click roughly doubles a fresh window. The reason
+// "budget" covers both the token and cost ceilings, so bump both — otherwise a
+// cost-triggered pause would re-trip on the next turn.
 const BUDGET_BUMP_TOKENS = 150_000;
+const BUDGET_BUMP_COST_USD = 3;
 
 interface GovernorBannerViewProps {
   status: GovernorStatus;
@@ -28,6 +31,9 @@ export function GovernorBannerView({
   onStop,
 }: GovernorBannerViewProps) {
   const stopped = status.reason === "stop";
+  // "Continue +budget" only makes sense for a budget pause — a manual or
+  // turn-count pause is not relieved by more tokens.
+  const showBudgetBump = !stopped && status.reason === "budget";
   return (
     <div className="governor-banner" role="alert">
       <div className="governor-banner-content">
@@ -61,7 +67,7 @@ export function GovernorBannerView({
         >
           {stopped ? "Resume" : "Continue"}
         </button>
-        {!stopped && (
+        {showBudgetBump ? (
           <button
             className="btn btn-sm"
             onClick={onResumeMore}
@@ -70,8 +76,8 @@ export function GovernorBannerView({
           >
             Continue +budget
           </button>
-        )}
-        {!stopped && (
+        ) : null}
+        {stopped ? null : (
           <button
             className="btn btn-sm governor-banner-stop"
             onClick={onStop}
@@ -100,7 +106,10 @@ export function GovernorBanner() {
     () =>
       mutate({
         action: "resume_more",
-        options: { addTokens: BUDGET_BUMP_TOKENS },
+        options: {
+          addTokens: BUDGET_BUMP_TOKENS,
+          addCostUsd: BUDGET_BUMP_COST_USD,
+        },
       }),
     [mutate],
   );

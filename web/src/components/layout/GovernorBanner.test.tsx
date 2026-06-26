@@ -57,6 +57,36 @@ describe("<GovernorBannerView>", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
+  it("hides Continue +budget for a turn-count checkpoint", () => {
+    render(
+      <GovernorBannerView
+        status={status({ reason: "turns" })}
+        busy={false}
+        onResume={vi.fn()}
+        onResumeMore={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Review checkpoint")).toBeTruthy();
+    expect(screen.queryByText("Continue +budget")).toBeNull();
+    expect(screen.getByText("Continue")).toBeTruthy();
+    expect(screen.getByText("Stop")).toBeTruthy();
+  });
+
+  it("renders a manual pause with Continue and Stop but no budget bump", () => {
+    render(
+      <GovernorBannerView
+        status={status({ reason: "manual" })}
+        busy={false}
+        onResume={vi.fn()}
+        onResumeMore={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Paused")).toBeTruthy();
+    expect(screen.queryByText("Continue +budget")).toBeNull();
+  });
+
   it("collapses to a single Resume action once stopped", () => {
     render(
       <GovernorBannerView

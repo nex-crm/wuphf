@@ -152,8 +152,9 @@ func (g *governor) gate(stop <-chan struct{}) bool {
 		case <-stop:
 			return false
 		case <-ch:
-			// Woken by resume() (or a re-pause replaced the channel). Loop to
-			// re-check paused — if a fresh pause raced in, park again.
+			// Woken by resume() closing the prior channel. Loop to re-check
+			// paused — if a fresh pause raced in before we re-acquired g.mu,
+			// park on the new channel instead.
 		}
 	}
 }
@@ -216,6 +217,7 @@ func (g *governor) resume(tokens int, cost float64) {
 	if g.paused {
 		g.paused = false
 		g.reason = pauseNone
+		g.pausedAt = time.Time{} // zero so a running status omits PausedAt
 		close(g.resumeCh)
 		g.resumeCh = make(chan struct{})
 	}

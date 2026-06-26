@@ -6,9 +6,23 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+)
+
+// governorActionMaxBodyBytes caps the POST /governor body. The valid payload is
+// a tiny action + slug + two numbers; anything larger is a bug or abuse. Mirrors
+// the body caps on the other POST handlers (otlpLogsMaxBodyBytes etc).
+const governorActionMaxBodyBytes = 1 << 10 // 1 KiB
+
+// Bounds for the "Continue +budget" bump so a single call can't set the budget
+// to +Inf (disabling the cost gate) or overflow int on a 32-bit build.
+const (
+	governorMaxAddTokens  = 10_000_000
+	governorMaxAddCostUsd = 1000.0
 )
 
 // headlessDispatchController is the narrow cancellation surface the governor's
@@ -207,8 +221,11 @@ func (b *Broker) handleGovernor(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var req governorActionRequest
 		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, governorActionMaxBodyBytes)
 			defer r.Body.Close()
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+			// An empty body (io.EOF) is allowed for action-only callers; any
+			// other decode error is a 400.
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 				http.Error(w, "invalid json", http.StatusBadRequest)
 				return
 			}
@@ -221,6 +238,14 @@ func (b *Broker) handleGovernor(w http.ResponseWriter, r *http.Request) {
 		case "resume":
 			b.GovernorResume()
 		case "resume_more":
+			if req.AddTokens < 0 || req.AddTokens > governorMaxAddTokens {
+				http.Error(w, "addTokens out of range", http.StatusBadRequest)
+				return
+			}
+			if req.AddCostUsd < 0 || req.AddCostUsd > governorMaxAddCostUsd {
+				http.Error(w, "addCostUsd out of range", http.StatusBadRequest)
+				return
+			}
 			b.GovernorResumeMore(req.AddTokens, req.AddCostUsd)
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)

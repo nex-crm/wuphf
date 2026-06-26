@@ -59,7 +59,9 @@ export function GovernorControl() {
   const onPause = useCallback(() => mutate({ action: "pause" }), [mutate]);
   const onStop = useCallback(() => mutate({ action: "stop" }), [mutate]);
 
-  if (!status || status.paused) return null;
+  // Hidden while paused (the banner owns that state) and when auto-pausing is
+  // disabled, where the meter would be noise and Pause/Stop are the only levers.
+  if (!status || status.paused || status.disabled) return null;
 
   return (
     <GovernorControlView

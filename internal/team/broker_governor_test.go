@@ -1,7 +1,11 @@
 package team
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +106,98 @@ func TestGovernorResumeClearsPause(t *testing.T) {
 	}
 	if st.TurnsSinceCheckpoint != 0 {
 		t.Fatalf("resume should reset turn count, got %d", st.TurnsSinceCheckpoint)
+	}
+}
+
+// TestGovernorCountsOnlyRealTurns is the regression test for the phantom-turn
+// bug: the dispatch worker's idle-drain iteration (beginHeadlessCodexTurn !ok)
+// must NOT be credited to the governor. Two real turns must count as exactly
+// two, not three (two turns + the trailing empty-queue drain).
+func TestGovernorCountsOnlyRealTurns(t *testing.T) {
+	processed := make(chan string, 4)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, _ string, notification string, _ ...string) error {
+		processed <- notification
+		return nil
+	})
+
+	l := newHeadlessLauncherForTest(t)
+	l.broker = newGovernorTestBroker(t)
+	// High threshold so the count is observable without an auto-pause racing in.
+	l.broker.governor = newGovernor(governorConfig{MaxTurnsPerGate: 100}, 0, 0)
+
+	l.enqueueHeadlessCodexTurn("fe", "first")
+	l.enqueueHeadlessCodexTurn("fe", "second")
+	waitForString(t, processed)
+	waitForString(t, processed)
+
+	// Let the worker drain NATURALLY to empty (the idle-drain iteration) rather
+	// than calling stopHeadlessWorkers, which would preempt that iteration at
+	// the top-of-loop stop check and hide the phantom count. We wait until the
+	// worker has deregistered itself (set inside beginHeadlessCodexTurn on the
+	// empty queue), then join its goroutine so any trailing governorNoteTurn has
+	// run before we read the count.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		l.headless.mu.Lock()
+		_, running := l.headless.workers["fe"]
+		l.headless.mu.Unlock()
+		if !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("worker did not drain to idle in time")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	l.stopHeadlessWorkers() // join the (already-exiting) worker goroutine
+
+	if got := l.broker.GovernorStatus().TurnsSinceCheckpoint; got != 2 {
+		t.Fatalf("governor counted %d turns, want exactly 2 (idle drain must not count)", got)
+	}
+}
+
+func TestHandleGovernorRejectsOutOfRangeBump(t *testing.T) {
+	b := newGovernorTestBroker(t)
+	b.governor = newGovernor(governorConfig{MaxSessionTokens: 1000}, 0, 0)
+
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"valid resume_more", `{"action":"resume_more","addTokens":5000}`, http.StatusOK},
+		{"absurd cost (would set +Inf)", `{"action":"resume_more","addCostUsd":1e308}`, http.StatusBadRequest},
+		{"absurd tokens (overflow risk)", `{"action":"resume_more","addTokens":2000000000}`, http.StatusBadRequest},
+		{"negative tokens", `{"action":"resume_more","addTokens":-1}`, http.StatusBadRequest},
+		{"unknown action", `{"action":"nuke"}`, http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/governor", strings.NewReader(tc.body))
+			rec := httptest.NewRecorder()
+			b.handleGovernor(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+	// The absurd-cost request must NOT have crippled the cost gate.
+	if b.GovernorStatus().MaxCostUsd > governorMaxAddCostUsd+defaultGovernorMaxCostUsd {
+		t.Fatalf("cost ceiling was corrupted to %v", b.GovernorStatus().MaxCostUsd)
+	}
+}
+
+func TestHandleGovernorCapsBodySize(t *testing.T) {
+	b := newGovernorTestBroker(t)
+	huge := `{"action":"pause","slug":"` + strings.Repeat("a", 4096) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/governor", strings.NewReader(huge))
+	rec := httptest.NewRecorder()
+	b.handleGovernor(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized body status = %d, want 400", rec.Code)
+	}
+	if b.GovernorStatus().Paused {
+		t.Fatalf("oversized body should not have paused the team")
 	}
 }
 

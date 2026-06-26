@@ -373,6 +373,11 @@ func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
 			defer recoverPanicTo("runHeadlessCodexQueue", fmt.Sprintf("slug=%s", slug))
 			turn, turnCtx, startedAt, timeout, ok := l.beginHeadlessCodexTurn(slug)
 			if !ok {
+				// No work dequeued (empty queue or shutdown). This is an idle
+				// drain, not a completed turn — don't credit the governor or
+				// the turn-checkpoint would fire well before MaxTurnsPerGate
+				// real turns ran.
+				countTurn = false
 				l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
 				return
 			}
