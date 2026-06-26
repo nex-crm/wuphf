@@ -205,6 +205,10 @@ type Broker struct {
 	// the StalledSince it was last acted on, so a still-stuck App Builder build
 	// is nudged at most once per stall episode (broker_app_eval.go).
 	appBuildStallSwept map[string]string
+	// inlineDetectActive single-flights inline workflow→App detection so a burst
+	// of task-less turns cannot spawn unbounded goroutines / corpus reads / judge
+	// calls (broker_workflow_detect.go). Guarded by mu.
+	inlineDetectActive bool
 	// mu is the broker's single big lock. contendedMutex == sync.Mutex
 	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
 	// long holder wedging every endpoint is visible in the log.

@@ -138,6 +138,125 @@ func TestDetectWorkflowAppSkipsWithoutRecurrenceEvidence(t *testing.T) {
 	}
 }
 
+// TestDetectInlineWorkflowAppRaisesProposal: repeated INLINE (task-less) work the
+// CEO did answering chat — which no task-completion ever triggers — clusters into
+// a recurring workflow and surfaces a proposal in the channel it happened in.
+// Bounded: while a proposal is on the board, a second pass doesn't re-judge.
+func TestDetectInlineWorkflowAppRaisesProposal(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	judgeCalls := 0
+	withFakeAppsLLM(t, func(_ context.Context, _, prompt string) (string, error) {
+		judgeCalls++
+		if !strings.Contains(prompt, "INLINE WORK") {
+			t.Errorf("inline judge prompt should mark the work as inline, got: %.80s", prompt)
+		}
+		return `{"worth_building":true,"name":"Lead Scorer","summary":"Score leads","description":"Scores inbound leads against the ICP every time","related_app_id":"","reason":"done repeatedly inline"}`, nil
+	})
+	b := newTestBroker(t)
+	// Two task-less inline turns with the same work shape (pseudo-tasks).
+	path := EventSinkPath()
+	for _, id := range []string{inlineTurnScopePrefix + "a", inlineTurnScopePrefix + "b"} {
+		if err := appendTurnManifest(path, manifestFor(id, "ceo", "crm_fetch_leads", "score_leads")); err != nil {
+			t.Fatalf("seed inline manifest: %v", err)
+		}
+	}
+
+	b.detectInlineWorkflowApp("ceo", "general")
+
+	var proposal *humanInterview
+	for i := range b.requests {
+		if b.requests[i].AppProposal != nil {
+			proposal = &b.requests[i]
+			break
+		}
+	}
+	if proposal == nil {
+		t.Fatal("expected an inline-detected app proposal")
+	}
+	if proposal.AppProposal.Name != "Lead Scorer" {
+		t.Fatalf("proposal name = %q", proposal.AppProposal.Name)
+	}
+	if len(proposal.AppProposal.ObservedSteps) == 0 {
+		t.Error("inline proposal should carry the observed shape")
+	}
+
+	// A second pass is bounded: a proposal is already on the board, so the judge
+	// is not consulted again.
+	before := judgeCalls
+	b.detectInlineWorkflowApp("ceo", "general")
+	if judgeCalls != before {
+		t.Errorf("judge re-consulted while a proposal was already pending (%d -> %d)", before, judgeCalls)
+	}
+}
+
+// TestDetectInlineWorkflowAppSkipsAlreadyProposedShape: a shape the human already
+// saw (an existing proposal, even one they answered/rejected) is not re-pitched
+// or re-judged — the per-turn inline path must not nag.
+func TestDetectInlineWorkflowAppSkipsAlreadyProposedShape(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	judgeCalls := 0
+	withFakeAppsLLM(t, func(_ context.Context, _, _ string) (string, error) {
+		judgeCalls++
+		return `{"worth_building":true,"name":"Lead Scorer","description":"x"}`, nil
+	})
+	b := newTestBroker(t)
+	path := EventSinkPath()
+	for _, id := range []string{inlineTurnScopePrefix + "a", inlineTurnScopePrefix + "b"} {
+		if err := appendTurnManifest(path, manifestFor(id, "ceo", "crm_fetch_leads", "score_leads")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The shape was already proposed and the human DECIDED (rejected) it.
+	b.requests = append(b.requests, humanInterview{
+		ID: "request-x", Kind: "approval",
+		AppProposal: &appProposalSpec{Name: "Lead Scorer", Fingerprint: "crm_fetch_leads>score_leads"},
+	})
+
+	b.detectInlineWorkflowApp("ceo", "general")
+
+	if judgeCalls != 0 {
+		t.Errorf("an already-proposed shape must not be re-judged, judgeCalls=%d", judgeCalls)
+	}
+	n := 0
+	for i := range b.requests {
+		if b.requests[i].AppProposal != nil {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("must not raise a second card for an already-proposed shape, got %d", n)
+	}
+}
+
+// TestDetectionLaneIsolation: an inline pseudo-task must NOT merge into a real
+// task's cluster (which fuzzy+cross-agent would otherwise do) — that would
+// inflate the task's recurrence count and mislabel it. Each lane sees only its
+// own manifests.
+func TestDetectionLaneIsolation(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	path := EventSinkPath()
+	// One real task and one inline pseudo-task with the SAME read-only shape.
+	if err := appendTurnManifest(path, manifestFor("OFFICE-1", "ceo", "crm_fetch_leads", "score_leads")); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendTurnManifest(path, manifestFor(inlineTurnScopePrefix+"a", "ceo", "crm_fetch_leads", "score_leads")); err != nil {
+		t.Fatal(err)
+	}
+	// Task lane: the real task is a single read-only run; the inline pseudo-task is
+	// excluded, so nothing inflates it to the floor → no candidate.
+	if cand := detectionCandidateForTask("OFFICE-1"); cand != nil {
+		t.Fatalf("task lane must not be inflated by an inline pseudo-task: %+v", cand)
+	}
+	// Inline lane: a single inline run is below the inline floor (>= 2) → none.
+	cands, err := detectAppCandidates(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("a single inline run must not surface, got %d", len(cands))
+	}
+}
+
 // TestDetectWorkflowAppSkipsAppBuilderOwnTasks: the App Builder's own build/edit
 // tasks ARE app work, not a workflow to convert — detection must not even call
 // the judge for them.

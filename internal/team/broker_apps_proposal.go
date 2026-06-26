@@ -41,6 +41,11 @@ type appProposalSpec struct {
 	// proposals. Passed through to the App Builder's brief as concrete, proven
 	// build targets so the generator works from the real steps, not just prose.
 	ObservedSteps []string `json:"observed_steps,omitempty"`
+	// Fingerprint is the mined shape's stable identity. The detector records it so
+	// a proposal that was already raised — even after the human ANSWERED (incl.
+	// rejected) it — is not re-pitched or re-judged for the same shape. Empty for
+	// agent-raised proposals.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // sanitizeAppProposalSpec trims the proposal and drops it entirely when it has
@@ -55,6 +60,7 @@ func sanitizeAppProposalSpec(in *appProposalSpec) *appProposalSpec {
 		Summary:     strings.TrimSpace(in.Summary),
 		Description: strings.TrimSpace(in.Description),
 		AppID:       strings.TrimSpace(in.AppID),
+		Fingerprint: strings.TrimSpace(in.Fingerprint),
 	}
 	for _, step := range in.ObservedSteps {
 		if step = strings.TrimSpace(step); step != "" {

@@ -37,28 +37,38 @@ var (
 // headlessCodexRunTurn. Routes by provider kind to the codex/opencode/claude
 // turn runner. Tests substitute via setHeadlessCodexRunTurnForTest.
 func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
-	if l != nil {
-		// Per-task provider wins over the agent binding (then global default).
-		kind := l.effectiveProviderKindForAgent(ctx, slug)
-		switch {
-		case kind == provider.KindCodex:
-			return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
-		case kind == provider.KindOpencode:
-			return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
-		case isOpenAICompatKind(kind):
-			return l.runHeadlessOpenAICompatTurn(ctx, slug, notification, channel...)
-		case kind == provider.KindSlack:
-			// Foreign Slack agents have no local runtime: their "turn" is the
-			// outbound Slack relay (a real <@U…> mention), which the transport
-			// dispatcher already delivered. Falling through to the Claude
-			// runner would spawn a doomed subprocess for an agent that acts on
-			// its own in Slack — so the queued turn is a deliberate no-op.
-			return nil
-		default:
-			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
-		}
+	if l == nil {
+		// Nil receiver is safe: runHeadlessCodexTurn checks l == nil and returns
+		// "broker is not running" — preserves the prior fall-through behavior.
+		return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
 	}
-	return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+	// Per-task provider wins over the agent binding (then global default).
+	kind := l.effectiveProviderKindForAgent(ctx, slug)
+	var err error
+	switch {
+	case kind == provider.KindSlack:
+		// Foreign Slack agents have no local runtime: their "turn" is the
+		// outbound Slack relay (a real <@U…> mention), which the transport
+		// dispatcher already delivered. Falling through to the Claude runner
+		// would spawn a doomed subprocess for an agent that acts on its own in
+		// Slack — so the queued turn is a deliberate no-op (and emits no
+		// manifest, so there is nothing to detect).
+		return nil
+	case kind == provider.KindCodex:
+		err = l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+	case kind == provider.KindOpencode:
+		err = l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
+	case isOpenAICompatKind(kind):
+		err = l.runHeadlessOpenAICompatTurn(ctx, slug, notification, channel...)
+	default:
+		err = l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+	}
+	// After a task-less (inline / chat) turn, run inline workflow→App detection:
+	// the post-task hook only fires on a task reaching done, so work the CEO did
+	// answering chat inline would otherwise never be seen. The turn's manifest is
+	// already persisted (turn-scoped), so the corpus is current.
+	l.maybeQueueInlineDetection(ctx, slug, channel...)
+	return err
 }
 
 // headlessCodexRunTurn dispatches a queued turn to whichever runner the

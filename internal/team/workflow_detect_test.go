@@ -186,6 +186,42 @@ func TestManifestToolTokenUnwrapsProxy(t *testing.T) {
 	}
 }
 
+// TestTurnManifestInlineScope: a turn attributed to a task records under that
+// task; a task-less (inline) turn records under a turn-scoped pseudo-task ONLY
+// when it used >= 2 real work tools, so conversational turns don't pollute the
+// corpus.
+func TestTurnManifestInlineScope(t *testing.T) {
+	man := func(taskID, turnID string, tools ...string) HeadlessEvent {
+		tc := make([]HeadlessManifestEntry, 0, len(tools))
+		for _, name := range tools {
+			tc = append(tc, HeadlessManifestEntry{ToolName: name, Count: 1})
+		}
+		return HeadlessEvent{Type: HeadlessEventTypeManifest, TaskID: taskID, TurnID: turnID, Agent: "ceo", ToolCalls: tc}
+	}
+
+	// Task turn → recorded under the task id.
+	if m, ok := turnManifestFromEvent(man("OFFICE-1", "tn1", "crm_fetch_leads", "score_leads")); !ok || m.TaskID != "OFFICE-1" {
+		t.Fatalf("task turn: ok=%v id=%q", ok, m.TaskID)
+	}
+	// Task-less work-shaped turn → turn-scoped pseudo-task.
+	m, ok := turnManifestFromEvent(man("", "tn2", "crm_fetch_leads", "score_leads"))
+	if !ok || m.TaskID != inlineTurnScopePrefix+"tn2" || !isInlineTurnScope(m.TaskID) {
+		t.Fatalf("inline turn: ok=%v id=%q", ok, m.TaskID)
+	}
+	// Task-less, orchestration-only → dropped.
+	if _, ok := turnManifestFromEvent(man("", "tn3", "Bash", "Read", "Edit")); ok {
+		t.Error("orchestration-only inline turn must not persist")
+	}
+	// Task-less, only one work tool → dropped (needs >= 2).
+	if _, ok := turnManifestFromEvent(man("", "tn4", "score_leads")); ok {
+		t.Error("single-work-tool inline turn must not persist")
+	}
+	// Task-less with no turn id → dropped (nothing to key on).
+	if _, ok := turnManifestFromEvent(man("", "", "crm_fetch_leads", "score_leads")); ok {
+		t.Error("inline turn without a turn id must not persist")
+	}
+}
+
 // TestEventSinkRoundTripAndCorruption: manifests persist and read back in order,
 // and a corrupt line is skipped rather than poisoning the corpus.
 func TestEventSinkRoundTripAndCorruption(t *testing.T) {

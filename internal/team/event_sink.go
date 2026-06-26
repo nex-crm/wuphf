@@ -43,15 +43,29 @@ const eventSinkFile = "events.jsonl"
 // eventSinkMu serializes appends so concurrent turns never interleave a line.
 var eventSinkMu sync.Mutex
 
+// inlineTurnScopePrefix marks a pseudo-task synthesized for a task-less (inline /
+// chat) turn so the detector can cluster repeated inline work-shaped turns. Each
+// such turn is its own one-turn pseudo-task keyed by its turn id.
+const inlineTurnScopePrefix = "turn:"
+
+// isInlineTurnScope reports whether a (pseudo-)task id was synthesized for a
+// task-less inline turn rather than being a real broker task.
+func isInlineTurnScope(taskID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(taskID), inlineTurnScopePrefix)
+}
+
 // turnManifestFromEvent builds a TurnManifest from a manifest HeadlessEvent.
-// Returns false when the event is not a usable manifest (wrong type, no
-// task_id, or no named tool calls) so the caller skips the write.
+// Returns false when the event is not a usable manifest (wrong type or no named
+// tool calls). A turn attributed to a real task records under that task id; a
+// task-less inline turn (the CEO answering work-shaped chat without scoping a
+// task — otherwise invisible to detection) records under a turn-scoped
+// pseudo-task, but ONLY when it used >= 2 real WORK tools so conversational
+// turns do not bloat the corpus.
 func turnManifestFromEvent(e HeadlessEvent) (TurnManifest, bool) {
 	if e.Type != HeadlessEventTypeManifest {
 		return TurnManifest{}, false
 	}
-	taskID := strings.TrimSpace(e.TaskID)
-	if taskID == "" || len(e.ToolCalls) == 0 {
+	if len(e.ToolCalls) == 0 {
 		return TurnManifest{}, false
 	}
 	tools := make([]TurnToolCount, 0, len(e.ToolCalls))
@@ -65,6 +79,14 @@ func turnManifestFromEvent(e HeadlessEvent) (TurnManifest, bool) {
 	if len(tools) == 0 {
 		return TurnManifest{}, false
 	}
+	taskID := strings.TrimSpace(e.TaskID)
+	if taskID == "" {
+		turnID := strings.TrimSpace(e.TurnID)
+		if turnID == "" || workToolCount(tools) < 2 {
+			return TurnManifest{}, false
+		}
+		taskID = inlineTurnScopePrefix + turnID
+	}
 	return TurnManifest{
 		TaskID:    taskID,
 		TurnID:    strings.TrimSpace(e.TurnID),
@@ -72,6 +94,18 @@ func turnManifestFromEvent(e HeadlessEvent) (TurnManifest, bool) {
 		StartedAt: strings.TrimSpace(e.StartedAt),
 		Tools:     tools,
 	}, true
+}
+
+// workToolCount returns how many of the tools are real workflow work (not agent
+// orchestration plumbing) — the signal that a turn did something worth detecting.
+func workToolCount(tools []TurnToolCount) int {
+	n := 0
+	for _, t := range tools {
+		if !isOrchestrationTool(t.Name) {
+			n++
+		}
+	}
+	return n
 }
 
 // EventSinkPath returns the durable detection-substrate file under the runtime
