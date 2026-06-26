@@ -66,3 +66,33 @@ def test_already_in_review_interrupts_for_decision():
     step = drive(g, run, thread_id="t7")
     assert step["status"] == "interrupted"
     assert step["interrupt"]["gate_kind"] == "review"
+
+
+def test_review_gate_projects_review_state_on_interrupt():
+    # Regression (headline): an interrupted gate must leave the run in the GATE
+    # state, not the pre-gate executable state. If this is "running" the broker
+    # never surfaces the gate and re-dispatches the task forever.
+    g = build_graph(FakeHarness(TurnOutcome.SUBMITTED_FOR_REVIEW))
+    run = from_broker_record({"task_id": "g1", "lifecycle_state": "running"})
+    step = drive(g, run, thread_id="g1")
+    assert step["status"] == "interrupted"
+    assert step["state"]["lifecycle_state"] == State.REVIEW.value
+
+
+def test_plan_gate_projects_decision_state_on_interrupt():
+    g = build_graph(FakeHarness(TurnOutcome.PLAN_READY))
+    run = from_broker_record({"task_id": "g2", "lifecycle_state": "planning"})
+    step = drive(g, run, thread_id="g2")
+    assert step["status"] == "interrupted"
+    assert step["state"]["lifecycle_state"] == State.DECISION.value
+
+
+def test_changes_requested_continue_stays_changes_requested():
+    # A continuation turn while changes are outstanding must NOT silently reset to
+    # RUNNING — a later turn still needs to know changes were requested.
+    step = _run(
+        {"task_id": "g3", "lifecycle_state": "changes_requested"},
+        FakeHarness(TurnOutcome.CONTINUE),
+    )
+    assert step["status"] == "done"
+    assert step["state"]["lifecycle_state"] == State.CHANGES_REQUESTED.value

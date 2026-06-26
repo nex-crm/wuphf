@@ -42,6 +42,10 @@ CANONICAL: tuple[State, ...] = (
 
 # state -> (pipeline_stage, review_state, status, blocked)   [lifecycleDerivedFields]
 FORWARD: dict[State, tuple[str, str, str, bool]] = {
+    # UNKNOWN is not a canonical broker state; it carries the fail-loud signal so
+    # derived_fields / to_projection stay total (no KeyError) and the Go side still
+    # detects it via status/lifecycle_state == "unknown" and refuses to dispatch.
+    State.UNKNOWN:             ("", "", "unknown", False),
     State.DRAFTING:            ("draft", "pending_review", "open", False),
     State.PLANNING:            ("plan", "pending_review", "in_progress", False),
     State.INTAKE:              ("triage", "pending_review", "open", False),
@@ -204,13 +208,26 @@ def gate_for_outcome(state: State, outcome: TurnOutcome) -> GateKind | None:
     return None
 
 
+def gate_pending_state(gate: GateKind) -> State:
+    """The lifecycle state a task parks in while a human gate is pending. Both are
+    non-executable and route HUMAN, so projecting one stops the dispatch loop and
+    lets the broker's existing approval path resolve the gate (re-hydrate model).
+    A plan awaiting approval is a DECISION; delivered work awaiting review is REVIEW."""
+    return State.DECISION if gate is GateKind.PLAN else State.REVIEW
+
+
 def apply_turn_outcome(state: State, outcome: TurnOutcome) -> State:
     """Non-gated outcomes only (CONTINUE/BLOCKED). Gated outcomes go through a
     human gate first (see apply_human_decision)."""
     if outcome is TurnOutcome.BLOCKED:
         return State.BLOCKED
     if outcome is TurnOutcome.CONTINUE:
-        return State.RUNNING if state is not State.PLANNING else State.PLANNING
+        # A continuation keeps the working state it was in: a planning turn stays
+        # PLANNING, a changes-requested turn stays CHANGES_REQUESTED (so a later
+        # turn still knows changes are outstanding), everything else is RUNNING.
+        if state in (State.PLANNING, State.CHANGES_REQUESTED):
+            return state
+        return State.RUNNING
     raise ValueError(f"{outcome} is a gated outcome; route through a human gate")
 
 

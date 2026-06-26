@@ -115,3 +115,13 @@ def test_build_harness_degrades_to_fake_without_sdk():
     # No SDK in CI -> the service stays runnable via FakeHarness.
     h = build_harness("claude-sonnet-4-6", {})
     assert isinstance(h, FakeHarness)
+
+
+def test_build_harness_warns_when_degrading(caplog):
+    # The degrade must be VISIBLE in operator logs — a silent FakeHarness in prod
+    # means tasks transition state with no real agent work behind them.
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.harness"):
+        build_harness("claude-sonnet-4-6", {})
+    assert any("FakeHarness" in r.message for r in caplog.records)

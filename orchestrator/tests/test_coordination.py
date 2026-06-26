@@ -94,9 +94,23 @@ def test_action_mapping_by_state():
     assert coordination_action(graph(node("t", State.DECISION)), "t") == CoordAction.AWAIT
     assert coordination_action(graph(node("t", State.APPROVED)), "t") == CoordAction.IDLE
     assert coordination_action(graph(node("t", State.ARCHIVED)), "t") == CoordAction.IDLE
+    assert coordination_action(graph(node("t", State.REJECTED)), "t") == CoordAction.IDLE
     assert coordination_action(graph(node("t", State.UNKNOWN)), "t") == CoordAction.UNKNOWN
     assert coordination_action(graph(node("t", State.READY)), "t") == CoordAction.START
+    assert coordination_action(graph(node("t", State.RUNNING)), "t") == CoordAction.DISPATCH
+    assert coordination_action(graph(node("t", State.PLANNING)), "t") == CoordAction.DISPATCH
     assert coordination_action(graph(node("t", State.CHANGES_REQUESTED)), "t") == CoordAction.DISPATCH
+    # BLOCKED is the broker's job to unblock — never START it (regression).
+    assert coordination_action(graph(node("t", State.BLOCKED)), "t") == CoordAction.IDLE
+
+
+def test_unknown_dependency_blocks_without_crash():
+    # A dependency that re-hydrated to UNKNOWN must block the dependent (fail-safe)
+    # and must NOT raise a KeyError out of derived_fields.
+    g = graph(node("a", State.UNKNOWN), node("b", State.READY, "a"))
+    assert dependency_resolved(State.UNKNOWN) is False
+    assert unresolved_dependencies(g, "b") == ["a"]
+    assert coordination_action(g, "b") == CoordAction.BLOCK
 
 
 # --- re-hydrate from broker records ------------------------------------------- #

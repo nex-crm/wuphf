@@ -92,6 +92,11 @@ def coordination_action(graph: TaskGraph, task_id: str) -> CoordAction:
         return CoordAction.UNKNOWN
     if lc.is_terminal(state):
         return CoordAction.IDLE
+    if state is lc.State.BLOCKED:
+        # The agent signalled an external block; unblocking is the broker's job,
+        # not the orchestrator's. IDLE here (mirrors route()), never START — a
+        # BLOCKED task with no unresolved task-deps must not be activated.
+        return CoordAction.IDLE
     if state in (lc.State.REVIEW, lc.State.DECISION):
         return CoordAction.AWAIT
     if unresolved_dependencies(graph, task_id):

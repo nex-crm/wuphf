@@ -186,8 +186,15 @@ func TestDispatchClientResume_DecisionValidation(t *testing.T) {
 		t.Fatal("expected error for invalid decision")
 	}
 
+	// Missing task_id is rejected before any round-trip (mirrors Run).
+	if _, err := c.Resume(context.Background(), ResumeRequest{
+		ThreadID: "task-4", Decision: DecisionApprove,
+	}); err == nil {
+		t.Fatal("expected error for empty task_id")
+	}
+
 	// Missing thread_id is rejected.
-	if _, err := c.Resume(context.Background(), ResumeRequest{Decision: DecisionApprove}); err == nil {
+	if _, err := c.Resume(context.Background(), ResumeRequest{TaskID: "task-4", Decision: DecisionApprove}); err == nil {
 		t.Fatal("expected error for empty thread_id")
 	}
 }

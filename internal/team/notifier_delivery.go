@@ -181,7 +181,15 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 	// ownership — never both paths. Runs in a goroutine so the notify loop is
 	// not blocked on the orchestration step (one step = one agent turn).
 	if l.orchestrator != nil && taskUsesOrchestrator(task) {
-		go l.dispatchTaskViaOrchestrator(target.Slug, task)
+		// Recover in the child goroutine: a parent's recover does NOT cover a
+		// goroutine it spawns, so without this an orchestrator-path panic would
+		// crash the whole broker process (Finding D1). Mirrors every other
+		// background goroutine in this package (see launcher_boot.go,
+		// headless_codex_queue.go, notifier_loops.go).
+		go func() {
+			defer recoverPanicTo("dispatchTaskViaOrchestrator", fmt.Sprintf("slug=%s task=%s", target.Slug, task.ID))
+			l.dispatchTaskViaOrchestrator(target.Slug, task)
+		}()
 		return
 	}
 	channel := normalizeChannelSlug(task.Channel)

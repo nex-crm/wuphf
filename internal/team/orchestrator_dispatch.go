@@ -86,7 +86,28 @@ func (l *Launcher) dispatchTaskViaOrchestrator(slug string, task teamTask) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), orchestratorStepTimeout)
+	// Single-flight guard (Finding D3): repeated sendTaskUpdate ticks for one
+	// task must not spawn concurrent /run goroutines — they would race the
+	// orchestrator's shared checkpointer and run duplicate agent turns. Hold a
+	// per-task slot for the duration of this step; a second concurrent dispatch
+	// for the same task is skipped, and the next tick re-dispatches once this
+	// one releases the slot.
+	if _, inFlight := l.orchestratorInFlight.LoadOrStore(taskID, struct{}{}); inFlight {
+		log.Printf("team: orchestrator dispatch for task %q (owner %q) already in flight — skipping duplicate", taskID, slug)
+		return
+	}
+	defer l.orchestratorInFlight.Delete(taskID)
+
+	// Derive the step deadline from the launcher's lifecycle context so a Kill()
+	// — which cancels l.headless.ctx — aborts an in-flight step instead of
+	// letting it run for the full orchestratorStepTimeout after shutdown and
+	// then writing to a stopped broker (Finding D2). Fall back to Background only
+	// for zero-value &Launcher{} fixtures where the pool context was never wired.
+	baseCtx := l.headless.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, orchestratorStepTimeout)
 	defer cancel()
 
 	req := provider.DispatchRequest{
@@ -122,7 +143,11 @@ func (l *Launcher) applyOrchestratorProjection(taskID string, result *provider.S
 		// The projection already reflects the gate state (e.g. decision); the
 		// broker's existing human-approval path resolves it, and the next
 		// dispatch re-hydrates the orchestrator from the moved-forward record.
-		log.Printf("team: orchestrator interrupted task %q at a human gate: %v", taskID, result.Interrupt)
+		//
+		// Log ONLY the gate identity, never the full interrupt map (Finding I):
+		// the orchestrator (graph.py) folds the agent's last turn text into the
+		// interrupt payload, which may carry sensitive content.
+		log.Printf("team: orchestrator interrupted task %q at a human gate (gate_kind=%q)", taskID, orchestratorGateKind(result.Interrupt))
 	}
 
 	newState := LifecycleState(strings.TrimSpace(proj.LifecycleState))
@@ -130,9 +155,35 @@ func (l *Launcher) applyOrchestratorProjection(taskID string, result *provider.S
 		log.Printf("team: orchestrator returned non-canonical lifecycle %q for task %q — refusing to transition", proj.LifecycleState, taskID)
 		return
 	}
+	// Terminal-resurrection guard (Finding C): this projection was computed from
+	// the record captured at dispatch time. If the task reached a terminal
+	// lifecycle in the meantime — e.g. a human approved or archived it while the
+	// step was running — applying a stale "running"/gate projection would
+	// transition it backward and revive a closed task. Read the CURRENT state
+	// from the broker and refuse loudly rather than resurrect.
+	if current := l.broker.TaskByID(taskID); current != nil {
+		if row, ok := derivedFieldsFor(current.LifecycleState); ok && isTerminalTeamTaskStatus(row.Status) {
+			log.Printf("team: orchestrator projected %q for task %q but it is already terminal (current=%q) — refusing to resurrect", newState, taskID, current.LifecycleState)
+			return
+		}
+	}
 	if err := l.broker.TransitionLifecycle(taskID, newState, "orchestrator:"+result.Status); err != nil {
 		log.Printf("team: applying orchestrator projection for task %q -> %q failed: %v", taskID, newState, err)
 	}
+}
+
+// orchestratorGateKind extracts the human-gate kind from an interrupt payload
+// for logging. It reads only the gate_kind key and never the rest of the map,
+// which can carry the agent's full turn text (Finding I). Defensive against a
+// missing key or non-string value.
+func orchestratorGateKind(interrupt map[string]any) string {
+	if interrupt == nil {
+		return ""
+	}
+	if v, ok := interrupt["gate_kind"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // orchestratorRecord builds the authoritative re-hydrate record the orchestrator

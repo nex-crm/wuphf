@@ -14,13 +14,24 @@ from __future__ import annotations
 
 from typing import Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from .graph import build_graph, drive
 from .harness import FakeHarness, Harness, build_harness
 from .lifecycle import State
 from .runstate import from_broker_record, to_projection
-from .wire import DispatchRequest, ResumeRequest, StepResult
+from .wire import SCHEMA_VERSION, DispatchRequest, ResumeRequest, StepResult
+
+
+def _check_schema_version(got: int) -> None:
+    """Fail loud on a wire-contract mismatch instead of silently misreading a
+    request shaped for a different schema. The version field is otherwise
+    decorative — a mismatched sidecar must 400, not best-effort parse."""
+    if got != SCHEMA_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"schema_version mismatch: orchestrator speaks {SCHEMA_VERSION}, got {got}",
+        )
 
 # Per-process harness factory; overridable for tests / wiring.
 HarnessFactory = Callable[[DispatchRequest], Harness]
@@ -46,16 +57,19 @@ def create_app(harness_factory: HarnessFactory = _default_harness_factory) -> Fa
 
     @app.post("/run", response_model=StepResult)
     def run(req: DispatchRequest) -> StepResult:
+        _check_schema_version(req.schema_version)
         run_state = from_broker_record(req.record)
         run_state["system_prompt"] = req.system_prompt or run_state.get("system_prompt", "")
         if req.messages:
             run_state["messages"] = req.messages
         if run_state["lifecycle_state"] == State.UNKNOWN.value:
-            # Fail loud: never dispatch an unmappable task.
+            # Fail loud: never dispatch an unmappable task. Emit the full projection
+            # shape (status "unknown") so the Go broker decodes every field and
+            # detects the signal via IsUnknown(), not a half-populated record.
             return StepResult(
                 status="done",
                 thread_id=req.task_id,
-                projection={"task_id": req.task_id, "lifecycle_state": State.UNKNOWN.value},
+                projection=to_projection(run_state),
             )
         graph = build_graph(harness_factory(req), checkpointer=checkpointer)
         result = drive(graph, run_state, thread_id=req.task_id)
@@ -68,6 +82,7 @@ def create_app(harness_factory: HarnessFactory = _default_harness_factory) -> Fa
 
     @app.post("/resume", response_model=StepResult)
     def resume(req: ResumeRequest) -> StepResult:
+        _check_schema_version(req.schema_version)
         # The harness is not invoked on resume (the graph continues at human_gate),
         # so a FakeHarness placeholder is fine; the shared checkpointer holds the thread.
         graph = build_graph(FakeHarness(), checkpointer=checkpointer)

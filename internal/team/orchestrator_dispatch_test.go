@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/provider"
@@ -184,6 +185,111 @@ func TestDispatchViaOrchestrator_InterruptedTransitionsToGate(t *testing.T) {
 
 	if got := lifecycleOf(t, b, "task-5"); got != LifecycleStateDecision {
 		t.Fatalf("interrupted dispatch should land the gate state; got %q", got)
+	}
+}
+
+// TestApplyProjection_TerminalTaskNotResurrected pins Finding C: a stale
+// dispatch's "running" projection must NOT transition a task that has already
+// reached a terminal lifecycle (approved/archived) in the meantime.
+func TestApplyProjection_TerminalTaskNotResurrected(t *testing.T) {
+	t.Parallel()
+	for _, terminal := range []LifecycleState{LifecycleStateApproved, LifecycleStateArchived} {
+		terminal := terminal
+		t.Run(string(terminal), func(t *testing.T) {
+			t.Parallel()
+			b := newTestBroker(t)
+			b.tasks = append(b.tasks, teamTask{
+				ID:             "task-term",
+				Owner:          "eng",
+				Title:          "demo",
+				LifecycleState: terminal,
+				Orchestrator:   orchestratorLangGraph,
+			})
+			l := &Launcher{broker: b}
+
+			// A stale dispatch projects "running" — applying it would revive the
+			// closed task. The terminal-resurrection guard must refuse.
+			l.applyOrchestratorProjection("task-term", &provider.StepResult{
+				Status:     provider.StepStatusDone,
+				Projection: provider.Projection{TaskID: "task-term", LifecycleState: "running"},
+			})
+			if got := lifecycleOf(t, b, "task-term"); got != terminal {
+				t.Fatalf("terminal task must not be resurrected; state = %q, want %q", got, terminal)
+			}
+		})
+	}
+}
+
+// blockingOrchestrator holds the first Run call open on a channel so a test can
+// observe the single-flight window: it signals when the first call enters and
+// blocks until released.
+type blockingOrchestrator struct {
+	mu       sync.Mutex
+	runCalls int
+	entered  chan struct{}
+	release  chan struct{}
+}
+
+func (f *blockingOrchestrator) Run(_ context.Context, req provider.DispatchRequest) (*provider.StepResult, error) {
+	f.mu.Lock()
+	f.runCalls++
+	first := f.runCalls == 1
+	f.mu.Unlock()
+	if first {
+		close(f.entered)
+		<-f.release
+	}
+	return &provider.StepResult{
+		Status:     provider.StepStatusDone,
+		Projection: provider.Projection{TaskID: req.TaskID, LifecycleState: "running"},
+	}, nil
+}
+
+func (f *blockingOrchestrator) Resume(_ context.Context, _ provider.ResumeRequest) (*provider.StepResult, error) {
+	return nil, nil
+}
+
+// TestDispatchViaOrchestrator_SingleFlightSkipsConcurrent pins Finding D3: while
+// a dispatch for a task is in flight, a second concurrent dispatch for the same
+// task is skipped (no duplicate /run), and a fresh dispatch is allowed once the
+// first releases the slot.
+func TestDispatchViaOrchestrator_SingleFlightSkipsConcurrent(t *testing.T) {
+	t.Parallel()
+	l, b := runningTaskBroker(t, "task-sf", "eng")
+	fake := &blockingOrchestrator{entered: make(chan struct{}), release: make(chan struct{})}
+	l.SetTaskOrchestrator(fake)
+	task := b.AllTasks()[0]
+
+	done := make(chan struct{})
+	go func() {
+		l.dispatchTaskViaOrchestrator("eng", task)
+		close(done)
+	}()
+
+	// Wait until the first dispatch is inside Run, holding the single-flight slot.
+	<-fake.entered
+
+	// A second concurrent dispatch for the same task must be skipped.
+	l.dispatchTaskViaOrchestrator("eng", task)
+	fake.mu.Lock()
+	calls := fake.runCalls
+	fake.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("second concurrent dispatch should be skipped; Run calls = %d, want 1", calls)
+	}
+
+	// Release the first dispatch and let it finish (frees the slot).
+	close(fake.release)
+	<-done
+
+	// With the slot freed, a fresh dispatch runs again (release already closed,
+	// so Run returns without blocking).
+	l.dispatchTaskViaOrchestrator("eng", task)
+	fake.mu.Lock()
+	calls = fake.runCalls
+	fake.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("dispatch after slot release should run; Run calls = %d, want 2", calls)
 	}
 }
 

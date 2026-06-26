@@ -44,7 +44,19 @@ def _dispatch_turn(state: TaskRun, harness: Harness) -> dict:
 def _after_dispatch(state: TaskRun) -> str:
     cur = lc.State(state["lifecycle_state"])
     outcome = lc.TurnOutcome(state["last_outcome"])
-    return "human" if lc.gate_for_outcome(cur, outcome) is not None else "continue"
+    return "enter_gate" if lc.gate_for_outcome(cur, outcome) is not None else "continue"
+
+
+def _enter_gate(state: TaskRun) -> dict:
+    """Commit the pending human-gate lifecycle state BEFORE the interrupt suspends
+    the run. This is load-bearing for the re-hydrate path: `drive` reads the
+    checkpoint after the interrupt, so the projection must already reflect the gate
+    state (review/decision) — otherwise the broker sees the pre-gate executable
+    state (running/planning), never surfaces the gate, and re-dispatches forever.
+    A node only commits its channel update when it RETURNS; `interrupt()` raises, so
+    the state write has to happen in a separate node that completes first."""
+    gate = lc.GateKind(state.get("gate_kind") or lc.GateKind.REVIEW.value)
+    return {"lifecycle_state": lc.gate_pending_state(gate).value}
 
 
 def _human_gate(state: TaskRun) -> dict:
@@ -71,14 +83,16 @@ def _apply_continue(state: TaskRun) -> dict:
 def build_graph(harness: Harness, checkpointer=None):
     g = StateGraph(TaskRun)
     g.add_node("dispatch_turn", lambda s: _dispatch_turn(s, harness))
+    g.add_node("enter_gate", _enter_gate)
     g.add_node("human_gate", _human_gate)
     g.add_node("apply_continue", _apply_continue)
     g.add_conditional_edges(
         START, _route_entry, {"dispatch": "dispatch_turn", "human": "human_gate", "idle": END}
     )
     g.add_conditional_edges(
-        "dispatch_turn", _after_dispatch, {"human": "human_gate", "continue": "apply_continue"}
+        "dispatch_turn", _after_dispatch, {"enter_gate": "enter_gate", "continue": "apply_continue"}
     )
+    g.add_edge("enter_gate", "human_gate")
     g.add_edge("human_gate", END)
     g.add_edge("apply_continue", END)
     return g.compile(checkpointer=checkpointer or MemorySaver())

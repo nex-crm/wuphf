@@ -8,12 +8,17 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = 1
 
 
 class McpServer(BaseModel):
+    # extra="forbid" so a field added on the Go side but forgotten here fails loud
+    # at decode time instead of being silently dropped (matters once P2 extends the
+    # contract with the goal-coordination message shape).
+    model_config = ConfigDict(extra="forbid")
+
     command: str
     args: list[str] = Field(default_factory=list)
     # ENV VAR NAMES to pass through to the teammcp subprocess (never values).
@@ -21,6 +26,8 @@ class McpServer(BaseModel):
 
 
 class DispatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     schema_version: int = SCHEMA_VERSION
     task_id: str
     # The authoritative broker record (re-hydrate source). Carries lifecycle_state
@@ -34,6 +41,8 @@ class DispatchRequest(BaseModel):
 
 
 class ResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     schema_version: int = SCHEMA_VERSION
     task_id: str
     thread_id: str
