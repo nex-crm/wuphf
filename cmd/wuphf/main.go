@@ -206,6 +206,7 @@ func wireBrokerWorkspaces(l *team.Launcher, extra ...func(*team.Broker)) {
 		}
 		b.SetWorkspaceOrchestrator(brokerOrchestratorAdapter{})
 		b.SetLauncherDrainer(l)
+		b.SetHeadlessDispatchController(l)
 		b.SetAdminPauseExitFn(os.Exit)
 		for _, fn := range extra {
 			if fn != nil {

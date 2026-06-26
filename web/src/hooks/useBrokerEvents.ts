@@ -160,6 +160,9 @@ export function useBrokerEvents(enabled: boolean) {
       void queryClient.invalidateQueries({ queryKey: ["actions"] });
       void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
     });
+    source.addEventListener("governor", () => {
+      void queryClient.invalidateQueries({ queryKey: ["governor"] });
+    });
     source.onerror = () => {
       setBrokerConnected(false);
       // EventSource auto-reconnects; only mark "reconnecting" once the
