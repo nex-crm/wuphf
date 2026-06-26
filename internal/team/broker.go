@@ -647,6 +647,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/sources/list", b.requireAuth(b.handleSourcesList))
 	mux.HandleFunc("/sources/read", b.requireAuth(b.handleSourcesRead))
 	mux.HandleFunc("/sources/ingest", b.requireAuth(b.handleSourcesIngest))
+	// S3 compile engine: deterministic source → cited article compiler.
+	mux.HandleFunc("/wiki/compile", b.requireAuth(b.handleWikiCompile))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
