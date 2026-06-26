@@ -51,13 +51,20 @@ func TestOrchestratorE2E_RealClientThroughBroker(t *testing.T) {
 				}
 			}
 		}
+		// Mirror the REAL service shape for a turn that submits for review: the
+		// step INTERRUPTS at a human gate and the projection is the GATE state
+		// (review), never the pre-gate executable "running". Emitting "running"
+		// here would let the broker re-dispatch the task forever — the bug the
+		// graph's enter_gate split fixed. The interrupt payload carries only the
+		// gate identity (the broker logs gate_kind, never the agent text).
 		_ = json.NewEncoder(w).Encode(provider.StepResult{
-			Status:   provider.StepStatusDone,
+			Status:   provider.StepStatusInterrupted,
 			ThreadID: req.TaskID,
 			Projection: provider.Projection{
 				TaskID: req.TaskID, LifecycleState: "review",
 				PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress",
 			},
+			Interrupt: map[string]any{"type": "approval_required", "gate_kind": "review"},
 		})
 	}))
 	defer srv.Close()
@@ -98,10 +105,14 @@ func TestOrchestratorE2E_RealClientThroughBroker(t *testing.T) {
 		t.Fatalf("re-hydrate record lifecycle_state = %q, want running", sawLifecycle)
 	}
 
-	// 4. The projection landed: lifecycle + the web-facing derived wire shape.
+	// 4. The projection landed: the task parked at the human gate (review), which
+	// is NON-executable — so the broker surfaces the gate and will not re-dispatch.
 	got, _ := taskByID(t, b, task.ID)
 	if got.LifecycleState != LifecycleStateReview {
 		t.Fatalf("lifecycle = %q, want review", got.LifecycleState)
+	}
+	if isExecutableTeamTaskStatus(got.LifecycleState) {
+		t.Fatalf("task parked at a gate must be non-executable, got executable %q", got.LifecycleState)
 	}
 	data, err := json.Marshal(got)
 	if err != nil {

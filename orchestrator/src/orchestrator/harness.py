@@ -19,6 +19,7 @@ matches the tool-name suffix.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -26,6 +27,8 @@ from typing import Protocol
 from .lifecycle import State, TurnOutcome
 from .runstate import TaskRun
 from .wire import McpServer
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -165,7 +168,7 @@ class ClaudeAgentHarness:
     def _require_sdk(self):
         try:
             import claude_agent_sdk  # noqa: F401  (lazy: optional dependency)
-        except ImportError as e:  # pragma: no cover - exercised when SDK present
+        except ImportError as e:  # pragma: no cover - unreachable when SDK is installed
             raise RuntimeError(
                 "ClaudeAgentHarness requires the 'claude' extra: pip install claude-agent-sdk"
             ) from e
@@ -215,5 +218,10 @@ def build_harness(model: str, mcp: dict[str, McpServer]) -> Harness:
     try:
         import claude_agent_sdk  # noqa: F401
     except ImportError:
+        _log.warning(
+            "claude-agent-sdk not installed; falling back to FakeHarness — no real "
+            "agent will run. Install the 'claude' extra (pip install claude-agent-sdk) "
+            "for live dispatch."
+        )
         return FakeHarness()
     return ClaudeAgentHarness(model=model, mcp=mcp)

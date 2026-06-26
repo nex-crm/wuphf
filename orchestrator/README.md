@@ -58,10 +58,13 @@ uv pip install langgraph langgraph-checkpoint-sqlite fastapi sse-starlette uvico
    `team_task` plan input). When it becomes executable, the broker routes it to
    `POST /run` instead of a headless CLI turn and writes the projection back.
 
-Caveat (FakeHarness only): without `claude-agent-sdk` installed the service falls
-back to `FakeHarness`, whose interrupted step projects `running`, so a wired task
-re-dispatches each tick. Install the SDK + set a key to get the real
-`ClaudeAgentHarness` (P1b-iv), which returns a real gate state and resolves this.
+Gate behavior (both harnesses): a turn that submits for review or readies a plan
+interrupts at a human gate and projects the GATE state (`review` / `decision`),
+which is non-executable — so the broker surfaces the gate and does NOT re-dispatch.
+The human resolves it through the broker's existing approval path; the next
+dispatch re-hydrates the moved-forward record. Without `claude-agent-sdk` the
+service degrades to `FakeHarness` (logged as a warning) so it stays runnable
+key-free; install the SDK + set a key for real `ClaudeAgentHarness` turns.
 
 ## Deferred (next increments — explicit, not hidden)
 

@@ -87,6 +87,15 @@ type Launcher struct {
 	// SetTaskOrchestrator.
 	orchestrator taskOrchestrator
 
+	// orchestratorInFlight is the per-task single-flight guard for the
+	// orchestrator dispatch path (orchestrator_dispatch.go). Keyed by task ID;
+	// dispatchTaskViaOrchestrator LoadOrStores the ID on entry and Deletes it on
+	// exit so repeated sendTaskUpdate ticks for one task cannot spawn concurrent
+	// /run goroutines that race the orchestrator's shared checkpointer. A
+	// zero-value sync.Map is ready to use, so &Launcher{} test fixtures stay
+	// nil-safe without explicit initialisation.
+	orchestratorInFlight sync.Map
+
 	// headless is the per-launcher headless-worker pool (PLAN.md §C7).
 	// All headless dispatch state — mutex, ctx/cancel, queues, workers,
 	// active turns, deferred lead turn, stop channel, and worker

@@ -85,3 +85,28 @@ def test_gate_classification_and_decisions():
     assert lc.apply_human_decision(GateKind.REVIEW, HumanDecision.APPROVE) is State.APPROVED
     assert lc.apply_human_decision(GateKind.REVIEW, HumanDecision.REQUEST_CHANGES) is State.CHANGES_REQUESTED
     assert lc.apply_human_decision(GateKind.REVIEW, HumanDecision.REJECT) is State.REJECTED
+
+
+def test_continue_preserves_working_state():
+    # A continuation keeps the state it was in for planning AND changes_requested;
+    # everything else collapses to running.
+    assert lc.apply_turn_outcome(State.PLANNING, TurnOutcome.CONTINUE) is State.PLANNING
+    assert lc.apply_turn_outcome(State.CHANGES_REQUESTED, TurnOutcome.CONTINUE) is State.CHANGES_REQUESTED
+    assert lc.apply_turn_outcome(State.RUNNING, TurnOutcome.CONTINUE) is State.RUNNING
+
+
+def test_gate_pending_state_maps_to_human_states():
+    assert lc.gate_pending_state(GateKind.PLAN) is State.DECISION
+    assert lc.gate_pending_state(GateKind.REVIEW) is State.REVIEW
+    # both park the task in a non-executable, human-routed state
+    for s in (State.DECISION, State.REVIEW):
+        assert not lc.is_executable(s)
+        assert lc.route(s) is Route.HUMAN
+
+
+def test_derived_fields_total_on_unknown():
+    # derived_fields must be total: UNKNOWN returns a fail-loud sentinel, never a
+    # KeyError (reachable from coordination when a dependency is unmappable).
+    ps, rs, status, blocked = lc.derived_fields(State.UNKNOWN)
+    assert status == "unknown"
+    assert blocked is False

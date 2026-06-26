@@ -126,8 +126,8 @@ var ErrUnexpectedStatus = errors.New("deepagents: unexpected step status")
 // DispatchClient talks to the orchestrator sidecar's HTTP surface. It is safe
 // for concurrent use (the underlying http.Client is).
 type DispatchClient struct {
-	baseURL string
-	http    *http.Client
+	baseURL    string
+	httpClient *http.Client
 }
 
 // DispatchOption configures a DispatchClient.
@@ -137,7 +137,7 @@ type DispatchOption func(*DispatchClient)
 func WithHTTPClient(c *http.Client) DispatchOption {
 	return func(d *DispatchClient) {
 		if c != nil {
-			d.http = c
+			d.httpClient = c
 		}
 	}
 }
@@ -157,7 +157,7 @@ func NewDispatchClient(baseURL string, opts ...DispatchOption) *DispatchClient {
 	}
 	d := &DispatchClient{
 		baseURL: strings.TrimRight(resolved, "/"),
-		http: &http.Client{
+		httpClient: &http.Client{
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 			},
@@ -185,6 +185,9 @@ func (c *DispatchClient) Run(ctx context.Context, req DispatchRequest) (*StepRes
 // Resume resolves a pending human gate on an interrupted thread (POST /resume)
 // and continues the graph to the next stable state.
 func (c *DispatchClient) Resume(ctx context.Context, req ResumeRequest) (*StepResult, error) {
+	if strings.TrimSpace(req.TaskID) == "" {
+		return nil, errors.New("deepagents: Resume requires a task_id")
+	}
 	if strings.TrimSpace(req.ThreadID) == "" {
 		return nil, errors.New("deepagents: Resume requires a thread_id")
 	}
@@ -206,7 +209,7 @@ func (c *DispatchClient) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("deepagents: build health request: %w", err)
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("deepagents: orchestrator unreachable at %s: %w", c.baseURL, err)
 	}
@@ -233,9 +236,9 @@ func (c *DispatchClient) postStep(ctx context.Context, path string, body any) (*
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.http.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("deepagents: POST %s%s: %w. Is the orchestrator sidecar running?", c.baseURL, path, err)
+		return nil, fmt.Errorf("deepagents: POST %s%s: %w (is the orchestrator sidecar running?)", c.baseURL, path, err)
 	}
 	defer resp.Body.Close()
 
