@@ -12,7 +12,7 @@ import (
 // and returns the final plain-text result.
 func RunClaudeOneShot(systemPrompt, prompt, cwd string) (string, error) {
 	return runClaudeOneShotWithAttempt(systemPrompt, prompt, cwd, func(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string) claudeAttemptResult {
-		return runClaudeAttempt(ch, prompt, systemPrompt, cwd, "")
+		return runClaudeAttempt(ch, prompt, systemPrompt, cwd, "", true)
 	})
 }
 
@@ -25,7 +25,7 @@ func RunClaudeOneShotCtx(ctx context.Context, systemPrompt, prompt, cwd string) 
 		return "", err
 	}
 	return runClaudeOneShotWithAttempt(systemPrompt, prompt, cwd, func(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string) claudeAttemptResult {
-		return runClaudeAttemptCtx(ctx, ch, prompt, systemPrompt, cwd, "")
+		return runClaudeAttemptCtx(ctx, ch, prompt, systemPrompt, cwd, "", true)
 	})
 }
 
