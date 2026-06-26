@@ -107,16 +107,15 @@ func operationStarterAgentsFromBlueprint(agents []operations.StarterAgent, repla
 			expertise = append(expertise, operationRenderTemplateString(item, replacements))
 		}
 		out = append(out, operationStarterAgent{
-			Slug:           operationRenderTemplateString(agent.Slug, replacements),
-			Emoji:          operationRenderTemplateString(agent.Emoji, replacements),
-			Name:           operationRenderTemplateString(agent.Name, replacements),
-			Role:           operationRenderTemplateString(agent.Role, replacements),
-			Checked:        agent.Checked,
-			Type:           operationRenderTemplateString(agent.Type, replacements),
-			PermissionMode: agent.PermissionMode,
-			BuiltIn:        agent.BuiltIn,
-			Expertise:      expertise,
-			Personality:    operationRenderTemplateString(agent.Personality, replacements),
+			Slug:        operationRenderTemplateString(agent.Slug, replacements),
+			Emoji:       operationRenderTemplateString(agent.Emoji, replacements),
+			Name:        operationRenderTemplateString(agent.Name, replacements),
+			Role:        operationRenderTemplateString(agent.Role, replacements),
+			Checked:     agent.Checked,
+			Type:        operationRenderTemplateString(agent.Type, replacements),
+			BuiltIn:     agent.BuiltIn,
+			Expertise:   expertise,
+			Personality: operationRenderTemplateString(agent.Personality, replacements),
 		})
 	}
 	return out

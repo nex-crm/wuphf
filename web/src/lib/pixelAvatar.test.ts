@@ -31,6 +31,31 @@ describe("pixel avatar sprite resolution", () => {
     expect(mixedCase.palette).toEqual(normalized.palette);
   });
 
+  it("keeps Jim's shared avatar on a square portrait", () => {
+    const jim = resolvePortraitSprite("jim");
+
+    expect(jim.id).toBe("office20");
+    expect(jim.portrait).toHaveLength(16);
+    expect(jim.portrait[0]).toHaveLength(16);
+    expect(resolvePortraitSprite("halpert").id).toBe("office20");
+    expect(resolvePortraitSprite("jim-halpert").id).toBe("office20");
+  });
+
+  it("renders Pam's archivist byline identity with the desk avatar", () => {
+    // The wiki desk avatar uses slug "pam"; Pam's commits are authored under
+    // the "archivist" git identity, so her bylines/audit/history arrive with
+    // that slug. Both must resolve to the same sprite — not a procedural face.
+    const desk = resolvePortraitSprite("pam");
+    expect(desk.id).toBe("hybridPam");
+
+    for (const slug of ["archivist", "librarian", " Archivist "]) {
+      const avatar = resolvePortraitSprite(slug);
+      expect(avatar.id).toBe(desk.id);
+      expect(avatar.palette).toEqual(desk.palette);
+      expect(avatar.portrait).toEqual(desk.portrait);
+    }
+  });
+
   it("keeps arbitrary new-agent slugs on generated office sprites", () => {
     const avatar = resolvePortraitSprite("custom-ops-agent");
     const idParts = avatar.id.split(":");
@@ -41,6 +66,7 @@ describe("pixel avatar sprite resolution", () => {
       "hybridCeo",
       "hybridGeneric",
       "hybridHuman",
+      "hybridJim",
       "hybridPam",
       "hybridPamCute",
     ]).not.toContain(baseID);
@@ -61,6 +87,7 @@ describe("pixel avatar sprite resolution", () => {
 
   it("keeps procedural agent colors stable and accent-like", () => {
     expect(getAgentColor("ceo")).toBe("#E8A838");
+    expect(getAgentColor("jim")).toBe("#8FB3D1");
     expect(getAgentColor("custom-ops-agent")).toMatch(/^#[0-9A-F]{6}$/i);
     expect(getAgentColor("custom-ops-agent")).toBe(
       getAgentColor("custom-ops-agent"),
@@ -71,6 +98,10 @@ describe("pixel avatar sprite resolution", () => {
     expect(getAgentColor("planner")).toBe(getAgentColor("pm"));
     expect(getAgentColor("builder")).toBe(getAgentColor("eng"));
     expect(getAgentColor("growth")).toBe(getAgentColor("gtm"));
+    expect(getAgentColor("halpert")).toBe(getAgentColor("jim"));
+    expect(getAgentColor("jim-halpert")).toBe(getAgentColor("jim"));
+    expect(getAgentColor("archivist")).toBe(getAgentColor("pam"));
+    expect(getAgentColor("librarian")).toBe(getAgentColor("pam"));
     expect(getAgentColor("operator")).toBe(getAgentColor("nex"));
   });
 

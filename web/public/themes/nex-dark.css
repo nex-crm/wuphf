@@ -19,22 +19,32 @@ html[data-theme="nex-dark"] {
   --overlay-white: rgba(255, 255, 255, 0.12);
   --overlay-white-strong: rgba(255, 255, 255, 0.32);
 
-  /* ── Semantic aliases ── */
-  --bg: #111213;
-  --bg-warm: #191a1b;
-  --bg-subtle: #0d0e0f;
-  --bg-card: #151617;
-  --text: #e9eaeb;
-  --text-secondary: #aeb1b2;
-  --text-tertiary: #686c6e;
-  --text-disabled: #434647;
+  /* ── Twilight palette ──
+     The light theme is purple-on-white; "nex-dark" is the same brand at
+     night, not a neutral dark mode. Every surface picks up a faint violet
+     temperature, and text warms toward cream so it pairs with the
+     aubergine ground instead of fighting it. */
+  --bg: #121017;
+  --bg-warm: #1c1825;
+  --bg-subtle: #0d0c14;
+  --bg-card: #16131e;
+  --text: #ece8ef;
+  --text-secondary: #b2adbb;
+  /* #75707d failed WCAG AA (3.62:1) on --bg-warm; bumped to 5.22:1. */
+  --text-tertiary: #928d9c;
+  --text-disabled: #46424d;
 
   /* accent stays the same purple/tertiary */
 
-  --border: #1e2022;
-  --border-light: #171819;
-  --border-dark: #2a2d2f;
-  --border-strong: #434647;
+  --border: #221d2c;
+  --border-light: #1a1623;
+  --border-dark: #2e2839;
+  --border-strong: #45404d;
+
+  /* Body gradient stops — tokenized so the twilight palette can be
+     tuned in one place. */
+  --bg-gradient-top: #1a1228;
+  --bg-gradient-bottom: #0e0f14;
 
   /* ── Sidebar – keep purple but use a deeper shade ── */
   --nex-sidebar: #4a1f70;
@@ -44,15 +54,28 @@ html[data-theme="nex-dark"] {
   --nex-sidebar-text-active: #ffffff;
 }
 
-/* ── Override hard-coded message text color (not a CSS variable in nex.css) ── */
-html[data-theme="nex-dark"] .message-text {
-  color: #c8cacc;
+/* ── Twilight atmosphere on body — a slow vertical fade from aubergine
+   to ink so the surface reads as a lit room rather than a flat panel.
+   The gradient is fixed so it does not tile when the chat scrolls. ── */
+html[data-theme="nex-dark"] body {
+  background-color: var(--bg);
+  background-image: linear-gradient(
+    180deg,
+    var(--bg-gradient-top) 0%,
+    var(--bg-gradient-bottom) 100%
+  );
+  background-attachment: fixed;
 }
 
-/* ── Composer inner border slightly lighter for dark bg ── */
+/* ── Override hard-coded message text color (not a CSS variable in nex.css) ── */
+html[data-theme="nex-dark"] .message-text {
+  color: #d2cdda;
+}
+
+/* ── Composer inner — match the violet-warmed card tone ── */
 html[data-theme="nex-dark"] .composer-inner {
-  background: #191a1b;
-  border-color: #2a2d2f;
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
 }
 
 /* ── Sidebar bottom matches deeper dark ── */
@@ -68,4 +91,168 @@ html[data-theme="nex-dark"] .sidebar-header {
 /* ── Message hover on dark bg ── */
 html[data-theme="nex-dark"] .message:hover {
   background: #191a1b;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Dark-theme contrast fixes
+   The base stylesheets target light surfaces. Anywhere a rule
+   hardcodes a light bg + dark text (or vice versa) needs an
+   override here so the dark theme stays readable.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── @mention + json-syntax accents track the brand purple, not amber.
+   At night the same violet that owns the sidebar should own the inline
+   accents too — otherwise the dark theme reads as a stranger. ── */
+html[data-theme="nex-dark"] {
+  --mention-bg: rgba(196, 176, 255, 0.14);
+  --mention-fg: #c4b0ff;
+  --syntax-number: #c4b0ff;
+  --syntax-bool: #f0a8c8;
+}
+
+/* ── Task status badges — light pastel chips don't survive on dark surface ── */
+html[data-theme="nex-dark"] .task-detail-status-badge.status-done {
+  background: rgba(47, 170, 100, 0.14);
+  color: #54c984;
+  border-color: rgba(47, 170, 100, 0.3);
+}
+html[data-theme="nex-dark"] .task-detail-status-badge.status-blocked {
+  background: rgba(196, 176, 255, 0.14);
+  color: #c4b0ff;
+  border-color: rgba(196, 176, 255, 0.3);
+}
+
+/* ── Insight badges — white text on bright accent washes out; tint the bg
+       darker so the white-on-color stays legible ── */
+html[data-theme="nex-dark"] .insight-badge-low {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+/* ── Notebook surface — base tokens assume cream-paper light mode.
+       Re-map to a dark parchment palette so the wiki notebook reads. ── */
+html[data-theme="nex-dark"] .notebook-surface {
+  --nb-paper: #161718;
+  --nb-paper-dark: #111213;
+  --nb-rule: rgba(255, 255, 255, 0.03);
+  --nb-surface: #1a1b1c;
+  --nb-text: #e9eaeb;
+  --nb-text-muted: #aeb1b2;
+  --nb-text-tertiary: #7d8082;
+  --nb-border: #2a2d2f;
+  --nb-border-light: #1e2022;
+  --nb-ink-blue: #88a4c2;
+  --nb-stamp-red: #d6443c;
+  --nb-amber: #ffb647;
+  --nb-amber-bg: rgba(255, 182, 71, 0.1);
+  --nb-amber-hover: #f0a541;
+  --nb-green-approve: #54c984;
+  --nb-green-bg: rgba(84, 201, 132, 0.1);
+
+  /* Kill the cream paper grain — both layers read as scanlines on dark. */
+  background-image: none !important;
+  background-color: var(--nb-paper);
+}
+
+/* Notebook status pills — were hardcoded dark grays/ambers/burgundies that
+   only contrasted against cream paper. Re-tint for the dark surface. */
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-item .nb-status-draft {
+  color: var(--text-secondary);
+}
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-item .nb-status-review {
+  color: #ffb647;
+}
+html[data-theme="nex-dark"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-changes {
+  color: #ff7e6e;
+}
+
+/* Notebook shelf cards — hardcoded white background flips to dark card. */
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-card {
+  background: var(--nb-paper-dark);
+  outline-color: rgba(255, 255, 255, 0.08);
+  color: var(--nb-text);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-card:hover {
+  background: #1f2021;
+  outline-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="nex-dark"]
+  .notebook-surface
+  .nb-shelf-card
+  .nb-shelf-card-meta {
+  color: var(--text-tertiary);
+}
+
+/* Notebook review cards — were bright yellow sticky-notes (#eef679 / #f5fb95).
+   On dark surface the yellow burns; switch to dark amber chip. */
+html[data-theme="nex-dark"] .notebook-surface .nb-review-card {
+  background: rgba(255, 182, 71, 0.1);
+  outline-color: rgba(255, 255, 255, 0.1);
+  color: var(--nb-text);
+}
+html[data-theme="nex-dark"] .notebook-surface .nb-review-card:hover {
+  background: rgba(255, 182, 71, 0.18);
+  outline-color: rgba(255, 182, 71, 0.4);
+}
+
+/* Scrollbar thumb hover — base uses rgba(0,0,0,0.4) which disappears on dark */
+html[data-theme="nex-dark"] .notebook-surface::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Wiki text muted/rule fallbacks now resolve to theme tokens via
+       :root in wiki.css; nothing extra needed here. ── */
+
+/* ═══════════════════════════════════════════════════════════════
+   Wiki link + amber accents (Tiptap editor chrome)
+
+   wiki.css seeds these from the light-only olive ramp:
+     --wk-wikilink   = --olive-500  (#3f4224, deep olive)
+     --wk-amber      = --olive-500
+     --wk-amber-bg   = --olive-200  (#eef679, near-white yellow)
+     --wk-amber-banner = --olive-100 (#f8ffdb, near-white)
+   On the twilight surface the olive link is ~1.5:1 (invisible) and the
+   near-white amber surfaces flash bright and bury the near-white --wk-text
+   (active rows become white-on-white). Re-map to the brand violet:
+   tertiary-300 (#cf72d9) clears ~5.6:1 on --bg for the link/accent, and the
+   amber surfaces become subtle violet tints that keep --wk-text readable.
+
+   Scoped to html[data-theme] (not .wiki-root) on purpose: the slash menu,
+   mention menu, and link/image popovers portal to document.body, outside
+   .wiki-root, so a .wiki-root override would never reach them. ── */
+html[data-theme="nex-dark"] {
+  --wk-wikilink: var(--tertiary-300);
+  --wk-amber: var(--tertiary-300);
+  --wk-amber-bg: rgba(159, 77, 191, 0.22);
+  --wk-amber-banner: rgba(159, 77, 191, 0.22);
+
+  /* Version-history diff washes. wiki.css seeds these from the light ramp:
+       --wk-diff-add-bg    = --green-bg  (#e9fbef, near-white green)
+       --wk-diff-remove-bg = --red-bg    (#ffeeeb, near-white red)
+     Those near-white washes flash bright on the twilight diff surface
+     (--wk-code-bg = --bg-warm = #1c1825) and the near-white --wk-text muted
+     context lines around them lose contrast. Re-map to low-alpha color washes
+     with a bright readable ink, mirroring the violet amber re-tint above:
+       added   #5ad08a on the composited ~#26312f wash clears ~6.9:1 on --bg-warm
+       removed  #f08a82 on the composited ~#312026 wash clears ~5.9:1 on --bg-warm
+     Both pass WCAG AA; the +/- prefix stays as the non-color cue. */
+  --wk-diff-add-bg: rgba(64, 180, 116, 0.16);
+  --wk-diff-add-ink: #5ad08a;
+  --wk-diff-remove-bg: rgba(214, 68, 60, 0.16);
+  --wk-diff-remove-ink: #f08a82;
+}
+
+/* "NEW" / type pill — the base rule's --accent-bg (#ffebfc, near-white)
+   would flash bright on the twilight surface. Re-tint to a violet wash with
+   a bright violet ink: #cf72d9 on the composited ~#2a2330 surface clears
+   well past 4.5:1. */
+html[data-theme="nex-dark"] .wk-section-new {
+  background: rgba(159, 77, 191, 0.2);
+  color: var(--tertiary-300);
 }

@@ -2002,3 +2002,1404 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 1: Pre-office provider picker (onboarding-into-office spec)
+   Single full-bleed screen — no modal chrome, no progress dots.
+   ═══════════════════════════════════════════════════════════════ */
+
+.pre-pick-screen {
+  min-height: 100vh;
+  display: flex;
+  /* Top-anchored (not vertically centered) so the page reads top-down and
+     avoids a dead band above the hero on tall viewports. */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(48px, 9vh, 112px) 24px 64px;
+  /* Token-based accent wash mirroring the wizard host (.onboarding-wizard):
+     a faint accent radial over the theme base so it reads on light, dark, and
+     noir without hardcoding a light gradient. */
+  background:
+    radial-gradient(
+      120% 100% at 50% 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 60%
+    ),
+    var(--bg);
+}
+
+.pre-pick-body {
+  width: 100%;
+  max-width: 1000px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Two-column band: the provider cards + every collapsible config section
+   share the left column (so they line up on one left edge); the verify clip
+   sits in the right column. Collapses to a single column on narrow viewports,
+   where the clip falls back under the left column. */
+.pre-pick-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 48px;
+  width: 100%;
+  align-items: start;
+}
+
+/* The shared left column: provider cards on top, then the config sections,
+   all stretched to the same width and aligned to the same left edge. */
+.pre-pick-left {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.pre-pick-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* The clip is centered vertically against the (taller) left column so the
+   right side reads as a balanced exhibit rather than top-aligned with empty
+   space beneath it. */
+.pre-pick-aside {
+  align-self: center;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+@media (max-width: 880px) {
+  .pre-pick-split {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .pre-pick-aside {
+    align-self: stretch;
+  }
+}
+
+.pre-pick-hero {
+  text-align: left;
+  margin-bottom: 4px;
+}
+
+.pre-pick-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.pre-pick-headline {
+  font-family: var(--font-logo);
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  margin: 0 0 14px 0;
+}
+
+.pre-pick-subhead {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 460px;
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* Rendered Remotion clip illustrating the verify pass (install / sign-in /
+   model-reachable checks resolving to Connected). It sits to the RIGHT of the
+   runtime cards (and under them on narrow viewports) so the providers stay the
+   first actionable block. The clip is a self-contained product window on its
+   own soft backdrop, so it reads on any theme. */
+.pre-pick-clip-figure {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.pre-pick-clip {
+  display: block;
+  width: 100%;
+  max-width: 440px;
+  height: auto;
+  border-radius: var(--radius-lg);
+}
+
+.pre-pick-clip-caption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 420px;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.pre-pick-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .pre-pick-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pre-pick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pre-pick-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.pre-pick-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pre-pick-card:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.pre-pick-card.missing {
+  background: transparent;
+}
+
+.pre-pick-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pre-pick-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pre-pick-card-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pre-pick-card.available .pre-pick-card-status {
+  color: var(--green);
+}
+
+/* Issue #932: installed-but-not-signed-in state — keep the tile visually
+   present (not the "missing" treatment) but recolor the status as warning so
+   the user can tell the card is in a blocking state without reading the
+   label. */
+.pre-pick-card.available.unauthed .pre-pick-card-status {
+  color: var(--warning-500);
+}
+
+.pre-pick-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.pre-pick-card-install {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  text-underline-offset: 3px;
+  transition:
+    text-decoration-color 120ms ease,
+    color 120ms ease;
+}
+
+.pre-pick-card:hover .pre-pick-card-install {
+  text-decoration-color: var(--accent);
+}
+
+.pre-pick-secondary-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.pre-pick-selected-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pre-pick-secondary-button {
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.pre-pick-secondary-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.pre-pick-secondary-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pre-pick-secondary-button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.pre-pick-helper {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.pre-pick-error {
+  font-size: 13px;
+  color: var(--red);
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--red-bg);
+  border: 1px solid color-mix(in srgb, var(--red) 28%, transparent);
+}
+
+/* ─── Pre-pick runtime cell (card + guide toggle) ───────────────────────── */
+
+.pre-pick-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The card inside a cell takes the full cell width so the toggle lines up
+   beneath it. */
+.pre-pick-cell .pre-pick-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-guide-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pre-pick-guide-toggle:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-dark);
+}
+
+.pre-pick-guide-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pre-pick-guide-toggle:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.pre-pick-guide-toggle.open {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.pre-pick-guide-toggle-chevron {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.pre-pick-guide-toggle.open .pre-pick-guide-toggle-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pre-pick-guide-toggle-chevron {
+    transition: none;
+  }
+}
+
+/* Disable the hover/state transitions on pre-pick controls under reduced
+   motion. The card lift, status-color crossfades, and copy-button feedback
+   are all decorative; state still changes instantly. */
+@media (prefers-reduced-motion: reduce) {
+  .pre-pick-card,
+  .pre-pick-card-install,
+  .pre-pick-secondary-button,
+  .pre-pick-guide-toggle,
+  .pre-pick-guide-command-copy {
+    transition: none;
+  }
+}
+
+/* ── Touch ergonomics ──────────────────────────────────────────────────────
+   On coarse pointers, the small pill controls need a 44px hit area even though
+   their visible text stays the same size (the larger target is invisible
+   padding, not bigger type). Mirrors the pattern in onboarding-wizard.css. */
+@media (pointer: coarse) {
+  .pre-pick-guide-toggle,
+  .pre-pick-secondary-button {
+    min-height: 44px;
+  }
+}
+
+/* ─── Pre-pick guided setup panel (spec section B) ──────────────────────── */
+
+.pre-pick-guide {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-card);
+  box-sizing: border-box;
+  animation: pre-pick-guide-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pre-pick-guide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pre-pick-guide {
+    animation: none;
+  }
+}
+
+.pre-pick-guide-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pre-pick-guide-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pre-pick-guide-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pre-pick-guide-step-num {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* The failed step is highlighted after a verify so the user sees exactly
+   where setup stalled. */
+.pre-pick-guide-step.failed .pre-pick-guide-step-num {
+  border-color: var(--warning-500);
+  color: var(--warning-500);
+}
+
+.pre-pick-guide-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pre-pick-guide-step-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pre-pick-guide-step.failed .pre-pick-guide-step-title {
+  color: var(--warning-500);
+}
+
+.pre-pick-guide-step-detail {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.pre-pick-guide-step-link {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 120ms ease;
+}
+
+.pre-pick-guide-step-link:hover {
+  text-decoration-color: var(--accent);
+}
+
+/* Mono "terminal" command row with a copy button (InlineCommand). */
+.pre-pick-guide-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.pre-pick-guide-command-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.pre-pick-guide-command-copy {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pre-pick-guide-command-copy:hover {
+  color: var(--text);
+  border-color: var(--border-dark);
+}
+
+.pre-pick-guide-command-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Pre-pick verify loop ──────────────────────────────────────────────── */
+
+.pre-pick-verify-row {
+  display: flex;
+}
+
+.pre-pick-verify-button {
+  align-self: flex-start;
+}
+
+.pre-pick-verify-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.pre-pick-verify-result.pass {
+  border-color: var(--green);
+  background: var(--green-bg);
+}
+
+.pre-pick-verify-result.auth {
+  border-color: var(--warning-400);
+  background: var(--warning-100);
+}
+
+.pre-pick-verify-result.neutral {
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.pre-pick-verify-result-lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pre-pick-verify-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.pre-pick-verify-result.pass .pre-pick-verify-glyph {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.pre-pick-verify-result.auth .pre-pick-verify-glyph {
+  background: var(--warning-100);
+  color: var(--warning-500);
+}
+
+.pre-pick-verify-result.neutral .pre-pick-verify-glyph {
+  background: var(--bg-card);
+  color: var(--text-tertiary);
+}
+
+.pre-pick-verify-version {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.pre-pick-verify-result-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.pre-pick-next-button {
+  width: 100%;
+}
+
+/* ─── Phase 5: Pre-pick extra sections (API keys, local, OAI-compat) ────── */
+
+.pre-pick-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pre-pick-section-heading {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Disclosure header for a collapsible pre-pick section (e.g. API keys).
+   Borderless so it reads as a section label, not a button, while still
+   exposing the full keyboard/AT affordances of a real <button>. */
+.pre-pick-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.pre-pick-section-toggle-chevron {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-secondary);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pre-pick-section-toggle-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-secondary);
+}
+
+.pre-pick-section-collapse {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Ordered after the base selectors above so specificity ascends and biome's
+   noDescendingSpecificity stays satisfied. */
+.pre-pick-section-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.pre-pick-section-toggle:hover .pre-pick-section-heading,
+.pre-pick-section-toggle:hover .pre-pick-section-toggle-chevron {
+  color: var(--text);
+}
+
+.pre-pick-section-toggle.open .pre-pick-section-toggle-chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+/* Grouped "options" card — the three secondary config sections (API keys,
+   local model, custom endpoint) read as one settings group with hairline
+   dividers instead of three loose rows floating under the cards. */
+.pre-pick-config-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.pre-pick-config-group .pre-pick-section {
+  gap: 0;
+}
+
+.pre-pick-config-group .pre-pick-section + .pre-pick-section {
+  border-top: 1px solid var(--border);
+}
+
+.pre-pick-config-group .pre-pick-section-toggle {
+  padding: 13px 16px;
+}
+
+.pre-pick-config-group .pre-pick-section-collapse {
+  padding: 2px 16px 16px;
+}
+
+.pre-pick-config-group .pre-pick-section-toggle:hover {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+/* One-shot staggered entrance for the pick screen — a single directed load
+   sequence rather than scattered hover effects. Reduced-motion users get the
+   final state instantly (guarded by the no-preference query). */
+@media (prefers-reduced-motion: no-preference) {
+  .pre-pick-left > *,
+  .pre-pick-aside {
+    animation: pre-pick-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .pre-pick-left > *:nth-child(1) {
+    animation-delay: 40ms;
+  }
+
+  .pre-pick-left > *:nth-child(2) {
+    animation-delay: 110ms;
+  }
+
+  .pre-pick-left > *:nth-child(3) {
+    animation-delay: 180ms;
+  }
+
+  .pre-pick-left > *:nth-child(n + 4) {
+    animation-delay: 240ms;
+  }
+
+  .pre-pick-aside {
+    animation-delay: 180ms;
+  }
+}
+
+@keyframes pre-pick-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pre-pick-section-toggle-chevron {
+    transition: none;
+  }
+}
+
+.pre-pick-section-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 4px 0;
+  line-height: 1.5;
+}
+
+/* Local provider picker wrapper */
+.pre-pick-local-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.pre-pick-local-detecting {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pre-pick-local-error {
+  font-size: 12px;
+  color: var(--red);
+  padding: 6px 8px;
+  background: var(--red-bg);
+  border: 1px solid color-mix(in srgb, var(--red) 28%, transparent);
+  border-radius: 4px;
+}
+
+.pre-pick-local-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 4px 0 0 0;
+}
+
+/* OpenAI-compatible endpoint inputs */
+.pre-pick-oai-compat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-oai-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pre-pick-oai-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-input-error {
+  border-color: var(--red);
+}
+
+.pre-pick-oai-url-error {
+  font-size: 12px;
+  color: var(--red);
+}
+
+.pre-pick-form-submit {
+  width: 100%;
+}
+
+/* ─── Phase 2: CEO card section ─────────────────────────────────────────
+   Renders inside the InterviewBar slot in the OnboardingDMRoute CEO DM.
+   Card lifecycle: pending → submitting → committed.
+   Spec: docs/specs/onboarding-into-office.md "## Surface 3 / Card states matrix"
+   ─────────────────────────────────────────────────────────────────────── */
+
+.ceo-card-section {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* Base CEO card */
+.ceo-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Committed state: collapses to one line in --text-secondary */
+.ceo-card--committed {
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+}
+
+.ceo-card-committed-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Label */
+.ceo-card-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Text input */
+.ceo-card-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.ceo-card-input:focus {
+  border-color: var(--accent);
+}
+
+.ceo-card-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Action row */
+.ceo-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Inline spinner (submitting state only — never full-card animation) */
+.ceo-card-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ceo-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ceo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ceo-card-spinner {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* ─── Chip row ─────────────────────────────────────────────────────────── */
+
+.ceo-chip-row-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ceo-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.ceo-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.ceo-chip--selected,
+.ceo-chip:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text);
+  outline: none;
+}
+
+.ceo-chip:focus-visible {
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent);
+}
+
+.ceo-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ─── Chip-row card variant (blueprint picker) ──────────────────────────
+ * Used when chip options ship an icon or description (e.g. the blueprint
+ * catalog). Renders each option as a clickable card with icon, title, and
+ * one-line description so the user picks based on what each pack actually
+ * does instead of a bare pill label. Plain chip rows still render as pills.
+ */
+
+.ceo-chip-grid-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.ceo-chip-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-card);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.ceo-chip-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.ceo-chip-card--selected,
+.ceo-chip-card:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  outline: none;
+}
+
+.ceo-chip-card:focus-visible {
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent);
+}
+
+.ceo-chip-card:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ceo-chip-card-icon {
+  flex-shrink: 0;
+  font-size: 22px;
+  line-height: 1;
+  width: 28px;
+  text-align: center;
+}
+
+.ceo-chip-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ceo-chip-card-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.ceo-chip-card-description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  /* Curated descriptions are one-liners today, but clamp to 2 lines as a
+   * layout safeguard so a future blueprint with a longer outcome line
+   * cannot push the card grid out of alignment. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ─── Checklist ────────────────────────────────────────────────────────── */
+
+.ceo-checklist-items {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ceo-checklist-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ceo-checklist-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ceo-checklist-item-text {
+  flex: 1;
+}
+
+/* ─── Scan chip ────────────────────────────────────────────────────────── */
+
+.ceo-scan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+}
+
+.ceo-scan-chip--done {
+  background: var(--green-bg);
+  border-color: var(--green);
+  color: var(--green-dark);
+}
+
+.ceo-scan-chip--failed {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red-dark);
+}
+
+.ceo-scan-chip-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ceo-spin 0.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ceo-scan-chip-spinner {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.ceo-scan-chip-icon {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Failure state expands into a stacked card: chip row + reason + CTAs.
+   The `--failed` modifier flips the outer container from inline-flex to a
+   block-level column so the reason and action row layout correctly. (#934) */
+.ceo-scan-chip--failed {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 6px);
+  max-width: 420px;
+}
+
+.ceo-scan-chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ceo-scan-chip-reason {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.ceo-scan-chip-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ─── Sidebar preview overlay (Phase 2 onboarding) ────────────────────────
+   Shows during greet/identity/scan/blueprint/team phases.
+   Dashed lavender border signals "staged, not committed yet."
+   Spec tokens: --preview-row-bg, --preview-row-border, --preview-row-text
+   ─────────────────────────────────────────────────────────────────────── */
+
+.sidebar-preview-overlay {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 240ms cross-fade out when seeding phase completes (reduced-motion: instant) */
+.sidebar-preview-overlay--seeding {
+  animation: preview-fade-out 240ms ease-out forwards;
+}
+
+@keyframes preview-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-preview-overlay--seeding {
+    animation: none;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.sidebar-preview-workspace {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--preview-row-text);
+  padding: 4px 6px;
+  background: var(--preview-row-bg);
+  border-radius: var(--radius-sm);
+  border: var(--preview-row-border);
+}
+
+.sidebar-preview-rows {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--preview-row-bg);
+  border: var(--preview-row-border);
+  font-size: 13px;
+  color: var(--preview-row-text);
+}
+
+.sidebar-preview-row-icon {
+  font-size: 12px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+/* ─── OnboardingDMRoute wrapper ─────────────────────────────────────────── */
+
+.onboarding-dm-route {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── OnboardingChat — full-screen CEO wizard ───────────────────────────────
+   Phase 2 deterministic CEO conversation is rendered OUTSIDE the office
+   Shell: the user is not "in the office" yet. The wizard masquerades as a
+   chat with the CEO — header + scrolling message feed + chip / form-field
+   card as the only input. No sidebar, no workspace rail, no workbench
+   panes; those appear only once `onboarded=true` flips and RootRoute
+   falls through to the office Shell branch.
+   ────────────────────────────────────────────────────────────────────── */
+
+.onboarding-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: radial-gradient(
+    circle at top,
+    var(--bg-base, #fffefb) 0%,
+    var(--bg-card, #ffffff) 70%
+  );
+  /* Block the whole viewport so deep links to /dm/* etc. land here too. */
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+}
+
+.onboarding-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.onboarding-chat-brand {
+  font-family: var(--font-display, inherit);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.onboarding-chat-phase {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.onboarding-chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  padding: 32px 16px 16px;
+}
+
+.onboarding-chat-stream {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.onboarding-chat-stream-empty {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+  padding: 40px 0;
+}
+
+.onboarding-chat-footer {
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 16px 24px;
+}
+
+.onboarding-chat-footer-inner {
+  width: 100%;
+  max-width: 720px;
+}
+
+.onboarding-chat-hint {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+  font-style: italic;
+}

@@ -16,7 +16,7 @@ func writeExec(t *testing.T, path string) {
 	}
 }
 
-func TestDetectPathShadowsFindsOthers(t *testing.T) {
+func TestDetectPathShadowsFindsEarlierBinary(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX exec-bit semantics")
 	}
@@ -35,10 +35,66 @@ func TestDetectPathShadowsFindsOthers(t *testing.T) {
 	writeExec(t, self)
 	writeExec(t, other)
 
-	pathEnv := strings.Join([]string{selfDir, otherDir}, string(os.PathListSeparator))
+	// Other dir earlier in PATH = shell would prefer it = real shadow.
+	pathEnv := strings.Join([]string{otherDir, selfDir}, string(os.PathListSeparator))
 	got := detectPathShadows(self, pathEnv)
 	if len(got) != 1 || got[0] != other {
 		t.Fatalf("want [%s], got %v", other, got)
+	}
+}
+
+func TestDetectPathShadowsIgnoresLaterBinary(t *testing.T) {
+	// Regression for U-05 (#942): a brew/global wuphf later in PATH than the
+	// source build cannot actually shadow it. Warning about it was the
+	// boot-noise bug.
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX exec-bit semantics")
+	}
+	root := t.TempDir()
+	selfDir := filepath.Join(root, "self")
+	otherDir := filepath.Join(root, "other")
+	if err := os.MkdirAll(selfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	self := filepath.Join(selfDir, "wuphf")
+	other := filepath.Join(otherDir, "wuphf")
+	writeExec(t, self)
+	writeExec(t, other)
+
+	pathEnv := strings.Join([]string{selfDir, otherDir}, string(os.PathListSeparator))
+	got := detectPathShadows(self, pathEnv)
+	if len(got) != 0 {
+		t.Fatalf("later-in-PATH binary should not shadow; got %v", got)
+	}
+}
+
+func TestDetectPathShadowsIgnoresWhenSelfNotOnPath(t *testing.T) {
+	// User invokes `./wuphf` from a build dir not on PATH. Other installs are
+	// not surprise shadows for this explicit invocation.
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX exec-bit semantics")
+	}
+	root := t.TempDir()
+	buildDir := filepath.Join(root, "build")
+	brewDir := filepath.Join(root, "brew")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(brewDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	self := filepath.Join(buildDir, "wuphf")
+	brew := filepath.Join(brewDir, "wuphf")
+	writeExec(t, self)
+	writeExec(t, brew)
+
+	pathEnv := brewDir // self's dir deliberately NOT on PATH
+	got := detectPathShadows(self, pathEnv)
+	if len(got) != 0 {
+		t.Fatalf("explicit ./wuphf invocation should not warn; got %v", got)
 	}
 }
 

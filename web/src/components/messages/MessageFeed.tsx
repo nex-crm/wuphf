@@ -3,9 +3,12 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Message } from "../../api/client";
 import { useMessages } from "../../hooks/useMessages";
 import { formatDateLabel } from "../../lib/format";
+import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { ThinkingLoader } from "../ui/ThinkingLoader";
 import { MessageBubble } from "./MessageBubble";
+import { TypingIndicator } from "./TypingIndicator";
 
 function dateDayKey(ts: string): string {
   const d = new Date(ts);
@@ -37,8 +40,11 @@ export function messagesAfterClearMarker(
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
-export function MessageFeed() {
-  const currentChannel = useChannelSlug() ?? "general";
+export function MessageFeed({ channel }: { channel?: string } = {}) {
+  // Prefer an explicit channel (the task-detail chat passes the task's channel,
+  // where useChannelSlug() is null). Fall back to the channel route slug.
+  const routeChannel = useChannelSlug();
+  const currentChannel = channel ?? routeChannel ?? "general";
   const clearMarkerId = useAppStore(
     (s) => s.clearedMessageIdsByChannel[currentChannel] ?? null,
   );
@@ -70,8 +76,12 @@ export function MessageFeed() {
 
   if (isLoading && messages.length === 0) {
     return (
-      <div className="messages">
-        <span className="messages-loading-label">Loading messages...</span>
+      <div className="messages messages-loading">
+        <ThinkingLoader
+          variant="block"
+          label="Loading messages…"
+          phrases={OFFICE_LOADING_PHRASES}
+        />
       </div>
     );
   }
@@ -99,6 +109,7 @@ export function MessageFeed() {
             Michael would be proud. Probably.
           </span>
         </div>
+        <TypingIndicator channel={currentChannel} />
       </div>
     );
   }
@@ -205,6 +216,7 @@ export function MessageFeed() {
                 setActiveThread({ id, channelSlug: currentChannel })
               }
               onCopyLink={copyMessageLink}
+              channel={currentChannel}
             />
             {hasReplies && (
               <button
@@ -246,6 +258,7 @@ export function MessageFeed() {
                       setActiveThread({ id, channelSlug: currentChannel })
                     }
                     onCopyLink={copyMessageLink}
+                    channel={currentChannel}
                   />
                 ))}
               </div>
@@ -253,6 +266,7 @@ export function MessageFeed() {
           </div>
         );
       })}
+      <TypingIndicator channel={currentChannel} />
     </div>
   );
 }

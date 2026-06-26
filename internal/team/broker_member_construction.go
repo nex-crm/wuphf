@@ -11,7 +11,7 @@ import (
 //     defaults loader + HTTP create handler so the field-copy logic
 //     lives once)
 //   - applyOfficeMemberDefaults: fills Name / Role / Expertise /
-//     Personality / PermissionMode when the input shape is partial
+//     Personality when the input shape is partial
 //   - inferOfficeExpertise / inferOfficePersonality: text-based defaults
 //     keyed off slug + role substrings (frontend, backend, ai/ml,
 //     marketing, sales, product, design)
@@ -25,17 +25,16 @@ import (
 // field-copy logic lives in one place.
 func memberFromSpec(spec company.MemberSpec, createdBy, createdAt string, builtIn bool) officeMember {
 	return officeMember{
-		Slug:           spec.Slug,
-		Name:           spec.Name,
-		Role:           spec.Role,
-		Expertise:      append([]string(nil), spec.Expertise...),
-		Personality:    spec.Personality,
-		PermissionMode: spec.PermissionMode,
-		AllowedTools:   append([]string(nil), spec.AllowedTools...),
-		CreatedBy:      createdBy,
-		CreatedAt:      createdAt,
-		BuiltIn:        builtIn,
-		Provider:       spec.Provider,
+		Slug:         spec.Slug,
+		Name:         spec.Name,
+		Role:         spec.Role,
+		Expertise:    append([]string(nil), spec.Expertise...),
+		Personality:  spec.Personality,
+		AllowedTools: append([]string(nil), spec.AllowedTools...),
+		CreatedBy:    createdBy,
+		CreatedAt:    createdAt,
+		BuiltIn:      builtIn,
+		Provider:     spec.Provider,
 	}
 }
 
@@ -54,9 +53,6 @@ func applyOfficeMemberDefaults(member *officeMember) {
 	}
 	if member.Personality == "" {
 		member.Personality = inferOfficePersonality(member.Slug, member.Role)
-	}
-	if member.PermissionMode == "" {
-		member.PermissionMode = "plan"
 	}
 }
 

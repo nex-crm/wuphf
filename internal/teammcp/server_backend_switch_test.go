@@ -161,6 +161,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			t.Setenv("WUPHF_MEMORY_BACKEND", tc.backend)
+			t.Setenv("WUPHF_ENABLE_AGENT_WIKI_WRITE", "")
 			t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 
 			channel := "general"
@@ -188,6 +189,17 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfigureServerToolsDirectWikiWriteAvailableForExplicitHumanRequests(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
+	t.Setenv("WUPHF_ENABLE_AGENT_WIKI_WRITE", "")
+	t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+
+	names := listRegisteredTools(t, "general", false)
+	if !slices.Contains(names, "team_wiki_write") {
+		t.Fatalf("expected team_wiki_write for explicit human wiki requests; got %v", names)
 	}
 }
 

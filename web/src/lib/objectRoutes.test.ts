@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { resolveObjectRoute, resolveUnknownObjectRoute } from "./objectRoutes";
 
 describe("resolveObjectRoute", () => {
-  it("resolves an agent slug to the DM hash route", () => {
+  it("resolves an agent slug to the agents hash route", () => {
     const route = resolveObjectRoute({ kind: "agent", slug: "alex" });
-    expect(route.href).toBe("#/dm/alex");
+    expect(route.href).toBe("#/agents/alex");
     expect(route.label).toBe("Agent: alex");
-    expect(route.appAction).toEqual({ app: "dm", channel: "alex" });
+    expect(route.appAction).toEqual({ app: "agents", channel: "alex" });
     expect(route.fallback).toBeUndefined();
   });
 
@@ -62,11 +62,11 @@ describe("resolveObjectRoute", () => {
     expect(route.appAction).toEqual({ app: "tasks" });
   });
 
-  it("resolves an artifact to the receipts app with a query param", () => {
+  it("resolves an artifact to the activity app with a query param", () => {
     const route = resolveObjectRoute({ kind: "artifact", id: "art-1" });
-    expect(route.href).toBe("#/apps/receipts?artifact=art-1");
+    expect(route.href).toBe("#/apps/activity?artifact=art-1");
     expect(route.label).toBe("Artifact: art-1");
-    expect(route.appAction).toEqual({ app: "receipts" });
+    expect(route.appAction).toEqual({ app: "activity" });
   });
 
   it("resolves a settings-section to the settings app", () => {

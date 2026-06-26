@@ -1,14 +1,8 @@
-/** Wikipedia-style tabs at the top of the article (Article / Talk / Edit / History / Raw). */
+/** Minimal docmost-style view tabs at the top of the article (Read / Edit / History / Raw). */
 
 import { keyedByOccurrence } from "../../lib/reactKeys";
 
-export type HatBarTab =
-  | "article"
-  | "visual"
-  | "talk"
-  | "edit"
-  | "history"
-  | "raw";
+export type HatBarTab = "article" | "edit" | "history" | "raw";
 
 interface HatBarProps {
   active: HatBarTab;
@@ -18,39 +12,34 @@ interface HatBarProps {
 }
 
 const LABELS: Record<HatBarTab, string> = {
-  article: "Article",
-  visual: "Visual",
-  talk: "Talk",
-  edit: "Edit source",
+  article: "Read",
+  edit: "Edit",
   history: "History",
   raw: "Raw markdown",
 };
 
-const ORDER: HatBarTab[] = [
-  "article",
-  "visual",
-  "talk",
-  "edit",
-  "history",
-  "raw",
-];
+const ORDER: HatBarTab[] = ["article", "edit", "history", "raw"];
 
 export default function HatBar({
   active,
   onChange,
   rightRail,
-  disabledTabs = ["talk"],
+  disabledTabs = [],
 }: HatBarProps) {
   return (
     <nav className="wk-hatbar" aria-label="Article views">
       {ORDER.map((tab) => {
+        const isActive = tab === active;
         const disabled = disabledTabs.includes(tab);
-        const className = `wk-tab${tab === active ? " active" : ""}`;
+        const className = `wk-tab${isActive ? " active" : ""}`;
         return (
           <button
             key={tab}
             type="button"
             className={className}
+            // The active tab is indicated by more than color: aria-current
+            // exposes "this is the current view" to assistive tech.
+            aria-current={isActive ? "page" : undefined}
             disabled={disabled}
             onClick={() => !disabled && onChange?.(tab)}
           >

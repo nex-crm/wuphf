@@ -292,6 +292,11 @@ func TestIsOneOnOneModeFromEnv(t *testing.T) {
 
 func TestHandleTeamMemberCreateTriggersReconfigure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// This test exercises the create mechanics (broker POST + reconfigure), not
+	// the human-approval gate (which has its own tests in member_approval_test.go).
+	// WUPHF_UNSAFE=1 is the intended bypass so the create proceeds without a human
+	// answering the approval card.
+	t.Setenv("WUPHF_UNSAFE", "1")
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
@@ -902,8 +907,23 @@ func TestHandleTeamTaskStatusReportsWorktreeIsolation(t *testing.T) {
 		t.Fatalf("expected 200 creating task, got %d", resp.StatusCode)
 	}
 
+	// Channel-per-task: an owned worktree task created against #general mints
+	// its own task-<id> channel, so resolve where it landed and report status
+	// there (status reports are channel-scoped).
+	var allTasks brokerTasksResponse
+	if err := brokerGetJSON(ctx, "/tasks?all_channels=true&include_done=true", &allTasks); err != nil {
+		t.Fatalf("fetch tasks: %v", err)
+	}
+	taskChannel := "general"
+	for _, tk := range allTasks.Tasks {
+		if tk.Title == "Implement worktree task" {
+			taskChannel = tk.Channel
+			break
+		}
+	}
+
 	result, _, err := handleTeamTaskStatus(ctx, nil, TeamTasksArgs{
-		Channel: "general",
+		Channel: taskChannel,
 		MySlug:  "fe",
 	})
 	if err != nil {
@@ -927,7 +947,7 @@ func TestHandleTeamTaskStatusReportsWorktreeIsolation(t *testing.T) {
 	}
 
 	tasksResult, _, err := handleTeamTasks(ctx, nil, TeamTasksArgs{
-		Channel: "general",
+		Channel: taskChannel,
 		MySlug:  "fe",
 	})
 	if err != nil {
@@ -1015,6 +1035,101 @@ func TestHandleTeamTaskReturnsWorktreeGuidance(t *testing.T) {
 	}
 }
 
+func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+	ensureBrokerMembers(t, ctx, "eng")
+
+	// Slice 7: specialists can't create Issues directly — only CEO
+	// (or human). Test the "default owner to caller" semantic with
+	// MySlug="ceo" since ceo is the lead and allowed to create.
+	result, _, err := handleTeamTask(ctx, nil, TeamTaskArgs{
+		Action:  "create",
+		Channel: "general",
+		Title:   "Investigate webhook retries",
+		Details: "The agent detected this as follow-up implementation work.",
+		MySlug:  "ceo",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTask: %v", err)
+	}
+	text := textFromResult(t, result)
+	// Creation is the authorization: an owner-set Issue (the default
+	// task_type via RULE ZERO override) lands running / in_progress
+	// immediately — no Approve & Start ceremony.
+	// Slice 7: MySlug must be ceo (only lead can create); owner
+	// defaults to the caller, so the assertion reads "@ceo".
+	// Task IDs follow the workspace prefix (Linear-style, default OFFICE).
+	// We assert the message shape without pinning the exact prefix so the
+	// test survives prefix-from-company-name resolution.
+	if !strings.Contains(text, "Task ") || !strings.Contains(text, "is now in_progress @ceo") {
+		t.Fatalf("expected self-owned running (in_progress) task result, got %q", text)
+	}
+
+	var tasks brokerTasksResponse
+	// Channel-per-task: a created task mints its own task-<id> channel and
+	// leaves #general (now owned by the archived Backup & Migration system
+	// task), so scan all channels and match by title instead of assuming the
+	// task is the lone occupant of #general.
+	if err := brokerGetJSON(ctx, "/tasks?all_channels=true&include_done=true", &tasks); err != nil {
+		t.Fatalf("fetch tasks: %v", err)
+	}
+	var task brokerTaskSummary
+	for _, candidate := range tasks.Tasks {
+		if candidate.Title == "Investigate webhook retries" {
+			task = candidate
+			break
+		}
+	}
+	if task.Title != "Investigate webhook retries" {
+		t.Fatalf("expected created task present across channels, got %+v", tasks.Tasks)
+	}
+	if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "in_progress" {
+		t.Fatalf("expected caller-owned running (status=in_progress) task, got %+v", task)
+	}
+
+	result, _, err = handleTeamTask(ctx, nil, TeamTaskArgs{
+		Action:  "create",
+		Channel: "general",
+		Title:   "Whitespace owner fallback",
+		Owner:   "   ",
+		MySlug:  "ceo",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTask whitespace owner: %v", err)
+	}
+	text = textFromResult(t, result)
+	if !strings.Contains(text, "is now in_progress @ceo") {
+		t.Fatalf("expected whitespace-owner task to be caller-owned (running), got %q", text)
+	}
+
+	if err := brokerGetJSON(ctx, "/tasks?all_channels=true&include_done=true", &tasks); err != nil {
+		t.Fatalf("fetch tasks after whitespace-owner create: %v", err)
+	}
+	foundWhitespace := false
+	for _, task := range tasks.Tasks {
+		if task.Title != "Whitespace owner fallback" {
+			continue
+		}
+		foundWhitespace = true
+		if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "in_progress" {
+			t.Fatalf("expected trimmed-empty owner to default to caller (running), got %+v", task)
+		}
+	}
+	if !foundWhitespace {
+		t.Fatal("expected whitespace-owner fallback task to exist")
+	}
+}
+
 func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_NO_NEX", "1")
@@ -1030,14 +1145,11 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
 	ensureBrokerMembers(t, ctx, "fe")
 
-	if err := brokerPostJSON(ctx, "/messages", map[string]any{
-		"channel": "general",
-		"from":    "ceo",
-		"content": "Need your approval before shipping.",
-	}, nil); err != nil {
-		t.Fatalf("post message: %v", err)
-	}
-
+	// Create the worktree task first so we can target its channel. Under
+	// channel-per-task an owned task mints its own task-<id> channel, so the
+	// message, approval request, and runtime-state query all target that same
+	// channel — mirroring production, where a task's approvals and chatter live
+	// in the task's channel rather than #general.
 	if err := brokerPostJSON(ctx, "/tasks", map[string]any{
 		"action":          "create",
 		"channel":         "general",
@@ -1051,9 +1163,29 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
+	var allTasks brokerTasksResponse
+	if err := brokerGetJSON(ctx, "/tasks?all_channels=true&include_done=true", &allTasks); err != nil {
+		t.Fatalf("fetch tasks: %v", err)
+	}
+	taskChannel := "general"
+	for _, tk := range allTasks.Tasks {
+		if tk.Title == "Ship release candidate" {
+			taskChannel = tk.Channel
+			break
+		}
+	}
+
+	if err := brokerPostJSON(ctx, "/messages", map[string]any{
+		"channel": taskChannel,
+		"from":    "ceo",
+		"content": "Need your approval before shipping.",
+	}, nil); err != nil {
+		t.Fatalf("post message: %v", err)
+	}
+
 	if err := brokerPostJSON(ctx, "/requests", map[string]any{
 		"kind":     "approval",
-		"channel":  "general",
+		"channel":  taskChannel,
 		"from":     "ceo",
 		"title":    "Approve release",
 		"question": "Should we ship the release candidate?",
@@ -1067,7 +1199,7 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	}
 
 	result, structured, err := handleTeamRuntimeState(ctx, nil, TeamRuntimeStateArgs{
-		Channel:      "general",
+		Channel:      taskChannel,
 		MySlug:       "fe",
 		MessageLimit: 10,
 	})
@@ -1076,7 +1208,10 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	}
 	text := textFromResult(t, result)
 	for _, want := range []string{
-		"Runtime state for #general",
+		fmt.Sprintf("Runtime state for #%s", taskChannel),
+		// 1 = the fixture's blocking approval. The drafting "Waiting on
+		// you" notice is gone with the start-approval ceremony: created
+		// tasks land running, so no awaiting-start request is raised.
 		"Pending human requests: 1",
 		"Current focus: Approve release from @ceo.",
 		"working_directory ",
@@ -1097,8 +1232,8 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected structured runtime snapshot, got %T", structured)
 	}
-	if snapshot.Channel != "general" {
-		t.Fatalf("expected general channel, got %q", snapshot.Channel)
+	if snapshot.Channel != taskChannel {
+		t.Fatalf("expected %q channel, got %q", taskChannel, snapshot.Channel)
 	}
 	if len(snapshot.Tasks) != 1 || !strings.Contains(snapshot.Tasks[0].WorktreePath, ".wuphf/task-worktrees/") {
 		t.Fatalf("unexpected runtime tasks: %+v", snapshot.Tasks)
@@ -1551,6 +1686,9 @@ func TestHandleTeamPlanCreatesDependentBlockedTasks(t *testing.T) {
 			Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 			TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 			ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+			Effort        string   `json:"effort,omitempty" jsonschema:"Optional model-specific reasoning-effort level (e.g. \"high\" for claude, \"medium\" for codex). Omit for runtime default."`
+			Provider      string   `json:"provider,omitempty" jsonschema:"Optional per-task LLM runtime kind (claude-code, codex, …). Dispatch prefers it over the owner's binding. Omit to inherit."`
+			Model         string   `json:"model,omitempty" jsonschema:"Optional per-task model id for the chosen provider. Omit to inherit the owner's binding or the install default."`
 			DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 		}{
 			{Title: "Research competitors", Assignee: "research"},
@@ -1605,6 +1743,9 @@ func TestHandleTeamPlanPreservesTaskMetadata(t *testing.T) {
 			Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 			TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 			ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+			Effort        string   `json:"effort,omitempty" jsonschema:"Optional model-specific reasoning-effort level (e.g. \"high\" for claude, \"medium\" for codex). Omit for runtime default."`
+			Provider      string   `json:"provider,omitempty" jsonschema:"Optional per-task LLM runtime kind (claude-code, codex, …). Dispatch prefers it over the owner's binding. Omit to inherit."`
+			Model         string   `json:"model,omitempty" jsonschema:"Optional per-task model id for the chosen provider. Omit to inherit the owner's binding or the install default."`
 			DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 		}{
 			{Title: "Build the studio control plane", Assignee: "eng", TaskType: "feature", ExecutionMode: "local_worktree"},
@@ -1616,7 +1757,7 @@ func TestHandleTeamPlanPreservesTaskMetadata(t *testing.T) {
 	}
 
 	var result brokerTasksResponse
-	if err := brokerGetJSON(context.Background(), "/tasks?channel=general&include_done=true", &result); err != nil {
+	if err := brokerGetJSON(context.Background(), "/tasks?all_channels=true&include_done=true", &result); err != nil {
 		t.Fatalf("fetch tasks: %v", err)
 	}
 
@@ -1658,7 +1799,7 @@ func TestHandleTeamTaskCreatePreservesTaskMetadata(t *testing.T) {
 	}
 
 	var result brokerTasksResponse
-	if err := brokerGetJSON(context.Background(), "/tasks?channel=general&include_done=true", &result); err != nil {
+	if err := brokerGetJSON(context.Background(), "/tasks?all_channels=true&include_done=true", &result); err != nil {
 		t.Fatalf("fetch tasks: %v", err)
 	}
 

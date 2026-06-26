@@ -1,135 +1,60 @@
-// Shared types for the onboarding wizard. Extracted from Wizard.tsx so
-// each step component (Step1Welcome.tsx … Step7Ready.tsx) can import
-// only what it needs. The corresponding runtime constants live in
-// constants.ts; keeping types in their own file means a step file that
-// only consumes shapes (no constant tables) imports zero runtime code.
+/**
+ * Wizard-local view types.
+ *
+ * `BlueprintOption` is the trimmed shape the step screens consume for the team
+ * picker. It is derived from the wire `BlueprintSummary` (api/onboarding.ts)
+ * but narrowed to exactly what the UI needs, so the screens do not depend on
+ * the full additive Go summary and cannot accidentally render fields the
+ * wizard never plumbs.
+ */
 
-export interface BlueprintTemplate {
-  id: string;
-  name: string;
-  description: string;
-  emoji?: string;
-  agents?: BlueprintAgent[];
-  tasks?: TaskTemplate[];
-  // Pack-library wire fields. The broker surfaces these from the
-  // operation blueprint yaml; older binaries omit them entirely. The
-  // adapter in packPreview.ts handles missing fields by returning empty
-  // arrays so the detail panel still renders.
-  outcome?: string;
-  category?: string;
-  estimated_setup_minutes?: number;
-  channels?: BlueprintChannel[];
-  skills?: BlueprintSkill[];
-  wiki_scaffold?: BlueprintWikiScaffoldEntry[];
-  first_tasks?: BlueprintFirstTask[];
-  requirements?: BlueprintRequirement[];
-  example_artifacts?: BlueprintExampleArtifact[];
-}
+import type {
+  BlueprintAgentSummary,
+  BlueprintSummary,
+} from "../../../api/onboarding";
 
-export interface BlueprintChannel {
-  slug: string;
-  name?: string;
-  purpose?: string;
-}
-
-export interface BlueprintSkill {
-  name: string;
-  purpose?: string;
-}
-
-export interface BlueprintWikiScaffoldEntry {
-  path: string;
-  title?: string;
-}
-
-export interface BlueprintFirstTask {
-  id: string;
-  title: string;
-  prompt?: string;
-  expected_output?: string;
-}
-
-export type BlueprintRequirementKind = "runtime" | "api-key" | "local-tool";
-
-export interface BlueprintRequirement {
-  kind?: BlueprintRequirementKind | (string & {});
-  name: string;
-  required?: boolean;
-  detail?: string;
-}
-
-export interface BlueprintExampleArtifact {
-  kind?: string;
-  title: string;
-}
-
-export interface BlueprintAgent {
+/** One agent row in a blueprint roster, as the team step renders it. */
+export interface BlueprintAgentOption {
   slug: string;
   name: string;
   role: string;
-  emoji?: string;
-  checked?: boolean;
-  // built_in marks the lead agent — always included, never removable.
-  // The backend also refuses to disable or remove a BuiltIn member, so
-  // even if someone bypassed this UI, the broker would reject the write.
-  built_in?: boolean;
+  emoji: string;
+  /** Whether the agent is kept by default. */
+  checked: boolean;
+  /** The lead agent; the team step must keep it checked. */
+  builtIn: boolean;
 }
 
-export interface TaskTemplate {
+/** One selectable starter roster in the team step. */
+export interface BlueprintOption {
   id: string;
   name: string;
   description: string;
-  emoji?: string;
-  prompt?: string;
+  emoji: string;
+  agents: BlueprintAgentOption[];
 }
 
-export type WizardStep =
-  | "welcome"
-  | "templates"
-  | "identity"
-  | "analysis"
-  | "team"
-  | "setup"
-  | "nex"
-  | "task"
-  | "ready";
-
-// Each runtime has a display label, the binary name the broker's prereqs
-// check looks for, a canonical install page to link to when missing, and
-// — for the runtimes the broker can actually dispatch agents to — the
-// provider id the broker expects on POST /config.
-export interface RuntimeSpec {
-  label: string;
-  binary: string;
-  installUrl: string;
-  provider: "claude-code" | "codex" | "opencode" | null;
+function toAgentOption(agent: BlueprintAgentSummary): BlueprintAgentOption {
+  return {
+    slug: agent.slug,
+    name: agent.name,
+    role: agent.role ?? "",
+    emoji: agent.emoji ?? "",
+    checked: agent.checked,
+    builtIn: agent.built_in === true,
+  };
 }
 
-export interface PrereqResult {
-  name: string;
-  required: boolean;
-  found: boolean;
-  ok?: boolean;
-  version?: string;
-  install_url?: string;
-}
-
-export type BlueprintCategoryKey = "services" | "media" | "product";
-
-export interface BlueprintDisplay {
-  category: BlueprintCategoryKey;
-  shortDescription: string;
-  icon: string;
-}
-
-export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
-
-export type NexSignupStatus = "open" | "submitting" | "ok" | "fallback";
-
-export type ReadinessStatus = "ready" | "next" | "missing";
-
-export interface ReadinessCheck {
-  label: string;
-  status: ReadinessStatus;
-  detail: string;
+/**
+ * Narrow a wire `BlueprintSummary` to the `BlueprintOption` the step screens
+ * consume. Drops the pack-library fields the wizard never renders.
+ */
+export function toBlueprintOption(summary: BlueprintSummary): BlueprintOption {
+  return {
+    id: summary.id,
+    name: summary.name,
+    description: summary.description ?? "",
+    emoji: summary.emoji ?? "",
+    agents: (summary.agents ?? []).map(toAgentOption),
+  };
 }

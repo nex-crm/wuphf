@@ -126,7 +126,7 @@ func TestCmdAgentPrompt_GeneratesAndCreatesMember(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			generatedPrompt = body["prompt"]
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"slug":"researcher","name":"Researcher","role":"Research lead","expertise":["research","synthesis"],"personality":"careful","permission_mode":"plan"}`))
+			_, _ = w.Write([]byte(`{"slug":"researcher","name":"Researcher","role":"Research lead","expertise":["research","synthesis"],"personality":"careful"}`))
 		case "/office-members":
 			if r.Method != http.MethodPost {
 				http.Error(w, "wrong method", http.StatusMethodNotAllowed)
@@ -167,9 +167,6 @@ func TestCmdAgentPrompt_GeneratesAndCreatesMember(t *testing.T) {
 	}
 	if gotBody["personality"] != "careful" {
 		t.Fatalf("personality not forwarded: %+v", gotBody)
-	}
-	if gotBody["permission_mode"] != "plan" {
-		t.Fatalf("permission mode not forwarded: %+v", gotBody)
 	}
 	if !strings.Contains(strings.Join(*out, "|"), "Created @researcher from prompt") {
 		t.Fatalf("expected prompt create confirmation, got %q", *out)

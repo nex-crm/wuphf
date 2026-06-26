@@ -57,7 +57,7 @@ func (p registryStubProvider) GetRelayEvent(context.Context, string) (RelayEvent
 	return RelayEventDetail{}, nil
 }
 
-func TestRegistryPrefersOneForActionsInAutoMode(t *testing.T) {
+func TestRegistryPrefersComposioForActionsInAutoMode(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
 	registry := &Registry{
 		providers: []Provider{
@@ -81,12 +81,15 @@ func TestRegistryPrefersOneForActionsInAutoMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provider for action execute: %v", err)
 	}
-	if provider.Name() != "one" {
-		t.Fatalf("expected one (local-first), got %s", provider.Name())
+	// Composio is the canonical integration plane: the human connects there, so
+	// execution must route there too (was One-first; the flip closes the
+	// misroute where a Composio-connected action ran through an unconnected One).
+	if provider.Name() != "composio" {
+		t.Fatalf("expected composio (canonical plane), got %s", provider.Name())
 	}
 }
 
-func TestRegistryPrefersOneForWorkflowsInAutoMode(t *testing.T) {
+func TestRegistryPrefersComposioForWorkflowsInAutoMode(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
 	registry := &Registry{
 		providers: []Provider{
@@ -110,8 +113,39 @@ func TestRegistryPrefersOneForWorkflowsInAutoMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provider for workflow execute: %v", err)
 	}
+	if provider.Name() != "composio" {
+		t.Fatalf("expected composio (canonical plane), got %s", provider.Name())
+	}
+}
+
+// One remains a configured fallback for the local-first power user: when
+// Composio is not configured, auto mode still resolves to One.
+func TestRegistryFallsBackToOneWhenComposioMissing(t *testing.T) {
+	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
+	registry := &Registry{
+		providers: []Provider{
+			registryStubProvider{
+				name:       "composio",
+				configured: false, // Not configured: COMPOSIO_API_KEY unset.
+				supports: map[Capability]bool{
+					CapabilityActionExecute: true,
+				},
+			},
+			registryStubProvider{
+				name:       "one",
+				configured: true,
+				supports: map[Capability]bool{
+					CapabilityActionExecute: true,
+				},
+			},
+		},
+	}
+	provider, err := registry.ProviderFor(CapabilityActionExecute)
+	if err != nil {
+		t.Fatalf("provider for action execute: %v", err)
+	}
 	if provider.Name() != "one" {
-		t.Fatalf("expected one (local-first), got %s", provider.Name())
+		t.Fatalf("expected one fallback when composio unconfigured, got %s", provider.Name())
 	}
 }
 

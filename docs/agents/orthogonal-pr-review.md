@@ -13,9 +13,10 @@ guidance for mixed codex + Claude fleets, and the round-2 rhythm.
 ## When to use
 
 - **Always**: major dependency bumps that touch the build chain (Vite,
-  electron-vite, TypeScript, vitest, electron itself, Node types).
-- **Always**: changes to the contextBridge allowlist, IPC surface, or
-  any rule under `apps/desktop/AGENTS.md`'s hard-rules list.
+  TypeScript, vitest, Node types).
+- **Always**: changes to a wire shape, the Go broker's HTTP/SSE surface, or
+  any rule under a v1 package's `AGENTS.md` hard-rules list
+  (e.g. `packages/protocol`).
 - **Usually**: schema migrations, broker process changes, anything
   affecting the release pipeline.
 - **Skip**: trivial refactors, doc-only changes, copy fixes, tests-only
@@ -35,7 +36,7 @@ different prompts).
 | 3 | Build / runtime parity (`build-parity`) | codex | Does the build still produce equivalent output? Externalization preserved? |
 | 4 | Scope discipline (`scope`) | claude (`staff-code-reviewer`) | Is the diff narrowly the advertised change, no drive-bys? |
 | 5 | Repo conventions (`conventions`) | codex | CLAUDE.md / AGENTS.md / INSTRUCTIONS.md compliance |
-| 6 | Security / IPC (`ipc`) | codex | Allowlist intact? No `any` across contextBridge? Sandbox preserved? |
+| 6 | Security / IPC (`ipc`) | codex | Broker loopback boundary intact? Bind still `127.0.0.1`-only, bearer enforced on `/api/*`, no newly trusted origins? |
 | 7 | Test coverage equivalence (`coverage`) | codex | Do tests still cover what they should? Versioning consistent? |
 | 8 | Beta / pre-release stability (`beta`) | codex | If pinning a beta: how risky, what's the upgrade path? |
 | 9 | Adversarial sweep (`adversarial`) | codex | "Assume earlier lenses missed something — what is it?" Always include. |
@@ -47,15 +48,15 @@ the finders missed*. Round 2 is centered on lens 9.
 
 `scripts/dispatch-triangulation.sh` accepts every lens name above (plus the
 design-time lenses `security`, `perf`, `api`, `sre`, `architecture`,
-`distsys`, `electron`). Round-1 example for a `apps/desktop`
+`distsys`). Round-1 example for a `packages/protocol`
 dependency-bump PR:
 
 ```bash
 # 1. Capture the PR scope + diff highlights in a problem file
 cat > /tmp/pr-785.md <<'EOF'
-PR #785 bumps apps/desktop dev-deps: typescript 6.0.3, vite 8.0.11,
-@types/node 25.6.2, electron-vite 6.0.0-beta.1. Diff at
-`git diff origin/main...HEAD -- apps/desktop bun.lock` in this worktree.
+PR #785 bumps packages/protocol dev-deps: typescript 6.0.3, vite 8.0.11,
+@types/node 25.6.2, vitest 4.1.5. Diff at
+`git diff origin/main...HEAD -- packages/protocol bun.lock` in this worktree.
 EOF
 
 # 2. Dispatch the codex-side lenses in parallel; each writes <lens>-report.md.

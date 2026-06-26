@@ -207,10 +207,12 @@ func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview
 }
 
 func cloneHumanInterview(req humanInterview) humanInterview {
-	req = sanitizeHumanInterview(req)
 	clone := req
 	if len(req.Options) > 0 {
 		clone.Options = append([]interviewOption(nil), req.Options...)
+	}
+	if len(req.AlsoAsking) > 0 {
+		clone.AlsoAsking = append([]string(nil), req.AlsoAsking...)
 	}
 	if req.Answered != nil {
 		answer := *req.Answered

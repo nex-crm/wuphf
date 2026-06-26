@@ -13,11 +13,50 @@ package team
 // the reverse — see the trap discussion in PLAN.md.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/channel"
+)
+
+// Context-packet sizing. These were historically tuned down to minimize
+// per-turn token cost (specialists woke with 4 thread messages and
+// 512-char task details, which starved them into re-asking answered
+// questions and contradicting prior decisions). The SOTA uplift
+// (docs/specs/sota-uplift.md, U0.2) inverts that: packets are sized for
+// outcome quality, and token cost is no longer a design constraint.
+const (
+	// threadContextLimit is how many recent thread messages every agent
+	// (lead and specialist alike) receives in a work packet.
+	threadContextLimit = 20
+	// threadMessageClipChars clips a single message inside the context block.
+	threadMessageClipChars = 2000
+	// taskDetailsClipChars clips the task spec text injected into packets.
+	taskDetailsClipChars = 4096
+	// taskListDetailsClipChars clips per-task DETAIL lines in multi-task
+	// summary lists. Titles are deliberately NOT display-clipped in any
+	// agent-facing string: the live $61k→"$6…" failure (ICP-eval v2
+	// [00:00]) came from a lane working off a truncated title as if it
+	// were the work contract. Titles render full (bounded only by
+	// taskDetailsClipChars as an overflow guard); UI surfaces may clip
+	// for display, packets must not.
+	taskListDetailsClipChars = 512
+	// triggerContentClipChars clips the trigger message in execution packets.
+	triggerContentClipChars = 4000
+	// changesRequestedClipChars clips the latest request-changes feedback
+	// rendered in execution packets. Generous on purpose: ICP-eval v2 J2
+	// found agents reworking blind because the human's typed feedback was
+	// invisible or truncated ("The feedback text is truncated in the
+	// packet"), so this block must carry the full review verbatim for any
+	// realistic comment length.
+	changesRequestedClipChars = 4000
+	// changesRequestedNotifyClipChars clips the same feedback inside the
+	// short single-line wake notification header.
+	changesRequestedNotifyClipChars = 600
+	// leadTaskContextLimit is how many task summaries the lead's packet carries.
+	leadTaskContextLimit = 10
 )
 
 // recipientHasTaskVisibility reports whether the given recipient slug
@@ -71,6 +110,23 @@ type notificationContextBuilder struct {
 	// the lead must not list itself as "already active".
 	activeHeadlessAgents func(except string) map[string]struct{}
 
+	// searchLearnings / searchWiki feed the task-scoped knowledge block
+	// (context_assembler.go, U2.2). Nil-safe: when unset the packet simply
+	// carries no knowledge block.
+	searchLearnings func(query string, limit int) []LearningSearchResult
+	searchWiki      func(ctx context.Context, query string, topK int) []SearchHit
+
+	// searchWikiArticles is the file-level wiki search behind the mandatory
+	// RETRIEVED CONTEXT block (context_assembler.go retrievedWikiContext):
+	// scores team/ articles by distinct-term containment. Nil-safe: when
+	// unset (markdown memory off, bare test fixtures) the block is omitted.
+	searchWikiArticles func(terms []string, limit int) []wikiArticleHit
+
+	// consumeTaskHumanNote clears teamTask.HumanNotePending after the
+	// owner's packet has rendered it — consumption releases the halt gate
+	// on submit_for_review/complete. Nil-safe for bare fixtures.
+	consumeTaskHumanNote func(taskID string)
+
 	// taskByID returns the task with the given ID (or nil). Used by the
 	// pre-review filter to decide whether a message tagged with
 	// SourceTaskID is visible to a given recipient. Nil callback means
@@ -80,7 +136,7 @@ type notificationContextBuilder struct {
 
 // NotificationContext returns the recent-messages context block for the
 // given (channel, threadRoot) pair. Excludes the trigger message itself,
-// system messages, demo_seed posts, and STATUS chatter. Thread-scoped
+// system messages, and STATUS chatter. Thread-scoped
 // when threadRoot is non-empty (anchors at root + most-recent thread
 // activity); recent-channel fallback otherwise.
 //
@@ -113,9 +169,6 @@ func (b *notificationContextBuilder) NotificationContext(recipientSlug, channel,
 		if m.From == "system" {
 			return false
 		}
-		if m.Kind == "demo_seed" {
-			return false
-		}
 		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(m.ID) == strings.TrimSpace(triggerMsgID) {
 			return false
 		}
@@ -140,7 +193,16 @@ func (b *notificationContextBuilder) NotificationContext(recipientSlug, channel,
 	formatContext := func(items []channelMessage) string {
 		var sb strings.Builder
 		for _, m := range items {
-			sb.WriteString(fmt.Sprintf("@%s: %s\n", m.From, truncate(m.Content, 600)))
+			// Human-authored messages render in FULL — the human's words are
+			// the work contract, and clipping them is how the v3 run absorbed
+			// half a redline message and re-asked for the other half
+			// (ten-out-of-ten Wave E handoff). Agent/system chatter keeps the
+			// clip as a token-overflow guard.
+			content := m.Content
+			if !isHumanMessageSender(m.From) {
+				content = truncate(content, threadMessageClipChars)
+			}
+			sb.WriteString(fmt.Sprintf("@%s: %s\n", m.From, content))
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	}
@@ -302,9 +364,9 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		if taskChannel == "" {
 			taskChannel = "general"
 		}
-		line := fmt.Sprintf("- #%s on #%s %s (%s)", task.ID, taskChannel, truncate(task.Title, 72), meta)
+		line := fmt.Sprintf("- #%s on #%s %s (%s)", task.ID, taskChannel, truncate(task.Title, taskDetailsClipChars), meta)
 		if details := strings.TrimSpace(task.Details); details != "" {
-			line += ": " + truncate(details, 96)
+			line += ": " + truncate(details, taskListDetailsClipChars)
 		}
 		return line
 	}
@@ -349,6 +411,28 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 
 	result := "Active tasks:\n" + strings.Join(lines, "\n")
 	if slug == lead {
+		// Concurrency awareness: the lead runs one dispatch lane per task, so the
+		// tasks above may be advancing in parallel right now (its own lanes and
+		// specialists'). Push non-dependent tasks forward together rather than
+		// serializing them, and reuse a live task before creating an overlapping one.
+		// The phrasing avoids implying the printed list is complete — the list is
+		// truncated to `limit`, so a reusable task may not be shown.
+		result += "\nCoordination: your tasks run on separate lanes and may be progressing in parallel right now. Advance non-dependent tasks together instead of one at a time, and reuse or update an existing task for the same work before creating a new one."
+		// If more eligible (non-done) tasks exist than were shown, the reusable
+		// task the lead should update may have been truncated away. Tell it to
+		// check the full list before creating a new one, so it doesn't duplicate.
+		// Dedup by ID to mirror the `seen` filter the printed list applies, so a
+		// repeated task can't trip a false-positive truncation cue.
+		eligibleIDs := make(map[string]struct{}, len(tasks))
+		for _, task := range tasks {
+			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
+				continue
+			}
+			eligibleIDs[task.ID] = struct{}{}
+		}
+		if len(eligibleIDs) > len(lines) {
+			result += "\nNote: more active tasks exist than shown here — check the full task list before creating a new one."
+		}
 		reviewCount := 0
 		for _, task := range tasks {
 			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
@@ -384,14 +468,44 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 			threadRoot = replyTo
 		}
 	}
-	var domainOwned teamTask
-	bestOwnedScore := 0.0
+	rawMsgCh := strings.TrimSpace(msg.Channel)
+	var (
+		domainOwned    teamTask
+		bestOwnedScore = 0.0
+		channelMatch   teamTask
+		channelMatches int
+	)
 	for _, task := range b.allTasks() {
 		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		if strings.TrimSpace(task.Owner) != slug {
 			continue
+		}
+		// Channel-per-task: the message's channel directly names the task it
+		// belongs to, so a channel match is the strongest binding — stronger
+		// than a thread or content-similarity match, which can drift for a
+		// short human chat. Guard on the RAW channels being non-empty (an
+		// unset channel normalizes to "general", which would otherwise let a
+		// channel-less task collide with #general) and skip archived tasks so
+		// general office chat in #general — owned by the archived Backup &
+		// Migration task — keeps routing normally. (Done is skipped above.)
+		// Legacy shared channels fall through to the thread/score checks below.
+		//
+		// Accumulate channel matches across ALL owned tasks instead of
+		// early-returning the first one: a single human can own several tasks
+		// that share a legacy channel, and binding to whichever happened to be
+		// scanned first attaches the wrong task. Only trust the channel binding
+		// when it is unambiguous (exactly one owned task in that channel);
+		// otherwise fall through to the thread/score logic below.
+		if rawMsgCh != "" {
+			rawTaskCh := strings.TrimSpace(task.Channel)
+			st := strings.ToLower(strings.TrimSpace(task.status))
+			if rawTaskCh != "" && st != "archived" &&
+				normalizeChannelSlug(rawTaskCh) == normalizeChannelSlug(rawMsgCh) {
+				channelMatches++
+				channelMatch = task
+			}
 		}
 		if task.ThreadID != "" && (task.ThreadID == msg.ID || task.ThreadID == threadRoot) {
 			return task, true
@@ -404,6 +518,9 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 			domainOwned = task
 			bestOwnedScore = score
 		}
+	}
+	if channelMatches == 1 {
+		return channelMatch, true
 	}
 	if domainOwned.ID != "" {
 		return domainOwned, true
@@ -440,7 +557,7 @@ func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMes
 		}
 		return fmt.Sprintf("You are @%s. You already own matching work. Reply only with concrete progress or a blocker; do not re-triage the thread.", slug)
 	}
-	return fmt.Sprintf("You are @%s. You were woken because the thread brushes your domain. If you have a sharp in-character take, a push-back from your expertise, a quick observation, or a one-line crack that adds energy, drop it — short. Office banter and half-joke riffs are how real teams stumble into ideas, so don't suppress yours when something genuine lands. Skip the turn only if you truly have nothing to add; do not reply just to acknowledge.", slug)
+	return fmt.Sprintf("You are @%s. You were woken because the thread brushes your domain. If you have a sharp take, a push-back from your expertise, or a quick observation that moves the work, drop it — short. Skip the turn only if you truly have nothing to add; do not reply just to acknowledge.", slug)
 }
 
 // BuildMessageWorkPacket returns the work packet a notified agent receives
@@ -449,6 +566,15 @@ func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMes
 // the lead) a list of agents who have already acted in this thread or
 // have pending headless turns ("do NOT re-route").
 func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, slug string) string {
+	packet, _ := b.BuildMessageWorkPacketWithContext(msg, slug)
+	return packet
+}
+
+// BuildMessageWorkPacketWithContext is BuildMessageWorkPacket plus the
+// context manifest: the ids of every knowledge/upstream/journal item the
+// packet injected, recorded on the turn so the ledger (and the Activity
+// rail) can show the human what context the agent was handed (B4).
+func (b *notificationContextBuilder) BuildMessageWorkPacketWithContext(msg channelMessage, slug string) (string, []string) {
 	channelSlug := normalizeChannelSlug(msg.Channel)
 	if channelSlug == "" {
 		channelSlug = "general"
@@ -488,21 +614,65 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 	if containsSlug(msg.Tagged, slug) {
 		lines = append(lines, "- Trigger: you were explicitly tagged")
 	}
+	var contextUsed []string
 	if task, ok := b.RelevantTaskForTarget(msg, slug); ok {
-		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, 96), strings.TrimSpace(task.status)))
+		// Full title: the title is part of the work contract, never a
+		// display label here (the $61k→"$6…" lane brief, ICP-eval v2).
+		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, taskDetailsClipChars), strings.TrimSpace(task.status)))
+		if note := humanNotePacketBlock(task, slug); note != "" {
+			// HUMAN POSTED WHILE YOU WORKED leads the whole packet.
+			lines = append([]string{note}, lines...)
+			if b.consumeTaskHumanNote != nil {
+				b.consumeTaskHumanNote(task.ID)
+			}
+		}
+		// Latest request-changes feedback rides the message wake too: the
+		// live request_changes wake reaches the owner as a CHANNEL message
+		// (postTaskRequestChangesNotificationsLocked), not a task-execution
+		// turn — changes_requested is not an executable state — so this
+		// packet is the one the reworking owner actually reads first
+		// (v3 [17:50]: "No written feedback came through").
+		if strings.EqualFold(strings.TrimSpace(task.Owner), strings.TrimSpace(slug)) {
+			if rcLines := changesRequestedPacketLines(task); len(rcLines) > 0 {
+				lines = append(lines, rcLines...)
+			}
+		}
+		if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
+			lines = append(lines, "- Task definition (the contract this work executes against):")
+			lines = append(lines, defLines...)
+		}
 		if details := strings.TrimSpace(task.Details); details != "" {
-			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, 512)))
+			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, taskDetailsClipChars)))
 		}
 		if path := strings.TrimSpace(task.WorktreePath); path != "" {
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 		}
+		if retrieved, manifest := b.retrievedWikiContext(task); retrieved != "" {
+			lines = append(lines, retrieved)
+			contextUsed = append(contextUsed, manifest...)
+		}
+		if knowledge, manifest := b.taskKnowledgeContext(task); knowledge != "" {
+			lines = append(lines, knowledge)
+			contextUsed = append(contextUsed, manifest...)
+		}
+		if upstream, manifest := b.upstreamOutcomesContext(task); upstream != "" {
+			lines = append(lines, upstream)
+			contextUsed = append(contextUsed, manifest...)
+		}
+		if journal := taskLedgerContext(task); journal != "" {
+			lines = append(lines, journal)
+			contextUsed = append(contextUsed, "journal:"+task.ID)
+		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
-	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, 4); ctx != "" {
+	// Every agent gets the full thread window. Specialists used to be
+	// capped at 4 messages "to stay token-efficient", which starved them
+	// into improvising from a keyhole view of the thread (sota-uplift U0.2).
+	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, threadContextLimit); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	if slug == b.targeter.LeadSlug() {
-		if taskCtx := b.TaskNotificationContext("", slug, 3); taskCtx != "" {
+		if taskCtx := b.TaskNotificationContext("", slug, leadTaskContextLimit); taskCtx != "" {
 			lines = append(lines, taskCtx)
 		}
 		activeAgents := map[string]struct{}{}
@@ -535,7 +705,7 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 			lines = append(lines, fmt.Sprintf("- Already active in this thread (do NOT re-route): %s", strings.Join(names, ", ")))
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), contextUsed
 }
 
 // BuildTaskExecutionPacket returns the work packet for a task assignment
@@ -543,6 +713,15 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 // pulled from title+details, local-worktree guardrails, external-execution
 // guidance for live business tasks, and the recent thread context.
 func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, action officeActionLog, task teamTask, content string) string {
+	packet, _ := b.BuildTaskExecutionPacketWithContext(slug, action, task, content)
+	return packet
+}
+
+// BuildTaskExecutionPacketWithContext is BuildTaskExecutionPacket plus the
+// context manifest (B4 transparency): ids of the injected knowledge,
+// upstream-outcome, and journal blocks. Recorded on the headless turn and
+// stamped onto the task ledger entry when the turn settles.
+func (b *notificationContextBuilder) BuildTaskExecutionPacketWithContext(slug string, action officeActionLog, task teamTask, content string) (string, []string) {
 	channelSlug := normalizeChannelSlug(task.Channel)
 	if channelSlug == "" {
 		channelSlug = "general"
@@ -550,12 +729,80 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	lines := []string{
 		fmt.Sprintf("[Task update from @%s]", action.Actor),
 		"Work packet:",
-		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, 120)),
+		// Full title — the title is part of the work contract. The live
+		// $61k account was briefed as $6k because a lane worked off the
+		// display-clipped title (ICP-eval v2 [00:00]/[00:10]).
+		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, taskDetailsClipChars)),
 		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.status)),
 		fmt.Sprintf("- Owner: @%s", slug),
 	}
+	// A human message posted into this task's channel while the work ran
+	// leads the ENTIRE packet — before the task header — and its render
+	// here consumes the marker (releasing the halt gate on
+	// submit_for_review/complete). ICP-eval v2 [00:50]: a typed stop order
+	// was never seen and the fabricated deliverable shipped over it.
+	if note := humanNotePacketBlock(task, slug); note != "" {
+		lines = append([]string{note}, lines...)
+		if b.consumeTaskHumanNote != nil {
+			b.consumeTaskHumanNote(task.ID)
+		}
+	}
+	// Latest request-changes feedback leads the packet (core-loop grader
+	// fix family #1, ICP-eval v2 J2): the reviewer's verbatim text rides
+	// on the task itself (teamTask.ChangesRequested) because the Decision
+	// Packet feedback log is invisible to the reworking agent. Rendered
+	// BEFORE the definition so a bounced task's next turn opens with what
+	// the reviewer actually said, not a bare "changes requested" flag.
+	if lines2 := changesRequestedPacketLines(task); len(lines2) > 0 {
+		lines = append(lines, lines2...)
+	}
+	// R4 definition: the structured intake contract leads the packet — the
+	// goal, deliverables (+format), success criteria, and access this work
+	// is executed against (task_definition.go).
+	if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
+		lines = append(lines, "- DEFINITION (the contract you execute against):")
+		lines = append(lines, defLines...)
+	}
+	if artifact := strings.TrimSpace(task.Artifact); artifact != "" {
+		lines = append(lines, fmt.Sprintf("- Delivered artifact: %s", artifact))
+	} else if task.Definition != nil {
+		lines = append(lines, "- Artifact gate: this task has a Definition, so it cannot reach done until you publish the deliverable to the wiki and pass artifact_path (wiki-relative path or visual-artifact id) on team_task action=complete.")
+	}
 	if details := strings.TrimSpace(task.Details); details != "" {
-		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, 512)))
+		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, taskDetailsClipChars)))
+	}
+	if v := task.Verification; v != nil && v.Kind != taskVerificationKindNone {
+		gate := "advisory"
+		if v.Required {
+			gate = "REQUIRED — complete/approve is blocked until this passes"
+		}
+		lines = append(lines, fmt.Sprintf("- Machine check (%s, %s): %s", v.Kind, gate, v.Spec))
+	}
+	if res := task.VerificationResult; res != nil && !res.Pass {
+		lines = append(lines, fmt.Sprintf("- LAST VERIFICATION FAILED (%s at %s): %s", res.Kind, res.CheckedAt, truncate(strings.TrimSpace(res.Detail), 2000)))
+		lines = append(lines, "  Fix the work so the definition-of-done check passes, then complete again. Do not try to bypass the check.")
+	}
+	var contextUsed []string
+	// Mandatory task-start retrieval (anti-fabrication fix family #2):
+	// every execution packet carries the RETRIEVED CONTEXT block — top
+	// wiki-article hits for the task's own terms, or the explicit
+	// "(searched the wiki for: … — no hits)" line — so a false "no data
+	// in the wiki" claim is impossible to make honestly.
+	if retrieved, manifest := b.retrievedWikiContext(task); retrieved != "" {
+		lines = append(lines, retrieved)
+		contextUsed = append(contextUsed, manifest...)
+	}
+	if knowledge, manifest := b.taskKnowledgeContext(task); knowledge != "" {
+		lines = append(lines, knowledge)
+		contextUsed = append(contextUsed, manifest...)
+	}
+	if upstream, manifest := b.upstreamOutcomesContext(task); upstream != "" {
+		lines = append(lines, upstream)
+		contextUsed = append(contextUsed, manifest...)
+	}
+	if journal := taskLedgerContext(task); journal != "" {
+		lines = append(lines, journal)
+		contextUsed = append(contextUsed, "journal:"+task.ID)
 	}
 	if targets := extractTaskFileTargets(task.Title + " " + task.Details); len(targets) > 0 {
 		lines = append(lines, fmt.Sprintf("- Named file targets: %s", strings.Join(targets, ", ")))
@@ -568,6 +815,23 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	lines = append(lines, fmt.Sprintf("- Mutation channel: use #%s when claiming or completing #%s", channelSlug, task.ID))
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
+	}
+	if slug == b.targeter.LeadSlug() {
+		// The lead (CEO) is the coordinator, not the sole worker. The default
+		// execution framing below pushes solo direct-implementation, which is
+		// right for a specialist in a worktree but wrong for the CEO on a broad
+		// owned task. Give the lead an explicit decompose-and-delegate path so
+		// it breaks large or cross-functional work into owned sub-tasks that
+		// spin off and run concurrently (Phase 2 lanes), instead of doing it
+		// all itself.
+		lines = append(lines,
+			"Lead execution rule: you are the coordinator, not the sole worker. For anything larger than a single owned step, DECOMPOSE this task instead of doing it all yourself:",
+			fmt.Sprintf("- Break the work into concrete sub-tasks with team_task action=create, each carrying parent_issue_id=%s so they nest under this task.", task.ID),
+			"- Give each sub-task an `owner`: REUSE the existing specialist whose expertise best fits (see AVAILABLE AGENTS). Only when no current teammate fits, propose a new specialist with team_member — creating a new agent ALWAYS requires explicit human approval (the tool blocks until the human decides), so prefer reusing the roster.",
+			"- Sub-tasks spin off automatically: once created with an owner they wake that owner and run concurrently on their own lanes. You do not need to tag or chase each one separately.",
+			"- Keep THIS task as the umbrella: track its sub-tasks, aggregate their results here as they land, and complete the parent only after the children are done. Do not mark the parent complete while children are still open.",
+			"- Do the work directly yourself only when it is genuinely a single step in your own domain, or when decomposition would not help.",
+		)
 	}
 	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 		lines = append(lines, "Execution rule: this is a local_worktree build task. Work inside the assigned working_directory and default to direct implementation. Do not spend this turn on another repo audit, architecture memo, or nested office launch unless the packet explicitly asks for that.")
@@ -593,13 +857,83 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		lines = append(lines, "Task hygiene rule: if this lane drifts into a proof packet, review bundle, blueprint-derived scaffold, rubric, or other internal artifact shell, rewrite it immediately into either the next real deliverable step or the exact capability-enablement task that will unlock that deliverable.")
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, task.ThreadID)
-	if ctx := b.NotificationContext(slug, channelSlug, "", threadRoot, 3); ctx != "" {
+	if ctx := b.NotificationContext(slug, channelSlug, "", threadRoot, threadContextLimit); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	lines = append(lines, fmt.Sprintf("If you deliver the substantive result for #%s in this turn, you MUST call team_task complete or review-ready for \"%s\" before any completion post and before you stop. A channel reply alone does not unblock dependent work, and a completion post without the task mutation is a failure.", task.ID, task.ID))
 	lines = append(lines, "Runtime rule: never launch another WUPHF office, copied wuphf binary, browser instance, or local web server/--web-port process from inside this turn. The office is already running; use the existing repo, broker state, and assigned worktree instead.")
-	lines = append(lines, fmt.Sprintf("%s Use team_task with my_slug \"%s\" to update status as you go.", truncate(content, 1000), slug))
-	return strings.Join(lines, "\n")
+	lines = append(lines, fmt.Sprintf("%s Use team_task with my_slug \"%s\" to update status as you go.", truncate(content, triggerContentClipChars), slug))
+	return strings.Join(lines, "\n"), contextUsed
+}
+
+// changesRequestedPacketLines renders the LATEST request-changes verdict
+// stored on the task (teamTask.ChangesRequested) for the execution packet.
+// Returns nil when no verdict is pending. When the verdict is the open
+// HUMAN objection (teamTask.HumanObjection), the block also states the
+// sovereignty contract: no agent — including the lead — can approve or
+// complete the task until the human clears it.
+func changesRequestedPacketLines(task teamTask) []string {
+	obj := task.ChangesRequested
+	if obj == nil {
+		return nil
+	}
+	body := strings.TrimSpace(obj.Body)
+	if body == "" {
+		body = "(no written feedback was provided)"
+	}
+	lines := []string{
+		fmt.Sprintf("- CHANGES REQUESTED by @%s: %s", obj.Actor, truncate(body, changesRequestedClipChars)),
+		"  Address this feedback FIRST — point by point, in the actual artifact — then resubmit with team_task action=submit_for_review. Do not guess at what the reviewer meant when the text above answers it.",
+	}
+	if task.HumanObjection != nil {
+		lines = append(lines, "  This objection is from the HUMAN and is sovereign: no agent (including the lead/CEO) can approve or complete this task while it stands. Only the human can clear it by approving or completing.")
+	}
+	return lines
+}
+
+// humanNotePacketBlock renders the pending human note for the task owner's
+// packet. Empty for non-owners (the note is addressed to the working agent)
+// and when no note is pending. The HALT variant names the standing stop
+// order explicitly. For a task in a terminal-done state the note is a
+// post-delivery follow-up (done-integrity fix family): the block leads with
+// FOLLOW-UP ON DELIVERED TASK and tells the owner exactly how to act —
+// reopen for revision requests, answer for questions — instead of leaving
+// the human's post in a dead zone (ICP-eval v2 [01:48]/[01:58]).
+func humanNotePacketBlock(task teamTask, slug string) string {
+	note := task.HumanNotePending
+	if note == nil {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(task.Owner), strings.TrimSpace(slug)) {
+		return ""
+	}
+	body := strings.TrimSpace(note.Body)
+	if body == "" {
+		return ""
+	}
+	if taskInTerminalDoneState(&task) {
+		return fmt.Sprintf(
+			"FOLLOW-UP ON DELIVERED TASK — the human posted after delivery: @%s said: %s\nIf this is a revision request, reopen the task (team_task action=reopen id=%s) and do the work; if it is a question, answer it in the task channel.",
+			note.From, body, task.ID,
+		)
+	}
+	if taskAwaitsHumanFollowUpWake(&task) {
+		return fmt.Sprintf(
+			"HUMAN POSTED ON YOUR WAITING TASK — read and respond before anything else: @%s said: %s\nThe task sits in %s. Absorb the message, apply what it asks in the actual work, and answer in the task channel; resubmit if it changes the deliverable.",
+			note.From, body, task.LifecycleState,
+		)
+	}
+	block := fmt.Sprintf("HUMAN POSTED WHILE YOU WORKED — read before continuing: @%s said: %s", note.From, body)
+	if note.Halt {
+		// V3-N6: a Stop is a PAUSE, never a license to "put things back".
+		// The v3 live run had the agent answer a Stop by running
+		// `git checkout HEAD` and silently destroying the session's
+		// deliverable while narrating "exactly as it was" ([20:03]).
+		block += "\nThis was a STOP order. PAUSE the work now. Do NOT discard or revert any work. Report state and wait." +
+			" Never run git checkout/reset/restore/clean or delete files in response to a Stop — reverting requires an explicit human instruction to revert." +
+			" Do not submit or complete this task until the human's instruction is addressed."
+	}
+	return block
 }
 
 // TaskNotificationContent returns the short single-line task notification
@@ -620,6 +954,12 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 		verb = "Task unblocked — dependencies resolved, ready to start"
 	case "watchdog_alert":
 		verb = "Watchdog reminder"
+	case taskFollowUpActionKind:
+		if taskInTerminalDoneState(&task) {
+			verb = "Follow-up on delivered task"
+		} else {
+			verb = "Human posted in this task's channel — respond now"
+		}
 	}
 	owner := strings.TrimSpace(task.Owner)
 	if owner == "" {
@@ -674,7 +1014,23 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 	if taskLooksLikeLiveBusinessObjective(&task) {
 		hygiene = "\n" + taskHygieneCoachingBlock()
 	}
-	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane. Once you have posted the needed update, STOP and wait for the next pushed notification.%s%s%s%s", verb, task.ID, channelSlug, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance, framing, capability, hygiene)
+	// The latest request-changes verdict rides the wake content itself (not
+	// only the full execution packet) so the bounced owner's very first
+	// line of context names who said no and what they said. ICP-eval v2 J2:
+	// "the feedback isn't visible in the packet" cost the human a manual
+	// re-explanation on every changes-request.
+	changes := ""
+	if obj := task.ChangesRequested; obj != nil {
+		body := strings.TrimSpace(obj.Body)
+		if body == "" {
+			body = "(no written feedback was provided)"
+		}
+		changes = fmt.Sprintf(" CHANGES REQUESTED by @%s: %s", obj.Actor, truncate(body, changesRequestedNotifyClipChars))
+		if task.HumanObjection != nil {
+			changes += " This is the HUMAN's objection — only the human can approve or complete this task while it stands."
+		}
+	}
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s).%s Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane. Once you have posted the needed update, STOP and wait for the next pushed notification.%s%s%s%s", verb, task.ID, channelSlug, task.Title, details, owner, status, pipeline, review, execMode, worktree, changes, guidance, framing, capability, hygiene)
 }
 
 // ── package-level helpers used inside the builder ──────────────────────

@@ -13,6 +13,7 @@ import {
   subscribePamEvents,
 } from "../../api/pam";
 import { buildPamMenu, type PamMenuEntry } from "../../lib/pamActions";
+import { drawKnownPixelAvatar } from "../../lib/pixelAvatar";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import "../../styles/pam.css";
 
@@ -37,7 +38,53 @@ type Status =
   | { kind: "done"; label: string }
   | { kind: "failed"; message: string };
 
+type JimPamPhase = "away" | "walking-in" | "chatting" | "walking-out";
+
+interface JimPamLine {
+  who: "jim" | "pam";
+  text: string;
+}
+
+interface JimPamVisitState {
+  phase: JimPamPhase;
+  line: JimPamLine | null;
+}
+
 const STATUS_CLEAR_MS = 4000;
+const JIM_VISIT_INITIAL_DELAY_MS = 5000;
+const JIM_VISIT_INITIAL_JITTER_MS = 4000;
+const JIM_VISIT_NEXT_DELAY_MS = 22000;
+const JIM_VISIT_NEXT_JITTER_MS = 18000;
+const JIM_WALK_IN_MS = 2600;
+const JIM_WALK_OUT_MS = 2200;
+const JIM_CHAT_LINE_MS = 3000;
+
+// Tone rule (ten-out-of-ten E1): no sarcastic or dismissive filler on a
+// work surface — "Of course it didn't. Classic." read as broken copy to a
+// real operator (ICP-eval v3 [17:41:35]). Keep the chatter warm, not snide.
+const JIM_PAM_CONVERSATIONS: readonly (readonly JimPamLine[])[] = [
+  [
+    {
+      who: "jim",
+      text: "Did you hear? CEO merged 12 PRs. Didn't ask anyone.",
+    },
+    { who: "pam", text: "Twelve? I'd better update the wiki." },
+    { who: "jim", text: "Honestly kind of amazing." },
+  ],
+  [
+    { who: "jim", text: "Dwight filed a formal complaint. Against the wiki." },
+    { who: "pam", text: "...Against the wiki?" },
+    { who: "jim", text: "He says the footnotes are insubordinate." },
+  ],
+  [
+    {
+      who: "jim",
+      text: "Michael is giving the CEO agent a performance review.",
+    },
+    { who: "pam", text: "The AI agent." },
+    { who: "jim", text: "It scored Outstanding. Michael cried." },
+  ],
+];
 
 /**
  * Pam — the wiki archivist, perched on the divider line at the top of the
@@ -55,6 +102,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const jimVisit = useJimPamVisit();
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -235,6 +283,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
 
   return (
     <div ref={wrapRef} className="pam-wrap" data-testid="pam-wrap">
+      <JimPamVisit visit={jimVisit} />
       <button
         type="button"
         ref={triggerRef}
@@ -246,7 +295,10 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
         title="Pam — click for options"
         onClick={() => setMenuOpen((v) => !v)}
       >
-        <PixelAvatar slug="pam" size={56} className="pam-avatar" />
+        {/* 40px avatar + 16px desk (−14px overlap) = 42px — exactly the
+            tab bar's height, so the sprite fits the row it lives in
+            instead of floating over the tabs (founder smoke run gap #5). */}
+        <PixelAvatar slug="pam" size={40} className="pam-avatar" />
       </button>
       <div className="pam-desk" aria-hidden="true" />
 
@@ -299,6 +351,125 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function useJimPamVisit(): JimPamVisitState {
+  const [visit, setVisit] = useState<JimPamVisitState>({
+    phase: "away",
+    line: null,
+  });
+
+  useEffect(() => {
+    if (prefersReducedAmbientMotion()) return;
+
+    let cancelled = false;
+    const timers: number[] = [];
+
+    function schedule(callback: () => void, delayMs: number) {
+      const timer = window.setTimeout(() => {
+        if (!cancelled) callback();
+      }, delayMs);
+      timers.push(timer);
+    }
+
+    function scheduleNextVisit(delayMs: number) {
+      schedule(startVisit, delayMs);
+    }
+
+    function startVisit() {
+      const conversation = pickJimPamConversation();
+      setVisit({ phase: "walking-in", line: null });
+
+      schedule(() => {
+        setVisit({ phase: "chatting", line: conversation[0] ?? null });
+
+        conversation.slice(1).forEach((line, index) => {
+          schedule(
+            () => {
+              setVisit({ phase: "chatting", line });
+            },
+            (index + 1) * JIM_CHAT_LINE_MS,
+          );
+        });
+
+        schedule(() => {
+          setVisit({ phase: "walking-out", line: null });
+          schedule(() => {
+            setVisit({ phase: "away", line: null });
+            scheduleNextVisit(
+              JIM_VISIT_NEXT_DELAY_MS +
+                Math.random() * JIM_VISIT_NEXT_JITTER_MS,
+            );
+          }, JIM_WALK_OUT_MS);
+        }, conversation.length * JIM_CHAT_LINE_MS);
+      }, JIM_WALK_IN_MS);
+    }
+
+    scheduleNextVisit(
+      JIM_VISIT_INITIAL_DELAY_MS + Math.random() * JIM_VISIT_INITIAL_JITTER_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, []);
+
+  return visit;
+}
+
+function prefersReducedAmbientMotion(): boolean {
+  if (typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function pickJimPamConversation(): readonly JimPamLine[] {
+  const index = Math.floor(Math.random() * JIM_PAM_CONVERSATIONS.length);
+  return JIM_PAM_CONVERSATIONS[index] ?? JIM_PAM_CONVERSATIONS[0];
+}
+
+function JimPamVisit({ visit }: { visit: JimPamVisitState }) {
+  const bubble = visit.phase === "chatting" ? visit.line : null;
+
+  return (
+    <div
+      className={`jim-pam-visitor is-${visit.phase}`}
+      data-testid="jim-pam-visitor"
+      aria-hidden="true"
+    >
+      {bubble ? (
+        <div className="jim-pam-bubble" data-speaker={bubble.who}>
+          {bubble.text}
+        </div>
+      ) : null}
+      <JimFullBodySprite size={34} className="jim-pixel" />
+    </div>
+  );
+}
+
+function JimFullBodySprite({
+  size,
+  className,
+}: {
+  size: number;
+  className?: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    drawKnownPixelAvatar(canvas, "hybridJim", size);
+  }, [size]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={["pixel-avatar", className].filter(Boolean).join(" ")}
+      data-testid="jim-full-body-sprite"
+    />
   );
 }
 

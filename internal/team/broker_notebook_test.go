@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -386,6 +387,234 @@ func TestBrokerNotebookVisualArtifactAgentHeaderAuthoritative(t *testing.T) {
 	}
 }
 
+// TestBrokerNotebookVisualArtifactAutoNotebookHome verifies the auto-create
+// notebook entry contract: every fresh visual artifact gets owner_slug,
+// attached_to_notebook_entry, and a materialized markdown companion file so
+// the chat link card has a real /notebooks/{owner}/{entry} destination.
+func TestBrokerNotebookVisualArtifactAutoNotebookHome(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":   "Coffee extraction science",
+		"summary": "How brew ratio drives extraction yield.",
+		"html":    "<!doctype html><html><body><h1>Coffee</h1></body></html>",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	req.Header.Set(agentRateLimitHeader, "ceo")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact: %v", err)
+	}
+	var created struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d", res.StatusCode)
+	}
+
+	// E1 — owner_slug must be set from the authenticated agent header.
+	if created.Artifact.OwnerSlug != "ceo" {
+		t.Fatalf("OwnerSlug = %q, want ceo", created.Artifact.OwnerSlug)
+	}
+	// E3 — attached_to_notebook_entry must point at the auto-created home.
+	attached := created.Artifact.AttachedToNotebookEntry
+	if attached == nil {
+		t.Fatalf("AttachedToNotebookEntry = nil, want auto-created home")
+	}
+	if attached.OwnerSlug != "ceo" || attached.EntrySlug != "coffee-extraction-science" {
+		t.Fatalf("attached = %+v, want {ceo coffee-extraction-science}", attached)
+	}
+
+	// The notebook entry file must actually exist with the marker that the
+	// detail view keys off of.
+	homeRel := filepath.Join("agents", "ceo", "notebook", "coffee-extraction-science.md")
+	homeFull := filepath.Join(b.WikiWorker().repo.Root(), homeRel)
+	body, err := os.ReadFile(homeFull)
+	if err != nil {
+		t.Fatalf("read notebook home: %v", err)
+	}
+	if !strings.Contains(string(body), "visual-artifact:"+created.Artifact.ID) {
+		t.Fatalf("notebook home missing artifact marker: %s", string(body))
+	}
+
+	// E2 — listing by owner_slug must return the artifact with the same
+	// shape. owner_slug is the FE-facing query name; the broker also accepts
+	// the legacy `slug` form.
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/visual-artifacts?owner_slug=ceo", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list visual artifacts: %v", err)
+	}
+	var list struct {
+		Artifacts []RichArtifact `json:"artifacts"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	_ = res.Body.Close()
+	if len(list.Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(list.Artifacts))
+	}
+	got := list.Artifacts[0]
+	if got.OwnerSlug != "ceo" {
+		t.Fatalf("list OwnerSlug = %q, want ceo", got.OwnerSlug)
+	}
+	if got.AttachedToNotebookEntry == nil ||
+		got.AttachedToNotebookEntry.OwnerSlug != "ceo" ||
+		got.AttachedToNotebookEntry.EntrySlug != "coffee-extraction-science" {
+		t.Fatalf("list attached = %+v, want {ceo coffee-extraction-science}", got.AttachedToNotebookEntry)
+	}
+	if got.Promotion == nil || got.Promotion.Status != ArtifactPromotionStatusDraft {
+		t.Fatalf("list promotion = %+v, want draft", got.Promotion)
+	}
+
+	// E4 — single-artifact GET must include the same fields.
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID, nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get visual artifact: %v", err)
+	}
+	var detail struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	_ = res.Body.Close()
+	if detail.Artifact.OwnerSlug != "ceo" {
+		t.Fatalf("detail OwnerSlug = %q, want ceo", detail.Artifact.OwnerSlug)
+	}
+	if detail.Artifact.AttachedToNotebookEntry == nil {
+		t.Fatalf("detail AttachedToNotebookEntry = nil, want {ceo coffee-extraction-science}")
+	}
+}
+
+// TestBrokerNotebookVisualArtifactAutoNotebookHomeCollision verifies the
+// entry-slug collision suffix logic: two artifacts authored by the same agent
+// with the same title get distinct notebook entries (foo, foo-2).
+func TestBrokerNotebookVisualArtifactAutoNotebookHomeCollision(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	create := func(seed string) RichArtifact {
+		t.Helper()
+		// Add an invisible distinguishing detail so the dedup hash in
+		// richArtifactID doesn't collapse the two requests into the same
+		// artifact ID. Same title → same notebook-home base slug → exercises
+		// the collision suffix.
+		createBody, _ := json.Marshal(map[string]any{
+			"title":   "Same title",
+			"summary": "different summary " + seed,
+			"html":    "<!doctype html><html><body><h1>Same</h1></body></html>",
+		})
+		req, _ := authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+		req.Header.Set(agentRateLimitHeader, "ceo")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		var created struct {
+			Artifact RichArtifact `json:"artifact"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d", res.StatusCode)
+		}
+		return created.Artifact
+	}
+
+	first := create("alpha")
+	second := create("beta")
+	if first.ID == second.ID {
+		t.Fatalf("expected distinct artifact IDs, got %s twice", first.ID)
+	}
+	if first.AttachedToNotebookEntry == nil || second.AttachedToNotebookEntry == nil {
+		t.Fatalf("attached missing: first=%+v second=%+v", first.AttachedToNotebookEntry, second.AttachedToNotebookEntry)
+	}
+	if first.AttachedToNotebookEntry.EntrySlug != "same-title" {
+		t.Fatalf("first entry_slug = %q, want same-title", first.AttachedToNotebookEntry.EntrySlug)
+	}
+	if second.AttachedToNotebookEntry.EntrySlug != "same-title-2" {
+		t.Fatalf("second entry_slug = %q, want same-title-2", second.AttachedToNotebookEntry.EntrySlug)
+	}
+}
+
+// TestBrokerNotebookVisualArtifactPreservesExplicitNotebookHome verifies the
+// legacy companion mode: when the agent passes source_markdown_path, the
+// existing notebook entry IS the home and no new file is materialized.
+func TestBrokerNotebookVisualArtifactPreservesExplicitNotebookHome(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	writeBody, _ := json.Marshal(map[string]any{
+		"slug":           "pm",
+		"path":           "agents/pm/notebook/retro.md",
+		"content":        "# Retro\n\nDraft source.\n",
+		"mode":           "create",
+		"commit_message": "draft retro",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/write", bytes.NewReader(writeBody), token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("notebook write: %v", err)
+	}
+	_ = res.Body.Close()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":                "Pretty retro",
+		"summary":              "Visual companion to the existing retro entry.",
+		"html":                 "<!doctype html><html><body><h1>Retro</h1></body></html>",
+		"source_markdown_path": "agents/pm/notebook/retro.md",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var created struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+
+	// The home must point at the explicit source entry, not a derived one.
+	attached := created.Artifact.AttachedToNotebookEntry
+	if attached == nil || attached.OwnerSlug != "pm" || attached.EntrySlug != "retro" {
+		t.Fatalf("attached = %+v, want {pm retro}", attached)
+	}
+	// The auto-derived "pretty-retro.md" file must NOT exist — the explicit
+	// source entry is the home.
+	root := b.WikiWorker().repo.Root()
+	if _, err := os.Stat(filepath.Join(root, "agents", "pm", "notebook", "pretty-retro.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("derived notebook entry should not exist when source_markdown_path is set, got err=%v", err)
+	}
+	// Source entry content must be intact.
+	body, err := os.ReadFile(filepath.Join(root, "agents", "pm", "notebook", "retro.md"))
+	if err != nil {
+		t.Fatalf("read source entry: %v", err)
+	}
+	if !strings.Contains(string(body), "Draft source") {
+		t.Fatalf("source entry overwritten: %s", string(body))
+	}
+}
+
 func TestBrokerNotebookVisualArtifactRejectsUnsafeInput(t *testing.T) {
 	srv, b, teardown := newNotebookTestServer(t)
 	defer teardown()
@@ -714,7 +943,7 @@ func TestRepoRichArtifactReadRevalidatesPersistedHTMLPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRichArtifact: %v", err)
 	}
-	if _, _, err := repo.CommitRichArtifact(context.Background(), "pm", artifact, html, "artifact: create"); err != nil {
+	if _, _, _, err := repo.CommitRichArtifact(context.Background(), "pm", artifact, html, "artifact: create"); err != nil {
 		t.Fatalf("commit rich artifact: %v", err)
 	}
 

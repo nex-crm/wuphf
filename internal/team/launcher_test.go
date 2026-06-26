@@ -504,6 +504,138 @@ func TestNotificationTargetsForHumanMessageDirectToTaggedSpecialists(t *testing.
 	}
 }
 
+// TestNotificationTargetsCEOWakesOnlyOnMention locks the wake contract: the
+// CEO/lead wakes on untagged human messages and on any message that @mentions
+// it, but NOT on a specialist message that does not @mention it. Before the
+// fix, an untagged specialist message woke the CEO as the default routing hub,
+// so every status ping and live-stream note spawned a CEO turn.
+func TestNotificationTargetsCEOWakesOnlyOnMention(t *testing.T) {
+	newLauncher := func(focus bool) *Launcher {
+		return &Launcher{
+			focusMode: focus,
+			pack: &agent.PackDefinition{
+				LeadSlug: "ceo",
+				Agents: []agent.AgentConfig{
+					{Slug: "ceo", Name: "CEO"},
+					{Slug: "fe", Name: "Frontend Engineer"},
+					{Slug: "be", Name: "Backend Engineer"},
+				},
+			},
+		}
+	}
+	hasSlug := func(targets []notificationTarget, slug string) bool {
+		for _, tg := range targets {
+			if tg.Slug == slug {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, focus := range []bool{true, false} {
+		mode := "collaborative"
+		if focus {
+			mode = "focus"
+		}
+
+		t.Run(mode+"/untagged specialist message does not wake CEO", func(t *testing.T) {
+			l := newLauncher(focus)
+			// A substantive (non-[STATUS]) note: pre-fix this woke the CEO as
+			// the default routing hub. It must not anymore.
+			immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+				From:    "be",
+				Content: "wired up the handler and shipped the first slice, two files left",
+			})
+			if hasSlug(immediate, "ceo") || hasSlug(delayed, "ceo") {
+				t.Fatalf("CEO must not wake on an untagged specialist message; immediate=%+v delayed=%+v", immediate, delayed)
+			}
+		})
+
+		t.Run(mode+"/specialist mentioning CEO wakes CEO", func(t *testing.T) {
+			l := newLauncher(focus)
+			immediate, _ := l.notificationTargetsForMessage(channelMessage{
+				From:    "be",
+				Content: "@ceo this needs a routing decision",
+				Tagged:  []string{"ceo"},
+			})
+			if !hasSlug(immediate, "ceo") {
+				t.Fatalf("CEO must wake when a specialist @mentions it; got %+v", immediate)
+			}
+		})
+
+		t.Run(mode+"/untagged human message wakes CEO", func(t *testing.T) {
+			l := newLauncher(focus)
+			immediate, _ := l.notificationTargetsForMessage(channelMessage{
+				From:    "you",
+				Content: "what's the status of the launch?",
+			})
+			if !hasSlug(immediate, "ceo") {
+				t.Fatalf("CEO must wake on an untagged human message; got %+v", immediate)
+			}
+		})
+
+		// Automation/nex traffic is inbound external work (scheduled triggers,
+		// Nex notifications), not internal agent chatter — it routes to the CEO
+		// to triage even when untagged. The router keeps two independent wake
+		// predicates (Kind=="automation" and From=="nex"); cover each on its own
+		// so dropping either one fails this regression.
+		for _, inbound := range []struct {
+			name string
+			msg  channelMessage
+		}{
+			{name: "automation kind", msg: channelMessage{From: "scheduler", Kind: "automation", Content: "inbound: scheduled trigger fired"}},
+			{name: "nex sender", msg: channelMessage{From: "nex", Content: "inbound: new lead assigned to the workspace"}},
+		} {
+			inbound := inbound
+			t.Run(mode+"/untagged inbound "+inbound.name+" wakes CEO", func(t *testing.T) {
+				l := newLauncher(focus)
+				immediate, _ := l.notificationTargetsForMessage(inbound.msg)
+				if !hasSlug(immediate, "ceo") {
+					t.Fatalf("CEO must wake on untagged inbound %s work; got %+v", inbound.name, immediate)
+				}
+			})
+		}
+
+		t.Run(mode+"/human tagging a specialist AND CEO still wakes CEO", func(t *testing.T) {
+			// An explicit @mention of the CEO always wakes it, even when the
+			// human also tags a specialist in the same message.
+			l := newLauncher(focus)
+			immediate, _ := l.notificationTargetsForMessage(channelMessage{
+				From:    "you",
+				Content: "@ceo @be please handle this",
+				Tagged:  []string{"ceo", "be"},
+			})
+			if !hasSlug(immediate, "ceo") {
+				t.Fatalf("CEO must wake when a human @mentions it alongside a specialist; got %+v", immediate)
+			}
+			if !hasSlug(immediate, "be") {
+				t.Fatalf("the tagged specialist must also wake; got %+v", immediate)
+			}
+		})
+
+		if focus {
+			// Focus mode only: a human who tags a specialist (and not the CEO)
+			// gets that specialist directly; the CEO is not pulled in to
+			// re-route an explicit assignment. Collaborative mode keeps the
+			// CEO in the loop on every human message by design.
+			t.Run(mode+"/human tagging only a specialist does not wake CEO", func(t *testing.T) {
+				l := newLauncher(focus)
+				immediate, _ := l.notificationTargetsForMessage(channelMessage{
+					From:    "you",
+					Content: "@be ship the handler",
+					Tagged:  []string{"be"},
+				})
+				if hasSlug(immediate, "ceo") {
+					t.Fatalf("CEO must not wake when the human tags only a specialist; got %+v", immediate)
+				}
+				if !hasSlug(immediate, "be") {
+					t.Fatalf("the tagged specialist must wake; got %+v", immediate)
+				}
+			})
+		}
+	}
+}
+
 func TestNotificationTargetsForDMChannel(t *testing.T) {
 	// DMs should route only to the target agent, not to CEO or other specialists.
 	l := &Launcher{
@@ -1194,8 +1326,11 @@ func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
 		prompt := l.buildPrompt(slug)
 		for _, want := range []string{
 			"notebook_write",
+			"notebook_visual_artifact_create",
 			"notebook_promote",
 			"wuphf_wiki_lookup",
+			"self-contained HTML article",
+			"visual-artifact:ra_...",
 			"Do not bypass notebook_promote",
 		} {
 			if !strings.Contains(prompt, want) {
@@ -1245,6 +1380,30 @@ func TestResponseInstructionForTargetLiveExternalTaskPromptsCapabilityCreation(t
 	}
 	if !strings.Contains(got, "if a live business lane gets named or reframed as a review packet, proof artifact, blueprint-derived scaffold") {
 		t.Fatalf("expected task-hygiene guidance in live external instruction: %q", got)
+	}
+}
+
+// TestTaskOwnerForMessageResolvesByChannel covers channel-first routing: a short
+// human chat in a task's own channel wakes that task's owner even when the
+// content would not clear the similarity threshold — while #general (owned by
+// the terminal Backup & Migration task) keeps routing normally.
+func TestTaskOwnerForMessageResolvesByChannel(t *testing.T) {
+	b := &Broker{
+		tasks: []teamTask{
+			{ID: "task-a", Channel: "task-a", Title: "Onboarding revamp", Owner: "builder", status: "drafting"},
+			{ID: "task-bkp", Channel: "general", Title: "Backup & Migration", Owner: "system", status: "archived"},
+		},
+	}
+	l := &Launcher{broker: b, pack: &agent.PackDefinition{LeadSlug: "ceo"}}
+
+	// Short, content-mismatched chat in the task's own channel → its owner.
+	if owner := l.taskOwnerForMessage(channelMessage{ID: "m1", From: "you", Channel: "task-a", Content: "actually, target SMBs"}); owner != "builder" {
+		t.Fatalf("expected channel-first resolution to builder, got %q", owner)
+	}
+	// #general is owned only by the archived Backup & Migration task → no
+	// channel-first binding, so general chat is not bound to that owner.
+	if owner := l.taskOwnerForMessage(channelMessage{ID: "m2", From: "you", Channel: "general", Content: "hello team"}); owner == "system" {
+		t.Fatalf("general chat must not bind to the archived Backup & Migration owner, got %q", owner)
 	}
 }
 
@@ -1998,8 +2157,8 @@ func TestResponseInstructionForTargetDMChannelRespondsHelpfully(t *testing.T) {
 	if strings.Contains(channelInstr, "messaging you directly") {
 		t.Errorf("non-DM should not get DM-direct guidance, got %q", channelInstr)
 	}
-	if !strings.Contains(channelInstr, "in-character") || !strings.Contains(channelInstr, "Skip the turn only if") {
-		t.Errorf("non-DM untagged should get chime-in-with-personality default, got %q", channelInstr)
+	if !strings.Contains(channelInstr, "brushes your domain") || !strings.Contains(channelInstr, "Skip the turn only if") {
+		t.Errorf("non-DM untagged should get the substantive chime-in default, got %q", channelInstr)
 	}
 
 	// DM with agent slug mismatch — wrong agent should not get DM instruction
@@ -2683,13 +2842,13 @@ func TestBuildPromptToolHygieneSection(t *testing.T) {
 		if !strings.Contains(prompt, "== TOOL HYGIENE ==") {
 			t.Errorf("%s prompt missing TOOL HYGIENE section", slug)
 		}
-		if !strings.Contains(prompt, "ALREADY registered") {
-			t.Errorf("%s prompt missing 'ALREADY registered' line", slug)
+		if !strings.Contains(prompt, "registered for this session") {
+			t.Errorf("%s prompt missing 'registered for this session' line", slug)
 		}
-		if !strings.Contains(prompt, "Do not read unrelated files") {
-			t.Errorf("%s prompt missing unrelated-files guidance", slug)
+		if !strings.Contains(prompt, "Gather the context the task needs") {
+			t.Errorf("%s prompt missing gather-context guidance", slug)
 		}
-		if !strings.Contains(prompt, "Emit at most one team_broadcast per turn") {
+		if !strings.Contains(prompt, "AT MOST one team_broadcast per turn") {
 			t.Errorf("%s prompt missing broadcast throttle guidance", slug)
 		}
 	}
@@ -2705,12 +2864,12 @@ func TestBuildMessageActiveAgentsSorted(t *testing.T) {
 			},
 		},
 		headless: headlessWorkerPool{
-			active: map[string]*headlessCodexActiveTurn{
-				"zebra": {},
-				"alpha": {},
-				"mango": {},
+			active: map[headlessLane]*headlessCodexActiveTurn{
+				{slug: "zebra"}: {},
+				{slug: "alpha"}: {},
+				{slug: "mango"}: {},
 			},
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 

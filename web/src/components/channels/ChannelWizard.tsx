@@ -94,7 +94,11 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
           return;
         }
         const channel = await generateChannel(prompt.trim());
-        await createChannel(channel.slug, channel.name || channel.slug, channel.description || "");
+        await createChannel(
+          channel.slug,
+          channel.name || channel.slug,
+          channel.description || "",
+        );
         newSlug = channel.slug;
       } else {
         if (!(manual.slug.trim() && manual.name.trim())) {

@@ -135,11 +135,11 @@ func TestUnblockDependentsLegacyDependsOnPath(t *testing.T) {
 	}
 }
 
-func TestUnblockDependentsHarnessBlockedOnPRMergePath(t *testing.T) {
-	// Acceptance: a task in LifecycleStateBlockedOnPRMerge with a typed
+func TestUnblockDependentsHarnessBlockedPath(t *testing.T) {
+	// Acceptance: a task in LifecycleStateBlocked with a typed
 	// BlockedOn entry that resolves must transition to
 	// LifecycleStateReview (not "in_progress"), per the design doc:
-	// "blocked_on_pr_merge → after removing the resolved entry from
+	// "blocked → after removing the resolved entry from
 	// BlockedOn, if list empty, transition to review."
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
@@ -166,7 +166,7 @@ func TestUnblockDependentsHarnessBlockedOnPRMergePath(t *testing.T) {
 			status:         "blocked",
 			blocked:        true,
 			BlockedOn:      []string{"blocker-task"},
-			LifecycleState: LifecycleStateBlockedOnPRMerge,
+			LifecycleState: LifecycleStateBlocked,
 			pipelineStage:  "review",
 			reviewState:    "ready_for_review",
 			CreatedBy:      "operator",
@@ -176,7 +176,7 @@ func TestUnblockDependentsHarnessBlockedOnPRMergePath(t *testing.T) {
 	}
 	// Index the seed state so the transition layer's index update has
 	// something to subtract from.
-	b.indexLifecycleLocked("harness-blocked", "", LifecycleStateBlockedOnPRMerge)
+	b.indexLifecycleLocked("harness-blocked", "", LifecycleStateBlocked)
 
 	b.unblockDependentsLocked("blocker-task")
 

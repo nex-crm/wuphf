@@ -5,6 +5,7 @@ import type { Message } from "../../api/client";
 import { toggleReaction } from "../../api/client";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { useMessages } from "../../hooks/useMessages";
 import { formatTime } from "../../lib/format";
 import { resolveHarness } from "../../lib/harness";
 import { renderMentions } from "../../lib/mentions";
@@ -16,12 +17,47 @@ import {
   extractRichArtifactIds,
   stripStandaloneRichArtifactReferenceLines,
 } from "../../lib/richArtifactReferences";
-import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useChannelSlug, useCurrentTaskId } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
-import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
+import {
+  ArtifactSkeleton,
+  useArtifactSkeletonTrigger,
+} from "./ArtifactSkeleton";
+import {
+  NotebookEntryCreatedCard,
+  parseNotebookEntryCreatedPayload,
+} from "./cards/NotebookEntryCreatedCard";
+import {
+  NotebookPromotionRequestedCard,
+  parseNotebookPromotionRequestedPayload,
+} from "./cards/NotebookPromotionRequestedCard";
+import {
+  NotebookPromotionResolvedCard,
+  parseNotebookPromotionResolvedPayload,
+} from "./cards/NotebookPromotionResolvedCard";
+import {
+  parseSystemAuthErrorPayload,
+  SystemErrorCard,
+} from "./cards/SystemErrorCard";
+import {
+  parseTaskCommentPayload,
+  TaskCommentCard,
+} from "./cards/TaskCommentCard";
+import {
+  parseTaskCreatedPayload,
+  TaskCreatedCard,
+} from "./cards/TaskCreatedCard";
+import {
+  parseTaskLifecyclePayload,
+  TaskLifecycleCard,
+} from "./cards/TaskLifecycleCard";
+import {
+  parseWikiArticleCreatedPayload,
+  WikiArticleCreatedCard,
+} from "./cards/WikiArticleCreatedCard";
 import MessageArtifactReferences from "./MessageArtifactReferences";
 
 interface MessageBubbleProps {
@@ -37,6 +73,14 @@ interface MessageBubbleProps {
   onQuoteReply?: (message: Message) => void;
   /** Copy a permalink to this message. Shown as a hover action when provided. */
   onCopyLink?: (id: string) => void;
+  /**
+   * Channel this bubble belongs to. Required on surfaces that are NOT a
+   * `/channels/$slug` route — e.g. the task-detail chat (`/tasks/$id`), where
+   * `useChannelSlug()` returns null and would otherwise fall back to "general",
+   * sending reactions and the artifact-skeleton probe to the wrong channel.
+   * Omit on the channel route to keep deriving it from the URL.
+   */
+  channel?: string;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -48,8 +92,16 @@ export function MessageBubble({
   onOpenThread,
   onQuoteReply,
   onCopyLink,
+  channel,
 }: MessageBubbleProps) {
-  const currentChannel = useChannelSlug() ?? "general";
+  const routeChannel = useChannelSlug();
+  const currentChannel = channel ?? routeChannel ?? "general";
+  // When the chat is rendered inside a task-detail route, this is that
+  // task's id. Task-pointer cards (created / lifecycle) use it to detect a
+  // self-reference: a card pointing at the very task you are already viewing
+  // would "Open →" nowhere, so we suppress or de-link it (see the card
+  // dispatch below). Null on every non-task-detail surface.
+  const currentTaskId = useCurrentTaskId();
   const { data: members = [] } = useOfficeMembers();
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   const isHuman =
@@ -110,10 +162,100 @@ export function MessageBubble({
     [isHuman, renderedText, knownSlugs],
   );
 
+  // Skeletal loader between "gist" message and the eventual visual-artifact
+  // card. Only candidates: agent-authored top-level messages (not replies,
+  // not humans). We subscribe to the channel feed + a coarse ticker so the
+  // skeleton ages out (60s window) without waiting for the next refetch.
+  const skeletonCandidate = !(
+    isHuman ||
+    isReply ||
+    message.content?.startsWith("[STATUS]")
+  );
+  // Always call hooks (rules of hooks). When the candidate is not eligible,
+  // `useArtifactSkeletonTrigger` short-circuits to `false` and skips its own
+  // ticker, so this is also cheap.
+  const { data: channelMessages = [] } = useMessages(currentChannel);
+  const showArtifactSkeleton = useArtifactSkeletonTrigger({
+    enabled: skeletonCandidate,
+    message,
+    channelMessages,
+    members,
+  });
+
   // Status messages — compact
   if (message.content?.startsWith("[STATUS]")) {
     const statusText = message.content.replace(/^\[STATUS\]\s*/, "");
     return <div className="message-status animate-fade">{statusText}</div>;
+  }
+
+  // Issue #933: system-authored auth-failure card. Renders OUTSIDE the
+  // standard message-bubble container so it's visually distinct from
+  // agent chat — banner-style with a sign-in CTA rather than an avatar +
+  // speech bubble. The broker emits these in place of the legacy
+  // agent_issue bubble when a provider returns "Not logged in".
+  if (message.kind === "system_auth_error") {
+    const payload = parseSystemAuthErrorPayload(message.payload);
+    return <SystemErrorCard payload={payload} />;
+  }
+
+  // System-authored issue card. Broker emits one per team_task
+  // action=create with task_type=issue. Renders OUTSIDE the standard
+  // message-bubble so it visually reads as a system event, not an
+  // agent line — same pattern as SystemErrorCard.
+  if (message.kind === "issue_created") {
+    const payload = parseTaskCreatedPayload(message.payload);
+    // Suppress the card entirely when it points at the task whose channel
+    // is already on screen — the "Open →" would just reload this page, so
+    // it reads as a dead card. Show it only when it points elsewhere
+    // (e.g. a sub-task created from this conversation).
+    if (payload.task_id && payload.task_id === currentTaskId) return null;
+    return <TaskCreatedCard payload={payload} />;
+  }
+
+  // PR-style Issue comment card. Broker emits one per
+  // POST /tasks/{id}/comment with a brief instructional content the
+  // agent loop wakes on; the card body shows the actual comment as a
+  // distinct chat surface so the human's question on the Issue does
+  // not look like a free-form chat ask.
+  if (message.kind === "issue_comment") {
+    const payload = parseTaskCommentPayload(message.payload);
+    return <TaskCommentCard payload={payload} />;
+  }
+
+  // Lifecycle transition cards (Drafting→Running, →Done, etc). Broker
+  // emits one whenever an Issue's lifecycle state changes in a way the
+  // human should see. Same surface treatment as TaskCreatedCard.
+  if (message.kind === "issue_lifecycle") {
+    const payload = parseTaskLifecyclePayload(message.payload);
+    // Same task as the channel on screen → still surface the transition
+    // (useful inline history) but render it inert: no "Open →", not
+    // clickable. Pointing at a different task keeps the openable card.
+    const sameTask = Boolean(
+      payload.task_id && payload.task_id === currentTaskId,
+    );
+    return <TaskLifecycleCard payload={payload} sameTask={sameTask} />;
+  }
+
+  // Wiki/notebook surface cards. Broker emits these in #general when one
+  // of four artifact events happens (new wiki article, new notebook
+  // entry, promotion requested, promotion resolved). Each card is a
+  // clickable banner that routes to the underlying artifact — wiki
+  // article, notebook entry, or the Reviews app.
+  if (message.kind === "wiki_article_created") {
+    const payload = parseWikiArticleCreatedPayload(message.payload);
+    return <WikiArticleCreatedCard payload={payload} />;
+  }
+  if (message.kind === "notebook_entry_created") {
+    const payload = parseNotebookEntryCreatedPayload(message.payload);
+    return <NotebookEntryCreatedCard payload={payload} />;
+  }
+  if (message.kind === "notebook_promotion_requested") {
+    const payload = parseNotebookPromotionRequestedPayload(message.payload);
+    return <NotebookPromotionRequestedCard payload={payload} />;
+  }
+  if (message.kind === "notebook_promotion_resolved") {
+    const payload = parseNotebookPromotionResolvedPayload(message.payload);
+    return <NotebookPromotionResolvedCard payload={payload} />;
   }
 
   return (
@@ -191,9 +333,6 @@ export function MessageBubble({
           <span className="message-time" title={message.timestamp}>
             {formatTime(message.timestamp)}
           </span>
-          {Boolean(message.redacted) && (
-            <RedactedBadge reasons={message.redaction_reasons} />
-          )}
         </div>
 
         {/* Text — humans render mention chips via safe ReactNode children;
@@ -204,8 +343,16 @@ export function MessageBubble({
           humanRendered={humanRendered}
         />
 
+        {/* Rich-artifact reference card, or the drafting skeleton while the
+            real card is still being produced. Rendered INSIDE .message-content
+            (not as a sibling of .message) so the skeleton aligns horizontally
+            with the eventual MessageArtifactReferences card instead of jumping
+            in from the feed edge when the real artifact lands. The skeleton
+            only shows when there's no real artifact reference yet. */}
         {richArtifactIds.length > 0 ? (
           <MessageArtifactReferences artifactIds={richArtifactIds} />
+        ) : showArtifactSkeleton ? (
+          <ArtifactSkeleton />
         ) : null}
 
         {/* Reactions */}
@@ -258,90 +405,12 @@ export function MessageBubble({
         )}
       </div>
 
-      {/* Hover actions — reply in thread, quote, copy link. Absolutely
-          positioned so they don't change the bubble's flow layout. */}
-      {onOpenThread || onQuoteReply || onCopyLink ? (
-        <div
-          className="message-hover-actions"
-          role="toolbar"
-          aria-label="Message actions"
-        >
-          {onOpenThread ? (
-            <button
-              type="button"
-              className="message-hover-btn"
-              onClick={() => onOpenThread(message.id)}
-              title="Reply in thread"
-              aria-label="Reply in thread"
-            >
-              <svg
-                aria-hidden="true"
-                focusable="false"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            </button>
-          ) : null}
-          {onQuoteReply ? (
-            <button
-              type="button"
-              className="message-hover-btn"
-              onClick={() => onQuoteReply(message)}
-              title="Quote-reply"
-              aria-label="Quote-reply"
-            >
-              <svg
-                aria-hidden="true"
-                focusable="false"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M3 21v-5a5 5 0 0 1 5-5h13" />
-                <path d="m16 16-5-5 5-5" />
-              </svg>
-            </button>
-          ) : null}
-          {onCopyLink ? (
-            <button
-              type="button"
-              className="message-hover-btn"
-              onClick={() => onCopyLink(message.id)}
-              title="Copy link"
-              aria-label="Copy link"
-            >
-              <svg
-                aria-hidden="true"
-                focusable="false"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71" />
-              </svg>
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <MessageHoverActions
+        message={message}
+        onOpenThread={onOpenThread}
+        onQuoteReply={onQuoteReply}
+        onCopyLink={onCopyLink}
+      />
     </div>
   );
 }
@@ -366,6 +435,107 @@ function MessageBodyText({
       >
         {renderedText}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+/**
+ * Hover toolbar (reply-in-thread / quote / copy-link). Absolutely positioned
+ * so it doesn't shift the bubble layout. Extracted from MessageBubble so the
+ * parent component stays under the function-length lint budget.
+ */
+function MessageHoverActions({
+  message,
+  onOpenThread,
+  onQuoteReply,
+  onCopyLink,
+}: {
+  message: Message;
+  onOpenThread?: (id: string) => void;
+  onQuoteReply?: (message: Message) => void;
+  onCopyLink?: (id: string) => void;
+}) {
+  if (!(onOpenThread || onQuoteReply || onCopyLink)) return null;
+  return (
+    <div
+      className="message-hover-actions"
+      role="toolbar"
+      aria-label="Message actions"
+    >
+      {onOpenThread ? (
+        <button
+          type="button"
+          className="message-hover-btn"
+          onClick={() => onOpenThread(message.id)}
+          title="Reply in thread"
+          aria-label="Reply in thread"
+        >
+          <svg
+            aria-hidden="true"
+            focusable="false"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        </button>
+      ) : null}
+      {onQuoteReply ? (
+        <button
+          type="button"
+          className="message-hover-btn"
+          onClick={() => onQuoteReply(message)}
+          title="Quote-reply"
+          aria-label="Quote-reply"
+        >
+          <svg
+            aria-hidden="true"
+            focusable="false"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 21v-5a5 5 0 0 1 5-5h13" />
+            <path d="m16 16-5-5 5-5" />
+          </svg>
+        </button>
+      ) : null}
+      {onCopyLink ? (
+        <button
+          type="button"
+          className="message-hover-btn"
+          onClick={() => onCopyLink(message.id)}
+          title="Copy link"
+          aria-label="Copy link"
+        >
+          <svg
+            aria-hidden="true"
+            focusable="false"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71" />
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 }

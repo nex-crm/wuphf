@@ -3,6 +3,7 @@ package team
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -19,9 +20,24 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 	}
 	switch r.Method {
 	case http.MethodGet:
+		// owner_slug is the frontend-facing query name; slug is the legacy
+		// agent-facing name. Accept both so MCP + UI callers can share the
+		// same endpoint without translation.
+		createdBy := strings.TrimSpace(r.URL.Query().Get("slug"))
+		if createdBy == "" {
+			createdBy = strings.TrimSpace(r.URL.Query().Get("owner_slug"))
+		}
+		// source_path is the FE-facing query name; source_markdown_path is
+		// the JSON-payload-shaped alias spec'd for the listing contract.
+		// Accept both so MCP + UI callers (and any future SDK) can use the
+		// shape they already speak.
+		sourcePath := strings.TrimSpace(r.URL.Query().Get("source_path"))
+		if sourcePath == "" {
+			sourcePath = strings.TrimSpace(r.URL.Query().Get("source_markdown_path"))
+		}
 		filter := RichArtifactFilter{
-			CreatedBy:          strings.TrimSpace(r.URL.Query().Get("slug")),
-			SourceMarkdownPath: strings.TrimSpace(r.URL.Query().Get("source_path")),
+			CreatedBy:          createdBy,
+			SourceMarkdownPath: sourcePath,
 		}
 		if filter.CreatedBy != "" {
 			if err := validateNotebookSlug(filter.CreatedBy); err != nil {
@@ -58,13 +74,37 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		sha, n, err := worker.CreateRichArtifact(r.Context(), artifact, html, body.CommitMessage)
+		stored, sha, n, err := worker.CreateRichArtifact(r.Context(), artifact, html, body.CommitMessage)
 		if err != nil {
 			writeRichArtifactError(w, err)
 			return
 		}
+		// CreateRichArtifact auto-creates a canonical notebook home for the
+		// artifact and reports it via stored.AttachedToNotebookEntry. The manual
+		// notebook-write path announces new entries with a #general chat card;
+		// mirror that here so an auto-created entry is not discovered by accident.
+		// The card emitter takes b.mu itself, and this HTTP handler holds no lock,
+		// so the call is safe. A "# Title" body makes markdownTitle resolve to the
+		// artifact title; SourceMarkdownPath is the mirrored notebook-home path.
+		//
+		// Only emit when the entry was DERIVED by the system. AttachedToNotebookEntry
+		// is also populated in companion mode (request supplied source_markdown_path),
+		// where it names a PRE-EXISTING note — firing the "new entry" card there is a
+		// false signal. Gate on an empty source path so the card announces genuinely
+		// new system-created homes only.
+		if stored.AttachedToNotebookEntry != nil && strings.TrimSpace(body.SourceMarkdownPath) == "" {
+			b.emitNewNotebookEntryCard(
+				stored.AttachedToNotebookEntry.OwnerSlug,
+				stored.SourceMarkdownPath,
+				fmt.Sprintf("# %s\n", stored.Title),
+				stored.OwnerSlug,
+			)
+		}
+		// stored carries the canonical notebook-home attachment chosen by the
+		// worker. Always pass it through DerivePromotion so the response shape
+		// matches the list/get endpoints (non-nil promotion field).
 		writeJSON(w, http.StatusOK, map[string]any{
-			"artifact":      artifact,
+			"artifact":      stored.WithDerivedPromotion(),
 			"commit_sha":    sha,
 			"bytes_written": n,
 		})

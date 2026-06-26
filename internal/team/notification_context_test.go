@@ -102,13 +102,12 @@ func TestNotificationContext_ContextEmptyWhenNoMessages(t *testing.T) {
 	}
 }
 
-func TestNotificationContext_FiltersSystemAndDemoSeedAndStatus(t *testing.T) {
+func TestNotificationContext_FiltersSystemAndStatus(t *testing.T) {
 	msgs := []channelMessage{
 		{ID: "1", From: "you", Content: "human says hi"},
 		{ID: "2", From: "system", Content: "system bookkeeping"},
 		{ID: "3", From: "ceo", Content: "[STATUS] working"},
-		{ID: "4", From: "ceo", Kind: "demo_seed", Content: "fake activity"},
-		{ID: "5", From: "ceo", Content: "real reply"},
+		{ID: "4", From: "ceo", Content: "real reply"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelMessages = func(string) []channelMessage { return msgs }
@@ -120,7 +119,7 @@ func TestNotificationContext_FiltersSystemAndDemoSeedAndStatus(t *testing.T) {
 	if !strings.Contains(got, "real reply") {
 		t.Errorf("expected real ceo reply included; got %q", got)
 	}
-	for _, banned := range []string{"system bookkeeping", "STATUS", "fake activity"} {
+	for _, banned := range []string{"system bookkeeping", "STATUS"} {
 		if strings.Contains(got, banned) {
 			t.Errorf("expected %q filtered out, got %q", banned, got)
 		}
@@ -409,8 +408,8 @@ func TestNotificationContext_ResponseInstruction_TaggedTriggersTaggedGuidance(t 
 func TestNotificationContext_ResponseInstruction_UntaggedNonOwnerInvitedToChimeIn(t *testing.T) {
 	b := newTestNotifyContextBuilder(t)
 	got := b.ResponseInstructionForTarget(channelMessage{Channel: "general"}, "eng")
-	if !strings.Contains(got, "in-character") || !strings.Contains(got, "Skip the turn only if") {
-		t.Errorf("expected chime-in-with-personality default for untagged non-owner; got %q", got)
+	if !strings.Contains(got, "brushes your domain") || !strings.Contains(got, "Skip the turn only if") {
+		t.Errorf("expected the substantive chime-in default for untagged non-owner; got %q", got)
 	}
 }
 
@@ -475,6 +474,39 @@ func TestNotificationContext_BuildTaskExecutionPacket_LocalWorktreeAddsCutLineAn
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in packet:\n%s", want, got)
 		}
+	}
+}
+
+// TestNotificationContext_BuildTaskExecutionPacket_LeadGetsDecomposeBranch is
+// the Phase 3 behavioral fix: when the LEAD (ceo) executes an owned task, the
+// packet tells it to decompose-and-delegate (create owned sub-tasks under this
+// task, reuse existing specialists, new agents need human approval) rather than
+// only doing the work itself. A specialist must NOT get that lead block.
+func TestNotificationContext_BuildTaskExecutionPacket_LeadGetsDecomposeBranch(t *testing.T) {
+	b := newTestNotifyContextBuilder(t)
+	task := teamTask{
+		ID:            "OFFICE-7",
+		Title:         "launch the referral program",
+		status:        "in_progress",
+		ExecutionMode: "office",
+	}
+
+	lead := b.BuildTaskExecutionPacket("ceo", officeActionLog{Actor: "ceo", Kind: "task_assigned"}, task, "kickoff")
+	for _, want := range []string{
+		"Lead execution rule: you are the coordinator",
+		"parent_issue_id=OFFICE-7",
+		"REUSE the existing specialist",
+		"creating a new agent ALWAYS requires explicit human approval",
+		"complete the parent only after the children are done",
+	} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("lead packet missing %q in:\n%s", want, lead)
+		}
+	}
+
+	specialist := b.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo", Kind: "task_assigned"}, task, "kickoff")
+	if strings.Contains(specialist, "Lead execution rule") {
+		t.Errorf("specialist packet must NOT contain the lead decompose block:\n%s", specialist)
 	}
 }
 
@@ -625,5 +657,142 @@ func TestNotificationContext_PreReviewFilter(t *testing.T) {
 	got = b.NotificationContext("", "general", "", "", 10)
 	if !strings.Contains(got, "WIP: just added") {
 		t.Errorf("empty recipient should bypass filter, message hidden:\n%s", got)
+	}
+}
+
+// TestNotificationContext_BuildTaskExecutionPacket_LongMoneyTitleFullInPacket
+// is the regression guard for the live $61k→"$6…" data corruption (ICP-eval
+// v2 [00:00]/[00:10]): a lane briefed a $61k account as $6k because the
+// execution packet rendered the title through a 120-char display clip.
+// Titles are part of the work contract — the owner's packet must carry the
+// full amount even when it sits past the old clip boundary.
+func TestNotificationContext_BuildTaskExecutionPacket_LongMoneyTitleFullInPacket(t *testing.T) {
+	b := newTestNotifyContextBuilder(t)
+	title := "Renew the Corti Labs contract before the Q4 board review and make sure the two unresolved support escalations are handled escalation-first in every touch ($61,000 ARR at risk)"
+	if len(title) <= 120 {
+		t.Fatalf("fixture title must exceed the old 120-char clip; got %d chars", len(title))
+	}
+	task := teamTask{ID: "t1", Title: title, Owner: "eng", status: "in_progress"}
+
+	packet := b.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, task, "kickoff")
+	if !strings.Contains(packet, "$61,000") {
+		t.Errorf("owner's execution packet must carry the full money-bearing title; got:\n%s", packet)
+	}
+
+	// The message-packet active-task line is agent-facing too.
+	msg := channelMessage{ID: "m1", From: "you", Channel: "general", Content: "status?"}
+	msgPacket, _ := func() (string, []string) {
+		bb := newTestNotifyContextBuilder(t, func(nb *notificationContextBuilder) {
+			nb.allTasks = func() []teamTask { return []teamTask{task} }
+			nb.scoreTaskCandidate = func(channelMessage, teamTask) float64 { return 1 }
+		})
+		return bb.BuildMessageWorkPacketWithContext(msg, "eng")
+	}()
+	if !strings.Contains(msgPacket, "$61,000") {
+		t.Errorf("message packet's active-task line must carry the full title; got:\n%s", msgPacket)
+	}
+}
+
+// TestNotificationContext_RetrievedContext_HitsAndNoHits pins the mandatory
+// task-start retrieval block (anti-fabrication fix family #2): with wiki
+// hits the packet lists title + path and the manifest carries wiki:<path>;
+// with none the packet states exactly what was searched, so a false "no
+// data in the wiki" claim is impossible to make honestly.
+func TestNotificationContext_RetrievedContext_HitsAndNoHits(t *testing.T) {
+	task := teamTask{
+		ID: "t1", Title: "Prepare the Acme Corp QBR one-pager",
+		Details: "Use the account brief and renewal playbook.",
+		Owner:   "eng", status: "in_progress",
+	}
+
+	withHits := newTestNotifyContextBuilder(t, func(nb *notificationContextBuilder) {
+		nb.searchWikiArticles = func(terms []string, limit int) []wikiArticleHit {
+			if len(terms) == 0 || limit <= 0 {
+				t.Fatalf("searchWikiArticles called with empty terms or non-positive limit")
+			}
+			return []wikiArticleHit{{Path: "team/accounts/acme-corp.md", Title: "Acme Corp — renewal brief"}}
+		}
+	})
+	packet, contextUsed := withHits.BuildTaskExecutionPacketWithContext("eng", officeActionLog{Actor: "ceo"}, task, "kickoff")
+	for _, want := range []string{
+		"RETRIEVED CONTEXT",
+		"Acme Corp — renewal brief — wiki:team/accounts/acme-corp.md",
+		"searched for: prepare acme corp",
+	} {
+		if !strings.Contains(packet, want) {
+			t.Errorf("packet missing retrieved-context fragment %q in:\n%s", want, packet)
+		}
+	}
+	foundManifest := false
+	for _, item := range contextUsed {
+		if item == "wiki:team/accounts/acme-corp.md" {
+			foundManifest = true
+		}
+	}
+	if !foundManifest {
+		t.Errorf("wiki hit must ride context_used; got %v", contextUsed)
+	}
+
+	noHits := newTestNotifyContextBuilder(t, func(nb *notificationContextBuilder) {
+		nb.searchWikiArticles = func([]string, int) []wikiArticleHit { return nil }
+	})
+	empty := noHits.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, task, "kickoff")
+	if !strings.Contains(empty, "(searched the wiki for:") || !strings.Contains(empty, "no hits") {
+		t.Errorf("no-hit packet must carry the explicit searched-no-hits line; got:\n%s", empty)
+	}
+
+	// No searcher wired (bare fixtures, markdown memory off) → no block.
+	bare := newTestNotifyContextBuilder(t)
+	plain := bare.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, task, "kickoff")
+	if strings.Contains(plain, "RETRIEVED CONTEXT") {
+		t.Errorf("packet must omit the block when no wiki searcher is wired:\n%s", plain)
+	}
+}
+
+// TestNotificationContext_HumanNoteLeadsPacketAndConsumes pins the stop-order
+// surface (ICP-eval v2 [00:50]): the pending human note leads the owner's
+// packet, the build consumes it via the callback, and non-owners neither see
+// nor consume it.
+func TestNotificationContext_HumanNoteLeadsPacketAndConsumes(t *testing.T) {
+	consumed := []string{}
+	b := newTestNotifyContextBuilder(t, func(nb *notificationContextBuilder) {
+		nb.consumeTaskHumanNote = func(taskID string) { consumed = append(consumed, taskID) }
+	})
+	task := teamTask{
+		ID: "t1", Title: "Draft the outreach sequence", Owner: "eng", status: "in_progress",
+		HumanNotePending: &TaskHumanNote{From: "human", Body: "Stop — read the real brief first.", At: "2026-06-10T00:00:00Z", Halt: true},
+	}
+
+	packet := b.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, task, "continue")
+	if !strings.HasPrefix(packet, "HUMAN POSTED WHILE YOU WORKED") {
+		t.Errorf("owner packet must LEAD with the human note; got head %q", truncate(packet, 80))
+	}
+	if !strings.Contains(packet, "Stop — read the real brief first.") {
+		t.Errorf("packet missing the note body:\n%s", packet)
+	}
+	if !strings.Contains(packet, "STOP order") {
+		t.Errorf("halt note must name the stop order:\n%s", packet)
+	}
+	// V3-N6: a Stop is a pause, never a revert license — the v3 live run
+	// answered a Stop with `git checkout HEAD` and destroyed the session's
+	// deliverable. The halt block must carry the do-not-revert contract.
+	if !strings.Contains(packet, "Do NOT discard or revert any work. Report state and wait.") {
+		t.Errorf("halt note must carry the do-not-revert instruction:\n%s", packet)
+	}
+	if !strings.Contains(packet, "explicit human instruction to revert") {
+		t.Errorf("halt note must require an explicit human instruction before any revert:\n%s", packet)
+	}
+	if len(consumed) != 1 || consumed[0] != "t1" {
+		t.Errorf("owner packet build must consume the note exactly once; got %v", consumed)
+	}
+
+	// Non-owner build: no note, no consumption.
+	consumed = nil
+	other := b.BuildTaskExecutionPacket("ceo", officeActionLog{Actor: "ceo"}, task, "fyi")
+	if strings.Contains(other, "HUMAN POSTED WHILE YOU WORKED") {
+		t.Errorf("non-owner packet must not render the note:\n%s", other)
+	}
+	if len(consumed) != 0 {
+		t.Errorf("non-owner packet build must not consume; got %v", consumed)
 	}
 }

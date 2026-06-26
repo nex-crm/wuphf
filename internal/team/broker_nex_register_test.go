@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -160,6 +161,65 @@ func TestNexRegisterEndpoint_CLIMissing(t *testing.T) {
 	}
 	if got, _ := out["error"].(string); got == "" {
 		t.Fatalf("expected non-empty error message when nex-cli missing")
+	}
+}
+
+// TestNexRegisterEndpoint_ShimWithoutBinary covers the reported bug: the
+// @nex-ai/nex npm shim is on PATH as `nex`, but the real nex-cli binary is
+// not — so the shim runs, prints "nex-cli binary not found", and exits 1.
+// The handler must surface this as the SAME 502 "not installed" response as
+// a bare missing binary, so the web panel flips to the external-link
+// fallback instead of rendering the shim's raw install blurb.
+func TestNexRegisterEndpoint_ShimWithoutBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell script requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	t.Setenv("WUPHF_NO_NEX", "")
+	// Mimic the npm shim's behaviour when its backing binary is absent.
+	writeFakeNexCLIForBroker(t, dir, "nex",
+		`echo 'nex-cli binary not found. Install it with: curl ...' >&2; exit 1`)
+
+	b := newTestBroker(t)
+	b.token = "test-token"
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer func() {
+		if b.server != nil {
+			_ = b.server.Shutdown(context.Background())
+		}
+	}()
+
+	body := bytes.NewBufferString(`{"email":"hi@mustafa.li"}`)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+b.addr+"/nex/register", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /nex/register: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502 for a shim without its binary, got %d body=%s", resp.StatusCode, string(raw))
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, string(raw))
+	}
+	if got, _ := out["status"].(string); got != "error" {
+		t.Fatalf("expected status=error, got %q", got)
+	}
+	// The body must carry the not-installed signal the web panel matches on
+	// — and must NOT leak the shim's raw "binary not found" install blurb.
+	errMsg, _ := out["error"].(string)
+	if !strings.Contains(errMsg, "not installed") {
+		t.Fatalf("expected error to read as not-installed, got %q", errMsg)
+	}
+	if strings.Contains(errMsg, "binary not found") || strings.Contains(errMsg, "curl") {
+		t.Fatalf("shim install blurb leaked into the response: %q", errMsg)
 	}
 }
 

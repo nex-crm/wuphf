@@ -7,7 +7,7 @@ package main
 //   - `wuphf task start [intent]`      — prompt-driven intake → ready → running
 //   - `wuphf task list [--filter=<f>]` — print inbox grouped by LifecycleState
 //   - `wuphf task review <id>`         — open the Decision Packet view in the browser
-//   - `wuphf task block <id> --on <pr-or-task-id>` — set blocked_on_pr_merge
+//   - `wuphf task block <id> --on <pr-or-task-id>` — set blocked
 //
 // The implementation talks to the broker via its existing HTTP API
 // (/tasks/inbox, /tasks/{id}, /tasks/{id}/block) and uses raw stdin

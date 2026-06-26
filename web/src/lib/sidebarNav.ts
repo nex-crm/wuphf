@@ -14,7 +14,17 @@ export function navigateToSidebarApp(appId: string): void {
     return;
   }
   if (appId === "inbox") {
-    void router.navigate({ to: "/inbox" });
+    // The Inbox was consolidated into the board; route legacy inbox nav to
+    // /tasks where its attention items now live.
+    void router.navigate({ to: "/tasks" });
+    return;
+  }
+  if (appId === "tasks") {
+    void router.navigate({ to: "/tasks" });
+    return;
+  }
+  if (appId === "agents") {
+    void router.navigate({ to: "/agents" });
     return;
   }
   void router.navigate({

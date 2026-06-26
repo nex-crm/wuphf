@@ -10,6 +10,7 @@
  * exposes the real endpoints. The shape on the wire is identical.
  */
 
+import { trackOn } from "../lib/analytics";
 import {
   getDecisionPacketMock,
   getInboxPayloadMock,
@@ -173,8 +174,43 @@ export async function getDecisionPacket(
  * sees the contract their types promise.
  */
 function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
+  // The GET /tasks/{id} response carries the source teamTask snapshot under
+  // `task` (see taskDetailResponse). The packet itself has no channel, and a
+  // DIRECT detail fetch (no inbox list row to backfill from) can also arrive
+  // with empty title/owner, so lift the channel + display fields off the
+  // snapshot. Stay defensive: `task` is not on the DecisionPacket type and may
+  // be absent. The Go teamTask wire keys are `title` and `owner`; accept
+  // `ownerSlug` too in case a snapshot ever carries the packet-side name.
+  const taskSnapshot = (
+    p as {
+      task?: {
+        channel?: unknown;
+        title?: unknown;
+        owner?: unknown;
+        ownerSlug?: unknown;
+      };
+    }
+  ).task;
+  const channel =
+    typeof taskSnapshot?.channel === "string" && taskSnapshot.channel.trim()
+      ? taskSnapshot.channel.trim()
+      : p.channel;
+  const title =
+    typeof taskSnapshot?.title === "string" && taskSnapshot.title.trim()
+      ? taskSnapshot.title.trim()
+      : p.title;
+  const snapshotOwner =
+    typeof taskSnapshot?.ownerSlug === "string" && taskSnapshot.ownerSlug.trim()
+      ? taskSnapshot.ownerSlug.trim()
+      : typeof taskSnapshot?.owner === "string" && taskSnapshot.owner.trim()
+        ? taskSnapshot.owner.trim()
+        : undefined;
+  const ownerSlug = snapshotOwner ?? p.ownerSlug;
   return {
     ...p,
+    channel,
+    title,
+    ownerSlug,
     banners: p.banners ?? [],
     changedFiles: p.changedFiles ?? [],
     reviewerGrades: p.reviewerGrades ?? [],
@@ -234,8 +270,86 @@ export async function postDecision(
   if (USE_MOCKS) {
     return Promise.resolve({ taskId, action, status: "recorded-mock" });
   }
-  const body: { action: DecisionAction; comment?: string } = { action };
+  // created_by: "human" self-attributes this decision as the human's. The
+  // local UI shares the broker token with agents, so the broker cannot tell
+  // them apart by auth; this explicit signal is what clears the Plan-mode
+  // human-only approval gate (mirrors the team_task created_by field).
+  const body: { action: DecisionAction; comment?: string; created_by: string } =
+    { action, created_by: "human" };
   const trimmed = (comment ?? "").trim();
   if (trimmed) body.comment = trimmed;
-  return post(`/tasks/${encodeURIComponent(taskId)}/decision`, body);
+  return trackOn(
+    post(`/tasks/${encodeURIComponent(taskId)}/decision`, body),
+    "decision_submitted",
+    { action, surface: "packet", has_comment: !!trimmed },
+  );
+}
+
+/**
+ * POST a terminal Reject on a task. Distinct from `block` (recoverable
+ * waiting on upstream) and from `request_changes` (revise + resubmit).
+ * After reject, downstream tasks that depend on this task STAY blocked
+ * permanently because the work did not land.
+ *
+ * Reject runs through the task mutation endpoint (POST /tasks with
+ * action=reject) rather than /tasks/{id}/decision so the lifecycle
+ * transition uses the same code path as the agent-side reject path.
+ */
+export async function postTaskReject(
+  taskId: string,
+  comment: string,
+): Promise<{ taskId: string; action: string; status: string }> {
+  const trimmed = comment.trim();
+  if (!trimmed) {
+    // Reject must carry a reason — the broker stores it as feedback and
+    // the channel broadcast quotes it. An empty reason violates the
+    // "reject requires a reason" contract from PacketActionSidebar.
+    throw new Error("reject reason required");
+  }
+  if (USE_MOCKS) {
+    return Promise.resolve({
+      taskId,
+      action: "reject",
+      status: "recorded-mock",
+    });
+  }
+  return trackOn(
+    post(`/tasks`, {
+      action: "reject",
+      id: taskId,
+      channel: "general",
+      details: trimmed,
+      created_by: "human",
+    }),
+    "decision_submitted",
+    { action: "reject", surface: "packet", has_comment: true },
+  );
+}
+
+/**
+ * POST a manual Resume on a blocked task. Clears the
+ * blocked state and re-queues the owner agent's lane, so the
+ * task picks up where it left off. Mirrors the watchdog's resume path
+ * but exposes the action to humans from the inbox card.
+ *
+ * The optional reason is written into task.Details for audit. A 200
+ * response with changed=false means the task was not in a resumable
+ * state (already running or already terminal) — the caller should
+ * surface that as an info-toast, not an error.
+ */
+export async function postTaskResume(
+  taskId: string,
+  reason?: string,
+): Promise<{ changed: boolean }> {
+  if (USE_MOCKS) {
+    return Promise.resolve({ changed: true });
+  }
+  const body: { reason?: string } = {};
+  const trimmed = (reason ?? "").trim();
+  if (trimmed) body.reason = trimmed;
+  return trackOn(
+    post(`/tasks/${encodeURIComponent(taskId)}/resume`, body),
+    "task_status_changed",
+    { action: "resume" },
+  );
 }

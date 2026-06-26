@@ -26,6 +26,18 @@ func startFakeServer(t *testing.T) (port int, shutdown func()) {
 	return ln.Addr().(*net.TCPAddr).Port, func() { _ = srv.Close() }
 }
 
+// freePort returns a TCP port that is not currently in use.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("freePort: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
+}
+
 // withOrchestratorHome isolates HOME (and WUPHF_RUNTIME_HOME) for orchestrator
 // tests. spacesDir uses real HOME because ~/.wuphf-spaces is shared
 // cross-workspace; overriding only WUPHF_RUNTIME_HOME would leak into the
@@ -488,6 +500,58 @@ func TestShredMovesToTrashByDefault(t *testing.T) {
 	_ = home
 }
 
+// TestShredAutoPausesRunningWorkspace verifies that Shred no longer rejects a
+// workspace whose registry row is StateRunning. The user-facing promise of
+// "shred this office" is end-to-end teardown — the prior behavior of erroring
+// with "pause it first" left the icon in the sidebar and the broker port
+// bound, surprising the user who already typed the name to confirm.
+//
+// Uses an unbound port so the Pause SIGTERM/SIGKILL ladder collapses to the
+// fail-open path; the contract under test is only that StateRunning no longer
+// blocks Shred.
+func TestShredAutoPausesRunningWorkspace(t *testing.T) {
+	withOrchestratorHome(t)
+	withShortPauseTimeouts(t)
+	withTmuxKillerStub(t)
+
+	sd, _ := spacesDir()
+	runtimeHome := filepath.Join(sd, "running-to-shred")
+	wuphfDir := filepath.Join(runtimeHome, ".wuphf")
+	if err := os.MkdirAll(wuphfDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := Write(&Registry{
+		Version:    Version,
+		CLICurrent: "main",
+		Workspaces: []*Workspace{
+			{Name: "main", RuntimeHome: filepath.Join(sd, "main"),
+				BrokerPort: MainBrokerPort, WebPort: MainWebPort,
+				State: StatePaused, CreatedAt: now, LastUsedAt: now},
+			{Name: "running-to-shred", RuntimeHome: runtimeHome,
+				BrokerPort: 29984, WebPort: 29985,
+				State: StateRunning, CreatedAt: now, LastUsedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := Shred(context.Background(), "running-to-shred", false); err != nil {
+		t.Fatalf("Shred running workspace: %v", err)
+	}
+
+	reg, _ := Read()
+	for _, ws := range reg.Workspaces {
+		if ws.Name == "running-to-shred" {
+			t.Error("running-to-shred still in registry after shred")
+		}
+	}
+	if _, err := os.Stat(runtimeHome); !os.IsNotExist(err) {
+		t.Error("runtime home should have been removed")
+	}
+}
+
 // ---- Doctor tests ----------------------------------------------------------
 
 func TestDoctorDetectsOrphanTree(t *testing.T) {
@@ -614,13 +678,15 @@ func TestDoctorRecreatesSymlink(t *testing.T) {
 func TestResumeUpdatesStateToRunning(t *testing.T) {
 	withOrchestratorHome(t)
 
+	bp := freePort(t)
+	wp := bp + 1
 	now := time.Now().UTC()
 	if err := Write(&Registry{
 		Version:    Version,
 		CLICurrent: "main",
 		Workspaces: []*Workspace{
 			{Name: "paused-ws", RuntimeHome: t.TempDir(),
-				BrokerPort: 7910, WebPort: 7911,
+				BrokerPort: bp, WebPort: wp,
 				State: StatePaused, PausedAt: now,
 				CreatedAt: now, LastUsedAt: now},
 		},

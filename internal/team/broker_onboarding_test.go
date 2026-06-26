@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
 
@@ -96,6 +97,65 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 	}
 }
 
+func TestOnboardingDraftPhaseCreatesFirstIssueFromTaskPrompt(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+
+	b := newTestBroker(t)
+	b.mu.Lock()
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	b.mu.Unlock()
+
+	state := &onboarding.State{
+		Version: 2,
+		Phase:   onboarding.PhaseBridge,
+		PendingSuggestion: &onboarding.Suggestion{
+			ID:    "first-issue-prompt",
+			Phase: onboarding.PhaseDraft,
+			Kind:  "ceo_form_field",
+		},
+		FormAnswers: onboarding.FormAnswers{
+			TaskPrompt: "Build a Stripe webhook handler that verifies signatures.",
+		},
+	}
+
+	if err := b.advancePhase(state, onboarding.PhaseDraft); err != nil {
+		t.Fatalf("advancePhase(draft): %v", err)
+	}
+	if state.FirstIssueID == "" {
+		t.Fatal("expected first issue id to be persisted on onboarding state")
+	}
+
+	loaded, err := onboarding.Load()
+	if err != nil {
+		t.Fatalf("load onboarding state: %v", err)
+	}
+	if loaded.FirstIssueID != state.FirstIssueID {
+		t.Fatalf("loaded first issue id = %q, want %q", loaded.FirstIssueID, state.FirstIssueID)
+	}
+	if loaded.PendingSuggestion != nil {
+		t.Fatalf("expected submitted draft suggestion to be cleared, got %+v", loaded.PendingSuggestion)
+	}
+
+	tasks := b.AllTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("expected one first issue task, got %+v", tasks)
+	}
+	task := tasks[0]
+	// The onboarding ask IS the authorization: the first issue lands
+	// running with the CEO as owner — no start-approval ceremony.
+	if task.ID != state.FirstIssueID || task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("unexpected first issue task: %+v", task)
+	}
+	if task.TaskType != "issue" || task.PipelineID != "issue" {
+		t.Fatalf("expected first issue to be an issue task, got type=%q pipeline=%q", task.TaskType, task.PipelineID)
+	}
+	// core-loop R2: the task carries the human's prompt as its description —
+	// no CEO draft-writer, no generated spec document.
+	if task.Details != state.FormAnswers.TaskPrompt {
+		t.Fatalf("expected first issue details to be the task prompt, got %q", task.Details)
+	}
+}
+
 // TestOnboardingCompleteHonorsAgentFilter verifies the wizard's per-agent
 // toggle state: agents=[ceo, builder] should seed only those two,
 // dropping the blueprint's other specialists.
@@ -135,7 +195,8 @@ func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 
 // TestOnboardingCompleteAgentsEmptySeedsLeadOnly verifies that an empty
 // agents array (user unchecked every toggle) seeds only the blueprint's
-// lead and posts a system message explaining the fallback.
+// lead (plus the built-in Librarian, which is always present) and posts a
+// system message explaining the fallback.
 func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
@@ -144,10 +205,9 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	}
 
 	b.mu.Lock()
-	memberCount := len(b.members)
-	var leadSlug string
-	if memberCount == 1 {
-		leadSlug = b.members[0].Slug
+	slugs := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		slugs = append(slugs, m.Slug)
 	}
 	var foundSystemMsg bool
 	for _, msg := range b.messages {
@@ -158,11 +218,9 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	if memberCount != 1 {
-		t.Fatalf("expected lead-only roster (1 member), got %d", memberCount)
-	}
-	if leadSlug != "ceo" {
-		t.Errorf("expected lead slug ceo, got %q", leadSlug)
+	// Lead + the always-present built-in Librarian.
+	if len(slugs) != 2 || slugs[0] != "ceo" || slugs[1] != LibrarianSlug {
+		t.Fatalf("expected lead + librarian roster [ceo %s], got %v", LibrarianSlug, slugs)
 	}
 	if !foundSystemMsg {
 		t.Errorf("expected system message explaining lead-only fallback; messages seen")
@@ -211,7 +269,9 @@ func TestOnboardingCompleteFromScratchHonorsSelectedFoundingAgents(t *testing.T)
 	}
 	b.mu.Unlock()
 
-	want := []string{"ceo", "founding-engineer"}
+	// Selected founding agents, plus the always-present built-in Librarian
+	// (appended last).
+	want := []string{"ceo", "founding-engineer", LibrarianSlug}
 	if len(slugs) != len(want) {
 		t.Fatalf("from-scratch selected roster got %v, want %v", slugs, want)
 	}
@@ -259,8 +319,10 @@ func TestBlankSlateMembersExplicitLeadOnlySelectionStaysLeadOnly(t *testing.T) {
 
 	members := blankSlateOfficeMembersFromBlueprint(blueprint, []string{"operator"})
 
-	if len(members) != 1 || members[0].Slug != "operator" {
-		t.Fatalf("explicit lead-only selection got %+v, want only operator", members)
+	// Lead-only selection keeps just the lead — plus the always-present
+	// built-in Librarian (appended last).
+	if len(members) != 2 || members[0].Slug != "operator" || members[1].Slug != LibrarianSlug {
+		t.Fatalf("explicit lead-only selection got %+v, want [operator %s]", members, LibrarianSlug)
 	}
 }
 
@@ -391,6 +453,9 @@ func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 	b.mu.Lock()
 	ids := make([]string, 0, len(b.tasks))
 	for _, tk := range b.tasks {
+		if tk.System {
+			continue // skip permanent system tasks (e.g. task-general)
+		}
 		ids = append(ids, tk.ID)
 	}
 	b.mu.Unlock()
@@ -510,5 +575,44 @@ func TestOnboardingCompleteEmitsOfficeReseededEvent(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+// TestOnboardingBlueprintSeedsLandExecutable pins the creation-is-the-
+// authorization contract on blueprint seeds: owned lanes land Running,
+// ownerless lanes land Ready — never Drafting (the parked state is for
+// explicit parks only). A silent regression to the retired start-approval
+// ceremony fails here.
+func TestOnboardingBlueprintSeedsLandExecutable(t *testing.T) {
+	ensureOperationsFallbackFS(t)
+	b := newTestBroker(t)
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
+		t.Fatalf("onboardingCompleteFn: %v", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	checked := 0
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if strings.EqualFold(task.TaskType, "system") || task.LifecycleState == LifecycleStateArchived {
+			continue
+		}
+		checked++
+		switch {
+		case strings.TrimSpace(task.Owner) != "" && !strings.EqualFold(task.Owner, "auto"):
+			if task.LifecycleState != LifecycleStateRunning && task.LifecycleState != LifecycleStateQueuedBehindOwner {
+				t.Errorf("owned seed %s (owner=%s) must land executable; got %s", task.ID, task.Owner, task.LifecycleState)
+			}
+		default:
+			if task.LifecycleState != LifecycleStateReady {
+				t.Errorf("ownerless seed %s must land Ready; got %s", task.ID, task.LifecycleState)
+			}
+		}
+		if task.LifecycleState == LifecycleStateDrafting {
+			t.Errorf("seed %s landed in the parked state — the start-approval ceremony is retired", task.ID)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("blueprint seeded no checkable tasks")
 	}
 }

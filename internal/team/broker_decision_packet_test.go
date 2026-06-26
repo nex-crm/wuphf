@@ -36,6 +36,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeDecisionPacketStore is the test double for decisionPacketStore.
@@ -529,6 +530,14 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 	// a concurrent Enqueue send).
 	relPath := wikiPromotionPath(taskID)
 	expectedPath := filepath.Join(wikiRoot, relPath)
+	// The promotion is enqueued from a background goroutine; cancelling
+	// before that goroutine runs makes the late Enqueue hit a drained
+	// worker ("worker is not running" — the CI race flake). Wait for the
+	// artifact first, then drain.
+	testTickUntil(t, 5*time.Second, func() bool {
+		_, err := os.Stat(expectedPath)
+		return err == nil
+	})
 	cancel()
 	<-worker.Done()
 	body, err := os.ReadFile(expectedPath)
@@ -682,4 +691,112 @@ func TestDecisionPacketSerialisationGuardsConcurrent(t *testing.T) {
 			t.Errorf("task %s: grades count: got %d, want %d", taskID, got, want)
 		}
 	}
+}
+
+// TestDecisionApproveFromDraftingTransitionsToRunning is the Slice 1
+// invariant: clicking "Approve & Start" on a Drafting issue must
+// transition to Running (start work) instead of Approved (terminal),
+// and must NOT write a Decision article to the wiki. See
+// docs/specs/issue-execution-loop.md (Slice 1).
+func TestDecisionApproveFromDraftingTransitionsToRunning(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WUPHF_RUNTIME_HOME", dir)
+	b := newTestBroker(t)
+	taskID := "task-draft-approve"
+	seedTaskInState(t, b, taskID, LifecycleStateDrafting)
+
+	// No spec or session report: we are approving the draft itself, not
+	// reviewing completed work.
+	if err := b.RecordTaskDecision(taskID, string(RecordDecisionApprove), "test-human"); err != nil {
+		t.Fatalf("RecordTaskDecision: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var task *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == taskID {
+			task = &b.tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		t.Fatalf("task %q not found after decision", taskID)
+	}
+	if task.LifecycleState != LifecycleStateRunning {
+		t.Errorf("drafting+approve should land in running, got %q", task.LifecycleState)
+	}
+	// Wiki path must not exist on disk — drafting->running is a start
+	// of work, not a decision. The wiki article is only written when
+	// the terminal Approved state is reached after real review.
+	wikiPath := filepath.Join(dir, "wiki-repo", wikiPromotionPath(taskID))
+	if _, err := os.Stat(wikiPath); err == nil {
+		t.Errorf("wiki article should NOT exist for drafting->running transition, found %s", wikiPath)
+	}
+}
+
+// TestDecisionApproveFromDraftingEmitsWakeAction pins the D1 fix: approving
+// a Drafting issue must emit a task_updated office action so the
+// notifyTaskActionsLoop wakes the owner and work actually starts. Before the
+// fix, the transition only posted a From=system lifecycle card (which
+// notifyAgentsLoop drops) and no action, so the owner sat idle until the
+// human sent a second message. The action's RelatedID must carry the task ID
+// so taskForAction can resolve the owner.
+func TestDecisionApproveFromDraftingEmitsWakeAction(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	taskID := "task-draft-wake"
+	seedTaskInState(t, b, taskID, LifecycleStateDrafting)
+
+	actions, unsubscribe := b.SubscribeActions(16)
+	defer unsubscribe()
+
+	if err := b.RecordTaskDecision(taskID, string(RecordDecisionApprove), "test-human"); err != nil {
+		t.Fatalf("RecordTaskDecision: %v", err)
+	}
+
+	// Drain the buffered action channel with a short deadline; the emit
+	// happens synchronously inside RecordTaskDecision's locked section, so a
+	// generous timeout only matters if the fix regresses (then we fail).
+	deadline := time.After(2 * time.Second)
+	var sawWake bool
+	for !sawWake {
+		select {
+		case action := <-actions:
+			if action.Kind == "task_updated" && action.RelatedID == taskID {
+				sawWake = true
+			}
+		case <-deadline:
+			t.Fatalf("no task_updated wake action emitted for %q on drafting->running approve", taskID)
+		}
+	}
+}
+
+// TestDecisionApproveFromReviewStillTerminal is the inverse of the
+// Slice 1 invariant: approving a Review-state task still maps to the
+// terminal Approved state (and would still trigger wiki promotion in a
+// fully-wired test). Guards against the disambiguation accidentally
+// short-circuiting the normal completion path.
+func TestDecisionApproveFromReviewStillTerminal(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	taskID := "task-review-approve"
+	seedTaskInState(t, b, taskID, LifecycleStateReview)
+
+	if err := b.RecordTaskDecision(taskID, string(RecordDecisionApprove), "test-human"); err != nil {
+		t.Fatalf("RecordTaskDecision: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].ID != taskID {
+			continue
+		}
+		if b.tasks[i].LifecycleState != LifecycleStateApproved {
+			t.Errorf("review+approve should land in approved, got %q", b.tasks[i].LifecycleState)
+		}
+		return
+	}
+	t.Fatalf("task %q not found after decision", taskID)
 }

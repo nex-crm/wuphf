@@ -10,28 +10,30 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   BookStack,
-  Calendar,
   ChatBubble,
   CheckCircle,
   ClipboardCheck,
   Flash,
   Group,
   Package,
-  Page,
   Play,
+  Repeat,
   Search,
   Settings as SettingsIcon,
   ShareAndroid,
   Shield,
   SidebarExpand,
-  Terminal,
+  TaskList,
 } from "iconoir-react";
 
 import { getUsage } from "../../api/platform";
-import { SIDEBAR_APPS } from "../../lib/constants";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
-import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
+import {
+  SIDEBAR_TOOLS,
+  WIKI_SURFACE_APP_IDS,
+} from "../../routes/routeRegistry";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentList } from "../sidebar/AgentList";
@@ -41,16 +43,15 @@ const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
+  issues: ClipboardCheck,
   wiki: BookStack,
-  console: Terminal,
   tasks: CheckCircle,
-  requests: ClipboardCheck,
+  requests: TaskList,
   graph: ShareAndroid,
   policies: Shield,
-  calendar: Calendar,
+  routines: Repeat,
   skills: Flash,
   activity: Package,
-  receipts: Page,
   "health-check": Search,
   settings: SettingsIcon,
 };
@@ -59,9 +60,14 @@ type Popover = "team" | "channels" | "usage" | null;
 type HintState = { label: string; y: number } | null;
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
-export function CollapsedSidebar() {
+export function CollapsedSidebar({ onExpand }: { onExpand?: () => void }) {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const expand = onExpand ?? toggleCollapsed;
   const currentApp = useCurrentApp();
+  // Tasks is the primary surface and carries the attention roll-up; the
+  // collapsed rail has no room for a number, so show a dot when > 0.
+  const { data: officeStats } = useOfficeStats();
+  const attentionCount = officeStats?.inbox_attention ?? 0;
   const [popover, setPopover] = useState<Popover>(null);
   const [hint, setHint] = useState<HintState>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -114,7 +120,7 @@ export function CollapsedSidebar() {
           type="button"
           className="sidebar-icon-btn"
           aria-label="Expand sidebar"
-          onClick={toggleCollapsed}
+          onClick={expand}
           onMouseEnter={(e) => showHint(e, "Expand sidebar")}
           onMouseLeave={hideHint}
         >
@@ -162,29 +168,37 @@ export function CollapsedSidebar() {
       </div>
 
       <div className="sidebar-rail-apps">
-        {SIDEBAR_APPS.filter((a) => a.id !== "settings").map((app) => {
-          const Icon = APP_ICONS[app.id];
+        {SIDEBAR_TOOLS.filter((t) => t.id !== "settings").map((tool) => {
+          const Icon = APP_ICONS[tool.id];
           // Wiki entry lights up for the wiki, notebooks, and reviews surfaces
           // since those three share the Wiki app shell via tabs.
           const isActive =
-            app.id === "wiki"
+            tool.id === "wiki"
               ? WIKI_SURFACE_APPS.has(currentApp ?? "")
-              : currentApp === app.id;
+              : currentApp === tool.id;
+          const showAttentionDot = tool.id === "tasks" && attentionCount > 0;
           return (
             <button
-              key={app.id}
+              key={tool.id}
               type="button"
               className={`sidebar-icon-btn${isActive ? " active" : ""}`}
-              aria-label={app.name}
-              onClick={() => navigateToSidebarApp(app.id)}
-              onMouseEnter={(e) => showHint(e, app.name)}
+              aria-label={
+                showAttentionDot
+                  ? `${tool.label} (${attentionCount} need attention)`
+                  : tool.label
+              }
+              onClick={() => navigateToSidebarApp(tool.id)}
+              onMouseEnter={(e) => showHint(e, tool.label)}
               onMouseLeave={hideHint}
             >
               {Icon ? (
                 <Icon />
               ) : (
-                <span className="sidebar-item-emoji">{app.icon}</span>
+                <span className="sidebar-item-emoji">{tool.icon}</span>
               )}
+              {showAttentionDot ? (
+                <span className="sidebar-rail-dot" aria-hidden="true" />
+              ) : null}
             </button>
           );
         })}

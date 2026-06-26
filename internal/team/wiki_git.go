@@ -70,6 +70,13 @@ var ErrBackupMissing = errors.New("wiki: backup mirror does not exist")
 
 var errArchiveCandidateChanged = errors.New("wiki archive: candidate changed during sweep")
 
+// errWikiCallerInput is the sentinel wrapped by validateArticlePath and
+// validateCommitSHA so callers can route a 400-class input error via
+// errors.Is instead of fragile string-prefix matching on the message text.
+// The wrapped messages stay human-readable (and free of git stderr /
+// filesystem layout), so handlers can safely echo them.
+var errWikiCallerInput = errors.New("wiki: invalid caller input")
+
 // CommitRef is a lightweight git log entry for a single article.
 type CommitRef struct {
 	SHA       string
@@ -161,17 +168,10 @@ func (r *Repo) Init(ctx context.Context) error {
 		return ErrGitUnavailable
 	}
 
-	gitDir := filepath.Join(r.root, ".git")
-	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+	if ok, err := r.isGitRepoLocked(ctx); err != nil {
+		return err
+	} else if ok {
 		return r.ensureLayoutLocked()
-	}
-
-	// If the wiki dir exists but .git does not, preserve whatever is there
-	// by moving it aside before re-initialising. Never discard user data.
-	if info, err := os.Stat(r.root); err == nil && info.IsDir() {
-		if err := r.preserveOrphanDirLocked(); err != nil {
-			return fmt.Errorf("wiki: preserve orphan dir: %w", err)
-		}
 	}
 
 	if err := os.MkdirAll(r.root, 0o700); err != nil {
@@ -193,14 +193,59 @@ func (r *Repo) Init(ctx context.Context) error {
 	return nil
 }
 
-// preserveOrphanDirLocked renames the existing wiki/ dir to wiki.orphan-<ts>
-// so an init can proceed without destroying the user's files.
-// Caller must hold r.mu.
-func (r *Repo) preserveOrphanDirLocked() error {
-	ts := time.Now().UTC().Format("20060102T150405")
-	parent := filepath.Dir(r.root)
-	target := filepath.Join(parent, fmt.Sprintf("wiki.orphan-%s", ts))
-	return os.Rename(r.root, target)
+// isGitRepoLocked reports whether r.root is already a valid git work tree.
+// It uses git itself instead of only checking for a .git directory so linked
+// worktrees with a .git file are accepted too. Caller must hold r.mu.
+func (r *Repo) isGitRepoLocked(ctx context.Context) (bool, error) {
+	info, err := os.Stat(r.root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("wiki: stat root: %w", err)
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("wiki: root exists but is not a directory: %s", r.root)
+	}
+	out, err := r.runGitLocked(ctx, "system", "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		if isGitNotRepositoryOutput(out) {
+			if _, statErr := os.Lstat(filepath.Join(r.root, ".git")); statErr == nil {
+				return false, fmt.Errorf("wiki: check git work tree: %w: %s", err, strings.TrimSpace(out))
+			} else if !os.IsNotExist(statErr) {
+				return false, fmt.Errorf("wiki: stat git metadata: %w", statErr)
+			}
+			return false, nil
+		}
+		return false, fmt.Errorf("wiki: check git work tree: %w: %s", err, strings.TrimSpace(out))
+	}
+	if strings.TrimSpace(out) != "true" {
+		return false, nil
+	}
+	// Inside-a-work-tree is not enough: when the wiki root lives under a
+	// LARGER repo (a runtime home inside a checkout — dev installs, eval
+	// scratch homes), rev-parse answers true for the PARENT repo, Init
+	// would skip git init, and fsck then fails on the missing .git
+	// forever. The wiki is a repo only if ITS OWN root is the toplevel.
+	top, err := r.runGitLocked(ctx, "system", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, fmt.Errorf("wiki: resolve work tree toplevel: %w: %s", err, strings.TrimSpace(top))
+	}
+	rootEval, rootErr := filepath.EvalSymlinks(r.root)
+	if rootErr != nil {
+		rootEval = r.root
+	}
+	topEval, topErr := filepath.EvalSymlinks(strings.TrimSpace(top))
+	if topErr != nil {
+		topEval = strings.TrimSpace(top)
+	}
+	return rootEval == topEval, nil
+}
+
+func isGitNotRepositoryOutput(out string) bool {
+	normalized := strings.ToLower(out)
+	return strings.Contains(normalized, "not a git repository") ||
+		strings.Contains(normalized, "not a git work tree")
 }
 
 // ensureLayoutLocked creates the thematic directories and the .gitignore so
@@ -228,7 +273,7 @@ func (r *Repo) ensureLayoutLocked() error {
 			}
 		}
 	}
-	return nil
+	return r.ensureObsidianVaultLocked()
 }
 
 // Commit writes content for slug @ path, stages, and commits with a per-commit
@@ -271,9 +316,38 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 		return "", 0, fmt.Errorf("wiki: mkdir %s: %w", filepath.Dir(fullPath), err)
 	}
 
+	// OS-level advisory lock spans write + git commit so an Obsidian editor
+	// cannot interleave its own write between our os.WriteFile and the staged
+	// commit (WIKI-OBSIDIAN-COMPATIBILITY §6.2).
+	lockFile, err := acquireArticleLock(fullPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("wiki: acquire article lock: %w", err)
+	}
+	defer releaseArticleLock(lockFile)
+
 	var bytesWritten int
 	switch mode {
 	case "create", "replace":
+		// Byte-identical fold (ten-out-of-ten A4): a replace whose content
+		// matches the file already on disk AND already committed is a no-op —
+		// return HEAD without rewriting the file. The rewrite used to bump
+		// the article's mtime, which changed index/all.md ("updated <mtime>"
+		// rows), which made the staged diff non-empty, which turned every
+		// identical retry into a real commit (v3 [20:15]: the same "confirm
+		// contact" change triple-committed). The git-status guard keeps the
+		// fold away from externally-written files (the Obsidian watcher
+		// writes content to disk first, then asks the repo to commit it —
+		// that path is dirty, never folded).
+		if existing, readErr := os.ReadFile(fullPath); readErr == nil && string(existing) == content {
+			porcelain, statusErr := r.runGitLocked(ctx, "system", "status", "--porcelain", "--", filepath.ToSlash(relPath))
+			if statusErr == nil && strings.TrimSpace(porcelain) == "" {
+				headSha, headErr := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+				if headErr != nil {
+					return "", 0, fmt.Errorf("wiki: resolve HEAD sha: %w", headErr)
+				}
+				return strings.TrimSpace(headSha), len(content), nil
+			}
+		}
 		if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 			return "", 0, fmt.Errorf("wiki: write article: %w", err)
 		}
@@ -545,6 +619,214 @@ func (r *Repo) Log(ctx context.Context, relPath string) ([]CommitRef, error) {
 	return refs, nil
 }
 
+// ErrWikiCommitNotFound is returned by Diff / RestoreToCommit when the
+// supplied SHA does not exist in the repo, or does not contain the requested
+// path. Handlers map it to 404.
+var ErrWikiCommitNotFound = errors.New("wiki: commit or path not found at sha")
+
+// ErrWikiRestoreNoop is returned by RestoreToCommit when the working-tree
+// content already matches the content at the target SHA, so there is nothing
+// to restore. Handlers map it to 409.
+var ErrWikiRestoreNoop = errors.New("wiki: nothing to restore; content is already current")
+
+// validateCommitSHA rejects anything that is not a short/long hex git object
+// name. Git accepts abbreviated SHAs as short as 4 hex chars; full SHA-256 is
+// 64. We never pass caller-supplied refs (HEAD, branch names, `..` ranges)
+// into git, so confining to [0-9a-f]{7,64} keeps the value from being mistaken
+// for a flag or a revision range. The returned value is the lower-cased SHA.
+func validateCommitSHA(sha string) (string, error) {
+	sha = strings.ToLower(strings.TrimSpace(sha))
+	if sha == "" {
+		return "", fmt.Errorf("%w: sha is required", errWikiCallerInput)
+	}
+	if len(sha) < 7 || len(sha) > 64 {
+		return "", fmt.Errorf("%w: sha must be 7-64 hex characters; got %d", errWikiCallerInput, len(sha))
+	}
+	for i := 0; i < len(sha); i++ {
+		c := sha[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", fmt.Errorf("%w: sha must be hexadecimal", errWikiCallerInput)
+		}
+	}
+	return sha, nil
+}
+
+// Diff returns the unified diff that the given commit introduced for a single
+// article. It uses `git show <sha> -- <path>` so the root (first) commit is
+// handled gracefully: git show on a root commit emits the full added content
+// as a diff against the empty tree, with no special-casing required.
+//
+// relPath must be a valid team/ article path and sha must be a hex object name
+// (validated before any git call). Returns ErrWikiCommitNotFound when the sha
+// does not resolve to a commit. A valid sha that simply did not touch relPath
+// yields an empty diff (not an error) — the commit exists, it just changed
+// nothing for that file.
+func (r *Repo) Diff(ctx context.Context, relPath, sha string) (string, error) {
+	if err := validateArticlePath(relPath); err != nil {
+		return "", err
+	}
+	// Use the cleaned slash path in the git argv (not the raw pre-clean
+	// relPath), mirroring RestoreToCommit. resolveTeamRelPath re-validates
+	// containment and returns the normalized team/-rooted slash path.
+	clean, _, err := resolveTeamRelPath(r.root, relPath)
+	if err != nil {
+		return "", err
+	}
+	cleanSHA, err := validateCommitSHA(sha)
+	if err != nil {
+		return "", err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Confirm the object resolves to a commit before asking for its diff so a
+	// bogus sha surfaces as 404 rather than an empty diff that could be
+	// confused with "commit exists, file unchanged".
+	if _, verifyErr := r.runGitLocked(ctx, "system", "rev-parse", "--verify", "--quiet", cleanSHA+"^{commit}"); verifyErr != nil {
+		return "", fmt.Errorf("%w: %s", ErrWikiCommitNotFound, cleanSHA)
+	}
+
+	out, err := r.runGitLocked(
+		ctx, "system",
+		"show",
+		"--no-color",
+		cleanSHA,
+		"--",
+		clean,
+	)
+	if err != nil {
+		// Never forward raw git stderr to the caller — log it and surface a
+		// fixed error. The rev-parse above already proved the commit exists,
+		// so a failure here is an internal git error, not a caller error.
+		log.Printf("wiki: git show %s -- %s failed: %v: %s", cleanSHA, clean, err, strings.TrimSpace(out))
+		return "", fmt.Errorf("wiki: git show: %w", err)
+	}
+	return out, nil
+}
+
+// RestoreToCommit reads the article content as it existed at sha and writes it
+// back into the working tree as a NEW commit authored by the supplied human
+// identity. It NEVER rewrites history (no reset, no force, no checkout of the
+// branch ref) — the prior commits remain intact and the restore is itself an
+// additional commit, so the audit trail is append-only.
+//
+//   - relPath must be a valid team/ article path.
+//   - sha must be a hex object name that contains relPath. A sha that does not
+//     resolve, or that did not contain the file, returns ErrWikiCommitNotFound
+//     (404).
+//   - When the working-tree content already equals the content at sha, returns
+//     ErrWikiRestoreNoop (409) without creating an empty commit.
+//
+// Returns the new short commit SHA.
+func (r *Repo) RestoreToCommit(ctx context.Context, relPath, sha string, identity HumanIdentity) (string, error) {
+	clean, abs, err := resolveTeamRelPath(r.root, relPath)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasSuffix(strings.ToLower(clean), ".md") {
+		return "", fmt.Errorf("%w: restore path must end with .md; got %q", errWikiFSBadPath, relPath)
+	}
+	cleanSHA, err := validateCommitSHA(sha)
+	if err != nil {
+		return "", err
+	}
+	name, email, _ := effectiveHumanIdentity(identity)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Read the file content as it existed at the target commit. `git show
+	// <sha>:<path>` fails if either the commit or the path is absent at that
+	// revision — both map to a 404 for the caller.
+	historical, err := r.runGitLocked(ctx, "system", "show", cleanSHA+":"+clean)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s:%s", ErrWikiCommitNotFound, cleanSHA, clean)
+	}
+
+	// No-op guard: if the live file already byte-matches the historical
+	// content there is nothing to restore. Treat a missing live file as
+	// "differs" so a restore of a since-deleted page still proceeds.
+	if current, readErr := os.ReadFile(abs); readErr == nil && string(current) == historical {
+		return "", ErrWikiRestoreNoop
+	} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return "", fmt.Errorf("wiki: read current article: %w", readErr)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+		return "", fmt.Errorf("wiki: mkdir %s: %w", filepath.Dir(abs), err)
+	}
+
+	// Snapshot the live bytes so a failed commit can roll the working tree
+	// back to exactly what was there before. os.ReadFile already ran above
+	// (errors other than NotExist returned), so re-read for the rollback copy.
+	prevBytes, prevErr := os.ReadFile(abs)
+	prevExisted := prevErr == nil
+
+	if err := os.WriteFile(abs, []byte(historical), 0o600); err != nil {
+		return "", fmt.Errorf("wiki: write restored article: %w", err)
+	}
+
+	msg := fmt.Sprintf("human: restore %s to %s", clean, cleanSHA)
+	commitSHA, commitErr := r.commitPathsLocked(ctx, name, email, msg, []string{clean})
+	if commitErr != nil {
+		// Roll the working tree back so a failed restore does not leave an
+		// uncommitted change that RecoverDirtyTree would later misattribute.
+		if prevExisted {
+			if rbErr := os.WriteFile(abs, prevBytes, 0o600); rbErr != nil {
+				return "", errors.Join(commitErr, fmt.Errorf("wiki: rollback restore %s: %w", clean, rbErr))
+			}
+		} else if rbErr := os.Remove(abs); rbErr != nil && !errors.Is(rbErr, os.ErrNotExist) {
+			return "", errors.Join(commitErr, fmt.Errorf("wiki: rollback restore %s: %w", clean, rbErr))
+		}
+		return "", commitErr
+	}
+	return commitSHA, nil
+}
+
+// latestCommitAuthorsByPath returns the most-recent commit author for each
+// supplied path, in a single git invocation scoped to just those paths.
+//
+// This is the hot-path alternative to commitBoundsByPath for callers that only
+// need the latest author of a known, small set of articles (e.g. backlink
+// attribution on article open). Unlike AuditLog/commitBoundsByPath, it does NOT
+// walk the entire repo history — git limits the log to commits touching the
+// given pathspecs, so cost scales with those files' history rather than the
+// whole wiki. Paths absent from the result simply have no recorded commit.
+func (r *Repo) latestCommitAuthorsByPath(ctx context.Context, paths []string) (map[string]string, error) {
+	if len(paths) == 0 {
+		return map[string]string{}, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	args := []string{
+		"log",
+		"--format=%h%x1f%an%x1f%aI%x1f%s",
+		"--name-only",
+		"--no-merges",
+		"--",
+	}
+	for _, p := range paths {
+		args = append(args, filepath.ToSlash(p))
+	}
+	out, err := r.runGitLocked(ctx, "system", args...)
+	if err != nil {
+		return nil, fmt.Errorf("wiki: latest-author log: %w", err)
+	}
+	// parseAuditLog returns commits most-recent-first; the first author we see
+	// for a path is therefore its latest committer.
+	authors := make(map[string]string, len(paths))
+	for _, entry := range parseAuditLog(out) {
+		for _, p := range entry.Paths {
+			if _, seen := authors[p]; !seen {
+				authors[p] = entry.Author
+			}
+		}
+	}
+	return authors, nil
+}
+
 // AuditEntry is a single cross-article commit surfaced by AuditLog. Unlike
 // CommitRef (which powers per-article history), this carries the list of
 // files touched by the commit so reviewers can reconstruct the full diff
@@ -759,13 +1041,70 @@ func (r *Repo) regenerateIndexLocked() error {
 
 // BackupMirror copies the wiki repo to ~/.wuphf/wiki.bak/ skipping git object
 // packs for speed. The worker calls this asynchronously and debounced.
+//
+// First-boot guard: on a freshly initialised wiki the layout is just
+// .gitkeep stubs under team/{people,companies,…}/ — there are no real
+// articles to back up. Creating ~/.wuphf/wiki.bak/ in that case puts a
+// surprising empty directory next to ~/.wuphf/wiki/ on every fresh
+// install. Skip the copy until at least one article exists.
+// Closes #981.
 func (r *Repo) BackupMirror(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	hasArticle, err := teamSubtreeHasArticle(filepath.Join(r.root, "team"))
+	if err != nil {
+		return fmt.Errorf("wiki: inspect team subtree for backup: %w", err)
+	}
+	if !hasArticle {
+		// Nothing to back up yet. The backup mirror will appear after the
+		// first real article write.
+		return nil
+	}
 	if err := copyTree(r.root, r.backupRoot); err != nil {
 		return fmt.Errorf("wiki: backup mirror: %w", err)
 	}
 	return nil
+}
+
+// teamSubtreeHasArticle reports whether teamDir contains at least one *.md
+// article (recursively). Dot-prefixed dirs and files are ignored so .gitkeep
+// and .obsidian-style scaffolding do not count as content. Returns (false,
+// nil) when teamDir does not exist so a never-initialised wiki degrades to
+// "empty".
+func teamSubtreeHasArticle(teamDir string) (bool, error) {
+	found := false
+	walkErr := filepath.Walk(teamDir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if info.IsDir() {
+			base := filepath.Base(p)
+			if strings.HasPrefix(base, ".") && p != teamDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := info.Name()
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+		// Case-insensitive match: validateArticlePath accepts mixed-case
+		// extensions (.MD, .Md) so we must too, otherwise BackupMirror
+		// could skip the snapshot for a wiki that has perfectly valid
+		// articles. CodeRabbit on PR #987.
+		if strings.EqualFold(filepath.Ext(name), ".md") {
+			found = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if walkErr != nil && !os.IsNotExist(walkErr) {
+		return found, walkErr
+	}
+	return found, nil
 }
 
 // RestoreFromBackup swaps the corrupt repo for the backup mirror.
@@ -820,6 +1159,27 @@ func (r *Repo) stageAllLocked(ctx context.Context) error {
 		return fmt.Errorf("wiki: git add -A: %w: %s", err, out)
 	}
 	return nil
+}
+
+// PathDirty reports whether relPath differs from its committed HEAD state
+// (modified or untracked). The Obsidian watcher uses this to distinguish a
+// REAL external edit from the fsnotify echo of an internal committed write:
+// after the wiki worker (or a promotion apply) writes-and-commits, the file
+// is byte-identical to HEAD by the time the watcher's debounce fires, so
+// there is nothing external to attribute. Without this check the watcher
+// stamped a fresh `last_human_edit_ts` sentinel on every echo — content
+// always differed, so every agent-authored commit was followed by a
+// human-attributed "wiki: external edit" commit, and that sentinel commit
+// re-triggered the watcher into a commit storm (B3 + B4: the v3 run's
+// all-human git history and "173 revisions" on a minutes-old article).
+func (r *Repo) PathDirty(ctx context.Context, relPath string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out, err := r.runGitLocked(ctx, "system", "status", "--porcelain", "--", filepath.ToSlash(relPath))
+	if err != nil {
+		return false, fmt.Errorf("wiki: git status %s: %w", relPath, err)
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // runGitLocked runs `git` with per-commit identity flags in the repo root.
@@ -983,23 +1343,23 @@ func searchArticles(repo *Repo, pattern string) ([]WikiSearchHit, error) {
 func validateArticlePath(relPath string) error {
 	relPath = strings.TrimSpace(relPath)
 	if relPath == "" {
-		return fmt.Errorf("wiki: article_path is required")
+		return fmt.Errorf("%w: article_path is required", errWikiCallerInput)
 	}
 	if filepath.IsAbs(relPath) {
-		return fmt.Errorf("wiki: article path must be relative; got %q", relPath)
+		return fmt.Errorf("%w: article path must be relative; got %q", errWikiCallerInput, relPath)
 	}
 	clean := filepath.ToSlash(filepath.Clean(relPath))
 	if clean != filepath.ToSlash(relPath) && !strings.HasPrefix(clean, "team/") {
-		return fmt.Errorf("wiki: article path must be within team/; got %q", relPath)
+		return fmt.Errorf("%w: article path must be within team/; got %q", errWikiCallerInput, relPath)
 	}
 	if strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || clean == ".." {
-		return fmt.Errorf("wiki: article path must not contain ..; got %q", relPath)
+		return fmt.Errorf("%w: article path must not contain ..; got %q", errWikiCallerInput, relPath)
 	}
 	if !strings.HasPrefix(clean, "team/") {
-		return fmt.Errorf("wiki: article path must be within team/; got %q", relPath)
+		return fmt.Errorf("%w: article path must be within team/; got %q", errWikiCallerInput, relPath)
 	}
 	if !strings.HasSuffix(strings.ToLower(clean), ".md") {
-		return fmt.Errorf("wiki: article path must end with .md; got %q", relPath)
+		return fmt.Errorf("%w: article path must end with .md; got %q", errWikiCallerInput, relPath)
 	}
 	return nil
 }

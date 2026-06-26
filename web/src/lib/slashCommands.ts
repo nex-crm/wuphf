@@ -77,8 +77,9 @@ export function handleSlashCommand(
     case "/skills":
       navigateToApp("skills");
       return true;
+    case "/routines":
     case "/calendar":
-      navigateToApp("calendar");
+      navigateToApp("routines");
       return true;
     case "/tasks":
       navigateToApp("tasks");
@@ -195,7 +196,7 @@ export function handleSlashCommand(
       createDM(slug)
         .then(() => {
           void router.navigate({
-            to: "/dm/$agentSlug",
+            to: "/agents/$agentSlug",
             params: { agentSlug: slug },
           });
         })

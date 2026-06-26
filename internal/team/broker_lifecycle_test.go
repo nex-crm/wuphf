@@ -26,8 +26,13 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		status        string
 		blocked       bool
 	}{
+		// Phase 3 — Drafting: pre-Intake mode where agents comment but cannot
+		// dispatch. PipelineStage="draft" matches the spec's draft phase name.
+		// Status="open" keeps it visible in the open-tasks view. Blocked=false.
+		{LifecycleStateDrafting, "draft", "pending_review", "open", false},
 		{LifecycleStateIntake, "triage", "pending_review", "open", false},
 		{LifecycleStateReady, "triage", "pending_review", "open", false},
+		{LifecycleStatePlanning, "plan", "pending_review", "in_progress", false},
 		{LifecycleStateRunning, "implement", "pending_review", "in_progress", false},
 		{LifecycleStateReview, "review", "ready_for_review", "in_progress", false},
 		{LifecycleStateDecision, "review", "ready_for_review", "in_progress", false},
@@ -35,10 +40,17 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		// instead of "in_progress" to preserve the pre-Lane-A contract
 		// that ~10 broker code paths read. See lifecycleDerivedFields
 		// comment for full rationale.
-		{LifecycleStateBlockedOnPRMerge, "review", "ready_for_review", "blocked", true},
+		{LifecycleStateBlocked, "review", "ready_for_review", "blocked", true},
 		{LifecycleStateQueuedBehindOwner, "triage", "pending_review", "open", true},
 		{LifecycleStateChangesRequested, "implement", "pending_review", "in_progress", false},
 		{LifecycleStateApproved, "ship", "approved", "done", false},
+		// Rejected: terminal, blocked=true so unblockDependentsLocked
+		// treats the upstream as unresolved; reviewState="rejected"
+		// is the durable filter signal in the inbox.
+		{LifecycleStateRejected, "review", "rejected", "rejected", true},
+		// Archived: terminal, off-board. Blocked=false (not waiting on
+		// anything), ReviewState="approved" (clean terminal).
+		{LifecycleStateArchived, "archived", "approved", "archived", false},
 	}
 
 	// The canonical state list and the forward-map must agree on which
@@ -98,5 +110,32 @@ func TestLifecycleTransitionRejectsNonCanonicalState(t *testing.T) {
 	b.mu.Unlock()
 	if err == nil {
 		t.Fatal("expected error for LifecycleStateUnknown (it is the migration fallback, not a valid target), got nil")
+	}
+}
+
+// ── Parked tasks raise no start-ceremony notice ──────────────────────────
+
+// The Approve & Start ceremony is retired: entering drafting (now the
+// explicit "parked" state) must raise NO Inbox notice — there is no
+// activation button to hint at, and a deliberate park needs no nag.
+// Regression guard for the removed awaiting-start notice flow.
+func TestParkedEntryRaisesNoInboxNotice(t *testing.T) {
+	b := newTestBroker(t)
+
+	b.mu.Lock()
+	b.tasks = []teamTask{{ID: "OFFICE-7", TaskType: "issue", Owner: "ceo", Channel: "general"}}
+	_, err := b.transitionLifecycleLocked("OFFICE-7", LifecycleStateDrafting, "composer park")
+	b.mu.Unlock()
+	if err != nil {
+		t.Fatalf("transition to drafting: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.requests {
+		if b.requests[i].IssueID == "OFFICE-7" {
+			t.Fatalf("parking must raise no inbox request, found kind=%q title=%q",
+				b.requests[i].Kind, b.requests[i].Title)
+		}
 	}
 }

@@ -1,38 +1,27 @@
-// Wiki unifies three surfaces behind one sidebar entry: the canonical
-// team wiki, per-agent notebooks (drafts), and the promotion review queue.
-// Each surface gets its own tab inside the Wiki app; notebooks/reviews
-// have no top-level sidebar entries of their own.
-// Inbox is hoisted out into a dedicated prominent button at the top of
-// the sidebar (see components/sidebar/InboxButton). It used to live in
-// this list as just another app; promoting it reflects that the inbox
-// is the primary attention surface, not a secondary tool.
-export const SIDEBAR_APPS = [
-  { id: "overview", icon: "\uD83C\uDFE0", name: "Overview" },
-  { id: "wiki", icon: "\uD83D\uDCD6", name: "Wiki" },
-  { id: "console", icon: ">", name: "Console" },
-  { id: "tasks", icon: "\u2705", name: "Tasks" },
-  { id: "requests", icon: "\uD83D\uDCCB", name: "Requests" },
-  { id: "graph", icon: "\uD83D\uDD78", name: "Graph" },
-  { id: "policies", icon: "\uD83D\uDEE1", name: "Policies" },
-  { id: "calendar", icon: "\uD83D\uDCC5", name: "Calendar" },
-  { id: "skills", icon: "\u26A1", name: "Skills" },
-  { id: "activity", icon: "\uD83D\uDCE6", name: "Activity" },
-  { id: "receipts", icon: "\uD83E\uDDFE", name: "Receipts" },
-  { id: "health-check", icon: "\uD83D\uDCF6", name: "Access & Health" },
-  { id: "settings", icon: "\u2699", name: "Settings" },
-] as const;
+// Sidebar TOOLS entries (labels, ids, order) live in
+// `routes/routeRegistry.ts`. This file historically re-exported a
+// duplicate `SIDEBAR_APPS` list — that was deleted to keep the registry
+// the single source of truth. Resolve labels through `APP_LABELS` /
+// `SIDEBAR_TOOLS` and read the displayed order from `SIDEBAR_TOOLS`.
+import {
+  APP_LABELS,
+  type AppPanelId,
+  type FirstClassAppId,
+  isAppPanelId,
+  isFirstClassAppId,
+} from "../routes/routeRegistry";
 
 export function appTitle(app: string): string {
-  return (
-    SIDEBAR_APPS.find((item) => item.id === app)?.name ??
-    app.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
-  );
+  if (isAppPanelId(app) || isFirstClassAppId(app)) {
+    return APP_LABELS[app as AppPanelId | FirstClassAppId];
+  }
+  return app.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export const ONBOARDING_COPY = {
   step1_headline: "AI employees with a shared brain",
   step1_subhead:
-    "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7.\nEach agent is backed by its own knowledge graph.",
+    "A collaborative office where AI agents like Claude Code, Codex, and Opencode learn your work playbooks, build personalized skills, and execute, 24x7.\nEach agent is backed by its own knowledge graph.",
   step1_cta: "Continue",
   step2_headline: "Name your office",
   step2_subhead: "This becomes the workspace your agents call home.",

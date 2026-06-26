@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Refresh, WarningTriangle } from "iconoir-react";
 
@@ -7,14 +7,19 @@ import {
   type ConfigUpdate,
   getConfig,
   getLocalProvidersStatus,
+  type LLMRuntimeKind,
   type LocalProviderStatus,
   resetWorkspace,
   shredWorkspace,
   updateConfig,
   type WorkspaceWipeResult,
 } from "../../api/client";
+import { useOfficeMembers } from "../../hooks/useMembers";
 import { router } from "../../lib/router";
+import { normalizeProviderList } from "../../lib/runtimeProviders";
 import { useAppStore } from "../../stores/app";
+import { CredentialRegistrationPanel } from "../cosign";
+import { CommandRow } from "../ui/CommandRow";
 import {
   ShredCardSubtitle,
   ShredDeletionsList,
@@ -23,9 +28,12 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
+import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
 import { SECTION_GROUPS } from "./settings/constants";
+import { PrivacySection } from "./settings/PrivacySection";
+import { RuntimeProviderChecklist } from "./settings/RuntimeProviderChecklist";
 import { styles } from "./settings/styles";
 import type { SectionId, SectionProps } from "./settings/types";
 
@@ -64,8 +72,67 @@ function useShredAction() {
   };
 }
 
+// TeamLeadPicker reads the office roster so the human picks from real
+// agents rather than typing a slug. The saved value persists as a slug on
+// the wire (cfg.team_lead_slug) — the picker round-trips through the slug
+// even when the agent's display name later changes, so renaming an agent
+// doesn't break the Team Lead binding. Falls back to a free-text input
+// while the roster is still loading or empty, so the field is never a
+// dead end on a brand-new install.
+function TeamLeadPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (slug: string) => void;
+}) {
+  const { data: members = [], isLoading } = useOfficeMembers();
+  if (isLoading || members.length === 0) {
+    return (
+      <input
+        style={styles.input}
+        placeholder="e.g. ceo"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  const knownSlug = members.some((m) => m.slug === value);
+  return (
+    <select
+      style={styles.input}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">— pick an agent —</option>
+      {members.map((m) => (
+        <option key={m.slug} value={m.slug}>
+          {m.name ? `${m.name} (@${m.slug})` : `@${m.slug}`}
+        </option>
+      ))}
+      {value && !knownSlug && (
+        <option value={value}>@{value} (not in roster)</option>
+      )}
+    </select>
+  );
+}
+
+function sameProviders(
+  a: readonly LLMRuntimeKind[] | null,
+  b: readonly LLMRuntimeKind[],
+) {
+  if (a === null) return false;
+  return a.length === b.length && a.every((provider, i) => provider === b[i]);
+}
+
 function GeneralSection({ cfg, save }: SectionProps) {
-  const [provider, setProvider] = useState(cfg.llm_provider ?? "ollama");
+  const initialProviders =
+    cfg.llm_provider_priority && cfg.llm_provider_priority.length > 0
+      ? cfg.llm_provider_priority
+      : cfg.llm_provider
+        ? [cfg.llm_provider]
+        : [];
+  const [providers, setProviders] = useState<string[]>(initialProviders);
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
@@ -77,10 +144,19 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
+  const [connectedProviders, setConnectedProviders] = useState<
+    LLMRuntimeKind[] | null
+  >(null);
+  const updateConnectedProviders = useCallback((next: LLMRuntimeKind[]) => {
+    setConnectedProviders((prev) => (sameProviders(prev, next) ? prev : next));
+  }, []);
 
   const onSave = async () => {
+    const providerPriority =
+      connectedProviders ?? normalizeProviderList(providers);
     const patch: ConfigUpdate = {
-      llm_provider: provider as ConfigUpdate["llm_provider"],
+      llm_provider: providerPriority[0] ?? "",
+      llm_provider_priority: providerPriority,
       default_format: format,
       blueprint,
       email,
@@ -100,35 +176,15 @@ function GeneralSection({ cfg, save }: SectionProps) {
         Core runtime settings. These map to CLI flags and config file entries.
       </p>
 
-      <div style={styles.groupTitle}>Runtime</div>
-      <Field label="LLM Provider" hint="--provider">
-        <select
-          style={styles.input}
-          value={provider}
-          onChange={(e) => setProvider(e.target.value as typeof provider)}
-        >
-          <optgroup label="Cloud">
-            <option value="claude-code">Claude Code</option>
-            <option value="codex">Codex</option>
-            <option value="opencode">Opencode</option>
-          </optgroup>
-          <optgroup label="Local">
-            <option value="mlx-lm">MLX-LM (Apple Silicon)</option>
-            <option value="ollama">Ollama</option>
-            <option value="exo">Exo</option>
-            <option value="hermes-agent">Hermes Agent</option>
-            <option value="openclaw-http">OpenClaw Gateway</option>
-          </optgroup>
-        </select>
-      </Field>
+      <RuntimeProviderChecklist
+        configuredKinds={cfg.llm_provider_kinds}
+        selectedProviders={providers}
+        onSelectedProvidersChange={setProviders}
+        onConnectedProvidersChange={updateConnectedProviders}
+      />
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
-      <Field label="Team Lead" hint="Default agent that leads operations">
-        <input
-          style={styles.input}
-          placeholder="e.g. ceo"
-          value={teamLead}
-          onChange={(e) => setTeamLead(e.target.value)}
-        />
+      <Field label="Team Lead" hint="Agent that leads operations">
+        <TeamLeadPicker value={teamLead} onChange={setTeamLead} />
       </Field>
       <Field label="Max Concurrent" hint="Parallel agent limit">
         <input
@@ -212,6 +268,11 @@ interface LocalProviderMeta {
   blurb: string;
 }
 
+// LOCAL_PROVIDERS lists directly-dispatched local LLM runtimes only. The
+// Hermes Agent and OpenClaw Gateway entries that used to live here were
+// gateway-controlled — they belong in the Integrations app, not the
+// runtime picker, because their job is to import existing agents into the
+// team rather than to back a WUPHF-created agent's turns.
 const LOCAL_PROVIDERS: LocalProviderMeta[] = [
   {
     kind: "mlx-lm",
@@ -230,18 +291,6 @@ const LOCAL_PROVIDERS: LocalProviderMeta[] = [
     label: "Exo",
     blurb:
       "Distributes inference across multiple devices. Useful when you want to pool a Mac Studio + a laptop.",
-  },
-  {
-    kind: "hermes-agent",
-    label: "Hermes Agent",
-    blurb:
-      "Runs WUPHF members through a local Hermes gateway via its OpenAI-compatible API server.",
-  },
-  {
-    kind: "openclaw-http",
-    label: "OpenClaw Gateway",
-    blurb:
-      "Runs WUPHF members through OpenClaw Gateway's OpenAI-compatible Chat Completions endpoint.",
   },
 ];
 
@@ -283,53 +332,6 @@ function StatusDot({ status }: { status: LocalProviderStatus | undefined }) {
         flexShrink: 0,
       }}
     />
-  );
-}
-
-function CommandRow({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      showNotice("Copy failed — select the text and copy manually.", "error");
-    }
-  };
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        alignItems: "center",
-        padding: "6px 8px",
-        background: "var(--bg-card-soft, var(--bg-card))",
-        border: "1px solid var(--border-light)",
-        borderRadius: 4,
-        marginTop: 6,
-      }}
-    >
-      <code
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-          flex: 1,
-          overflowX: "auto",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {command}
-      </code>
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        onClick={onCopy}
-        style={{ flexShrink: 0 }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
   );
 }
 
@@ -781,13 +783,6 @@ const KEY_DEFS: KeyDef[] = [
     env: "MINIMAX_API_KEY",
   },
   {
-    field: "one_api_key",
-    flag: "one_key_set",
-    label: "One (integration)",
-    placeholder: "one_...",
-    env: "ONE_SECRET",
-  },
-  {
     field: "composio_api_key",
     flag: "composio_key_set",
     label: "Composio",
@@ -846,64 +841,56 @@ function KeysSection({ cfg, save }: SectionProps) {
 }
 
 function IntegrationsSection({ cfg, save }: SectionProps) {
-  const [actionProvider, setActionProvider] = useState<string>(
-    cfg.action_provider ?? "auto",
-  );
-  const [gatewayUrl, setGatewayUrl] = useState(cfg.openclaw_gateway_url ?? "");
-  const [openclawToken, setOpenclawToken] = useState("");
+  const [actionProvider, setActionProvider] = useState<string>("composio");
+  const [actionProviderDirty, setActionProviderDirty] = useState(false);
 
   const onSave = async () => {
-    const patch: ConfigUpdate = {
-      action_provider: actionProvider as ConfigUpdate["action_provider"],
-    };
-    if (gatewayUrl) patch.openclaw_gateway_url = gatewayUrl;
-    if (openclawToken) patch.openclaw_token = openclawToken;
+    const patch: ConfigUpdate = {};
+    if (actionProviderDirty) {
+      patch.action_provider = actionProvider as ConfigUpdate["action_provider"];
+    }
     await save(patch);
-    setOpenclawToken("");
+    setActionProviderDirty(false);
   };
 
+  // Gateway-style integrations (OpenClaw, Hermes, Telegram) now live in the
+  // dedicated Integrations app. We keep Action Provider + Workspace here
+  // because they're install-wide config knobs, not gateways — they configure
+  // routing for an existing action surface rather than importing agents.
   return (
     <div>
       <h2 style={styles.sectionTitle}>Integrations</h2>
       <p style={styles.sectionDesc}>
-        External service connections and action providers.
+        Install-wide integration knobs. Connect OpenClaw, Hermes, or Telegram
+        from the{" "}
+        <button
+          type="button"
+          className="btn btn-link"
+          style={{ padding: 0, height: "auto", fontSize: "inherit" }}
+          onClick={() =>
+            void router.navigate({
+              to: "/apps/$appId",
+              params: { appId: "integrations" },
+            })
+          }
+        >
+          Integrations app
+        </button>
+        .
       </p>
 
       <Field label="Action Provider" hint="External action routing">
         <select
           style={styles.input}
           value={actionProvider}
-          onChange={(e) => setActionProvider(e.target.value)}
+          onChange={(e) => {
+            setActionProvider(e.target.value);
+            setActionProviderDirty(true);
+          }}
         >
-          <option value="auto">Auto</option>
-          <option value="one">One CLI</option>
           <option value="composio">Composio</option>
         </select>
       </Field>
-
-      <div style={{ marginTop: 20 }}>
-        <div style={styles.groupTitle}>OpenClaw</div>
-        <Field label="Gateway URL" hint="WebSocket endpoint">
-          <input
-            style={{
-              ...styles.input,
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-            }}
-            placeholder="ws://127.0.0.1:18789"
-            value={gatewayUrl}
-            onChange={(e) => setGatewayUrl(e.target.value)}
-          />
-        </Field>
-        <Field label="Token" hint="Gateway auth token">
-          <KeyField
-            hasValue={Boolean(cfg.openclaw_token_set)}
-            placeholder="oc_..."
-            value={openclawToken}
-            onChange={setOpenclawToken}
-          />
-        </Field>
-      </div>
 
       <div style={{ marginTop: 20 }}>
         <div style={styles.groupTitle}>Workspace</div>
@@ -923,6 +910,27 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
             value={cfg.workspace_slug ?? ""}
           />
         </Field>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div style={styles.groupTitle}>Nex</div>
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            margin: "4px 0 0",
+          }}
+        >
+          Nex is a context graph platform for AI agents. Register to enable
+          shared memory, entity briefs, and integrations. Once registered, paste
+          your API key in the API Keys section.
+        </p>
+        <NexConnectPanel />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div style={styles.groupTitle}>Approval cosign</div>
+        <CredentialRegistrationPanel />
       </div>
 
       <SaveButton label="Save integration settings" onSave={onSave} />
@@ -1384,6 +1392,12 @@ export function SettingsApp() {
                   key={sec.id}
                   style={styles.navItem(sec.id === section)}
                   onClick={() => setSection(sec.id)}
+                  // testid so e2e can disambiguate the Settings section
+                  // buttons from buttons with the same name that live in
+                  // the parent sidebar (e.g. the Integrations sidebar app
+                  // entry shares the "Integrations" accessible name with
+                  // the Settings → Integrations section button).
+                  data-testid={`settings-nav-${sec.id}`}
                 >
                   <Icon style={styles.navIcon} />
                   <span>{sec.name}</span>
@@ -1406,6 +1420,7 @@ export function SettingsApp() {
         )}
         {section === "intervals" && <IntervalsSection cfg={data} save={save} />}
         {section === "flags" && <FlagsSection />}
+        {section === "privacy" && <PrivacySection cfg={data} save={save} />}
         {section === "danger" && <DangerZoneSection />}
       </div>
     </div>

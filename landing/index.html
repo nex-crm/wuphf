@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MeetingMind — AI Meeting Notes</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #13131a;
+      --border: #2a2a3a;
+      --accent: #7c6ef2;
+      --accent-hover: #9283f7;
+      --text: #e8e8f0;
+      --muted: #8888a8;
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* NAV */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: rgba(10, 10, 15, 0.85);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .logo span { color: var(--accent); }
+    nav a.cta-nav {
+      background: var(--accent);
+      color: #fff;
+      padding: 0.5rem 1.2rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: background 0.15s;
+    }
+    nav a.cta-nav:hover { background: var(--accent-hover); }
+
+    /* HERO */
+    .hero {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 6rem 2rem 4rem;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(124, 110, 242, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(124, 110, 242, 0.3);
+      padding: 0.3rem 0.85rem;
+      border-radius: 99px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+    }
+    h1 {
+      font-size: clamp(2.2rem, 5vw, 3.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+    }
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, #7c6ef2, #b09cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .tagline {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 520px;
+      margin: 0 auto 2.5rem;
+    }
+    .hero-cta {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.85rem 2rem;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 1rem;
+      font-weight: 700;
+      transition: background 0.15s, transform 0.1s;
+      box-shadow: 0 4px 24px rgba(124, 110, 242, 0.35);
+    }
+    .hero-cta:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+    /* FEATURES */
+    .features {
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 4rem 2rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2rem;
+      transition: border-color 0.2s, transform 0.15s;
+    }
+    .card:hover {
+      border-color: rgba(124, 110, 242, 0.5);
+      transform: translateY(-2px);
+    }
+    .card-icon {
+      width: 44px;
+      height: 44px;
+      background: rgba(124, 110, 242, 0.12);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.25rem;
+      font-size: 1.4rem;
+    }
+    .card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.01em;
+    }
+    .card p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+
+    /* CAPTURE FORM */
+    .capture {
+      max-width: 540px;
+      margin: 0 auto;
+      padding: 3rem 2rem 6rem;
+      text-align: center;
+    }
+    .capture h2 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.6rem;
+    }
+    .capture p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+    .form-row {
+      display: flex;
+      gap: 0.6rem;
+    }
+    .form-row input[type="email"] {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 0.8rem 1.1rem;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-family: var(--font);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-row input[type="email"]::placeholder { color: var(--muted); }
+    .form-row input[type="email"]:focus { border-color: var(--accent); }
+    .form-row button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      padding: 0.8rem 1.4rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .form-row button:hover { background: var(--accent-hover); }
+    .form-note {
+      margin-top: 0.8rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    #success {
+      display: none;
+      margin-top: 1rem;
+      color: #68d391;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    /* FOOTER */
+    footer {
+      border-top: 1px solid var(--border);
+      text-align: center;
+      padding: 1.5rem 2rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 480px) {
+      .form-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a class="logo" href="#"><span>Meeting</span>Mind</a>
+    <a class="cta-nav" href="#early-access">Get early access</a>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="badge">Now in beta</div>
+    <h1>Your meetings,<br /><em>remembered perfectly.</em></h1>
+    <p class="tagline">
+      MeetingMind listens, transcribes, and extracts action items in real time —
+      so you can focus on the conversation, not the notes.
+    </p>
+    <a class="hero-cta" href="#early-access">Request early access &darr;</a>
+  </section>
+
+  <!-- FEATURE CARDS -->
+  <section class="features" aria-label="Features">
+
+    <div class="card">
+      <div class="card-icon">&#x26A1;</div>
+      <h3>Instant transcription</h3>
+      <p>
+        Word-accurate transcripts appear live during your call. Supports Zoom,
+        Meet, Teams, and any browser tab — no plugin required.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">&#x1F4CB;</div>
+      <h3>Auto action items</h3>
+      <p>
+        MeetingMind extracts every commitment, deadline, and decision from the
+        conversation and delivers a structured summary the moment the call ends.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">&#x1F50D;</div>
+      <h3>Searchable history</h3>
+      <p>
+        Every meeting is indexed and searchable by keyword, attendee, or date.
+        Find that decision from three months ago in seconds, not scroll-hours.
+      </p>
+    </div>
+
+  </section>
+
+  <!-- EMAIL CAPTURE -->
+  <section class="capture" id="early-access">
+    <h2>Join the waitlist</h2>
+    <p>We're rolling out to early teams. Drop your email and we'll let you in first.</p>
+    <form id="capture-form" onsubmit="handleSubmit(event)" novalidate>
+      <div class="form-row">
+        <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="you@company.com"
+          required
+          autocomplete="email"
+          aria-label="Work email address"
+        />
+        <button type="submit">Get access</button>
+      </div>
+      <p class="form-note">No spam. Unsubscribe any time.</p>
+      <p id="success" role="status">&#x2713; You're on the list — we'll be in touch!</p>
+    </form>
+  </section>
+
+  <footer>
+    &copy; 2026 MeetingMind. All rights reserved.
+  </footer>
+
+  <script>
+    function handleSubmit(e) {
+      e.preventDefault();
+      var email = document.getElementById('email').value.trim();
+      if (!email || !email.includes('@')) return;
+      // In production, POST to your API here.
+      document.getElementById('success').style.display = 'block';
+      document.getElementById('email').value = '';
+      document.querySelector('#capture-form button').disabled = true;
+    }
+  </script>
+
+</body>
+</html>

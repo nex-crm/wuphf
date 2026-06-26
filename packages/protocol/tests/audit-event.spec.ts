@@ -33,7 +33,10 @@ import {
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
 import {
+  approvalAuditPayloadToBytes,
   asAgentSlug,
+  asApprovalClaimId,
+  asApprovalRequestId,
   asBudgetId,
   asMicroUsd,
   asProviderKind,
@@ -41,6 +44,7 @@ import {
   asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
+  asWriteId,
   costAuditPayloadFromJsonValue,
   costAuditPayloadToBytes,
   costAuditPayloadToJsonValue,
@@ -48,7 +52,8 @@ import {
   threadSpecContentHash,
 } from "../src/index.ts";
 import { asReceiptId, type ReceiptId } from "../src/receipt.ts";
-import { asSha256Hex, type Sha256Hex, sha256Hex } from "../src/sha256.ts";
+import { asSha256Hex, type Sha256Hex } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256-node.ts";
 
 interface AuditEventVectorPayloadInput {
   readonly kind: AuditEventKind;
@@ -1148,6 +1153,39 @@ describe("audit-event chain verification", () => {
         }).ok,
       ).toBe(false);
     });
+
+    it("validates approval audit payloads and claim/scope binding", () => {
+      const claim = approvalClaimFixture();
+      const requestedPayload = {
+        requestId: asApprovalRequestId("01HRQ7KZ7D4E6F8G9H0J1K2M3N"),
+        claim,
+        scope: approvalScopeFixture(claim),
+        riskClass: "high",
+        threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        taskId: asTaskId("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+        receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        requestedBy: asSignerIdentity("fran@example.com"),
+        requestedAt: new Date("2026-05-08T18:00:00.000Z"),
+      };
+
+      expect(validateAuditEventPayloadBody("approval_requested", requestedPayload)).toEqual({
+        ok: true,
+      });
+      expect(
+        validateAuditEventPayloadBody("approval_decided", {
+          requestId: requestedPayload.requestId,
+          decision: "reject",
+          decidedBy: asSignerIdentity("approver@example.com"),
+          decidedAt: new Date("2026-05-08T18:05:00.000Z"),
+        }),
+      ).toEqual({ ok: true });
+      expect(
+        validateAuditEventPayloadBody("approval_requested", {
+          ...requestedPayload,
+          scope: { ...requestedPayload.scope, writeId: asWriteId("write_02") },
+        }).ok,
+      ).toBe(false);
+    });
   });
 
   describe("cost audit payload ISO date vectors", () => {
@@ -1439,6 +1477,28 @@ function budgetThresholdCrossedJson(crossedAt: string): Record<string, unknown> 
 }
 
 function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {
+  if (kind === "approval_requested") {
+    const claim = approvalClaimFixture();
+    return approvalAuditPayloadToBytes(kind, {
+      requestId: asApprovalRequestId("01HRQ7KZ7D4E6F8G9H0J1K2M3N"),
+      claim,
+      scope: approvalScopeFixture(claim),
+      riskClass: "high",
+      threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+      taskId: asTaskId("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+      receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      requestedBy: asSignerIdentity("fran@example.com"),
+      requestedAt: new Date("2026-05-08T18:00:00.000Z"),
+    });
+  }
+  if (kind === "approval_decided") {
+    return approvalAuditPayloadToBytes(kind, {
+      requestId: asApprovalRequestId("01HRQ7KZ7D4E6F8G9H0J1K2M3N"),
+      decision: index % 2 === 0 ? "approve" : "abstain",
+      decidedBy: asSignerIdentity("approver@example.com"),
+      decidedAt: new Date("2026-05-08T18:05:00.000Z"),
+    });
+  }
   if (kind === "thread_created") {
     return threadAuditPayloadToBytes(kind, {
       threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
@@ -1507,6 +1567,31 @@ function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {
     });
   }
   return new Uint8Array([index, 0, 255]);
+}
+
+function approvalClaimFixture() {
+  return {
+    schemaVersion: 1 as const,
+    claimId: asApprovalClaimId("claim_receipt_cosign_01"),
+    kind: "receipt_co_sign" as const,
+    receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    writeId: asWriteId("write_01"),
+    frozenArgsHash: sha256Hex("approval-request-frozen-args"),
+    riskClass: "high" as const,
+  };
+}
+
+function approvalScopeFixture(claim: ReturnType<typeof approvalClaimFixture>) {
+  return {
+    mode: "single_use" as const,
+    claimId: claim.claimId,
+    claimKind: claim.kind,
+    role: "approver" as const,
+    maxUses: 1 as const,
+    receiptId: claim.receiptId,
+    writeId: claim.writeId,
+    frozenArgsHash: claim.frozenArgsHash,
+  };
 }
 
 function auditEventRecordFromVector(vector: AuditEventVector): AuditEventRecord {

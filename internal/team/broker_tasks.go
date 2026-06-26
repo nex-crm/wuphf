@@ -1,28 +1,28 @@
 package team
 
 type brokerTaskMutationSnapshot struct {
-	tasks       []teamTask
-	channels    []teamChannel
-	messages    []channelMessage
-	agentIssues []agentIssueRecord
-	actions     []officeActionLog
-	watchdogs   []watchdogAlert
-	scheduler   []schedulerJob
-	lifecycle   map[LifecycleState][]string
-	counter     int
+	tasks     []teamTask
+	channels  []teamChannel
+	messages  []channelMessage
+	incidents []incidentRecord
+	actions   []officeActionLog
+	watchdogs []watchdogAlert
+	scheduler []schedulerJob
+	lifecycle map[LifecycleState][]string
+	counter   int
 }
 
 func snapshotBrokerTaskMutationLocked(b *Broker) brokerTaskMutationSnapshot {
 	return brokerTaskMutationSnapshot{
-		tasks:       cloneTeamTasksForRollback(b.tasks),
-		channels:    cloneTeamChannelsForRollback(b.channels),
-		messages:    cloneChannelMessagesForRollback(b.messages),
-		agentIssues: append([]agentIssueRecord(nil), b.agentIssues...),
-		actions:     cloneOfficeActionsForRollback(b.actions),
-		watchdogs:   append([]watchdogAlert(nil), b.watchdogs...),
-		scheduler:   append([]schedulerJob(nil), b.scheduler...),
-		lifecycle:   cloneLifecycleIndexForRollback(b.lifecycleIndex),
-		counter:     b.counter,
+		tasks:     cloneTeamTasksForRollback(b.tasks),
+		channels:  cloneTeamChannelsForRollback(b.channels),
+		messages:  cloneChannelMessagesForRollback(b.messages),
+		incidents: append([]incidentRecord(nil), b.incidents...),
+		actions:   cloneOfficeActionsForRollback(b.actions),
+		watchdogs: append([]watchdogAlert(nil), b.watchdogs...),
+		scheduler: append([]schedulerJob(nil), b.scheduler...),
+		lifecycle: cloneLifecycleIndexForRollback(b.lifecycleIndex),
+		counter:   b.counter,
 	}
 }
 
@@ -30,7 +30,7 @@ func (snapshot brokerTaskMutationSnapshot) restore(b *Broker) {
 	b.tasks = cloneTeamTasksForRollback(snapshot.tasks)
 	b.channels = cloneTeamChannelsForRollback(snapshot.channels)
 	b.messages = cloneChannelMessagesForRollback(snapshot.messages)
-	b.agentIssues = append([]agentIssueRecord(nil), snapshot.agentIssues...)
+	b.incidents = append([]incidentRecord(nil), snapshot.incidents...)
 	b.actions = cloneOfficeActionsForRollback(snapshot.actions)
 	b.watchdogs = append([]watchdogAlert(nil), snapshot.watchdogs...)
 	b.scheduler = append([]schedulerJob(nil), snapshot.scheduler...)

@@ -5,6 +5,7 @@ import type { OfficeMember } from "../../api/client";
 import { post } from "../../api/client";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { formatAgentName } from "../../lib/agentName";
+import { humanizeActivity } from "../../lib/humanizeActivity";
 import { useAppStore } from "../../stores/app";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice, showUndoToast } from "../ui/Toast";
@@ -23,15 +24,16 @@ function memberDisplayName(member: OfficeMember): string {
   return formatAgentName(member.slug);
 }
 
+// Live activity strings can leak raw runtime internals — MCP tool ids,
+// snake_case tool names, or whole tool-call JSON blobs. The shared
+// humanizeActivity (lib/humanizeActivity.ts) collapses anything
+// machine-shaped to "Working…" and passes genuine prose through.
 function memberActivity(member: OfficeMember): string {
   if (member.disabled) return "Disabled in this channel";
-  return (
-    member.liveActivity?.trim() ||
-    member.task?.trim() ||
-    member.detail?.trim() ||
-    member.role?.trim() ||
-    "Idle"
-  );
+  const live =
+    member.liveActivity?.trim() || member.task?.trim() || member.detail?.trim();
+  if (live) return humanizeActivity(live);
+  return member.role?.trim() || "Idle";
 }
 
 function sortParticipants(a: OfficeMember, b: OfficeMember): number {

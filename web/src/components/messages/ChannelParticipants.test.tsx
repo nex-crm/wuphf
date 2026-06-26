@@ -127,7 +127,7 @@ describe("<ChannelParticipants>", () => {
     mocks.useOfficeMembers.mockReturnValue({
       data: [
         member({ slug: "ceo", name: "CEO", built_in: true }),
-        member({ slug: "planner", name: "Planner", role: "Planning agent" }),
+        member({ slug: "planner", name: "Planner", role: "Research agent" }),
       ],
     });
 

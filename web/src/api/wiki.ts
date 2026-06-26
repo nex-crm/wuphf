@@ -2,7 +2,9 @@
  * Wiki API client — thin wrapper over the shared fetch helper in `client.ts`.
  */
 
-import { get, post, sseURL } from "./client";
+import { track, trackOn } from "../lib/analytics";
+import { del, get, post, sseURL } from "./client";
+import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
 export interface WikiArticle {
   path: string;
@@ -79,18 +81,29 @@ export async function writeHumanArticle(params: {
       commit_message: params.commitMessage,
       expected_sha: params.expectedSha,
     });
+    track("wiki_article_edited", { is_create: false, had_conflict: false });
     return res;
   } catch (err: unknown) {
     // The shared post() helper surfaces non-2xx as Error(text). For 409
     // the body is a JSON envelope — try to parse it out.
     const message = err instanceof Error ? err.message : String(err);
     const parsed = tryParseConflict(message);
-    if (parsed) return parsed;
+    if (parsed) {
+      // A conflict is still a human edit attempt — record it with the flag so
+      // we can see how often concurrent edits collide.
+      track("wiki_article_edited", { is_create: false, had_conflict: true });
+      return parsed;
+    }
     throw err;
   }
 }
 
-function tryParseConflict(text: string): WriteHumanConflict | null {
+/**
+ * Parse a 409 conflict body (raw error text from the shared post() helper) into
+ * a typed WriteHumanConflict, or null when the text is not a conflict envelope.
+ * Shared by the wiki and agent-file write clients (same 409 shape).
+ */
+export function tryParseConflict(text: string): WriteHumanConflict | null {
   try {
     const data = JSON.parse(text) as Partial<WriteHumanConflict> & {
       error?: string;
@@ -114,12 +127,252 @@ function tryParseConflict(text: string): WriteHumanConflict | null {
   return null;
 }
 
+// ── Wiki file surface (GET /wiki/tree, GET /wiki/file) ──────────────────────
+
+/**
+ * One node in the wiki file tree. Mirrors Go's `team.TreeNode`.
+ *
+ * - `path` is repo-root-relative, slash-separated, and includes the `team/`
+ *   prefix. For a page it is byte-identical to what /wiki/catalog emits.
+ * - `children` is populated only for `dir` nodes. Apps and websites are
+ *   leaves even though they are directories on disk.
+ * - `ext` is populated only for `file` nodes (lowercase, with the dot).
+ */
+export interface WikiFSTreeNode {
+  name: string;
+  path: string;
+  type: "dir" | "page" | "file" | "app" | "website";
+  title: string;
+  ext?: string;
+  children?: WikiFSTreeNode[];
+}
+
+/**
+ * GET /wiki/tree — the wiki directory + page + app/website tree. An
+ * optional `subPath` (repo-root-relative, e.g. "team/people") scopes the
+ * walk to a subtree; omit it for the whole `team/` tree. The response
+ * shape is `{ "nodes": WikiFSTreeNode[] }`; this returns the nodes array.
+ */
+export async function fetchWikiTree(
+  subPath?: string,
+): Promise<WikiFSTreeNode[]> {
+  const trimmed = subPath?.trim();
+  const url = trimmed
+    ? `/wiki/tree?path=${encodeURIComponent(trimmed)}`
+    : "/wiki/tree";
+  const res = await get<{ nodes: WikiFSTreeNode[] }>(url);
+  return Array.isArray(res?.nodes) ? res.nodes : [];
+}
+
+/**
+ * Build the GET /wiki/file URL for a repo-root-relative `path` (e.g.
+ * "team/site/index.html"). Returned as a URL — not a fetch — because callers
+ * use it directly as an `<img>` / `<iframe>` src, which cannot carry an
+ * Authorization header. In direct-broker mode `sseURL` appends the auth token
+ * as a query param (same pattern as the SSE stream); in proxy mode the cookie-
+ * less same-origin `/api` prefix is used. We compose the `path` query onto the
+ * base `sseURL("/wiki/file")` with the correct separator so the token param
+ * (when present) is preserved.
+ */
+export function wikiFileUrl(path: string): string {
+  const base = sseURL("/wiki/file");
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}path=${encodeURIComponent(path)}`;
+}
+
+/**
+ * Build the embedded-app entry URL for an app/website wiki folder. `folderPath`
+ * is a repo-root-relative directory under `team/` (e.g. "team/site/dashboard");
+ * the broker serves the folder's `index.html` from GET /wiki/app/<folderPath>/index.html
+ * with relative assets (./styles.css, ./app.js) resolving against the same path.
+ *
+ * Unlike wikiFileUrl, this URL carries NO auth token. The route is served on the
+ * loopback origin and the app loads inside a sandboxed iframe WITHOUT
+ * allow-same-origin (see WebsiteViewer); embedding the broker token in the URL
+ * would hand a bearer credential to untrusted, agent-authored app code, which
+ * could then exfiltrate it. We pick the same base as sseURL (proxy `/api` prefix
+ * vs the direct broker origin) but strip the `?token=...` query the SSE helper
+ * appends so only the bare path crosses into the sandbox.
+ *
+ * Each path segment is URL-encoded but the slash separators are preserved so the
+ * broker still routes on the folder hierarchy.
+ */
+export function appUrl(folderPath: string): string {
+  // sseURL gives us the right base (proxy vs direct broker) but appends the
+  // auth token as `?token=...` in direct mode. Strip everything from the first
+  // `?` so the token never rides into the sandboxed app.
+  const baseWithToken = sseURL("/wiki/app");
+  const base = baseWithToken.split("?")[0];
+
+  const encoded = String(folderPath)
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return `${base}/${encoded}/index.html`;
+}
+
+// ── Wiki page mutations (Slice 2 — create / move / rename / delete) ─────────
+//
+// These drive the drag-and-drop file tree in components/wiki/tree. Each maps to
+// a broker endpoint that commits a single git change and, for move/rename,
+// rewrites any wikilinks that pointed at the old path so references never break.
+// `path`/`from`/`to` are always repo-root-relative with the `team/` prefix and a
+// `.md` suffix, byte-identical to what /wiki/tree and /wiki/catalog emit.
+
+/** Result envelope for POST /wiki/page/create. */
+export interface CreatePageResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Result envelope for POST /wiki/page/move. `references_rewritten` is the count
+ * of wikilinks the broker repointed at the new path; `rewritten_paths` lists the
+ * articles it touched so the UI can surface "Rewrote N links" with detail.
+ */
+export interface MovePageResult {
+  to: string;
+  commit_sha: string;
+  references_rewritten: number;
+  rewritten_paths: string[];
+}
+
+/** Result envelope for POST /wiki/page/rename. */
+export interface RenamePageResult {
+  to: string;
+  commit_sha: string;
+  references_rewritten: number;
+}
+
+/** Result envelope for DELETE /wiki/page. */
+export interface DeletePageResult {
+  path: string;
+  commit_sha: string;
+}
+
+/** Result envelope for POST /wiki/upload. */
+export interface UploadFileResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Upload a file into a wiki folder via multipart POST /wiki/upload. `dir` is
+ * a repo-root-relative directory under `team/` (e.g. "team/assets"); `file` is
+ * the browser File from a drop or picker. The broker derives a safe basename,
+ * blocks executable extensions, writes under `team/<dir>/<name>` with collision
+ * suffixing, and commits the change as the human, returning the canonical path
+ * plus commit SHA.
+ *
+ * This cannot reuse the shared `post()` helper: multipart bodies must NOT carry
+ * an explicit `Content-Type` header (the browser sets the boundary), whereas
+ * `post()` hardcodes `application/json`. We build the URL with `sseURL` so the
+ * auth token rides as a query param in direct-broker mode (the same tokened-URL
+ * pattern as `wikiFileUrl`), and the cookieless same-origin `/api` prefix in
+ * proxy mode.
+ */
+export async function uploadWikiFile(
+  dir: string,
+  file: File,
+): Promise<UploadFileResult> {
+  const form = new FormData();
+  form.append("dir", dir);
+  form.append("file", file, file.name);
+
+  const res = await fetch(sseURL("/wiki/upload"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const text = (await res.text().catch(() => "")).trim();
+    let message = text || `Upload failed with status ${res.status}`;
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error) {
+        message = parsed.error;
+      }
+    } catch {
+      // Non-JSON body (e.g. a 413 from MaxBytesReader); keep the raw text.
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as UploadFileResult;
+}
+
+/**
+ * Create a new wiki page at `path`. The broker commits a stub (or the supplied
+ * `content`) and returns the canonical path + commit SHA. `title` seeds the H1
+ * when `content` is omitted.
+ */
+export async function createPage(params: {
+  path: string;
+  title?: string;
+  content?: string;
+}): Promise<CreatePageResult> {
+  const body: Record<string, string> = { path: params.path };
+  if (params.title !== undefined) body.title = params.title;
+  if (params.content !== undefined) body.content = params.content;
+  return trackOn(
+    post<CreatePageResult>("/wiki/page/create", body),
+    "wiki_article_edited",
+    { is_create: true, had_conflict: false },
+  );
+}
+
+/**
+ * Move a page from `from` to `to` (e.g. dropping it into a different folder).
+ * The broker rewrites any wikilinks pointing at the old path and reports how
+ * many it rewrote so the caller can confirm the cascade to the user.
+ */
+export async function movePage(params: {
+  from: string;
+  to: string;
+}): Promise<MovePageResult> {
+  return post<MovePageResult>("/wiki/page/move", {
+    from: params.from,
+    to: params.to,
+  });
+}
+
+/**
+ * Rename the leaf of `path` to `newName` (no extension, no slashes — the broker
+ * appends `.md`). Like move, this rewrites inbound wikilinks.
+ */
+export async function renamePage(params: {
+  path: string;
+  newName: string;
+}): Promise<RenamePageResult> {
+  return post<RenamePageResult>("/wiki/page/rename", {
+    path: params.path,
+    newName: params.newName,
+  });
+}
+
+/**
+ * Delete the page at `path`. State-changing and irreversible from the UI's
+ * perspective — callers MUST confirm with the user before invoking this.
+ */
+export async function deletePage(path: string): Promise<DeletePageResult> {
+  return del<DeletePageResult>(`/wiki/page?path=${encodeURIComponent(path)}`);
+}
+
 export interface WikiCatalogEntry {
   path: string;
   title: string;
   author_slug: string;
   last_edited_ts: string;
   group: string;
+  /**
+   * Many-to-many category slugs from the article's `categories:` frontmatter
+   * (markdown-authoritative). Always present from the broker (possibly empty);
+   * optional here for older fixtures. `group` (the folder) is the fallback nav
+   * key during the category migration.
+   */
+  categories?: string[];
   /** ISO-8601 timestamp of the last access by any reader. Null if never accessed. */
   last_read?: string | null;
   human_read_count?: number;
@@ -286,16 +539,15 @@ export function subscribeSectionsUpdated(
   handler: (event: WikiSectionsUpdatedEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
   let onEvent: ((ev: MessageEvent) => void) | null = null;
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES)
+    source = openSharedEventStream();
+    if (!source)
       return () => {
         closed = true;
       };
-    source = new ES(sseURL("/events"));
     onEvent = (ev: MessageEvent) => {
       if (closed) return;
       try {
@@ -317,6 +569,119 @@ export function subscribeSectionsUpdated(
     if (source && onEvent) {
       source.removeEventListener(
         "wiki:sections_updated",
+        onEvent as EventListener,
+      );
+    }
+    if (source) {
+      source.close();
+      source = null;
+    }
+  };
+}
+
+/**
+ * One category in the Wikipedia-style category nav. Maps 1:1 to Go's
+ * `team.DiscoveredCategory`. Categories are a many-to-many classification
+ * authored in each article's `categories:` frontmatter (markdown-authoritative)
+ * and surfaced from the derived article_categories index.
+ */
+export interface DiscoveredCategory {
+  slug: string;
+  title: string;
+  article_count: number;
+  /**
+   * Parent category slugs (the subcategory tree). Always present from the
+   * broker (possibly empty); optional here for older fixtures. A category's
+   * children are the categories whose `parents` include its slug.
+   */
+  parents?: string[];
+}
+
+/** A member article of a category. Maps to Go's `team.CategoryArticle`. */
+export interface CategoryArticle {
+  path: string;
+  title: string;
+}
+
+/**
+ * GET /wiki/categories/{slug} response. Maps to Go's `team.CategoryDetail`.
+ */
+export interface CategoryDetail {
+  slug: string;
+  title: string;
+  articles: CategoryArticle[];
+}
+
+export interface WikiCategoriesUpdatedEvent {
+  categories: DiscoveredCategory[];
+  timestamp: string;
+}
+
+/**
+ * GET /wiki/categories — the category nav list (slug, title, article count),
+ * sorted by slug. Empty array on backend error so the nav can fall back to the
+ * folder/section IA without blanking.
+ */
+export async function fetchCategories(): Promise<DiscoveredCategory[]> {
+  try {
+    const res = await get<{ categories: DiscoveredCategory[] }>(
+      "/wiki/categories",
+    );
+    return Array.isArray(res?.categories) ? res.categories : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * GET /wiki/categories/{slug} — the member articles of one category. Throws on
+ * backend error so callers can surface a load failure for the category page.
+ */
+export async function fetchCategory(slug: string): Promise<CategoryDetail> {
+  return get<CategoryDetail>(`/wiki/categories/${encodeURIComponent(slug)}`);
+}
+
+/**
+ * Subscribe to `wiki:categories_updated` events on the shared `/events` SSE
+ * stream. Returns an unsubscribe function. Mirrors subscribeSectionsUpdated.
+ */
+export function subscribeCategoriesUpdated(
+  handler: (event: WikiCategoriesUpdatedEvent) => void,
+): () => void {
+  let closed = false;
+  let source: SharedEventStream | null = null;
+  let onEvent: ((ev: MessageEvent) => void) | null = null;
+
+  try {
+    source = openSharedEventStream();
+    if (!source)
+      return () => {
+        closed = true;
+      };
+    onEvent = (ev: MessageEvent) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse(ev.data) as WikiCategoriesUpdatedEvent;
+        if (data && Array.isArray(data.categories)) {
+          handler(data);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+    source.addEventListener(
+      "wiki:categories_updated",
+      onEvent as EventListener,
+    );
+  } catch {
+    source = null;
+  }
+
+  return () => {
+    closed = true;
+    if (source && onEvent) {
+      source.removeEventListener(
+        "wiki:categories_updated",
         onEvent as EventListener,
       );
     }
@@ -559,6 +924,52 @@ export async function fetchHistory(
 }
 
 /**
+ * Result envelope for GET /wiki/diff?path=&sha=. `diff` is the raw unified
+ * git diff for the article at the given commit `sha` (the change that commit
+ * introduced). The version-history UI renders it line-by-line, colouring
+ * added/removed lines. Unlike fetchHistory this does NOT swallow errors —
+ * the caller surfaces a "couldn't load this version's diff" state so the
+ * selection feedback is honest rather than silently blank.
+ */
+export interface WikiDiffResult {
+  diff: string;
+  sha: string;
+  path: string;
+}
+
+export async function fetchWikiDiff(
+  path: string,
+  sha: string,
+): Promise<WikiDiffResult> {
+  return get<WikiDiffResult>("/wiki/diff", { path, sha });
+}
+
+/**
+ * Result envelope for POST /wiki/restore. `commit_sha` is the NEW commit the
+ * broker created to bring the article's content back to the restored version
+ * (a forward commit, never a history rewrite). The caller passes it up via
+ * onRestored so the article view refetches the now-current body.
+ */
+export interface RestoreVersionResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Restore an article to a prior `sha`. State-changing and not reversible from
+ * the UI without another restore — callers MUST confirm with the user before
+ * invoking this (the broker writes a fresh commit that overwrites HEAD's body
+ * with the historical version). Mirrors the page-mutation client pattern: a
+ * thin POST with a typed envelope, errors propagated to the caller.
+ */
+export async function restoreWikiVersion(
+  path: string,
+  sha: string,
+): Promise<RestoreVersionResult> {
+  return post<RestoreVersionResult>("/wiki/restore", { path, sha });
+}
+
+/**
  * Subscribe to the shared broker `/events` SSE stream filtered to
  * `wiki:write` events. Returns an unsubscribe function that tears down
  * the underlying EventSource.
@@ -573,16 +984,15 @@ export function subscribeEditLog(
   handler: (entry: WikiEditLogEntry) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
   let onWrite: ((ev: MessageEvent) => void) | null = null;
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES)
+    source = openSharedEventStream();
+    if (!source)
       return () => {
         closed = true;
       };
-    source = new ES(sseURL("/events"));
     onWrite = (ev: MessageEvent) => {
       if (closed) return;
       try {

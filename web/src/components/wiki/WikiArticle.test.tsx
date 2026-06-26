@@ -1,9 +1,54 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as richApi from "../../api/richArtifacts";
 import * as api from "../../api/wiki";
+import { requestOpenInEdit } from "./openInEditTarget";
 import WikiArticle from "./WikiArticle";
+
+// WikiArticle now reads the wiki-tree React Query (the article delete control
+// invalidates it so a deleted page leaves the sidebar index), so renders need
+// a QueryClient in context. Wrap via the `wrapper` option so `rerender` keeps
+// the provider. Fresh client per render isolates tests; retries off so error
+// states surface immediately.
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return rtlRender(ui, { wrapper: Wrapper });
+}
+
+// WikiArticle's Edit tab mounts the WYSIWYG WikiEditor, which lazy-loads the
+// real Tiptap/ProseMirror stack (RefCloneEditor). Stub that module with a
+// controlled textarea that mirrors the props.onChange contract so the
+// article-level save/refresh flow is exercised without booting ProseMirror in
+// tests. (The legacy ./editor/TiptapWikiEditor is also stubbed for any path
+// that still references it.)
+const editorStub = ({
+  content,
+  onChange,
+}: {
+  content: string;
+  onChange: (markdown: string) => void;
+}) => (
+  <textarea
+    data-testid="wk-tiptap-stub"
+    value={content}
+    onChange={(e) => onChange(e.target.value)}
+  />
+);
+vi.mock("./editor/refclone/RefCloneEditor", () => ({ default: editorStub }));
+vi.mock("./editor/TiptapWikiEditor", () => ({ default: editorStub }));
 
 const CATALOG: api.WikiCatalogEntry[] = [
   {
@@ -33,6 +78,15 @@ beforeEach(() => {
   // Default history stub — individual tests override as needed.
   vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
   vi.spyOn(richApi, "fetchWikiVisualArtifact").mockResolvedValue(null);
+  // Default the by-id artifact fetch to a 404-style rejection so articles
+  // without inline `visual-artifact:<id>` markers never accidentally embed
+  // one. Tests that exercise inline markers override this with a resolved
+  // detail. restoreAllMocks in this same hook resets the spy each test, so
+  // the per-test spyOn re-installs cleanly (this mirrors the proven pattern
+  // in NotebookEntry.test.tsx).
+  vi.spyOn(richApi, "fetchRichArtifact").mockRejectedValue(
+    new Error("404 not found"),
+  );
 });
 
 describe("<WikiArticle content>", () => {
@@ -99,10 +153,14 @@ describe("<WikiArticle content>", () => {
     getByRole("button", { name: "Raw markdown" }).click();
     await waitFor(() => expect(getByText(/## Heading A/)).toBeInTheDocument());
     getByRole("button", { name: "History" }).click();
-    await waitFor(() => expect(getByText(/streams from/)).toBeInTheDocument());
+    // The History tab now mounts the real VersionHistory panel. With the
+    // default empty fetchHistory stub it lands on its empty state.
+    await waitFor(() =>
+      expect(getByText(/no version history yet/i)).toBeInTheDocument(),
+    );
   });
 
-  it("shows promoted visual views in the Visual tab", async () => {
+  it("renders a paired visual artifact inline at the top of the Article tab (no separate Visual tab)", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue({
       path: "team/drafts/visual-plan.md",
       title: "Visual Plan",
@@ -142,16 +200,187 @@ describe("<WikiArticle content>", () => {
       />,
     );
 
-    const visualTab = await screen.findByRole("button", { name: "Visual" });
-    await waitFor(() => expect(visualTab).not.toBeDisabled());
+    // The Visual tab is gone — folded into Article. The article tab is the
+    // default, so the embed should appear without any tab interaction.
+    expect(screen.queryByRole("button", { name: "Visual" })).toBeNull();
 
-    expect(await screen.findByTestId("wk-visual-artifact")).toBeInTheDocument();
-    expect(screen.getByTitle("Visual Plan")).toHaveAttribute(
-      "srcdoc",
-      expect.stringContaining("Visual artifact"),
+    const embed = await screen.findByLabelText("Visual Plan", {
+      selector: "rich-artifact-embed",
+    });
+    expect(embed).toBeInTheDocument();
+    expect(embed.closest("figure")).not.toBeNull();
+
+    // The right sidebar is preserved (we dropped the dedicated visual mode).
+    expect(document.querySelector(".wk-right-sidebar")).not.toBeNull();
+
+    // No iframe anywhere — strict inline embed.
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+});
+
+describe("<WikiArticle inline visual-artifact markers>", () => {
+  it("strips an inline visual-artifact marker and embeds the referenced artifact", async () => {
+    // Repro of the live bug: the agent hand-wrote a standalone
+    // `visual-artifact:<id>` marker into the article body via team_wiki_write
+    // instead of promoting. The marker must never render as raw text; the
+    // referenced artifact must be embedded inline.
+    const inlineId = "ra_19dcb5cac5a2bd3a";
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/drafts/ceo-coffee-extraction-control-chart.md",
+      title: "Coffee Extraction Control Chart",
+      content: `# Coffee Extraction\n\nBody copy.\n\nvisual-artifact:${inlineId}\n\nMore copy.`,
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    // Override the beforeEach 404 default: this id resolves to a draft
+    // artifact referenced only by the hand-written marker.
+    const fetchByIdSpy = vi
+      .spyOn(richApi, "fetchRichArtifact")
+      .mockResolvedValue({
+        artifact: {
+          id: inlineId,
+          kind: "wiki_visual",
+          title: "Coffee Extraction Control Chart",
+          summary: "",
+          trustLevel: "draft",
+          representation: "html",
+          htmlPath: `wiki/visual-artifacts/${inlineId}.html`,
+          createdBy: "ceo",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          contentHash: "hash",
+          sanitizerVersion: "sandbox-v1",
+        },
+        html: "<svg aria-label='inline-control-chart'></svg>",
+      });
+
+    render(
+      <WikiArticle
+        path="team/drafts/ceo-coffee-extraction-control-chart.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
     );
+
+    // The artifact is fetched by id and embedded inline (scoped to this
+    // render's body to avoid sibling-test shadow-DOM leakage).
+    const body = await screen.findByTestId("wk-article-body");
+    const embed = await screen.findByTestId("rich-artifact-embed");
+    expect(body.contains(embed)).toBe(true);
+    expect(fetchByIdSpy).toHaveBeenCalledWith(inlineId);
+
+    // The raw marker must never render as literal text in the body.
+    expect(body.textContent ?? "").not.toContain("visual-artifact:");
+    expect(body.textContent ?? "").not.toContain(inlineId);
+    // Surrounding prose is preserved.
+    expect(body.textContent ?? "").toContain("Body copy.");
+    expect(body.textContent ?? "").toContain("More copy.");
   });
 
+  it("does not double-embed when the promoted artifact is also referenced inline", async () => {
+    // Distinct from the strip test's id so a leaked shadow-DOM node from a
+    // sibling test cannot masquerade as this render's embed.
+    const sharedId = "ra_5ed0000012345abc";
+    const detail: richApi.RichArtifactDetail = {
+      artifact: {
+        id: sharedId,
+        kind: "wiki_visual",
+        title: "Shared Chart",
+        summary: "",
+        trustLevel: "promoted",
+        representation: "html",
+        htmlPath: `wiki/visual-artifacts/${sharedId}.html`,
+        promotedWikiPath: "team/reference/coffee.md",
+        createdBy: "ceo",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        contentHash: "hash",
+        sanitizerVersion: "sandbox-v1",
+      },
+      html: "<svg aria-label='shared-chart'></svg>",
+    };
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/reference/coffee.md",
+      title: "Coffee",
+      content: `# Coffee\n\nBody copy.\n\nvisual-artifact:${sharedId}\n`,
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    // The shared id resolves through BOTH the promoted-path fetch
+    // (fetchWikiVisualArtifact) and the inline-marker fetch
+    // (fetchRichArtifact). The dedupe must collapse them to a single embed.
+    vi.spyOn(richApi, "fetchWikiVisualArtifact").mockResolvedValue(detail);
+    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(detail);
+
+    render(
+      <WikiArticle
+        path="team/reference/coffee.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const body = await screen.findByTestId("wk-article-body");
+    // Wait for the inline embed to mount, then assert exactly one embed lives
+    // inside this render's body. Scoping to body (rather than screen) keeps
+    // the count honest even if a sibling test leaked a custom-element node;
+    // the distinct id above means no leaked node could match anyway.
+    const embed = await screen.findByTestId("rich-artifact-embed");
+    expect(body.contains(embed)).toBe(true);
+    const embedsInBody = Array.from(
+      body.querySelectorAll('[data-testid="rich-artifact-embed"]'),
+    );
+    expect(embedsInBody).toHaveLength(1);
+  });
+
+  it("skips an inline marker whose artifact 404s without leaking raw text", async () => {
+    const missingId = "ra_00000000deadbeef";
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/reference/coffee.md",
+      title: "Coffee",
+      content: `# Coffee\n\nBefore.\n\nvisual-artifact:${missingId}\n\nAfter.`,
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    // beforeEach already defaults fetchRichArtifact to a 404 rejection; this
+    // test relies on that default, so no extra spy is needed.
+
+    render(
+      <WikiArticle
+        path="team/reference/coffee.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const body = await screen.findByTestId("wk-article-body");
+    // No embed, but also no leaked marker text — the stripped line keeps the
+    // body clean and the failed fetch degrades to nothing visible.
+    await waitFor(() => {
+      expect(body.textContent ?? "").toContain("Before.");
+    });
+    expect(body.textContent ?? "").not.toContain("visual-artifact:");
+    expect(body.textContent ?? "").not.toContain(missingId);
+    expect(screen.queryByTestId("rich-artifact-embed")).toBeNull();
+  });
+});
+
+describe("<WikiArticle content (cont.)>", () => {
   it("keeps the selected tab during same-path refreshes without a visual artifact", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
 
@@ -195,6 +424,85 @@ describe("<WikiArticle content>", () => {
     await waitFor(() =>
       expect(screen.getByText(/network down/)).toBeInTheDocument(),
     );
+    // The error state must expose a retry affordance so the user is not
+    // stuck on a dead end if the broker recovers.
+    expect(
+      screen.getByRole("button", { name: /retry loading article/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("<WikiArticle loader timeout and retry>", () => {
+  it("transitions Loading article… to an error+retry state on timeout and retries on click", async () => {
+    // Arrange — first call hangs forever to simulate a stalled broker.
+    type Resolve = (v: api.WikiArticle) => void;
+    let firstResolve: Resolve | null = null;
+    const fetchSpy = vi.spyOn(api, "fetchArticle");
+    fetchSpy.mockImplementationOnce(
+      () =>
+        new Promise<api.WikiArticle>((r) => {
+          firstResolve = r as Resolve;
+        }),
+    );
+    // Second call (after Retry) resolves successfully.
+    fetchSpy.mockResolvedValueOnce({
+      path: "team/about/README.md",
+      title: "About",
+      content: "Body after retry.",
+      last_edited_by: "pm",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["pm"],
+      backlinks: [],
+      word_count: 3,
+      categories: [],
+    });
+
+    vi.useFakeTimers();
+    try {
+      render(
+        <WikiArticle
+          path="team/about/README.md"
+          catalog={[]}
+          onNavigate={() => {}}
+        />,
+      );
+      expect(screen.getByText(/Loading article/i)).toBeInTheDocument();
+
+      // Advance past the 5s timeout — loader should flip to the error state.
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect(
+        screen.getByText(/Still waiting on the broker/i),
+      ).toBeInTheDocument();
+      const retry = screen.getByRole("button", {
+        name: /retry loading article/i,
+      });
+      expect(retry).toBeInTheDocument();
+
+      // Click Retry — the second fetch resolves and the article renders.
+      retry.click();
+      // Release the dangling first promise so it cannot stomp later state.
+      const releaseFirst = firstResolve as Resolve | null;
+      releaseFirst?.({
+        path: "team/about/README.md",
+        title: "About",
+        content: "stale",
+        last_edited_by: "pm",
+        last_edited_ts: new Date().toISOString(),
+        revisions: 1,
+        contributors: ["pm"],
+        backlinks: [],
+        word_count: 1,
+        categories: [],
+      });
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() =>
+      expect(screen.getByText(/Body after retry/)).toBeInTheDocument(),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("shows a loading state before the fetch resolves", async () => {
@@ -382,8 +690,11 @@ describe("<WikiArticle history and refresh>", () => {
     );
 
     await screen.findByText("Original body");
-    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
-    fireEvent.change(screen.getByTestId("wk-editor-textarea"), {
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = (await screen.findByTestId(
+      "wk-tiptap-stub",
+    )) as HTMLTextAreaElement;
+    fireEvent.change(editor, {
       target: { value: "Updated body" },
     });
     fireEvent.change(screen.getByTestId("wk-editor-commit"), {
@@ -677,5 +988,154 @@ describe("<WikiArticle synthesis status>", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.queryByText("generating brief…")).not.toBeInTheDocument();
+  });
+});
+
+describe("<WikiArticle open-in-edit hand-off>", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("opens a freshly-created page directly in the editor tab", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      path: "team/playbooks/onboarding.md",
+      title: "Onboarding",
+      content: "# Onboarding\n",
+    });
+    // Simulate the tree's create flow parking the intent before navigating.
+    requestOpenInEdit("team/playbooks/onboarding.md");
+
+    render(
+      <WikiArticle
+        path="team/playbooks/onboarding.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    // The Edit tab is active and the editor surface mounts without the user
+    // having to click "Edit" first.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Edit" })).toHaveClass(
+        "active",
+      ),
+    );
+    expect(await screen.findByTestId("wk-tiptap-stub")).toBeInTheDocument();
+  });
+
+  it("opens an existing page (no pending intent) in the read view", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Customer X" });
+    expect(screen.getByRole("button", { name: "Read" })).toHaveClass("active");
+    expect(screen.queryByTestId("wk-tiptap-stub")).toBeNull();
+  });
+});
+
+describe("<WikiArticle delete affordance>", () => {
+  it("confirms before deleting, then deletes and navigates away on success", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
+    const deleteSpy = vi.spyOn(api, "deletePage").mockResolvedValue({
+      path: STUB_ARTICLE.path,
+      commit_sha: "del0001",
+    });
+    const onNavigate = vi.fn();
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Customer X" });
+    fireEvent.click(screen.getByTestId("wk-article-delete"));
+
+    // The confirm dialog appears first — no delete yet (tell-don't-ask veto).
+    expect(screen.getByTestId("wk-article-delete-confirm")).toBeInTheDocument();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    // Initial focus lands on Cancel so a stray Enter cancels rather than deletes.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus(),
+    );
+
+    fireEvent.click(screen.getByTestId("wk-article-delete-confirm-btn"));
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
+    expect(deleteSpy).toHaveBeenCalledWith("people/customer-x");
+    // On success the user is sent back to the catalog (empty path).
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith(""));
+  });
+
+  it("surfaces an error and keeps the user on the page when delete fails", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
+    vi.spyOn(api, "deletePage").mockRejectedValue(new Error("broker down"));
+    const onNavigate = vi.fn();
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Customer X" });
+    fireEvent.click(screen.getByTestId("wk-article-delete"));
+    fireEvent.click(screen.getByTestId("wk-article-delete-confirm-btn"));
+
+    expect(await screen.findByText("broker down")).toBeInTheDocument();
+    // The page is still here; no navigation away on failure.
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("<WikiArticle header row>", () => {
+  // Regression (live smoke run): the floated action toolbars overlapped a
+  // vertically-wrapping breadcrumb. The header must be ONE row container
+  // holding breadcrumb + actions, with the title below it — not floats.
+  it("renders breadcrumb and page actions inside a single header row, title below", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Customer X" });
+    const header = screen.getByTestId("wk-article-header");
+
+    // Breadcrumb lives inside the header row…
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(header.contains(breadcrumb)).toBe(true);
+
+    // …and so do BOTH page actions, grouped in one actions container.
+    const aiChange = screen.getByTestId("wk-article-ai-change");
+    const deleteBtn = screen.getByTestId("wk-article-delete");
+    expect(header.contains(aiChange)).toBe(true);
+    expect(header.contains(deleteBtn)).toBe(true);
+    const actions = header.querySelector(".wk-article-actions");
+    expect(actions).not.toBeNull();
+    expect(actions?.contains(aiChange)).toBe(true);
+    expect(actions?.contains(deleteBtn)).toBe(true);
+
+    // The title renders on its own line BELOW the header row, not inside it.
+    const title = screen.getByRole("heading", { name: "Customer X" });
+    expect(header.contains(title)).toBe(false);
+    expect(
+      header.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

@@ -86,18 +86,25 @@ export function DMView({ agentSlug, channelSlug }: DMViewProps) {
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} />
               ))}
-            </div>
-          ) : lastMessage ? (
-            <div className="dm-chat-preview">
-              <MessageBubble message={lastMessage} />
+              {/* Inline at the foot of the scroll — the spot the agent's
+                  reply will land, so the loader is replaced in place. */}
+              <TypingIndicator />
             </div>
           ) : (
-            <div className="dm-chat-preview dm-chat-preview-empty">
-              No messages yet — start the conversation below.
-            </div>
+            <>
+              {lastMessage ? (
+                <div className="dm-chat-preview">
+                  <MessageBubble message={lastMessage} />
+                </div>
+              ) : (
+                <div className="dm-chat-preview dm-chat-preview-empty">
+                  No messages yet — start the conversation below.
+                </div>
+              )}
+              <TypingIndicator />
+            </>
           )}
-          <TypingIndicator />
-          <InterviewBar />
+          <InterviewBar channelSlug={channelSlug} />
           <Composer />
         </div>
       </div>

@@ -62,12 +62,11 @@ func cmdAgent(ctx *SlashContext, args string) error {
 }
 
 type generatedAgentTemplate struct {
-	Slug           string   `json:"slug"`
-	Name           string   `json:"name"`
-	Role           string   `json:"role"`
-	Expertise      []string `json:"expertise"`
-	Personality    string   `json:"personality"`
-	PermissionMode string   `json:"permission_mode"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role"`
+	Expertise   []string `json:"expertise"`
+	Personality string   `json:"personality"`
 }
 
 func cmdAgentPrompt(ctx *SlashContext, args string) error {
@@ -91,9 +90,6 @@ func cmdAgentPrompt(ctx *SlashContext, args string) error {
 	}
 	if strings.TrimSpace(tmpl.Personality) != "" {
 		body["personality"] = tmpl.Personality
-	}
-	if strings.TrimSpace(tmpl.PermissionMode) != "" {
-		body["permission_mode"] = tmpl.PermissionMode
 	}
 	if _, err := brokerPostOfficeMembers(body); err != nil {
 		ctx.AddMessage("system", fmt.Sprintf("Create failed: %v", err))
@@ -137,13 +133,12 @@ func cmdAgentCreate(ctx *SlashContext, args string) error {
 	}
 
 	body := map[string]any{
-		"action":          "create",
-		"slug":            slug,
-		"name":            getFlagOr(flags, "name", slug),
-		"role":            getFlag(flags, "role"),
-		"personality":     getFlag(flags, "personality"),
-		"permission_mode": getFlag(flags, "permission-mode"),
-		"created_by":      "slash",
+		"action":      "create",
+		"slug":        slug,
+		"name":        getFlagOr(flags, "name", slug),
+		"role":        getFlag(flags, "role"),
+		"personality": getFlag(flags, "personality"),
+		"created_by":  "slash",
 	}
 	if providerKind != "" {
 		body["provider"] = buildProviderPayload(providerKind, flags)
@@ -177,9 +172,6 @@ func cmdAgentEdit(ctx *SlashContext, args string) error {
 	}
 	if v := strings.TrimSpace(flags["personality"]); v != "" {
 		body["personality"] = v
-	}
-	if v := strings.TrimSpace(flags["permission-mode"]); v != "" {
-		body["permission_mode"] = v
 	}
 	if providerKind, ok := flags["provider"]; ok {
 		providerKind = strings.TrimSpace(providerKind)

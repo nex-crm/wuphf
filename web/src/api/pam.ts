@@ -6,7 +6,8 @@
  * and subscribes to her progress.
  */
 
-import { get, post, sseURL } from "./client";
+import { get, post } from "./client";
+import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
 // Open string union on PamActionId is intentional: the canonical id today is
 // `enrich_article`, but new actions added in pam_actions.go should flow
@@ -128,19 +129,18 @@ export function subscribePamEvents(
   handler: (evt: PamActionEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
   let onStarted: ((ev: MessageEvent) => void) | null = null;
   let onDone: ((ev: MessageEvent) => void) | null = null;
   let onFailed: ((ev: MessageEvent) => void) | null = null;
   let onError: ((ev: Event) => void) | null = null;
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES)
+    source = openSharedEventStream();
+    if (!source)
       return () => {
         closed = true;
       };
-    source = new ES(sseURL("/events"));
 
     const dispatch = (kind: EventKind, ev: MessageEvent) => {
       if (closed) return;
@@ -154,7 +154,7 @@ export function subscribePamEvents(
       if (closed) return;
       // EventSource auto-reconnects on transient errors. Only surface a
       // failure to the caller when the connection is terminally closed.
-      if (source && source.readyState === ES.CLOSED) {
+      if (source && source.readyState === source.CLOSED) {
         closed = true;
         console.warn("pam: SSE connection lost");
         handler({

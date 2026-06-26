@@ -2,11 +2,12 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
 
 import {
+  agentDetailRoute,
+  agentsRoute,
   appRoute,
   appTaskDetailRoute,
   channelRoute,
   createAppRouter,
-  dmRoute,
   inboxRoute,
   indexRoute,
   legacyWorkbenchAgentRoute,
@@ -25,11 +26,15 @@ import {
   wikiLookupRoute,
 } from "../lib/router";
 import {
+  APP_LABELS,
   APP_PANEL_IDS,
+  FIRST_CLASS_APP_IDS,
   isAppPanelId,
+  isFirstClassAppId,
   ROUTE_CONTRACTS,
   ROUTE_PATHS,
   SIDEBAR_APP_IDS,
+  SIDEBAR_TOOLS,
   sidebarAppRouteKind,
 } from "./routeRegistry";
 
@@ -40,7 +45,10 @@ function unique<T>(values: readonly T[]): T[] {
 describe("route registry", () => {
   it("keeps app panel ids unique and validated", () => {
     expect(unique(APP_PANEL_IDS)).toHaveLength(APP_PANEL_IDS.length);
-    expect(isAppPanelId("tasks")).toBe(true);
+    expect(isAppPanelId("graph")).toBe(true);
+    // `tasks` is now a first-class surface (lives at /tasks), not an
+    // /apps/$id panel.
+    expect(isAppPanelId("tasks")).toBe(false);
     expect(isAppPanelId("wiki")).toBe(false);
     expect(isAppPanelId("notebooks")).toBe(false);
   });
@@ -52,6 +60,32 @@ describe("route registry", () => {
     for (const id of SIDEBAR_APP_IDS) {
       expect(sidebarAppRouteKind(id), id).not.toBeNull();
     }
+  });
+
+  it("provides a human label for every routed sidebar id", () => {
+    for (const id of APP_PANEL_IDS) {
+      expect(APP_LABELS[id], id).toBeTruthy();
+    }
+    for (const id of FIRST_CLASS_APP_IDS) {
+      expect(APP_LABELS[id], id).toBeTruthy();
+    }
+  });
+
+  it("drives sidebar TOOLS labels from the route registry", () => {
+    // Every entry in the rendered TOOLS list is either an app-panel id
+    // (routed at /apps/$id) or a first-class app id (routed at /$id).
+    // Labels come from APP_LABELS, never an out-of-band constant.
+    for (const tool of SIDEBAR_TOOLS) {
+      expect(sidebarAppRouteKind(tool.id), tool.id).toBe(tool.kind);
+      expect(tool.label).toBe(APP_LABELS[tool.id]);
+    }
+  });
+
+  it("recognises first-class app ids that live outside /apps", () => {
+    expect(isFirstClassAppId("wiki")).toBe(true);
+    expect(isFirstClassAppId("inbox")).toBe(true);
+    expect(isFirstClassAppId("tasks")).toBe(true);
+    expect(isFirstClassAppId("graph")).toBe(false);
   });
 
   it("keeps the planned route contracts unique", () => {
@@ -68,7 +102,8 @@ describe("TanStack route tree", () => {
   const expectedLeafRoutes = [
     ["/", indexRoute.id],
     ["/channels/launch", channelRoute.id],
-    ["/dm/pm", dmRoute.id],
+    ["/agents", agentsRoute.id],
+    ["/agents/pm", agentDetailRoute.id],
     ["/apps/tasks", appRoute.id],
     ["/tasks", tasksRoute.id],
     ["/tasks/task-7", taskDetailRoute.id],
@@ -126,11 +161,31 @@ describe("TanStack route tree", () => {
     );
     const leaf = router.matchRoutes(path).at(-1);
 
-    // /console and /threads were temporary aliases during phase 0. They
-    // should now only match the root (no leaf), so the canonical
-    // /apps/console URL is the single source of truth (and /apps/threads
-    // is no longer a recognized app panel — see APP_PANEL_IDS).
+    // /console and /threads were temporary aliases during phase 0. Neither
+    // is a recognized app panel any longer (see APP_PANEL_IDS), so both
+    // should only match the root (no leaf).
     expect(leaf?.routeId).toBe(rootRoute.id);
+  });
+
+  it.each([
+    ["/apps/wiki", "wiki"],
+    ["/apps/inbox", "inbox"],
+  ])("routes %s through the generic app route so MainContent can redirect to the first-class surface", (path, expectedAppId) => {
+    // /apps/wiki and /apps/inbox match the generic /apps/$appId route
+    // because the router has no opinion on which app ids are
+    // first-class. MainContent narrows via isFirstClassAppId() and
+    // mounts FirstClassAppRedirect, which navigates to /wiki or
+    // /inbox respectively. Asserting both halves here keeps the
+    // aliasing contract pinned: a future drop of either side would
+    // silently bring the "Page not found" regression back.
+    const router = createAppRouter(
+      createMemoryHistory({ initialEntries: ["/"] }),
+    );
+    const leaf = router.matchRoutes(path).at(-1);
+
+    expect(leaf?.routeId).toBe(appRoute.id);
+    expect((leaf?.params as { appId?: string })?.appId).toBe(expectedAppId);
+    expect(isFirstClassAppId(expectedAppId)).toBe(true);
   });
 
   it("treats /apps/threads as an unknown app panel", () => {

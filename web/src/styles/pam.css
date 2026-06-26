@@ -29,20 +29,26 @@
 }
 
 .pam-wrap {
-  position: absolute;
-  /* Bottom of wrap sits on the tab bar's bottom edge — which is the
-   * divider line between the tab row and the wiki body. With the flex
-   * column order (avatar first, desk second) and desk being visually
-   * the lowest element, the desk's bottom rests exactly on that line. */
-  bottom: 0;
-  right: 24px;
-  z-index: 40; /* above content; below global overlays */
+  /* Pam is a right-aligned FLEX CHILD of the tab bar, not an absolute
+   * overlay. The earlier `position: absolute; bottom: 0; right: 24px`
+   * floated her sprite OVER the tab row itself (founder smoke run:
+   * "the fixed Pam sprite sits over the wiki toolbar"). As a flex item
+   * the row reserves her horizontal space, and the sprite is sized to
+   * fit the 42px bar height so nothing pokes over neighbouring chrome.
+   * Her desk still rests on the bar's bottom divider line via
+   * align-self: flex-end. */
+  position: relative; /* anchor for the menu / status / Jim visit */
+  margin-left: auto;
+  margin-right: 24px;
+  align-self: flex-end;
+  z-index: 40; /* menu + status above content; below global overlays */
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 96px;
+  width: 72px;
   user-select: none;
   pointer-events: none; /* only the button + menu receive clicks */
+  overflow: visible;
 }
 
 .pam-button {
@@ -74,9 +80,9 @@
 
 .pam-desk {
   pointer-events: auto;
-  margin-top: -18px;
-  width: 92px;
-  height: 22px;
+  margin-top: -14px;
+  width: 68px;
+  height: 16px;
   background: /* Top edge — lighter highlight */
       linear-gradient(to bottom, #c6a37a 0 2px, transparent 2px),
       /* Main desk surface — warm wood */
@@ -93,10 +99,10 @@
 .pam-desk::before {
   content: "";
   position: absolute;
-  left: 10px;
-  top: 6px;
-  width: 22px;
-  height: 8px;
+  left: 7px;
+  top: 4px;
+  width: 16px;
+  height: 6px;
   background: #f4e8c8;
   border: 1px solid #3a2710;
 }
@@ -104,10 +110,10 @@
 .pam-desk::after {
   content: "";
   position: absolute;
-  right: 12px;
-  top: 4px;
-  width: 14px;
-  height: 10px;
+  right: 8px;
+  top: 3px;
+  width: 10px;
+  height: 8px;
   background: #ffffff;
   border: 1px solid #3a2710;
   box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.15);
@@ -200,6 +206,89 @@
   pointer-events: none;
 }
 
+/* ─── Jim visits Pam ───
+ *
+ * Jim occasionally walks in from off-tab, trades a few bubbles with Pam, then
+ * leaves. The sprite comes from the shared generated office avatar system; this
+ * wrapper only handles placement and timing. It is intentionally non-interactive
+ * and pointer-events free so Pam's desk menu remains the only control here.
+ */
+.jim-pam-visitor {
+  position: absolute;
+  right: 74px;
+  bottom: 0;
+  z-index: 35;
+  width: 34px;
+  height: 48px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(180px);
+}
+
+.jim-pam-visitor.is-walking-in {
+  animation: jim-walk-in 2.6s linear forwards;
+}
+
+.jim-pam-visitor.is-chatting {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.jim-pam-visitor.is-walking-out {
+  animation: jim-walk-out 2.2s linear forwards;
+}
+
+.jim-pam-visitor.is-walking-in .jim-pixel,
+.jim-pam-visitor.is-walking-out .jim-pixel {
+  animation: jim-step 0.36s steps(2, end) infinite;
+}
+
+.jim-pixel {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 34px;
+  display: block;
+  image-rendering: pixelated;
+  transform-origin: 50% 100%;
+}
+
+.jim-pam-bubble {
+  position: absolute;
+  bottom: 44px;
+  left: -78px;
+  width: 190px;
+  padding: 7px 9px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  color: var(--wk-text);
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.jim-pam-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 91px;
+  width: 10px;
+  height: 10px;
+  background: var(--wk-surface);
+  border-right: 1px solid var(--wk-border);
+  border-bottom: 1px solid var(--wk-border);
+  transform: rotate(45deg);
+}
+
+.jim-pam-bubble[data-speaker="pam"] {
+  left: -34px;
+  border-color: var(--wk-amber);
+  background: var(--wk-amber-banner);
+}
+
 /* ─── Idle + busy animations ───
  * Sway is a gentle 1deg rotation roughly every 8 seconds. Blink is a quick
  * vertical squash so Pam feels alive without motion-sickness risk. Busy-bob
@@ -229,9 +318,47 @@
   }
 }
 
+@keyframes jim-walk-in {
+  from {
+    opacity: 1;
+    transform: translateX(180px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes jim-walk-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(180px);
+  }
+}
+
+@keyframes jim-step {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(1deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pam-button,
-  .pam-button[data-busy="true"] {
+  .pam-button[data-busy="true"],
+  .jim-pam-visitor {
+    animation: none;
+  }
+
+  .jim-pam-visitor.is-walking-in .jim-pixel,
+  .jim-pam-visitor.is-walking-out .jim-pixel {
     animation: none;
   }
 }

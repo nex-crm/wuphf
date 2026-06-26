@@ -2,8 +2,11 @@
 import { useQuery } from "@tanstack/react-query";
 
 import {
+  get,
   getActions,
+  getConfig,
   getDecisions,
+  getLocalProvidersStatus,
   getOfficeMembers,
   getScheduler,
   getWatchdogs,
@@ -13,8 +16,14 @@ import { getOfficeTasks } from "../../api/tasks";
 import { formatTokens } from "../../lib/format";
 import { isAgentActive, normalizeStatus } from "../../lib/officeStatus";
 import { keyedByOccurrence } from "../../lib/reactKeys";
+import { router } from "../../lib/router";
+import {
+  configuredConnectedRuntimeProviders,
+  type RuntimeProviderOption,
+} from "../../lib/runtimeProviders";
 import { type Insight, InsightsList } from "../activity/InsightsList";
 import { Timeline, type TimelineEvent } from "../activity/Timeline";
+import type { PrereqResult } from "../onboarding/runtimes";
 import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
 import { AgentPulsePanel } from "./shared/AgentPulsePanel";
 
@@ -68,7 +77,6 @@ interface SchedulerJobRaw {
   due_at?: string;
 }
 
-
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function ArtifactsApp() {
   const tasks = useQuery({
@@ -112,6 +120,22 @@ export function ArtifactsApp() {
     queryFn: () => getOfficeMembers(),
     refetchInterval: 15_000,
   });
+  const config = useQuery({
+    queryKey: ["activity-config"],
+    queryFn: getConfig,
+    staleTime: 15_000,
+  });
+  const prereqs = useQuery({
+    queryKey: ["activity-runtime-prereqs"],
+    queryFn: () =>
+      get<{ prereqs?: PrereqResult[] } | PrereqResult[]>("/onboarding/prereqs"),
+    staleTime: 15_000,
+  });
+  const localProviders = useQuery({
+    queryKey: ["activity-local-providers"],
+    queryFn: getLocalProvidersStatus,
+    staleTime: 15_000,
+  });
 
   const isLoading =
     tasks.isLoading ||
@@ -150,6 +174,17 @@ export function ArtifactsApp() {
   const allJobs = (scheduler.data?.jobs ?? []) as unknown as SchedulerJobRaw[];
   const usageData = usage.data;
   const allMembers = members.data?.members ?? [];
+  const prereqList = Array.isArray(prereqs.data)
+    ? prereqs.data
+    : (prereqs.data?.prereqs ?? []);
+  const connectedProviders = config.data
+    ? configuredConnectedRuntimeProviders(config.data, {
+        prereqs: prereqList,
+        localStatuses: localProviders.data,
+      })
+    : [];
+  const providersIsFetched =
+    config.isFetched && prereqs.isFetched && localProviders.isFetched;
 
   const activeTasks = allTasks.filter((t) => {
     const s = normalizeStatus(t.status);
@@ -265,6 +300,10 @@ export function ArtifactsApp() {
           })}
         </div>
       </div>
+
+      {providersIsFetched && connectedProviders.length > 0 ? (
+        <ConnectedProvidersSection providers={connectedProviders} />
+      ) : null}
 
       {/* Stat grid */}
       <div
@@ -429,6 +468,104 @@ export function ArtifactsApp() {
 }
 
 /* ── Shared sub-components ── */
+
+function goToSettings(): void {
+  void router.navigate({ to: "/apps/$appId", params: { appId: "settings" } });
+}
+
+function goToHealthCheck(): void {
+  void router.navigate({
+    to: "/apps/$appId",
+    params: { appId: "health-check" },
+  });
+}
+
+function ConnectedProvidersSection({
+  providers,
+}: {
+  providers: RuntimeProviderOption[];
+}) {
+  return (
+    <section
+      id="connected-providers"
+      aria-label="Connected providers"
+      style={{
+        background: "var(--green-bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "12px 16px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          marginBottom: 8,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600 }}>
+          {providers.length} provider{providers.length !== 1 ? "s" : ""}{" "}
+          connected
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={goToSettings}
+          >
+            Settings
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={goToHealthCheck}
+          >
+            Provider Doctor
+          </button>
+        </div>
+      </div>
+      {providers.map((provider) => (
+        <div
+          key={provider.id}
+          style={{
+            fontSize: 13,
+            color: "var(--text)",
+            marginBottom: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "var(--green)",
+              flexShrink: 0,
+            }}
+          />
+          <strong>{provider.label}</strong>
+          {" — ready"}
+          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+            ({provider.desc})
+          </span>
+        </div>
+      ))}
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 12,
+          color: "var(--warning-400, #ce6b09)",
+        }}
+      >
+        Task creation and runtime switching only show configured providers that
+        pass connection checks.
+      </div>
+    </section>
+  );
+}
 
 interface StatCardProps {
   kicker: string;

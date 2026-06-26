@@ -22,7 +22,15 @@ import {
   searchMentionItems,
 } from "./mentionCatalog";
 import { floatingStyle } from "./SlashMenu";
+import { useActiveDescendant } from "./useActiveDescendant";
 import { useMenuKeyNav } from "./useMenuKeyNav";
+
+/** Stable id for the mention listbox + a deterministic per-option id so the
+ *  editor's `aria-activedescendant` can point at the active row. */
+const MENTION_LISTBOX_ID = "wk-mention-listbox";
+export function mentionOptionId(idx: number): string {
+  return `wk-mention-opt-${idx}`;
+}
 
 export interface MentionMenuProps {
   /** All wiki entries available to mention. */
@@ -37,6 +45,11 @@ export interface MentionMenuProps {
   categoryFilter?: MentionCategory | null;
   /** Optional title displayed at the top of the menu. */
   heading?: string;
+  /** The element that holds keyboard focus while the menu is open (the
+   *  editor's contenteditable). When provided, the active option id is
+   *  mirrored onto it via `aria-activedescendant` so AT can follow the
+   *  highlighted row. */
+  activeDescendantTarget?: HTMLElement | null;
   onSelect: (item: MentionItem) => void;
   onClose: () => void;
 }
@@ -47,6 +60,7 @@ export function MentionMenu({
   position,
   categoryFilter,
   heading,
+  activeDescendantTarget,
   onSelect,
   onClose,
 }: MentionMenuProps): React.ReactElement | null {
@@ -73,11 +87,18 @@ export function MentionMenu({
     onClose,
   });
 
+  const activeOptionId =
+    flat.length > 0 && activeIdx >= 0 && activeIdx < flat.length
+      ? mentionOptionId(activeIdx)
+      : null;
+  useActiveDescendant(activeDescendantTarget, activeOptionId);
+
   if (flat.length === 0) {
     return createPortal(
       <div
         className="wk-insert-menu wk-insert-menu--empty"
         data-testid="wk-mention-menu-empty"
+        id={MENTION_LISTBOX_ID}
         style={floatingStyle(position)}
         role="listbox"
         aria-label={heading ?? "Insert mention"}
@@ -96,6 +117,7 @@ export function MentionMenu({
     <div
       className="wk-insert-menu wk-insert-menu--mention"
       data-testid="wk-mention-menu"
+      id={MENTION_LISTBOX_ID}
       style={floatingStyle(position)}
       role="listbox"
       aria-label={heading ?? "Insert mention"}
@@ -122,6 +144,7 @@ export function MentionMenu({
                   <button
                     type="button"
                     className="wk-insert-menu__btn"
+                    id={mentionOptionId(idx)}
                     role="option"
                     aria-selected={idx === activeIdx}
                     data-testid={`wk-mention-${item.slug}`}

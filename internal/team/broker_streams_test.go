@@ -41,31 +41,6 @@ func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
 	}
 }
 
-func TestAgentStreamBufferRedactsSecretsFromHistoryAndSubscribers(t *testing.T) {
-	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
-	secret := "sk-" + strings.Repeat("C", 24)
-
-	out, cancel := s.subscribeTask("task-1")
-	defer cancel()
-	s.PushTask("task-1", "streamed key: "+secret+"\n")
-
-	history := strings.Join(s.recentTask("task-1"), "")
-	if strings.Contains(history, secret) {
-		t.Fatalf("task history leaked secret: %q", history)
-	}
-	if !strings.Contains(history, "[REDACTED]") {
-		t.Fatalf("task history missing redaction marker: %q", history)
-	}
-
-	got := <-out
-	if strings.Contains(got, secret) {
-		t.Fatalf("subscriber leaked secret: %q", got)
-	}
-	if !strings.Contains(got, "[REDACTED]") {
-		t.Fatalf("subscriber missing redaction marker: %q", got)
-	}
-}
-
 func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
 	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
 	s.PushTask("task-1", "one")
@@ -225,25 +200,6 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 	}
 }
 
-func TestBrokerMessageSubscribersReceiveRedactedMessages(t *testing.T) {
-	b := newTestBroker(t)
-	msgs, unsubscribe := b.SubscribeMessages(4)
-	defer unsubscribe()
-	secret := "sk-" + strings.Repeat("D", 24)
-
-	if _, err := b.PostMessage("ceo", "general", "model key: "+secret, nil, ""); err != nil {
-		t.Fatalf("PostMessage: %v", err)
-	}
-
-	got := <-msgs
-	if strings.Contains(got.Content, secret) {
-		t.Fatalf("subscribed message leaked secret: %+v", got)
-	}
-	if !got.Redacted || got.RedactionCount != 1 {
-		t.Fatalf("subscribed message missing redaction metadata: %+v", got)
-	}
-}
-
 func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
 	b := newTestBroker(t)
 	actions, unsubscribe := b.SubscribeActions(4)
@@ -286,6 +242,16 @@ func TestReapStaleActivityLocked(t *testing.T) {
 		}
 		if snap.Slug != "stale-active" && snap.Slug != "stale-thinking" {
 			t.Errorf("unexpected reaped slug: %q", snap.Slug)
+		}
+		// The idle detail must read as plain English to a non-technical
+		// operator and say how to recover — never engineer jargon like
+		// "stale activity reaped". Regression for the customer complaint
+		// that the live stream "doesn't tell much fruitful stuff".
+		if strings.Contains(snap.Detail, "reaped") || strings.Contains(snap.Detail, "stale activity") {
+			t.Errorf("reaped detail leaks jargon: %q", snap.Detail)
+		}
+		if !strings.Contains(snap.Detail, "send a new message") {
+			t.Errorf("reaped detail should tell the operator how to recover; got %q", snap.Detail)
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -276,11 +277,15 @@ func TestBrokerPostRequestDedupeKeyCollapsesDuplicates(t *testing.T) {
 	}
 }
 
-// TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer pins that once
-// the human answers (or cancels) the original request, a new POST
-// with the same dedupe_key creates a fresh request instead of
-// silently mapping to the now-terminal one.
-func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
+// TestBrokerPostRequestDedupeKeyReusesApprovedApproval pins the
+// post-Slice-7 contract: once an APPROVAL is approved, a subsequent
+// POST with the same dedupe_key within recentApprovalReuseWindow
+// reuses the existing answered request (so the calling agent's poll
+// loop sees the approval immediately and executes without re-prompting
+// the human). This is the explicit fix for the "I approved it but it
+// asked me again" loop the user reported. The window-expiry +
+// non-approval-kind paths are covered by the other dedupe tests.
+func TestBrokerPostRequestDedupeKeyReusesApprovedApproval(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")
 	if err := b.StartOnPort(0); err != nil {
@@ -346,13 +351,16 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 		t.Fatalf("expected 200 answering request, got %d", resp.StatusCode)
 	}
 
-	// Same dedupe key after answer → new request, not the terminal one.
+	// Same dedupe key after approve → reuse the existing answered
+	// approval (deduped=true). The agent's poll loop on /interview/
+	// answer?id=<first> already shows answer=approve, so the agent
+	// proceeds to execute without spamming the human with a new card.
 	second, deduped := post()
-	if second == "" || second == first {
-		t.Fatalf("expected fresh request after answer, got first=%q second=%q", first, second)
+	if second != first {
+		t.Fatalf("expected reused approval, got first=%q second=%q", first, second)
 	}
-	if deduped {
-		t.Fatal("expected deduped=false for fresh request after answer")
+	if !deduped {
+		t.Fatal("expected deduped=true for reused approval within window")
 	}
 }
 
@@ -674,7 +682,7 @@ func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
 	}
 }
 
-func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) {
+func TestBrokerHumanInterviewDoesNotBlockAndThreadReplyAnswers(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
@@ -712,6 +720,16 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	}
 	if created.Request.Blocking || created.Request.Required {
 		t.Fatalf("human interviews must be non-blocking, got %+v", created.Request)
+	}
+	var answerDirectly *interviewOption
+	for i := range created.Request.Options {
+		if created.Request.Options[i].ID == "answer_directly" {
+			answerDirectly = &created.Request.Options[i]
+			break
+		}
+	}
+	if answerDirectly == nil || !answerDirectly.RequiresText || strings.TrimSpace(answerDirectly.TextHint) == "" {
+		t.Fatalf("expected answer_directly to require text, got %+v", answerDirectly)
 	}
 	if b.HasBlockingRequest() {
 		t.Fatal("human interview should not count as a blocking request")
@@ -784,6 +802,9 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 		t.Fatalf("expected invalid send to leave interview pending, got %+v", pendingAnswer)
 	}
 
+	// A human THREAD reply on the interview's anchor is the ANSWER (v3
+	// fix family #2, [19:24:53]) — it must not cancel the interview the
+	// human is answering.
 	messageBody, _ := json.Marshal(map[string]any{
 		"from":     "you",
 		"channel":  "general",
@@ -822,8 +843,11 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	for _, listed := range listing.Requests {
 		byID[listed.ID] = listed
 	}
-	if byID[created.Request.ID].Status != "canceled" {
-		t.Fatalf("expected replied-to interview to be canceled after human message, got %+v", byID[created.Request.ID])
+	if byID[created.Request.ID].Status != "answered" {
+		t.Fatalf("expected replied-to interview to be ANSWERED by the thread reply, got %+v", byID[created.Request.ID])
+	}
+	if got := byID[created.Request.ID].Answered; got == nil || got.CustomText != "Let's keep moving in this thread." {
+		t.Fatalf("expected the human's reply text as the answer, got %+v", got)
 	}
 	if byID[createdFollowUp.Request.ID].Status != "pending" {
 		t.Fatalf("expected queued follow-up interview to remain pending, got %+v", byID[createdFollowUp.Request.ID])
@@ -861,8 +885,9 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
 		t.Fatalf("decode interview answer: %v", err)
 	}
-	if answer.Answered != nil || answer.Status != "canceled" {
-		t.Fatalf("expected canceled interview answer state, got %+v", answer)
+	if answer.Answered == nil || answer.Status != "answered" ||
+		answer.Answered.CustomText != "Let's keep moving in this thread." {
+		t.Fatalf("expected the polling agent to receive the thread-reply answer, got %+v", answer)
 	}
 }
 
@@ -959,7 +984,10 @@ func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 		t.Fatalf("expected 200 answering request, got %d: %s", resp.StatusCode, raw)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?channel=general", nil)
+	// "Ship the launch packet after approval" is a business-objective task
+	// (title contains "launch") so it gets its own per-task channel — query
+	// using all_channels=true so the check is channel-location-agnostic.
+	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?all_channels=true&viewer=ceo", nil)
 	req.Header.Set("Authorization", "Bearer "+b.Token())
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -1150,11 +1178,21 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if got := b.tasks[0]; got.Blocked() {
-		t.Fatalf("expected task to unblock after request answer, got %+v", got)
+	var got *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == "task-3" {
+			got = &b.tasks[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("expected task-3 to exist after answer")
+	}
+	if got.Blocked() {
+		t.Fatalf("expected task to unblock after request answer, got %+v", *got)
 	} else {
 		if got.Status() != "in_progress" {
-			t.Fatalf("expected task status to move to in_progress, got %+v", got)
+			t.Fatalf("expected task status to move to in_progress, got %+v", *got)
 		}
 		if !strings.Contains(got.Details, "Meridian Growth Studio") {
 			t.Fatalf("expected task details to include human answer, got %q", got.Details)
@@ -1169,5 +1207,40 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected task_unblocked action after answering request")
+	}
+}
+
+// TestAlsoAskingSurvivesRestart pins the dedupe fan-out across a broker
+// restart: a subscriber attached to a pending interview must still be
+// treated as awaiting the answer after the state round-trips disk.
+func TestAlsoAskingSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "broker-state.json")
+	b := NewBrokerAt(statePath)
+	b.mu.Lock()
+	b.requests = append(b.requests, humanInterview{
+		ID: "req-restart", Kind: "interview", Status: "pending",
+		From: "ae", Channel: "general",
+		Question:   "Which CRM should I connect to?",
+		AlsoAsking: []string{"revops"},
+	})
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("save: %v", err)
+	}
+	b.mu.Unlock()
+
+	b2 := NewBrokerAt(statePath)
+	if err := b2.loadState(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !b2.AgentAwaitingInterviewAnswer("revops") {
+		t.Fatal("also_asking subscriber must still be awaiting after restart")
+	}
+	if !b2.AgentAwaitingInterviewAnswer("ae") {
+		t.Fatal("original asker must still be awaiting after restart")
+	}
+	if b2.AgentAwaitingInterviewAnswer("eng") {
+		t.Fatal("non-subscriber must not be parked")
 	}
 }

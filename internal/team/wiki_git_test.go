@@ -59,15 +59,17 @@ func TestRepoInitDetectsMissingGit(t *testing.T) {
 	}
 }
 
-func TestRepoInitPreservesOrphanDir(t *testing.T) {
-	// Arrange — wiki exists with content but no .git
+func TestRepoInitBootstrapsExistingMarkdownInPlace(t *testing.T) {
+	// Arrange — wiki exists with readable content but no .git. This happens
+	// when onboarding materializes skeletons before a markdown worker is live.
 	repo := newTestRepo(t)
-	if err := os.MkdirAll(repo.Root(), 0o700); err != nil {
-		t.Fatalf("mkdir root: %v", err)
+	articleRel := "team/about/operating-principles.md"
+	articlePath := filepath.Join(repo.Root(), articleRel)
+	if err := os.MkdirAll(filepath.Dir(articlePath), 0o700); err != nil {
+		t.Fatalf("mkdir article dir: %v", err)
 	}
-	orphanFile := filepath.Join(repo.Root(), "marker.txt")
-	if err := os.WriteFile(orphanFile, []byte("orphan"), 0o600); err != nil {
-		t.Fatalf("write orphan: %v", err)
+	if err := os.WriteFile(articlePath, []byte("# Operating Principles\n"), 0o600); err != nil {
+		t.Fatalf("write article: %v", err)
 	}
 
 	// Act
@@ -75,23 +77,73 @@ func TestRepoInitPreservesOrphanDir(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	// Assert — orphan moved aside, new wiki has .git
+	// Assert — the existing article stays in place and is committed, so
+	// human-edit optimistic concurrency can resolve its current SHA.
 	if _, err := os.Stat(filepath.Join(repo.Root(), ".git")); err != nil {
 		t.Fatalf("expected .git to exist: %v", err)
 	}
-	parent := filepath.Dir(repo.Root())
-	entries, err := os.ReadDir(parent)
+	if _, err := os.Stat(articlePath); err != nil {
+		t.Fatalf("expected article to remain in place: %v", err)
+	}
+	refs, err := repo.Log(context.Background(), articleRel)
 	if err != nil {
-		t.Fatalf("read parent: %v", err)
+		t.Fatalf("log article: %v", err)
 	}
-	var foundOrphan bool
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "wiki.orphan-") {
-			foundOrphan = true
-		}
+	if len(refs) == 0 {
+		t.Fatal("expected bootstrapped article to have commit history")
 	}
-	if !foundOrphan {
-		t.Fatalf("expected orphan dir, got %+v", entries)
+}
+
+func TestRepoIsGitRepoLockedPropagatesUnexpectedGitFailure(t *testing.T) {
+	// Arrange
+	repo := newTestRepo(t)
+	if err := os.MkdirAll(repo.Root(), 0o700); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	repo.mu.Lock()
+	ok, err := repo.isGitRepoLocked(ctx)
+	repo.mu.Unlock()
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected canceled git probe to return an error")
+	}
+	if ok {
+		t.Fatal("expected canceled git probe not to report a git repo")
+	}
+	if !strings.Contains(err.Error(), "check git work tree") {
+		t.Fatalf("expected wrapped git probe error, got %v", err)
+	}
+}
+
+func TestRepoIsGitRepoLockedPropagatesCorruptGitMetadata(t *testing.T) {
+	// Arrange
+	repo := newTestRepo(t)
+	if err := os.MkdirAll(repo.Root(), 0o700); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root(), ".git"), []byte("gitdir: /definitely/missing\n"), 0o600); err != nil {
+		t.Fatalf("write corrupt git metadata: %v", err)
+	}
+
+	// Act
+	repo.mu.Lock()
+	ok, err := repo.isGitRepoLocked(context.Background())
+	repo.mu.Unlock()
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected corrupt git metadata to return an error")
+	}
+	if ok {
+		t.Fatal("expected corrupt git metadata not to report a git repo")
+	}
+	if !strings.Contains(err.Error(), "check git work tree") {
+		t.Fatalf("expected wrapped git probe error, got %v", err)
 	}
 }
 

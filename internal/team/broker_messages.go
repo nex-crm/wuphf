@@ -75,9 +75,13 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
-	if firstBlockingRequest(b.requests) != nil {
+	// The blocking-request chat gate is CHANNEL-scoped: a pending approval
+	// in task A's channel parks chat there until answered, but the human
+	// keeps talking everywhere else. The old office-wide 409 meant one
+	// buried card silenced the whole office (v3 fix family #2).
+	if firstBlockingRequestInChannel(b.requests, body.Channel) != nil {
 		b.mu.Unlock()
-		http.Error(w, "request pending; answer required before chat resumes", http.StatusConflict)
+		http.Error(w, "request pending in this channel; answer required before chat resumes here", http.StatusConflict)
 		return
 	}
 
@@ -218,10 +222,6 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if humanSenderMayCancelInterviews(body.From) {
-		b.cancelActiveHumanInterviewsLocked(body.From, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
-	}
-
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
@@ -235,6 +235,29 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg = b.appendMessageLocked(msg)
 	total := len(b.messages)
+
+	// Human utterance routing (v3 fix family #2), in priority order:
+	//  1. A thread reply anchored to an active interview IS the interview
+	//     answer — the requesting agent's poll returns it ([19:24:53]: the
+	//     reply box was a dead letter). This must run BEFORE the legacy
+	//     cancel below, which used to cancel the very interview the human
+	//     was answering.
+	//  2. Otherwise a fresh human message cancels a stale same-channel
+	//     interview (the agent re-reads the chat instead).
+	//  3. Stop-order backstop + waiting-task follow-up: the message is
+	//     stamped on this channel's tasks so the owner's next packet leads
+	//     with it; tasks with no natural next turn (review/decision/
+	//     changes-requested/blocked/done) also get the task_followup wake.
+	// In-memory writes only; saveLocked below persists them.
+	var answerCascade []pendingTaskTransition
+	if isHumanMessageSender(msg.From) {
+		var answeredInterview bool
+		answeredInterview, answerCascade = b.answerInterviewFromHumanThreadReplyLocked(msg)
+		if !answeredInterview && humanSenderMayCancelInterviews(msg.From) {
+			b.cancelActiveHumanInterviewsLocked(msg.From, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
+		}
+		b.markHumanNoteOnChannelTasksLocked(msg)
+	}
 
 	// Track which agents were tagged — they should show "typing" immediately
 	if len(msg.Tagged) > 0 && isHumanMessageSender(msg.From) {
@@ -251,12 +274,31 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		delete(b.lastTaggedAt, msg.From)
 	}
 
-	if err := b.saveLocked(); err != nil {
+	// Snapshot-then-write: prepare the state write (prune + marshal) under
+	// the lock, but perform the DISK write after releasing b.mu. Message
+	// posting is the broker's hottest mutation (agent relays, system posts,
+	// human chat); holding the big lock across file I/O here serialized
+	// every other endpoint behind disk latency (F1, ten-out-of-ten Wave F).
+	// The seq guard in writeBrokerState drops this write if a newer state
+	// snapshot lands first, so out-of-order completion cannot regress the
+	// file. Failure semantics are unchanged: the message stays in memory
+	// and the caller gets a 500, exactly as the locked save behaved.
+	b.pruneCompletedTasksLocked()
+	write, err := b.prepareBrokerStateWriteLocked()
+	if err != nil {
 		b.mu.Unlock()
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 		return
 	}
+	// Flush any task transitions released by an interview answered via
+	// thread reply — same post-persist cascade the /requests/answer
+	// handler performs.
+	b.flushPendingAutoNotebookTransitionsLocked(answerCascade, "system")
 	b.mu.Unlock()
+	if err := b.writeBrokerState(write); err != nil {
+		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+		return
+	}
 
 	// PR 2: human "remember" intent. Hook fires AFTER b.mu.Unlock() and ONLY
 	// for human senders. Handle is a non-blocking enqueue; the classifier and
@@ -436,8 +478,9 @@ func (b *Broker) PostSystemMessage(channel, content, kind string) {
 func (b *Broker) PostMessage(from, channel, content string, tagged []string, replyTo string) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if firstBlockingRequest(b.requests) != nil {
-		return channelMessage{}, fmt.Errorf("request pending; answer required before chat resumes")
+	// Channel-scoped gate — see handlePostMessage for the rationale.
+	if firstBlockingRequestInChannel(b.requests, channel) != nil {
+		return channelMessage{}, fmt.Errorf("request pending in this channel; answer required before chat resumes here")
 	}
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
@@ -456,9 +499,6 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if !b.canAccessChannelLocked(from, channel) {
 		return channelMessage{}, fmt.Errorf("channel access denied")
 	}
-	if humanSenderMayCancelInterviews(from) {
-		b.cancelActiveHumanInterviewsLocked(from, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
-	}
 	b.counter++
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -472,6 +512,20 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	msg = b.appendMessageLocked(msg)
+	// Human utterance routing — same priority order as handlePostMessage:
+	// thread-reply-to-interview answers the interview; otherwise a fresh
+	// human message cancels a stale same-channel interview; the note is
+	// stamped on this channel's tasks with the task_followup wake for
+	// waiting states.
+	var answerCascade []pendingTaskTransition
+	if isHumanMessageSender(msg.From) {
+		var answeredInterview bool
+		answeredInterview, answerCascade = b.answerInterviewFromHumanThreadReplyLocked(msg)
+		if !answeredInterview && humanSenderMayCancelInterviews(msg.From) {
+			b.cancelActiveHumanInterviewsLocked(msg.From, "Human sent a new message; unanswered interview canceled.", channel, msg.ReplyTo)
+		}
+		b.markHumanNoteOnChannelTasksLocked(msg)
+	}
 	// Clear typing indicator — agent has replied
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
@@ -480,6 +534,7 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
 	}
+	b.flushPendingAutoNotebookTransitionsLocked(answerCascade, "system")
 	// PostMessage intentionally does NOT auto-write notebook entries.
 	// Notebooks are for properly drafted working notes and learnings
 	// authored via the notebook_write MCP tool. Auto-writing every
@@ -579,7 +634,9 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = "Request"
 	}
-	req = sanitizeHumanInterview(req)
+	// Loud ask (v3 fix family #2): same announcement + thread-anchor
+	// contract as the HTTP create path in handlePostRequest.
+	b.postRequestRaisedChatMessageLocked(&req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
@@ -858,7 +915,7 @@ func FormatChannelView(messages []channelMessage) string {
 
 	var sb strings.Builder
 	for _, m := range messages {
-		m = sanitizeChannelMessageSecrets(m)
+		// redaction removed (core-loop R1)
 		ts := m.Timestamp
 		if len(ts) > 19 {
 			ts = ts[11:19]
@@ -975,5 +1032,5 @@ func cloneChannelMessageForRead(msg channelMessage) channelMessage {
 		clone.RedactionReasons = append([]string(nil), msg.RedactionReasons...)
 	}
 	clone.Usage = cloneMessageUsage(msg.Usage)
-	return sanitizeChannelMessageSecrets(clone)
+	return clone
 }

@@ -352,7 +352,7 @@ func TestInboxFilterMappings(t *testing.T) {
 	transitions := map[string]LifecycleState{
 		"decision-1":     LifecycleStateDecision,
 		"running-1":      LifecycleStateRunning,
-		"blocked-1":      LifecycleStateBlockedOnPRMerge,
+		"blocked-1":      LifecycleStateBlocked,
 		"merged-today-1": LifecycleStateApproved,
 		"merged-old-1":   LifecycleStateApproved,
 	}

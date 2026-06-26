@@ -8,6 +8,8 @@ on:
     paths-ignore:
       - "index/**"
       - "team/**"
+  # Manual escape hatch: cut a release without a [release] commit marker.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,9 +20,17 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Skip if the commit was made by this workflow (prevent loops).
+    # Opt-in releases: a push to main cuts a release ONLY when its tip
+    # commit message contains the literal marker [release]. This replaced
+    # release-on-every-push, which produced ~8-9 npm/CLI releases a day
+    # (v0.194 → v0.210 in three days) and the matching Release-workflow
+    # spend. Put [release] on the squash-merge commit / PR title when a
+    # change should ship; routine commits accumulate on main untagged.
+    # workflow_dispatch runs bypass the marker for manual releases.
     # The if: expression is evaluated by GitHub, not a shell — no injection risk.
-    if: "!contains(github.event.head_commit.message, '[skip-release]')"
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[release]')
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
@@ -82,3 +92,16 @@ jobs:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           gh workflow run release.yml --ref "$VERSION"
+
+      - name: Dispatch desktop-release workflow at the new tag
+        # Same GITHUB_TOKEN limitation as the Release dispatch above: a tag pushed
+        # with GITHUB_TOKEN never fires desktop-release.yml's `on: push: tags`, so
+        # dispatch it explicitly. Every product release then also builds + attaches
+        # the signed desktop apps. --ref points the run at the new tag (so its
+        # github.ref_name is the v* tag → draft:false → append to the release);
+        # the bare version is passed as the stamping input.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          gh workflow run desktop-release.yml --ref "$VERSION" -f version="${VERSION#v}"

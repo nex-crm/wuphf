@@ -10,20 +10,33 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 )
 
-func TestTeamSkillCreateRegisteredForSpecialists(t *testing.T) {
+// TestAgentSkillCreationToolsNotRegistered pins core-loop R5: agents have
+// no tool to create or propose skills (team_skill_create) and no tool to
+// request enablement (request_skill_enable). Skills come only from playbook
+// compilation; team_skill_run remains for invoking compiled skills.
+func TestAgentSkillCreationToolsNotRegistered(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		channel  string
 		oneOnOne bool
+		wantRun  bool
 	}{
-		{name: "office", channel: "general"},
-		{name: "dm", channel: "dm-workflow-architect"},
+		{name: "office", channel: "general", wantRun: true},
+		{name: "dm", channel: "dm-workflow-architect", wantRun: true},
+		// One-on-one sessions have no office mechanics; team_skill_run is
+		// deliberately not registered there.
 		{name: "one-on-one", channel: "dm-workflow-architect", oneOnOne: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			names := listRegisteredTools(t, tc.channel, tc.oneOnOne)
-			if !slices.Contains(names, "team_skill_create") {
-				t.Fatalf("expected team_skill_create for specialist in %s mode; tools=%v", tc.name, names)
+			if slices.Contains(names, "team_skill_create") {
+				t.Fatalf("team_skill_create must NOT be registered in %s mode (skills come only from playbook compilation); tools=%v", tc.name, names)
+			}
+			if slices.Contains(names, "request_skill_enable") {
+				t.Fatalf("request_skill_enable must NOT be registered in %s mode; tools=%v", tc.name, names)
+			}
+			if tc.wantRun && !slices.Contains(names, "team_skill_run") {
+				t.Fatalf("expected team_skill_run in %s mode; tools=%v", tc.name, names)
 			}
 		})
 	}
@@ -163,205 +176,5 @@ func TestHandleTeamSkillRunMissingSkillReturnsToolError(t *testing.T) {
 	}
 	if res == nil || !res.IsError {
 		t.Fatalf("expected IsError=true for missing skill, got %+v", res)
-	}
-}
-
-func TestHandleTeamSkillCreateProposesSkill(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("start broker: %v", err)
-	}
-	defer b.Stop()
-
-	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
-	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
-
-	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:        "handoff-checklist",
-		Title:       "Handoff Checklist",
-		Description: "A deterministic checklist for cross-agent handoffs.",
-		Content:     "1. Summarize state.\n2. Name the owner.\n3. Name the next action.",
-		Trigger:     "Before delegating multi-step work",
-		Tags:        []string{"coordination", "ops"},
-		Action:      "propose",
-		MySlug:      "ceo",
-		Channel:     "general",
-	})
-	if err != nil {
-		t.Fatalf("skill create: %v", err)
-	}
-	if res == nil || res.IsError {
-		t.Fatalf("expected successful tool result, got %+v", res)
-	}
-
-	req, _ := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/skills?channel=general", nil)
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("get skills: %v", err)
-	}
-	defer resp.Body.Close()
-	var result struct {
-		Skills []struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"skills"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("decode skills: %v", err)
-	}
-	if len(result.Skills) != 1 {
-		t.Fatalf("expected 1 skill, got %+v", result.Skills)
-	}
-	if got := result.Skills[0].Name; got != "handoff-checklist" {
-		t.Fatalf("expected handoff-checklist skill, got %q", got)
-	}
-	if got := result.Skills[0].Status; got != "proposed" {
-		t.Fatalf("expected proposed skill, got %q", got)
-	}
-	if got := len(b.Requests("general", false)); got != 1 {
-		t.Fatalf("expected 1 approval request, got %d", got)
-	}
-}
-
-func TestHandleTeamSkillCreateCanActivateImmediately(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("start broker: %v", err)
-	}
-	defer b.Stop()
-
-	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
-	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
-
-	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:        "already-approved",
-		Title:       "Already Approved",
-		Description: "Run the already-approved workflow.",
-		Content:     "1. Run the already-approved workflow.",
-		Action:      "create",
-		MySlug:      "ceo",
-		Channel:     "general",
-	})
-	if err != nil {
-		t.Fatalf("skill create: %v", err)
-	}
-	if res == nil || res.IsError {
-		t.Fatalf("expected successful tool result, got %+v", res)
-	}
-
-	req, _ := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/skills?channel=general", nil)
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("get skills: %v", err)
-	}
-	defer resp.Body.Close()
-	var result struct {
-		Skills []struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"skills"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("decode skills: %v", err)
-	}
-	if len(result.Skills) != 1 || result.Skills[0].Name != "already-approved" {
-		t.Fatalf("expected already-approved skill, got %+v", result.Skills)
-	}
-	if got := result.Skills[0].Status; got != "active" {
-		t.Fatalf("expected active skill, got %q", got)
-	}
-	if got := len(b.Requests("general", false)); got != 0 {
-		t.Fatalf("expected no approval request for action=create, got %d", got)
-	}
-}
-
-func TestHandleTeamSkillCreateAllowsNonCEOProposal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("start broker: %v", err)
-	}
-	defer b.Stop()
-
-	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
-	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
-
-	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:        "planner-retro-loop",
-		Title:       "Planner Retro Loop",
-		Description: "Run the planner retro loop after every retro.",
-		Content:     "1. Collect notes.\n2. Extract action items.",
-		Action:      "propose",
-		MySlug:      "planner",
-		Channel:     "general",
-	})
-	if err != nil {
-		t.Fatalf("skill propose: %v", err)
-	}
-	if res == nil || res.IsError {
-		t.Fatalf("expected successful tool result, got %+v", res)
-	}
-	if got := len(b.Requests("general", false)); got != 1 {
-		t.Fatalf("expected 1 approval request, got %d", got)
-	}
-	requests := b.Requests("general", false)
-	if requests[0].From != "planner" || requests[0].ReplyTo != "planner-retro-loop" {
-		t.Fatalf("unexpected approval request: %+v", requests[0])
-	}
-}
-
-func TestHandleTeamSkillCreateRejectsNonCEOActiveCreate(t *testing.T) {
-	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:    "handoff-checklist",
-		Content: "1. Do it",
-		Action:  "create",
-		MySlug:  "pm",
-	})
-	if err != nil {
-		t.Fatalf("unexpected go error: %v", err)
-	}
-	if res == nil || !res.IsError {
-		t.Fatalf("expected IsError=true for non-CEO active create, got %+v", res)
-	}
-}
-
-func TestHandleTeamSkillCreateRequiresAction(t *testing.T) {
-	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:    "handoff-checklist",
-		Content: "1. Do it",
-		MySlug:  "pm",
-	})
-	if err != nil {
-		t.Fatalf("unexpected go error: %v", err)
-	}
-	if res == nil || !res.IsError {
-		t.Fatalf("expected IsError=true when action is omitted, got %+v", res)
-	}
-}
-
-// TestHandleTeamSkillCreateRequiresDescription pins the description guard
-// added at the MCP boundary. RenderSkillMarkdown rejects an empty
-// description, so without this check the broker's POST /skills would 400
-// opaquely instead of the agent seeing a clear "description is required"
-// tool error. Both empty and whitespace-only descriptions must fail.
-func TestHandleTeamSkillCreateRequiresDescription(t *testing.T) {
-	for _, desc := range []string{"", "   "} {
-		res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-			Name:        "needs-description",
-			Content:     "1. Do something",
-			Description: desc,
-			Action:      "propose",
-			MySlug:      "ceo",
-		})
-		if err != nil {
-			t.Fatalf("description=%q: unexpected go error: %v", desc, err)
-		}
-		if res == nil || !res.IsError {
-			t.Fatalf("description=%q: expected IsError=true, got %+v", desc, res)
-		}
 	}
 }

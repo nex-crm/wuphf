@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// BlockTask transitions taskID to LifecycleStateBlockedOnPRMerge and
+// BlockTask transitions taskID to LifecycleStateBlocked and
 // records `blockerID` in task.BlockedOn so the unblock cascade fires
 // automatically when the blocker merges.
 //
@@ -78,7 +78,7 @@ func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, b
 		// gate (build-time gate #1) all stay in sync. The transition
 		// stamps status/blocked/pipelineStage/reviewState atomically and
 		// updates the lifecycleIndex bucket.
-		if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateBlockedOnPRMerge, reason); err != nil {
+		if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateBlocked, reason); err != nil {
 			return *task, false, err
 		}
 		task.UpdatedAt = now
@@ -90,11 +90,11 @@ func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, b
 			return teamTask{}, false, err
 		}
 		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.status+"]", 140), task.ID)
-		// Self-heal gate (build-time gate #1): blocked_on_pr_merge is a
+		// Self-heal gate (build-time gate #1): blocked is a
 		// typed legitimate state, not a self-heal trigger. Short-circuit
 		// the call site itself so the unit test can observe absence at
 		// the call boundary, not just the side-effect downstream.
-		if task.LifecycleState != LifecycleStateBlockedOnPRMerge {
+		if task.LifecycleState != LifecycleStateBlocked {
 			b.requestCapabilitySelfHealingLocked(task, actor, reason)
 		}
 		if err := b.saveLocked(); err != nil {
@@ -141,7 +141,14 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 			task.Details = cleaned
 			changed = true
 		}
-		if task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
+		// Honor real dependencies on resume. Clearing a transient block (a
+		// rate-limit cooldown, a capability self-heal) must not jump a task
+		// ahead of a declared dependency: a task with unresolved DependsOn stays
+		// blocked, and unblockDependentsLocked activates it when its dependency
+		// completes. This is the inverse of "non-dependent tasks run together" —
+		// dependent tasks do NOT. (Previously the now-removed exclusive-owner
+		// lane re-blocked here as a side effect; the gate is now explicit.)
+		if (task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked")) && !b.hasUnresolvedDepsLocked(task) {
 			targetState := LifecycleStateReady
 			if strings.TrimSpace(task.Owner) != "" {
 				targetState = LifecycleStateRunning
@@ -267,9 +274,23 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Allocate the task ID before choosing the channel so we can name
+	// the per-task channel deterministically.
 	b.counter++
+	taskID := b.allocateIssueIDLocked()
+	// Mint a dedicated channel for a task that defaulted to "general" or was
+	// created from inside another task's chat (so it never shares one).
+	if shouldMintPerTaskChannel(channel, b.channelOwnedByAnotherTaskLocked(channel), &teamTask{
+		Title:   title,
+		Details: strings.TrimSpace(details),
+		Owner:   strings.TrimSpace(owner),
+	}) {
+		if ch := b.createPerTaskChannelLocked(taskID, title, strings.TrimSpace(owner), strings.TrimSpace(createdBy)); ch != nil {
+			channel = ch.Slug
+		}
+	}
 	task := teamTask{
-		ID:        fmt.Sprintf("task-%d", b.counter),
+		ID:        taskID,
 		Channel:   channel,
 		Title:     title,
 		Details:   strings.TrimSpace(details),
@@ -394,7 +415,7 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // "task_unblocked" action so the launcher can deliver a notification to the owner.
 //
 // Lane A extension: the function sweeps the union of (DependsOn, BlockedOn)
-// and branches on LifecycleState so harness tasks (blocked_on_pr_merge) move
+// and branches on LifecycleState so harness tasks (blocked) move
 // to review on resolution while legacy DependsOn-blocked tasks keep their
 // pre-Lane-A in_progress / open behavior.
 //
@@ -403,6 +424,22 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // b.mu before the persist would leak notebook entries for transitions the
 // broker subsequently rolled back on save failure (CodeRabbit, major).
 func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTransition {
+	// Dependency release requires COMPLETION, not an approval click
+	// (ICP-eval v3 [18:45:40]: OFFICE-253 was released the moment the human
+	// approved OFFICE-246, then ran against a one-pager that never existed).
+	// OnDecisionRecorded fires this cascade after EVERY decision — including
+	// Drafting→Running activations — so verify the named upstream actually
+	// reached a terminal status before releasing anything that waited on it.
+	// IDs that don't resolve to a task (answered humanInterview requests)
+	// pass through: request resolution is checked per-dependent below.
+	for i := range b.tasks {
+		if b.tasks[i].ID == completedTaskID {
+			if !isTerminalTeamTaskStatus(b.tasks[i].status) {
+				return nil
+			}
+			break
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	var pending []pendingTaskTransition
 	for i := range b.tasks {
@@ -412,7 +449,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// are accepted so harness tasks (which set LifecycleState before
 		// the legacy fields settle) and pre-Lane-A tasks (which only
 		// have the legacy flag) cascade the same way.
-		if !task.blocked && task.LifecycleState != LifecycleStateBlockedOnPRMerge {
+		if !task.blocked && task.LifecycleState != LifecycleStateBlocked {
 			continue
 		}
 		// Sweep both legacy DependsOn and the new typed BlockedOn list so
@@ -438,7 +475,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// Snapshot BlockedOn so a transition failure below can roll
 		// back the filtered list. Mutating before the transition and
 		// then `continue`ing on error used to leave the task in
-		// LifecycleStateBlockedOnPRMerge with the completed blocker
+		// LifecycleStateBlocked with the completed blocker
 		// stripped out — the next merge cascade would skip the task
 		// (it's no longer in DependsOn/BlockedOn) and the task sat
 		// stuck forever.
@@ -465,7 +502,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// Branch on LifecycleState: harness tasks move to review,
 		// legacy tasks fall back to the pre-Lane-A behavior. The
 		// transition layer stamps every derived field for both paths.
-		if task.LifecycleState == LifecycleStateBlockedOnPRMerge {
+		if task.LifecycleState == LifecycleStateBlocked {
 			if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateReview, "blocker resolved by "+completedTaskID); err != nil {
 				// Restore BlockedOn so the next cascade can retry
 				// this dependent task instead of silently dropping
@@ -567,21 +604,42 @@ func taskCanMatchScopedIdentity(task *teamTask, match taskReuseMatch) bool {
 	return strings.TrimSpace(match.PipelineID) != "" && strings.TrimSpace(task.PipelineID) != ""
 }
 
+// findReusableTaskLocked looks for an existing non-terminal task that
+// matches the given intent (title + owner + optional thread / scoped
+// identity).  The search is deliberately channel-agnostic: since each
+// new business-objective task now gets its own dedicated channel
+// (task-<id>), a duplicate create request that arrives against "general"
+// must still find the already-minted task in its per-task channel.
+// The Backup & Migration system task has a unique title so it is never
+// matched accidentally.
+//
+// Dedup scope (intentional, bounded): with no thread or scoped identity the
+// match is title + owner only, so two genuinely-distinct intents that share a
+// title AND owner can collapse into one. That over-match is bounded two ways —
+// terminal tasks are skipped (a finished same-title task is never reused; a
+// fresh one is minted), and the only collision that survives is between two
+// concurrently-active identical-title-and-owner tasks, which in practice is a
+// resubmission of the same intent (idempotent re-plan) — exactly the case the
+// channel-agnostic search exists to dedup. Callers that need precise identity
+// (distinct intents sharing a title) pass a ThreadID or a scoped identity
+// (PipelineID / SourceSignalID / SourceDecisionID), which narrows the match.
+// TestReuseIsChannelAgnostic and TestFindReusableTaskSkipsTerminal pin both
+// halves of this contract.
 func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
-	channel := normalizeChannelSlug(match.Channel)
 	title := strings.TrimSpace(match.Title)
 	threadID := strings.TrimSpace(match.ThreadID)
 	owner := strings.TrimSpace(match.Owner)
 	scopedIdentity := match.hasScopedIdentity()
 	for i := range b.tasks {
 		task := &b.tasks[i]
-		if normalizeChannelSlug(task.Channel) != channel {
-			continue
-		}
 		if isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
-		sameTitle := title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title)
+		// Title match is fuzzy (normalized + token-set similar), not byte-exact:
+		// near-duplicate restatements of the same goal ("Ship the MVP" vs "Build
+		// the first MVP slice") must collapse onto the existing task instead of
+		// spawning a duplicate. See titlesAreSimilar.
+		sameTitle := title != "" && titlesAreSimilar(task.Title, title)
 		if threadID != "" && strings.TrimSpace(task.ThreadID) == threadID {
 			if sameTitle && taskOwnerMatches(task, owner) {
 				taskHasScopedIdentity := taskCanMatchScopedIdentity(task, match)
@@ -618,7 +676,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 
 func isTerminalTeamTaskStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "done", "completed", "canceled", "cancelled":
+	case "done", "completed", "canceled", "cancelled", "archived":
 		return true
 	default:
 		return false

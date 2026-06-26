@@ -197,7 +197,13 @@ func (c *Cache) set(text, model, namespace string, dimension int, vector []float
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
+	dir := filepath.Dir(c.path)
+	runtimeCacheDir := config.RuntimeCacheDir()
+	if runtimeCacheDir != "" && filepath.Clean(dir) == filepath.Clean(runtimeCacheDir) {
+		if err := config.EnsureCacheDir(dir); err != nil {
+			return fmt.Errorf("embedding: cache: mkdir: %w", err)
+		}
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("embedding: cache: mkdir: %w", err)
 	}
 

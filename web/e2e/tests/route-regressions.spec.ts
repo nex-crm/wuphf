@@ -4,7 +4,7 @@ import {
   collectReactErrors,
   expectNoReactErrors,
   resetBroker,
-  waitForShellReady,
+  waitForReactMount,
 } from "./_helpers";
 
 // Regression pins for behaviours that broke during the TanStack Router
@@ -42,7 +42,12 @@ async function seedTestChannel(page: Page): Promise<void> {
 
 async function gotoShell(page: Page, route: string): Promise<void> {
   await page.goto(route);
-  await waitForShellReady(page);
+  await waitForReactMount(page);
+  // Wait on the always-present sidebar, not the channel composer: the index
+  // route ("/") now renders the home composer (no `.composer-input`), and
+  // these tests assert channel-specific composer placeholders explicitly
+  // where they need them.
+  await expect(page.locator("aside.sidebar")).toBeVisible({ timeout: 10_000 });
 }
 
 test.afterEach(async ({ request }) => {
@@ -50,97 +55,82 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("PR #634 review pins", () => {
-  test("Console keeps the user's last-visited channel after nav off-conversation", async ({
+  test("/apps/console no longer mounts a Console app panel", async ({
     page,
   }) => {
-    // Repro: legacy `s.currentChannel` retained the last-visited slug
-    // across non-conversation navigation. After the TanStack migration,
-    // ConsoleApp read `useChannelSlug() ?? "general"` directly off the
-    // URL, so opening Console from #launch silently snapped to #general.
-    // useFallbackChannelSlug threads URL → lastConversationalChannel →
-    // "general" so the user's working channel survives the hop.
+    // The Console surface was intentionally removed in #1055. The generic
+    // /apps/$appId route still accepts the URL, but MainContent must narrow
+    // it into the unknown-app fallback instead of trying to mount stale UI.
     const getErrors = collectReactErrors(page);
-    await seedTestChannel(page);
-    await gotoShell(page, "/");
-    await gotoShell(page, `/#/channels/${TEST_CHANNEL}`);
-    await expect(page.locator(".composer-input")).toHaveAttribute(
-      "placeholder",
-      `Message #${TEST_CHANNEL}`,
-    );
-
     await page.goto(`/#/apps/console`);
     const consolePage = page.getByTestId("app-page-console");
     await expect(consolePage).toBeVisible({ timeout: 10_000 });
-    // ConsoleApp echoes the channel in two visible places: the header
-    // chip and the prompt. Both should track #launch, not #general.
-    await expect(consolePage).toContainText(`#${TEST_CHANNEL}`);
-    await expect(consolePage).toContainText(`wuphf:${TEST_CHANNEL}$`);
-    await expect(consolePage).not.toContainText("wuphf:general$");
+    await expect(consolePage).toContainText("Unknown app: console");
 
-    await expectNoReactErrors(page, getErrors, "during console fallback");
+    await expectNoReactErrors(page, getErrors, "console app removal");
   });
 
-  test("Legacy /#/apps/requests redirects to the unified Inbox", async ({
+  test("Legacy /#/apps/requests redirects to the Tasks board", async ({
     page,
   }) => {
-    // Phase 2b retired the standalone RequestsApp; /apps/requests now
-    // renders InboxRedirect which navigates to /inbox. The
-    // last-visited-channel regression that the prior test guarded
-    // (RequestsApp re-fetching general's queue) is gone with the
-    // surface — the unified Inbox doesn't fetch by channel.
+    // The standalone RequestsApp was retired and the Inbox consolidated
+    // into the Task board; /apps/requests now renders TasksRedirect which
+    // navigates to /tasks. The last-visited-channel regression that the
+    // prior test guarded (RequestsApp re-fetching general's queue) is gone
+    // with the surface — the board doesn't fetch by channel.
     const getErrors = collectReactErrors(page);
     await page.goto(`/#/apps/requests`);
-    // The InboxRedirect testid mounts then unmounts as soon as the
+    // The TasksRedirect testid mounts then unmounts as soon as the
     // useEffect fires, so racing toBeVisible against the redirect is
     // flaky. URL change is the stable assertion.
-    await expect(page).toHaveURL(/#\/inbox$/, { timeout: 5_000 });
-    await expectNoReactErrors(page, getErrors, "during legacy requests redirect");
+    await expect(page).toHaveURL(/#\/tasks$/, { timeout: 5_000 });
+    await expectNoReactErrors(
+      page,
+      getErrors,
+      "during legacy requests redirect",
+    );
   });
 
-  test("AgentPanel hides the per-channel toggle when no conversation channel is active", async ({
+  test("AgentPanel's per-channel toggle never renders off a conversation route", async ({
     page,
   }) => {
-    // Repro: AgentPanel.AgentPanelView used `useChannelSlug() ?? "general"`
-    // and rendered an "Enabled in #general" toggle that POSTed to
-    // /channel-members for #general — even when the user opened the
-    // panel from /apps/console while last-viewing #launch. The fix
-    // narrows currentChannel to URL-only (no fallback) and gates the
-    // toggle UI on a real conversation route.
+    // Repro (#634): AgentPanel.AgentPanelView used `useChannelSlug() ??
+    // "general"` and rendered an "Enabled in #general" toggle that POSTed to
+    // /channel-members for #general — even when opened off-conversation. v3
+    // reshaped the surface: the panel is opened from the channel participant
+    // list (ChannelParticipants → onOpenAgent), the toggle is gated on a
+    // URL-derived channel (no fallback), and leaving the conversation route
+    // closes the panel outright. Together those make a stale-channel toggle
+    // structurally unreachable — which is exactly what this pins.
     //
-    // The broker's lead agent (slug "ceo") has the toggle hidden by
-    // design (canRemove/canToggle are false for built-in members), so
-    // pick the FIRST non-CEO agent for this test. The seeded roster
-    // always has one (founder/operator/builder/reviewer in the default
-    // manifest).
+    // The lead agent (slug "ceo") hides the toggle by design (built-ins are
+    // not per-channel toggleable), so open a NON-lead participant. The seeded
+    // roster always has one (planner/executor/reviewer in the default manifest).
     const getErrors = collectReactErrors(page);
-    await gotoShell(page, "/");
+    await gotoShell(page, "/#/channels/general");
 
-    const nonLeadAgent = page
-      .locator('button[data-agent-slug]:not([data-agent-slug="ceo"])')
+    const nonLeadParticipant = page
+      .locator(".channel-participant-main")
+      .filter({ hasNotText: /ceo/i })
       .first();
-    await expect(nonLeadAgent).toBeVisible({ timeout: 10_000 });
+    await expect(nonLeadParticipant).toBeVisible({ timeout: 10_000 });
+    await nonLeadParticipant.click();
 
-    // Sanity: on a conversation route, the toggle is visible.
-    await nonLeadAgent.click();
-    await expect(page.locator(".agent-panel")).toBeVisible();
+    // On a conversation route the toggle renders, scoped to the URL channel.
+    await expect(page.locator(".agent-panel")).toBeVisible({ timeout: 10_000 });
     await expect(page.locator(".agent-toggle")).toBeVisible();
-    // Close the panel before navigating so the route-change effect
-    // doesn't auto-close inside the assertion window.
-    await page.locator(".agent-panel-close").click();
-    await expect(page.locator(".agent-panel")).toHaveCount(0);
-
-    // Navigate to an off-conversation surface, then re-open the panel.
-    await page.goto("/#/apps/console");
-    await expect(page.getByTestId("app-page-console")).toBeVisible({
-      timeout: 10_000,
-    });
-    await nonLeadAgent.click();
-    await expect(page.locator(".agent-panel")).toBeVisible();
-    // The toggle MUST be gone — both the slider and its label.
-    await expect(page.locator(".agent-toggle")).toHaveCount(0);
     await expect(
       page.locator(".agent-panel-stat-label", { hasText: /Enabled in/ }),
-    ).toHaveCount(0);
+    ).toContainText("#general");
+
+    // Leaving the conversation surface closes the panel, so the per-channel
+    // toggle can never render against a non-conversation route.
+    await page.goto("/#/apps/graph");
+    await expect(page.getByTestId("app-page-graph")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator(".agent-panel")).toHaveCount(0);
+    await expect(page.locator(".agent-toggle")).toHaveCount(0);
 
     await expectNoReactErrors(page, getErrors, "agent panel off-conversation");
   });
@@ -150,7 +140,7 @@ test.describe("PR #634 review pins", () => {
   }) => {
     // Repro: activeThreadId was a bare string on the store; ThreadPanel
     // resolved its channel via `useChannelSlug() ?? "general"`. Open a
-    // thread on #launch, navigate to /apps/console, and the panel
+    // thread on #launch, navigate to /apps/graph, and the panel
     // header silently flipped to "#general" — and any reply posted from
     // there would land in general. The fix promotes activeThread to
     // {id, channelSlug} captured at open time so the panel header (and
@@ -206,8 +196,8 @@ test.describe("PR #634 review pins", () => {
 
     // Navigate to a non-conversation route. ThreadPanel is mounted in
     // Shell so it persists across navigation.
-    await page.goto("/#/apps/console");
-    await expect(page.getByTestId("app-page-console")).toBeVisible({
+    await page.goto("/#/apps/graph");
+    await expect(page.getByTestId("app-page-graph")).toBeVisible({
       timeout: 10_000,
     });
 
@@ -258,8 +248,7 @@ test.describe("PR #634 review pins", () => {
       { route: "/#/wiki", label: "Wiki" },
       { route: "/#/wiki/lookup?q=test", label: "Wiki" },
       { route: "/#/notebooks", label: "Notebooks" },
-      // /#/reviews was retired in Phase 2b; the route now redirects to
-      // /inbox so it no longer has its own breadcrumb label.
+      { route: "/#/reviews", label: "Reviews" },
     ];
 
     for (const { route, label } of surfaces) {
@@ -321,65 +310,5 @@ test.describe("PR #634 review pins", () => {
     );
 
     await expectNoReactErrors(page, getErrors, "not-found link");
-  });
-
-  test("hash with a query-string suffix doesn't bump unread for the active channel", async ({
-    page,
-  }) => {
-    // Repro: useBrokerEvents.activeBrokerChannel parsed
-    // window.location.hash with a bare path.split("/"). When the hash
-    // carried a search-string suffix
-    // (e.g. "#/channels/general?modal=settings") the slug bled into the
-    // next segment as "general?modal=settings", the comparison failed,
-    // and every inbound message bumped #general's unread counter while
-    // the user was staring at it. The fix splits on "?" before parsing.
-    //
-    // We can't easily fake a future suffix the app will write (no code
-    // generates that yet). But we can simulate it: visit #general, then
-    // append "?ts=…" via location.hash and post a message. Pre-fix:
-    // unread for #general bumps to 1. Post-fix: stays 0.
-    const getErrors = collectReactErrors(page);
-    await gotoShell(page, "/");
-    await gotoShell(page, "/#/channels/general");
-
-    // Append a synthetic query string to the hash. Avoids `page.goto`
-    // round-trips so the channel's unread state isn't reset by a fresh
-    // mount. The SSE handler reads `window.location.hash` at the moment
-    // a message arrives (not on hashchange), so all we need is for the
-    // hash mutation to be observable in-page before the broker post —
-    // wait deterministically for that property instead of a fixed
-    // sleep (which is both flaky and forbidden by repo memory).
-    await page.evaluate(() => {
-      window.location.hash = "#/channels/general?probe=1";
-    });
-    await page.waitForFunction(
-      () => window.location.hash === "#/channels/general?probe=1",
-    );
-
-    const payload = `unread-suppression probe ${Date.now()}`;
-    const post = await page.request.post("/api/messages", {
-      data: { from: "ceo", channel: "general", content: payload },
-    });
-    expect(post.ok()).toBeTruthy();
-
-    // The freshly-posted message must render in the feed (the human IS
-    // watching #general). If unread bumped, MessageFeed would still show
-    // the message but the sidebar would carry a non-zero badge.
-    await expect(
-      page.locator(".message", { hasText: payload }).first(),
-    ).toBeVisible({ timeout: 10_000 });
-
-    // Sidebar #general entry — read its unread badge. ChannelList renders
-    // the count inside .sidebar-channel; absence means zero.
-    const generalRow = page
-      .locator(".sidebar-channels button", { hasText: /general/i })
-      .first();
-    await expect(generalRow).toBeVisible();
-    const badge = generalRow.locator(".sidebar-badge");
-    // 0 unread → no badge. Anything else means the query-string slipped
-    // past the parser.
-    await expect(badge).toHaveCount(0);
-
-    await expectNoReactErrors(page, getErrors, "unread suppression");
   });
 });

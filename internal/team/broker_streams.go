@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +39,6 @@ func (s *agentStreamBuffer) Push(line string) {
 
 func (s *agentStreamBuffer) PushTask(taskID, line string) {
 	taskID = strings.TrimSpace(taskID)
-	line = redactSecretsInText(line)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lines = append(s.lines, agentStreamLine{
@@ -351,7 +351,7 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 		current.Activity = update.Activity
 	}
 	if update.Detail != "" {
-		current.Detail = redactSecretsInText(update.Detail)
+		current.Detail = update.Detail
 	}
 	if update.LastTime != "" {
 		current.LastTime = update.LastTime
@@ -550,7 +550,19 @@ func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot 
 		case age >= staleActivityThreshold:
 			snap.Status = "idle"
 			snap.Activity = "idle"
-			snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
+			// Plain-language, actionable detail — this string surfaces in the
+			// activity feed and the agent pill tooltip, so it must read as
+			// English to a non-technical operator (not "stale activity
+			// reaped") and tell them how to get the agent moving again.
+			mins := int(age.Round(time.Minute) / time.Minute)
+			if mins < 1 {
+				mins = 1
+			}
+			unit := "minutes"
+			if mins == 1 {
+				unit = "minute"
+			}
+			snap.Detail = fmt.Sprintf("Went idle after no progress for %d %s — send a new message to bring it back.", mins, unit)
 			snap.LastTime = now.UTC().Format(time.RFC3339)
 			// Reaping back to idle clears any prior stuck flag — the
 			// agent is no longer claiming to be working.
@@ -586,6 +598,16 @@ func (b *Broker) runActivityWatchdog(ctx context.Context) {
 			reset := b.reapStaleActivityLocked(now)
 			for _, snap := range reset {
 				b.publishActivityLocked(snap)
+			}
+			// Expire blocking connect/fallback cards the human never answered so
+			// they cannot wedge a channel forever (slice 3b backstop).
+			b.expireStaleIntegrationDecisionsLocked(now)
+			// Silent-stall honesty (Wave F2): a RUNNING task with no
+			// observable trace for taskStallThreshold gets a visible
+			// stall marker + one honest chat line; markers self-clear
+			// when activity resumes (broker_task_stall.go).
+			if b.markSilentRunningTasksLocked(now, taskStallThreshold) {
+				_ = b.saveLocked()
 			}
 			b.mu.Unlock()
 		}

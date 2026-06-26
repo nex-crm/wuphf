@@ -84,7 +84,7 @@ func TestRichArtifactTutorialFixturesExerciseWikiFlow(t *testing.T) {
 				t.Fatal("newRichArtifact changed fixture HTML")
 			}
 
-			if _, bytesWritten, err := repo.CommitRichArtifact(ctx, scenario.ActorSlug, artifact, sanitizedHTML, "artifact: create tutorial "+scenario.Slug); err != nil {
+			if _, _, bytesWritten, err := repo.CommitRichArtifact(ctx, scenario.ActorSlug, artifact, sanitizedHTML, "artifact: create tutorial "+scenario.Slug); err != nil {
 				t.Fatalf("commit rich artifact: %v", err)
 			} else if bytesWritten == 0 {
 				t.Fatal("expected artifact bytes to be written")

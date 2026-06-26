@@ -1,23 +1,32 @@
 import { useMatches } from "@tanstack/react-router";
 
+import { useOfficeTasks } from "../hooks/useOfficeTasks";
 import {
+  agentDetailRoute,
+  agentDetailTabRoute,
+  agentsRoute,
   appRoute,
   appTaskDetailRoute,
+  articleRoute,
   channelRoute,
-  dmRoute,
   inboxRoute,
+  indexRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  routineDetailRoute,
+  routineNewRoute,
+  skillDetailRoute,
   taskDecisionRoute,
   taskDetailRoute,
+  taskNewRoute,
   tasksRoute,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
 } from "../lib/router";
-import { directChannelSlug, useAppStore } from "../stores/app";
+import { useAppStore } from "../stores/app";
 
 /**
  * Discriminated union describing the matched leaf route. Replaces the
@@ -31,10 +40,12 @@ import { directChannelSlug, useAppStore } from "../stores/app";
  */
 export type CurrentRoute =
   | { kind: "channel"; channelSlug: string }
-  | { kind: "dm"; agentSlug: string; channelSlug: string }
   | { kind: "app"; appId: string }
+  // New-task home composer (index route).
+  | { kind: "home" }
   | { kind: "task-board" }
   | { kind: "task-detail"; taskId: string }
+  | { kind: "task-new" }
   | { kind: "wiki" }
   | { kind: "wiki-article"; articlePath: string }
   | { kind: "wiki-lookup"; query: string | null }
@@ -42,8 +53,16 @@ export type CurrentRoute =
   | { kind: "notebook-agent"; agentSlug: string }
   | { kind: "notebook-entry"; agentSlug: string; entrySlug: string }
   | { kind: "reviews" }
+  | { kind: "article"; articleId: string }
   | { kind: "inbox" }
   | { kind: "task-decision"; taskId: string }
+  // Agents tool — roster grid + per-agent config/detail page.
+  | { kind: "agents" }
+  | { kind: "agent-detail"; agentSlug: string; tab?: string }
+  // Full-screen skill detail editor + viewer.
+  | { kind: "skill-detail"; skillName: string }
+  | { kind: "routine-detail"; routineSlug: string }
+  | { kind: "routine-new" }
   | { kind: "unknown" };
 
 interface ParamsShape {
@@ -53,6 +72,10 @@ interface ParamsShape {
   entrySlug?: string;
   taskId?: string;
   _splat?: string;
+  articleId?: string;
+  tab?: string;
+  skillName?: string;
+  routineSlug?: string;
 }
 
 interface SearchShape {
@@ -61,11 +84,12 @@ interface SearchShape {
 
 type RouteDeriver = (params: ParamsShape, search: SearchShape) => CurrentRoute;
 type CurrentRouteId =
+  | typeof indexRoute.id
   | typeof channelRoute.id
-  | typeof dmRoute.id
   | typeof appRoute.id
   | typeof tasksRoute.id
   | typeof taskDetailRoute.id
+  | typeof taskNewRoute.id
   | typeof appTaskDetailRoute.id
   | typeof wikiIndexRoute.id
   | typeof wikiLookupRoute.id
@@ -74,15 +98,23 @@ type CurrentRouteId =
   | typeof notebookAgentRoute.id
   | typeof notebookEntryRoute.id
   | typeof reviewsRoute.id
+  | typeof articleRoute.id
   | typeof inboxRoute.id
-  | typeof taskDecisionRoute.id;
+  | typeof taskDecisionRoute.id
+  | typeof agentsRoute.id
+  | typeof agentDetailRoute.id
+  | typeof agentDetailTabRoute.id
+  | typeof skillDetailRoute.id
+  | typeof routineDetailRoute.id
+  | typeof routineNewRoute.id;
 
 const CURRENT_ROUTE_IDS = [
+  indexRoute.id,
   channelRoute.id,
-  dmRoute.id,
   appRoute.id,
   tasksRoute.id,
   taskDetailRoute.id,
+  taskNewRoute.id,
   appTaskDetailRoute.id,
   wikiIndexRoute.id,
   wikiLookupRoute.id,
@@ -91,8 +123,15 @@ const CURRENT_ROUTE_IDS = [
   notebookAgentRoute.id,
   notebookEntryRoute.id,
   reviewsRoute.id,
+  articleRoute.id,
   inboxRoute.id,
   taskDecisionRoute.id,
+  agentsRoute.id,
+  agentDetailRoute.id,
+  agentDetailTabRoute.id,
+  skillDetailRoute.id,
+  routineDetailRoute.id,
+  routineNewRoute.id,
 ] as const satisfies readonly CurrentRouteId[];
 
 const CURRENT_ROUTE_ID_SET = new Set<string>(CURRENT_ROUTE_IDS);
@@ -102,24 +141,20 @@ function isCurrentRouteId(routeId: string): routeId is CurrentRouteId {
 }
 
 const ROUTE_DERIVERS = {
+  [indexRoute.id]: () => ({ kind: "home" }),
   [channelRoute.id]: (params) => ({
     kind: "channel",
     channelSlug: params.channelSlug ?? "general",
   }),
-  [dmRoute.id]: (params) => {
-    const agentSlug = params.agentSlug ?? "";
-    return {
-      kind: "dm",
-      agentSlug,
-      channelSlug: directChannelSlug(agentSlug),
-    };
-  },
   [appRoute.id]: (params) => ({ kind: "app", appId: params.appId ?? "" }),
   [tasksRoute.id]: () => ({ kind: "task-board" }),
   [taskDetailRoute.id]: (params) => ({
     kind: "task-detail",
     taskId: params.taskId ?? "",
   }),
+  [taskNewRoute.id]: () => ({ kind: "task-new" }),
+  // `/apps/tasks/$taskId` redirects before matching; the deriver mirrors
+  // taskDetail for completeness so the registry type stays exhaustive.
   [appTaskDetailRoute.id]: (params) => ({
     kind: "task-detail",
     taskId: params.taskId ?? "",
@@ -148,11 +183,37 @@ const ROUTE_DERIVERS = {
     entrySlug: params.entrySlug ?? "",
   }),
   [reviewsRoute.id]: () => ({ kind: "reviews" }),
+  [articleRoute.id]: (params) => ({
+    kind: "article",
+    articleId: params.articleId ?? "",
+  }),
   [inboxRoute.id]: () => ({ kind: "inbox" }),
   [taskDecisionRoute.id]: (params) => ({
     kind: "task-decision",
     taskId: params.taskId ?? "",
   }),
+  // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug)
+  // + tabbed subspace (/agents/$slug/$tab).
+  [agentsRoute.id]: () => ({ kind: "agents" }),
+  [agentDetailRoute.id]: (params) => ({
+    kind: "agent-detail",
+    agentSlug: params.agentSlug ?? "",
+    tab: undefined,
+  }),
+  [agentDetailTabRoute.id]: (params) => ({
+    kind: "agent-detail",
+    agentSlug: params.agentSlug ?? "",
+    tab: params.tab,
+  }),
+  [skillDetailRoute.id]: (params) => ({
+    kind: "skill-detail",
+    skillName: params.skillName ?? "",
+  }),
+  [routineDetailRoute.id]: (params) => ({
+    kind: "routine-detail",
+    routineSlug: params.routineSlug ?? "",
+  }),
+  [routineNewRoute.id]: () => ({ kind: "routine-new" }),
 } satisfies Record<CurrentRouteId, RouteDeriver>;
 
 /**
@@ -186,14 +247,56 @@ export function useCurrentRoute(): CurrentRoute {
 export function useChannelSlug(): string | null {
   const route = useCurrentRoute();
   if (route.kind === "channel") return route.channelSlug;
-  if (route.kind === "dm") return route.channelSlug;
   return null;
 }
 
 /**
- * Channel slug consumers that work outside conversation routes (Console,
- * Requests, sidebar request badge) should use this hook so they keep
- * pointing at the user's last-visited channel rather than silently
+ * Resolve the task id for the currently-viewed task-detail route, or null
+ * when the matched route is anything else. Chat cards use this to detect
+ * when a Task pointer (created / lifecycle card) refers to the very task
+ * whose channel is already on screen, so a self-referential "Open →" can
+ * be suppressed (created card) or rendered inert (lifecycle card).
+ */
+export function useCurrentTaskId(): string | null {
+  const route = useCurrentRoute();
+  if (route.kind === "task-detail" && route.taskId) return route.taskId;
+  return null;
+}
+
+/**
+ * Resolve the channel slug of the chat the human is *currently looking at*:
+ * the channel for a channel route, the owning task's channel for a
+ * task-detail route, and "general" for the home composer (which posts to
+ * #general). Returns null on non-chat surfaces (wiki, agents, apps,
+ * settings, inbox, …) where there is no single conversation to anchor to.
+ *
+ * The interview bar uses this to surface an agent's question only in the
+ * chat it was asked in, instead of mirroring the office-wide request queue
+ * onto every surface. Cross-channel triage still lives in the Inbox, so a
+ * request is never stranded by this narrowing.
+ *
+ * task-detail resolution leans on the already-cached office task list
+ * (useOfficeTasks shares its query key), so this adds no extra polling.
+ * While that list is still loading the slug is null and the bar simply
+ * stays quiet for a beat rather than flashing another channel's request.
+ */
+export function useActiveChannelSlug(): string | null {
+  const route = useCurrentRoute();
+  const { data: tasks } = useOfficeTasks();
+  if (route.kind === "channel") return route.channelSlug;
+  if (route.kind === "home") return "general";
+  if (route.kind === "task-detail") {
+    const owner = (tasks ?? []).find((task) => task.id === route.taskId);
+    const channel = owner?.channel?.trim();
+    return channel ? channel : null;
+  }
+  return null;
+}
+
+/**
+ * Channel slug consumers that work outside conversation routes (thread
+ * panels, request badges, cross-surface actions) should use this hook so
+ * they keep pointing at the user's last-visited channel rather than silently
  * collapsing to `"general"` whenever the URL is on `/apps/...` or
  * `/wiki/...`. Falls through to `"general"` only on a cold start where
  * the user has not yet visited any conversation route.
@@ -202,7 +305,6 @@ export function useFallbackChannelSlug(): string {
   const route = useCurrentRoute();
   const lastChannel = useAppStore((s) => s.lastConversationalChannel);
   if (route.kind === "channel") return route.channelSlug;
-  if (route.kind === "dm") return route.channelSlug;
   return lastChannel ?? "general";
 }
 
@@ -215,7 +317,7 @@ export function useFallbackChannelSlug(): string {
  *   - "wiki-lookup" for /wiki/lookup,
  *   - "notebooks" for any notebook route,
  *   - "reviews" for /reviews,
- *   - null when the matched route is a conversation (channel/dm) or
+ *   - null when the matched route is a conversation (channel) or
  *     unknown.
  */
 export function useCurrentApp(): string | null {
@@ -225,6 +327,7 @@ export function useCurrentApp(): string | null {
       return route.appId;
     case "task-board":
     case "task-detail":
+    case "task-new":
       return "tasks";
     case "wiki":
     case "wiki-article":
@@ -237,12 +340,21 @@ export function useCurrentApp(): string | null {
       return "notebooks";
     case "reviews":
       return "reviews";
+    case "article":
+      return "article";
     case "inbox":
       return "inbox";
     case "task-decision":
       return "inbox";
+    case "routine-detail":
+    case "routine-new":
+      return "routines";
+    case "agents":
+    case "agent-detail":
+      return "agents";
+    case "home":
     case "channel":
-    case "dm":
+    case "skill-detail":
     case "unknown":
       return null;
     default: {

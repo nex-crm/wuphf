@@ -1,7 +1,7 @@
 package team
 
 // skill_dedup.go implements semantic skill deduplication. The write funnel
-// (writeSkillProposalLocked) calls findSimilarSkillsLocked before creating a
+// (writeCompiledSkillLocked) calls findSimilarSkillsLocked before creating a
 // new skill. Three tiers of comparison are applied in order:
 //
 //   - Tier 1: Jaro-Winkler on slugs (zero cost, reuses jaro_winkler.go)
@@ -219,7 +219,11 @@ func (b *Broker) findSimilarByEmbeddingLocked(candidateSlug, candidateDescLower 
 // vectors). Caller MUST hold b.mu.
 func (b *Broker) skillEmbeddingProviderLocked() embedding.Provider {
 	provider := embedding.NewDefault()
-	if provider == nil || provider.Name() == "local-stub" {
+	// NewDefault always returns a non-nil provider (it falls back to the
+	// stub), so the only unusable case is the local-stub, whose vectors are
+	// non-semantic. A `provider == nil` guard here is dead code (staticcheck
+	// SA4023), so it is intentionally omitted.
+	if provider.Name() == "local-stub" {
 		return nil
 	}
 	return provider

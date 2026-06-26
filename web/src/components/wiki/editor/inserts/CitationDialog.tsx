@@ -16,6 +16,7 @@ import {
   buildCitation,
   nextFootnoteId,
 } from "./markdownShapes";
+import { useFocusTrap } from "./useFocusTrap";
 
 export interface CitationDialogProps {
   currentMarkdown: string;
@@ -32,6 +33,7 @@ export function CitationDialog({
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const urlRef = useRef<HTMLInputElement | null>(null);
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   useEffect(() => {
     urlRef.current?.focus();
@@ -59,6 +61,8 @@ export function CitationDialog({
       data-testid="wk-citation-dialog-backdrop"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="wk-citation-dialog-title"
+      ref={trapRef}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -71,7 +75,7 @@ export function CitationDialog({
         data-testid="wk-citation-dialog"
         onSubmit={handleSubmit}
       >
-        <h2>Cite source</h2>
+        <h2 id="wk-citation-dialog-title">Cite source</h2>
         <label htmlFor="wk-citation-url" className="wk-editor-label">
           URL
         </label>

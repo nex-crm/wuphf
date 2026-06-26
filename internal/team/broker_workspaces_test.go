@@ -1026,6 +1026,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		// office members + channels
 		"/office-members",
 		"/office-members/generate",
+		// derived stats (single source for surface counts)
+		"/office/stats",
 		"/channels",
 		"/channels/dm",
 		"/channels/generate",
@@ -1096,6 +1098,16 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/requests/answer",
 		"/interview",
 		"/interview/answer",
+		// integrations (catalog, OAuth lifecycle, action resolver, scoped grants)
+		"/integrations",
+		"/integrations/connect",
+		"/integrations/connect-status",
+		"/integrations/disconnect",
+		"/integrations/audit",
+		"/integrations/resolve",
+		"/integrations/grants",
+		"/integrations/composio/signin/start",
+		"/integrations/composio/signin/status",
 		// reset/usage/policies/signals/decisions/watchdogs/actions/scheduler
 		"/reset",
 		"/reset-dm",
@@ -1146,6 +1158,9 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/onboarding/validate-key",
 		"/onboarding/templates",
 		"/onboarding/blueprints",
+		"/onboarding/transition",
+		"/onboarding/answer",
+		"/onboarding/suggestion/ack",
 		"/onboarding/checklist/dismiss",
 		"/onboarding/checklist/anything", // /onboarding/checklist/ subpath
 		// workspace wipes (mounted via workspace.RegisterRoutesWithOptions)

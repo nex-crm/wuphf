@@ -156,6 +156,41 @@ func newNotifyCtx(l *Launcher) *notificationContextBuilder {
 			}
 			return l.broker.TaskByID(id)
 		},
+		searchLearnings: func(query string, limit int) []LearningSearchResult {
+			if l.broker == nil {
+				return nil
+			}
+			return relevantLearnings(l.broker.TeamLearningLog(), query, limit)
+		},
+		searchWiki: func(ctx context.Context, query string, topK int) []SearchHit {
+			if l.broker == nil {
+				return nil
+			}
+			// hybridWikiSearch (hybrid_retrieval.go) is BM25-only when no
+			// embedding provider is configured — identical to the pre-B4
+			// behavior — and BM25 ∪ dense with RRF fusion when one is.
+			return hybridWikiSearch(ctx, l.broker.WikiIndex(), query, topK)
+		},
+		searchWikiArticles: func(terms []string, limit int) []wikiArticleHit {
+			if l.broker == nil {
+				return nil
+			}
+			worker := l.broker.WikiWorker()
+			if worker == nil {
+				return nil
+			}
+			// File-level search over team/ articles — the corpus the office
+			// actually wrote — for the mandatory RETRIEVED CONTEXT block.
+			// The derived fact index (searchWiki above) misses articles the
+			// extractor has not processed; this path cannot.
+			return searchWikiArticlesByTerms(worker.Repo(), terms, limit)
+		},
+		consumeTaskHumanNote: func(taskID string) {
+			if l.broker == nil {
+				return
+			}
+			l.broker.ConsumeTaskHumanNote(taskID)
+		},
 	}
 }
 

@@ -33,7 +33,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 
 	args := []string{
-		"--model", l.headlessClaudeModel(slug),
+		"--model", l.headlessClaudeModel(ctx, slug),
 		"--print", "-",
 		"--output-format", "stream-json",
 		"--verbose",
@@ -43,25 +43,51 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		"--append-system-prompt", l.buildPrompt(slug),
 		"--mcp-config", agentMCP,
 		"--strict-mcp-config",
+		// NOTE: tried --disallowedTools ToolSearch to block the
+		// deferred-tools reminder loop. claude-code requires ToolSearch
+		// when MCP tools are deferred; the agent exited with SIGTERM
+		// after ~23s and zero events. Reverted. The prompt's TOOL
+		// HYGIENE block continues to instruct the model to ignore the
+		// reminder and call MCP tools directly; we accept the soft
+		// failure mode (~30s tax on first turn) over the hard one
+		// (agent dies before producing any output).
 	}
-	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
+	args = append(args, strings.Fields(l.resolvePermissionFlags(ctx, slug))...)
 
-	// Workspace isolation: coding agents get their own git worktree.
+	// Per-task reasoning effort: when the active task carries a composer-set
+	// effort that claude accepts, pass it as `--effort <level>`. Empty/unknown
+	// normalises away so the CLI keeps its default (high).
+	if effort := normalizeClaudeEffort(l.activeTaskEffort(ctx, slug)); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+
+	// Workspace isolation: coding agents get their own git worktree. Resolve the
+	// worktree for THIS turn's task (via ctx) so a parallel instance writes its
+	// own per-task worktree instead of whichever in_progress task is first.
 	worktreeDir := ""
 	if codingAgentSlugs[slug] && l.broker != nil {
-		task := l.agentActiveTask(slug)
-		if task != nil && strings.TrimSpace(task.ID) != "" {
+		if task := l.turnTaskForCtx(ctx, slug); task != nil && strings.TrimSpace(task.ID) != "" {
 			if wPath, _, err := prepareTaskWorktree(task.ID); err == nil {
 				worktreeDir = wPath
 			}
 		}
+	}
+	if worktreeDir == "" {
+		// Non-coding agents (CEO included) still honor an assigned
+		// local_worktree path on this turn's task.
+		worktreeDir = strings.TrimSpace(l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)))
 	}
 
 	cmd := headlessClaudeCommandContext(ctx, "claude", args...)
 	if worktreeDir != "" {
 		cmd.Dir = worktreeDir
 	} else {
-		cmd.Dir = l.cwd
+		// V3-N5: a turn without a task worktree (chat turns, office-mode
+		// task turns) runs in the agent's scratch dir inside the office
+		// runtime home — NEVER the broker process launch cwd. The v3 live
+		// run had the CEO writing landing/index.html into (and later
+		// `git checkout`-destroying it inside) the founder's host repo.
+		cmd.Dir = agentScratchDir(slug)
 	}
 	configureHeadlessProcess(cmd)
 	env := l.buildHeadlessClaudeEnv(slug)
@@ -92,7 +118,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 
 	// Pipe raw stdout to the agent stream for the web UI's live output pane.
 	var agentStream *agentStreamBuffer
-	taskID := l.agentActiveTaskID(slug)
+	taskID := l.turnTaskIDForCtx(ctx, slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -162,6 +188,11 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	turnID := newHeadlessTurnID()
 	var turnToolNames []string
 	var turnTextLen int
+	// Plan posture (task in LifecycleStatePlanning): the agent runs read-only
+	// and delivers its plan via the ExitPlanMode tool call, which we harvest
+	// here so it can be surfaced to the human for plan approval.
+	planning := l.resolveTurnPosture(ctx, slug) == posturePlan
+	var planArtifact string
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -191,6 +222,11 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			}
 			appendHeadlessClaudeLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
+			if planning && isExitPlanModeTool(event.ToolName) {
+				if plan := extractClaudePlanArtifact(event.ToolInput); plan != "" {
+					planArtifact = plan
+				}
+			}
 			turnToolNames = append(turnToolNames, event.ToolName)
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
@@ -251,24 +287,73 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, summary, "", metrics, claudeUsageToTokenUsage(result.Usage))
 	emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 	if l.broker != nil {
-		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
+		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(ctx, slug), result.Usage)
 	}
 	relay.Flush()
-	if text := strings.TrimSpace(result.FinalMessage); text != "" {
-		appendHeadlessClaudeLog(slug, "result: "+text)
-		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
+	finalText := strings.TrimSpace(result.FinalMessage)
+	if planning && planArtifact != "" {
+		// Surface the plan as its own stream card, and use it as the channel
+		// summary the human reviews: under plan mode Claude delivers the plan
+		// via ExitPlanMode (a tool call), so result.FinalMessage is usually
+		// empty and the plan would otherwise sit only in the raw tool stream.
+		emitHeadlessPlan(agentStream, turnID, HeadlessProviderClaude, slug, taskID, planArtifact)
+		if finalText == "" {
+			finalText = planArtifact
+		}
+	}
+	if finalText != "" {
+		appendHeadlessClaudeLog(slug, "result: "+finalText)
+		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, finalText, startedAt)
 		if err != nil {
 			appendHeadlessClaudeLog(slug, "fallback-post-error: "+err.Error())
 		} else if posted {
 			appendHeadlessClaudeLog(slug, fmt.Sprintf("fallback-post: posted final output to #%s as %s", msg.Channel, msg.ID))
 		}
 	}
+	// A planning turn that produced a plan stops to await human approval — raise
+	// the plan-approval human_interview (idempotent) so execution only starts
+	// after the human says yes.
+	if planning {
+		l.raisePlanApprovalAfterTurn(taskID, slug, firstNonEmpty(planArtifact, finalText))
+	}
 	return nil
 }
 
-func (l *Launcher) headlessClaudeModel(slug string) string {
+func (l *Launcher) headlessClaudeModel(ctx context.Context, slug string) string {
+	// Per-agent override wins: when the user picks a specific model in the
+	// AgentProfilePanel runtime section (or AgentWizard), that's the
+	// model the next dispatch must use. Without this check the picker
+	// silently rewrote ProviderBinding.Model but every turn still ran
+	// against the hardcoded default — the user-visible symptom was
+	// "I picked a different model and nothing changed."
+	//
+	// The per-agent binding is only consulted when its kind is also
+	// claude-code: if a user moved the agent to codex with model=gpt-4o,
+	// we must not feed gpt-4o to claude on a later switch back. The
+	// runtime-switch flow clears the binding entirely on kind change
+	// (see AgentProfilePanel save path), so the most common edge cases
+	// are already prevented at the source, but the kind check here is
+	// belt-and-suspenders.
+	// Per-task model wins over the agent binding (the model lives on the task,
+	// not the agent). Only when the task's provider is claude-code.
+	if model := l.taskModelForKind(ctx, slug, provider.KindClaudeCode); model != "" {
+		return model
+	}
+	if l != nil && l.broker != nil {
+		binding := l.broker.MemberProviderBinding(slug)
+		if binding.Kind == "claude-code" {
+			if model := strings.TrimSpace(binding.Model); model != "" {
+				return model
+			}
+		}
+	}
+	// Anthropic family default (verified 2026-05-29). The lead falls back
+	// to the top opus tier when --opus-ceo is on; everyone else gets the
+	// best-balanced sonnet. claude-opus-4-6 (the previous default here)
+	// is still available but no longer the recommended pick — see
+	// https://platform.claude.com/docs/en/docs/about-claude/models.
 	if l.opusCEO && slug == l.targeter().LeadSlug() {
-		return "claude-opus-4-6"
+		return "claude-opus-4-8"
 	}
 	return "claude-sonnet-4-6"
 }

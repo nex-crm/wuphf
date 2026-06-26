@@ -22,10 +22,12 @@ func TestBlueprintsIncludeWikiSchema(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 
 	for _, id := range []string{
+		"ai-revops",
+		"ai-startup",
 		"bookkeeping-invoicing-service",
 		"local-business-ai-package",
-		"multi-agent-workflow-consulting",
 		"niche-crm",
+		"niche-newsletter",
 		"paid-discord-community",
 		"youtube-factory",
 	} {

@@ -3,28 +3,22 @@
  *
  * Each insert action emits a fragment that gets concatenated into article
  * markdown. This file proves that:
- *   1. The fragment alone survives Milkdown parse then serialize then
- *      `postProcessWikilinks` unchanged.
+ *   1. The fragment alone survives the editor's markdown -> HTML -> markdown
+ *      round-trip unchanged (modulo list-marker whitespace).
  *   2. The fragment composed with surrounding article content also
  *      survives (no parse interaction with neighbouring blocks).
  *
- * The harness mirrors `RichWikiEditor.roundtrip.test.tsx` exactly so the
- * test stays a faithful proxy for the production editor pipeline.
+ * The harness now drives the *production* Tiptap pipeline
+ * (`wikiMarkdownToHtml` then `wikiHtmlToMarkdown`) instead of the retired
+ * Milkdown editor, so the round-trip stays a faithful proxy for what the
+ * `TiptapWikiEditor` actually serializes on save.
  */
-import {
-  defaultValueCtx,
-  Editor,
-  remarkPluginsCtx,
-  remarkStringifyOptionsCtx,
-} from "@milkdown/core";
-import { commonmark } from "@milkdown/preset-commonmark";
-import { gfm } from "@milkdown/preset-gfm";
-import { getMarkdown } from "@milkdown/utils";
 import { describe, expect, it } from "vitest";
 
-import { wikiLinkRemarkPlugin } from "../../../../lib/wikilink";
-import { STRINGIFY_DEFAULTS } from "../../../../lib/wikilinkStringify";
-import { postProcessWikilinks } from "../wikilinkPostProcess";
+import {
+  wikiHtmlToMarkdown,
+  wikiMarkdownToHtml,
+} from "../../../../lib/wiki/markdown";
 import {
   appendBlockToTail,
   appendCitationDefinition,
@@ -37,44 +31,25 @@ import {
 } from "./markdownShapes";
 
 function normalise(s: string): string {
-  return s
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .join("\n")
-    .trim();
+  return (
+    s
+      .split("\n")
+      // Collapse the multi-space list-marker padding turndown emits
+      // (`-   item` -> `- item`) so equality compares content, not the
+      // serializer's marker alignment.
+      .map((l) => l.replace(/^(\s*[-*+]) {2,}/, "$1 ").trimEnd())
+      .join("\n")
+      .trim()
+  );
 }
 
-async function roundTrip(initial: string): Promise<string> {
-  const root = document.createElement("div");
-  document.body.appendChild(root);
-  try {
-    const editor = await Editor.make()
-      .config((ctx) => {
-        ctx.set(defaultValueCtx, initial);
-        ctx.update(remarkPluginsCtx, (prev) => [
-          ...prev,
-          {
-            plugin: wikiLinkRemarkPlugin(() => true),
-            options: {},
-          },
-        ]);
-        ctx.update(remarkStringifyOptionsCtx, (prev) => ({
-          ...prev,
-          ...STRINGIFY_DEFAULTS,
-        }));
-      })
-      .use(commonmark)
-      .use(gfm)
-      .create();
-    try {
-      const md = editor.action(getMarkdown());
-      return postProcessWikilinks(md);
-    } finally {
-      await editor.destroy();
-    }
-  } finally {
-    root.remove();
-  }
+/**
+ * Drive a markdown string through the editor's markdown <-> HTML pipeline
+ * exactly as the live editor does on load + save. Synchronous: the
+ * unified/turndown pipeline does not need a mounted editor.
+ */
+function roundTrip(initial: string): string {
+  return wikiHtmlToMarkdown(wikiMarkdownToHtml(initial));
 }
 
 // ─── buildWikilink ─────────────────────────────────────────────────────────
@@ -98,14 +73,14 @@ describe("buildWikilink", () => {
     expect(buildWikilink("   ")).toBeNull();
   });
 
-  it("survives round-trip in a paragraph", async () => {
+  it("survives round-trip in a paragraph", () => {
     const md = `See ${buildWikilink("alex")} for details.\n`;
-    expect(normalise(await roundTrip(md))).toBe(normalise(md));
+    expect(normalise(roundTrip(md))).toBe(normalise(md));
   });
 
-  it("survives round-trip with display text in a paragraph", async () => {
+  it("survives round-trip with display text in a paragraph", () => {
     const md = `Owner: ${buildWikilink("team/people/alex", "Alex Chen")}.\n`;
-    expect(normalise(await roundTrip(md))).toBe(normalise(md));
+    expect(normalise(roundTrip(md))).toBe(normalise(md));
   });
 });
 
@@ -144,14 +119,14 @@ describe("buildCitation", () => {
     expect(built.reference).toBe("[^weirdid]");
   });
 
-  it("survives round-trip when reference and definition coexist", async () => {
+  it("survives round-trip when reference and definition coexist", () => {
     const cite = buildCitation({
       id: "1",
       title: "Source",
       url: "https://example.com",
     });
     const md = `Body${cite.reference}.\n\n${cite.definition}`;
-    const out = normalise(await roundTrip(md));
+    const out = normalise(roundTrip(md));
     expect(out).toContain(cite.reference);
     expect(out).toContain("[^1]:");
     expect(out).toContain("https://example.com");
@@ -281,7 +256,7 @@ describe("buildFactBlock", () => {
     expect(lines.every((l) => l !== "```")).toBe(true);
   });
 
-  it("survives round-trip through Milkdown", async () => {
+  it("survives round-trip through the editor pipeline", () => {
     const block = buildFactBlock({
       subject: "alex",
       predicate: "works_at",
@@ -289,7 +264,7 @@ describe("buildFactBlock", () => {
       confidence: 0.9,
     });
     const md = `Some prose.\n\n${block}\nMore prose.\n`;
-    expect(normalise(await roundTrip(md))).toBe(normalise(md));
+    expect(normalise(roundTrip(md))).toBe(normalise(md));
   });
 });
 
@@ -320,15 +295,15 @@ describe("buildDecisionBlock", () => {
     expect(block).toContain("alternatives: TipTap, ProseMirror raw");
   });
 
-  it("survives round-trip through Milkdown", async () => {
+  it("survives round-trip through the editor pipeline", () => {
     const block = buildDecisionBlock({
-      title: "Adopt Milkdown",
+      title: "Adopt Tiptap",
       date: "2026-05-06",
       rationale: "Smallest workable surface.",
-      alternatives: ["TipTap", "ProseMirror"],
+      alternatives: ["Milkdown", "ProseMirror"],
     });
     const md = `# Engineering log\n\n${block}\n`;
-    expect(normalise(await roundTrip(md))).toBe(normalise(md));
+    expect(normalise(roundTrip(md))).toBe(normalise(md));
   });
 });
 
@@ -361,18 +336,16 @@ describe("buildRelatedBlock", () => {
     expect(block).not.toContain("..");
   });
 
-  it("survives round-trip through Milkdown in canonical loose-list form", async () => {
-    // Milkdown's commonmark serializer renders bullet lists in loose form
-    // (a blank line between siblings) — the same shape the existing
-    // RichWikiEditor.roundtrip.test.tsx pins for nested lists. Edits
-    // settle on this canonical shape after one save and remain stable.
+  it("survives round-trip through the editor pipeline in tight-list form", () => {
+    // The Tiptap pipeline (remark -> turndown) serializes bullet lists in
+    // tight form (no blank line between siblings), so the related block
+    // round-trips back to exactly what `buildRelatedBlock` emitted, modulo
+    // the list-marker padding `normalise` collapses.
     const block = buildRelatedBlock([
       { slug: "team/people/alex", display: "Alex Chen" },
       { slug: "team/projects/backend" },
     ]);
-    const canonical =
-      "# Page\n\nSome prose.\n\n## Related\n\n- [[team/people/alex|Alex Chen]]\n\n- [[team/projects/backend]]\n";
     const md = `# Page\n\nSome prose.\n\n${block}`;
-    expect(normalise(await roundTrip(md))).toBe(normalise(canonical));
+    expect(normalise(roundTrip(md))).toBe(normalise(md));
   });
 });

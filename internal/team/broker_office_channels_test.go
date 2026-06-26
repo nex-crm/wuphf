@@ -236,8 +236,8 @@ func TestChannelMembersRejectDisableOrRemoveOfLead(t *testing.T) {
 	b.mu.Lock()
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.members = []officeMember{
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", CreatedBy: "wuphf", CreatedAt: now},
 	}
 	b.channels = []teamChannel{
 		{Slug: "general", Name: "general", Members: []string{"operator", "builder"}, CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now},
@@ -687,8 +687,8 @@ func TestEnsureDefaultOfficeMembersNoOpWhenNonEmpty(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto"},
+		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true},
+		{Slug: "builder", Name: "Builder", Role: "Builder"},
 	}
 	b.ensureDefaultOfficeMembersLocked()
 	got := make([]string, 0, len(b.members))
@@ -723,11 +723,11 @@ func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
 	b.mu.Lock()
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.members = []officeMember{
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "planner", Name: "Planner", Role: "Planner", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "growth", Name: "Growth", Role: "Growth", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "planner", Name: "Planner", Role: "Planner", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "growth", Name: "Growth", Role: "Growth", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", CreatedBy: "wuphf", CreatedAt: now},
 	}
 	// Seed a task so saveLocked doesn't short-circuit on default state.
 	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
@@ -745,7 +745,12 @@ func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
 	}
 	reloaded.mu.Unlock()
 
-	want := []string{"operator", "planner", "builder", "growth", "reviewer"}
+	// The curated blueprint roster must survive reload with NO generic
+	// default-manifest agents (ceo/planner/executor/reviewer) leaking back in.
+	// The one exception is the Librarian (Pam): a universal built-in, added to
+	// every roster on load by the Phase 6 migration — like the CEO is meant to
+	// be — so she is expected here, appended last.
+	want := []string{"operator", "planner", "builder", "growth", "reviewer", LibrarianSlug}
 	if len(slugs) != len(want) {
 		t.Fatalf("expected blueprint roster %v to survive reload, got %v", want, slugs)
 	}

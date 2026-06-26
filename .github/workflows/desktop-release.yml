@@ -1,0 +1,389 @@
+# Desktop release: build → sign → notarize → package → attach to a GitHub Release.
+#
+# macOS is fully wired (Developer ID + notarization, proven by hand 2026-06-14).
+# Windows builds and signs via Azure Trusted Signing IF its secrets exist; without
+# them it still produces an (unsigned) installer so the pipeline isn't blocked.
+#
+# Trigger: every product release. auto-release.yml dispatches this workflow at the
+# new `v*` tag — a tag pushed with GITHUB_TOKEN does NOT fire `on: push: tags`
+# (the same limitation release.yml works around), so the dispatch is the real path
+# for the main cadence. `push: tags` still covers a manually pushed `v*`/`desktop-v*`
+# tag, and workflow_dispatch covers out-of-band builds. The app is a fat
+# self-contained binary, so every release needs a fresh dmg + Windows installer.
+# On a `v*` tag this job WAITS for the published Release that release.yml/goreleaser
+# creates for the tag, then APPENDS its signed artifacts to it; on a standalone
+# `desktop-v*` tag (or manual dispatch) it owns a DRAFT release for review first.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   macOS:
+#     APPLE_CERT_P12_BASE64      Developer ID Application cert + key, exported as
+#                                .p12, then `base64 -i cert.p12`.
+#     APPLE_CERT_PASSWORD        the .p12 export password.
+#     APPLE_SIGN_IDENTITY        e.g. "Developer ID Application: GarageSpace, Inc. (GXAA6X232R)"
+#     APPLE_TEAM_ID              e.g. GXAA6X232R
+#     APPLE_NOTARY_KEY_P8_BASE64 App Store Connect API .p8, base64 (Developer role):
+#                                base64 -i AuthKey_*.p8 | gh secret set APPLE_NOTARY_KEY_P8_BASE64
+#     APPLE_NOTARY_KEY_ID        the Key ID (the XXX in the AuthKey_XXX.p8 filename).
+#     APPLE_NOTARY_ISSUER_ID     the Issuer ID.
+#     KEYCHAIN_PASSWORD          any random string (ephemeral CI keychain).
+#   Windows (optional — Azure Trusted Signing):
+#     AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+#     AZURE_TS_ENDPOINT, AZURE_TS_ACCOUNT, AZURE_TS_PROFILE
+name: desktop-release
+
+on:
+  push:
+    tags: ["v*", "desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: write # create/upload to the Release
+
+env:
+  WAILS_VERSION: v2.12.0
+
+jobs:
+  # ---------------------------------------------------------------- macOS ----
+  macos:
+    runs-on: macos-14 # Apple Silicon
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+
+      - name: Free disk space for DMG packaging
+        # macos-14 runners ship near-full; `hdiutil create` for the universal
+        # .app has failed with "No space left on device" (v0.1.0, v0.227.0,
+        # v0.227.2). Reclaim the big tools this Go/Wails build never touches
+        # BEFORE building so packaging has headroom. The *active* Xcode is kept
+        # (codesign, hdiutil, notarytool, stapler all need it) — only the other
+        # installed Xcode versions and unused SDKs are removed.
+        run: |
+          set -uo pipefail
+          echo "Disk before cleanup:"; df -h /
+          # iOS simulator runtimes, caches, and device-support (~10-20 GB).
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/* || true
+          sudo rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport/* || true
+          # Android SDK/NDK — never used by this build (~10+ GB).
+          sudo rm -rf "${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}" ~/Library/Android || true
+          # Extra Xcode installs — keep ONLY the one `xcode-select` points at.
+          # Guard on the active path actually being an /Applications/Xcode*.app so
+          # a CLT-only selection can never delete every Xcode out from under us.
+          active_xcode="$(xcode-select -p 2>/dev/null | sed 's#/Contents/Developer##')"
+          echo "Active Xcode: ${active_xcode:-<none>}"
+          case "$active_xcode" in
+            /Applications/Xcode*.app)
+              for x in /Applications/Xcode*.app; do
+                [ -e "$x" ] || continue
+                [ "$x" = "$active_xcode" ] && continue
+                echo "Removing unused $x"
+                sudo rm -rf "$x" || true
+              done
+              ;;
+            *)
+              echo "Active toolchain is not a removable Xcode.app; skipping Xcode pruning"
+              ;;
+          esac
+          echo "Disk after cleanup:"; df -h /
+
+      - name: Resolve version
+        id: ver
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # Resolve the bare version. INPUT_VERSION (manual dispatch, or the
+          # auto-release.yml dispatch) is used verbatim; a tag push strips its
+          # prefix (desktop-v first, then v).
+          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; V="${V#v}"; fi
+          # Reject anything that isn't a clean version so a crafted tag can't
+          # smuggle shell metacharacters into later filename/volname uses.
+          if ! printf '%s' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
+            echo "::error::invalid version '$V' (expected semver-like, e.g. 0.1.0)"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          # Resolve the release TAG this run targets so softprops never falls back
+          # to github.ref (a branch on a UI dispatch). A v*/desktop-v* tag ref is
+          # used as-is; a branch dispatch synthesizes desktop-v<version>.
+          case "$REF_NAME" in
+            v*|desktop-v*) TAG="$REF_NAME" ;;
+            *) TAG="desktop-v$V" ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2
+
+      - name: Build embedded web bundle
+        run: |
+          cd web
+          # Retry `bun install`: the xlsx dep pulls from the sheetjs CDN, which
+          # intermittently 502s and has failed desktop releases (v0.227.2).
+          # `bun run build` is a real build step, so only the network-bound
+          # install is retried.
+          for attempt in 1 2 3; do
+            if bun install; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::bun install failed after 3 attempts (transient registry/CDN error?)"
+              exit 1
+            fi
+            echo "::warning::bun install attempt $attempt failed; retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          bun run build
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Stamp version into wails.json
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          cd desktop/oswails
+          VERSION="$VERSION" node -e '
+            const fs=require("fs"); const j=JSON.parse(fs.readFileSync("wails.json","utf8"));
+            j.info=j.info||{}; j.info.productVersion=process.env.VERSION;
+            fs.writeFileSync("wails.json", JSON.stringify(j,null,2));
+          '
+
+      - name: Build universal .app
+        run: |
+          GOBIN_DIR="$(go env GOPATH)/bin"
+          export PATH="$PATH:$GOBIN_DIR"
+          cd desktop/oswails
+          wails build -platform darwin/universal -s -skipbindings -tags desktop
+
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT="$RUNNER_TEMP/cert.p12"
+          KC="$RUNNER_TEMP/build.keychain-db"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$CERT"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security import "$CERT" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KC" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KC"
+
+      - name: Codesign (Developer ID + hardened runtime)
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: |
+          codesign --deep --force --options runtime --timestamp \
+            --entitlements desktop/oswails/build/darwin/entitlements.plist \
+            --sign "$SIGN_IDENTITY" \
+            desktop/oswails/build/bin/WUPHF.app
+          codesign --verify --deep --strict --verbose=2 desktop/oswails/build/bin/WUPHF.app
+
+      - name: Package + sign .dmg
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          stage="$RUNNER_TEMP/dmg"; mkdir -p "$stage"
+          cp -R desktop/oswails/build/bin/WUPHF.app "$stage/"
+          ln -s /Applications "$stage/Applications"
+          mkdir -p dist
+          hdiutil create -volname "WUPHF" -srcfolder "$stage" -ov -format UDZO "dist/WUPHF-$VERSION.dmg"
+          codesign --sign "$SIGN_IDENTITY" --timestamp "dist/WUPHF-$VERSION.dmg"
+
+      - name: Notarize + staple
+        env:
+          NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          KEY="$RUNNER_TEMP/notary.p8"
+          echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$KEY"
+          xcrun notarytool submit "dist/WUPHF-$VERSION.dmg" \
+            --key "$KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple "dist/WUPHF-$VERSION.dmg"
+          spctl -a -t open --context context:primary-signature -v "dist/WUPHF-$VERSION.dmg"
+          # Version-less alias so the website can link the stable
+          # releases/latest/download/WUPHF-mac.dmg URL (same signed+stapled bytes).
+          cp "dist/WUPHF-$VERSION.dmg" "dist/WUPHF-mac.dmg"
+
+      - name: Wait for the product release to exist
+        # On the v* cadence the published Release is created by release.yml/
+        # goreleaser (auto-release.yml dispatches both in parallel). Wait for it so
+        # softprops APPENDS to that release instead of racing ahead and creating a
+        # partial one. Skipped on desktop-v*/dispatch, where this job owns a draft.
+        if: startsWith(github.ref_name, 'v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $TAG exists — appending desktop assets"; exit 0
+            fi
+            echo "waiting for release $TAG ($i/60)"; sleep 15
+          done
+          echo "::error::release $TAG not created within 15m; refusing to upload a partial release"; exit 1
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # ratchet:softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: dist/WUPHF-*.dmg
+          # On a `v*` tag, append to the published release goreleaser made for the
+          # same tag (draft:false keeps it published). On a standalone `desktop-v*`
+          # tag or manual dispatch, ship a draft to review first.
+          draft: ${{ !startsWith(github.ref_name, 'v') }}
+
+  # -------------------------------------------------------------- Windows ----
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # ratchet:actions/checkout@v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # Resolve the bare version. INPUT_VERSION (manual dispatch, or the
+          # auto-release.yml dispatch) is used verbatim; a tag push strips its
+          # prefix (desktop-v first, then v).
+          if [ -n "$INPUT_VERSION" ]; then V="$INPUT_VERSION"; else V="${REF_NAME#desktop-v}"; V="${V#v}"; fi
+          # Reject anything that isn't a clean version so a crafted tag can't
+          # smuggle shell metacharacters into later filename/volname uses.
+          if ! printf '%s' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$'; then
+            echo "::error::invalid version '$V' (expected semver-like, e.g. 0.1.0)"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          # Resolve the release TAG this run targets so softprops never falls back
+          # to github.ref (a branch on a UI dispatch). A v*/desktop-v* tag ref is
+          # used as-is; a branch dispatch synthesizes desktop-v<version>.
+          case "$REF_NAME" in
+            v*|desktop-v*) TAG="$REF_NAME" ;;
+            *) TAG="desktop-v$V" ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build embedded web bundle
+        shell: bash
+        run: |
+          cd web
+          # Retry `bun install`: the xlsx dep pulls from the sheetjs CDN, which
+          # intermittently 502s and failed the v0.227.2 Windows desktop build.
+          # `bun run build` is a real build step, so only the network-bound
+          # install is retried.
+          for attempt in 1 2 3; do
+            if bun install; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::bun install failed after 3 attempts (transient registry/CDN error?)"
+              exit 1
+            fi
+            echo "::warning::bun install attempt $attempt failed; retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          bun run build
+
+      - name: Install Wails CLI
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build .exe + NSIS installer (WebView2)
+        shell: bash
+        run: |
+          GOBIN_DIR="$(go env GOPATH)/bin"
+          export PATH="$PATH:$GOBIN_DIR"
+          cd desktop/oswails
+          wails build -platform windows/amd64 -s -skipbindings -tags desktop -nsis -ldflags "-H windowsgui"
+
+      # `secrets` can't be used in `if:`, so detect it in a step output first.
+      - name: Detect Azure signing secrets
+        id: azure
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "enabled=false" >> "$GITHUB_OUTPUT"; fi
+
+      # Azure Trusted Signing — only runs when the AZURE_* secrets are present.
+      - name: Sign (Azure Trusted Signing)
+        if: steps.azure.outputs.enabled == 'true'
+        uses: azure/trusted-signing-action@07c81171dd46a04e1b9f382b6c693815828bbbf7 # ratchet:azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: desktop/oswails/build/bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Flag unsigned Windows installer
+        # If Azure signing was skipped (secrets absent), the installer ships
+        # unsigned. Surface it loudly — a green run otherwise hides that users
+        # will hit a SmartScreen warning, and that a secret may have lapsed.
+        if: steps.azure.outputs.enabled != 'true'
+        shell: bash
+        run: |
+          echo "::warning::Azure Trusted Signing secrets absent — WUPHF-windows-setup.exe is UNSIGNED (users hit a SmartScreen warning). Set AZURE_CLIENT_ID + siblings to sign."
+          {
+            echo "### ⚠️ Unsigned Windows installer"
+            echo "Azure Trusted Signing secrets were absent, so \`WUPHF-windows-setup.exe\` is NOT code-signed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Rename artifact with version
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p dist
+          # Wails -nsis emits both the app .exe and the NSIS installer; publish the installer.
+          exe=$(find desktop/oswails/build/bin -maxdepth 1 -name '*installer*.exe' | head -1)
+          [ -n "$exe" ] || exe=$(find desktop/oswails/build/bin -maxdepth 1 -name '*.exe' | head -1)
+          cp "$exe" "dist/WUPHF-$VERSION-setup.exe"
+          # Version-less alias for the stable releases/latest/download URL.
+          cp "$exe" "dist/WUPHF-windows-setup.exe"
+
+      - name: Wait for the product release to exist
+        # Same coordination as macOS: append to goreleaser's published release on
+        # the v* cadence instead of racing it; skipped on desktop-v*/dispatch.
+        if: startsWith(github.ref_name, 'v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $TAG exists — appending desktop assets"; exit 0
+            fi
+            echo "waiting for release $TAG ($i/60)"; sleep 15
+          done
+          echo "::error::release $TAG not created within 15m; refusing to upload a partial release"; exit 1
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # ratchet:softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: dist/WUPHF-*-setup.exe
+          # Same draft logic as macOS: append on `v*`, draft on `desktop-v*`/dispatch.
+          draft: ${{ !startsWith(github.ref_name, 'v') }}

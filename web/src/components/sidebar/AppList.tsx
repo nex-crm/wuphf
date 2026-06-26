@@ -1,77 +1,86 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-import type { ComponentType } from "react";
+import { type ComponentType, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookStack,
-  Calendar,
-  CheckCircle,
   ClipboardCheck,
+  Community,
   Flash,
+  HomeSimple,
   Package,
-  Page,
   Play,
+  Puzzle,
+  Repeat,
   Search,
   Settings,
   ShareAndroid,
   Shield,
-  Terminal,
+  TaskList,
 } from "iconoir-react";
 
-import { getRequests } from "../../api/client";
 import { fetchReviews } from "../../api/notebook";
-import { useOverflow } from "../../hooks/useOverflow";
-import { SIDEBAR_APPS } from "../../lib/constants";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
-import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
 import {
-  useCurrentApp,
-  useFallbackChannelSlug,
-} from "../../routes/useCurrentRoute";
+  SIDEBAR_TOOLS,
+  WIKI_SURFACE_APP_IDS,
+} from "../../routes/routeRegistry";
+import { useCurrentApp } from "../../routes/useCurrentRoute";
+import { SidebarItem } from "./SidebarItem";
+import { SidebarSection } from "./SidebarSection";
+import { TasksNavButton } from "./TasksNavButton";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
 const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  overview: HomeSimple,
   studio: Play,
   wiki: BookStack,
-  console: Terminal,
-  tasks: CheckCircle,
-  requests: ClipboardCheck,
+  tasks: ClipboardCheck,
+  requests: TaskList,
   graph: ShareAndroid,
   policies: Shield,
-  calendar: Calendar,
+  routines: Repeat,
   skills: Flash,
   activity: Package,
-  receipts: Page,
   "health-check": Search,
   settings: Settings,
+  // Agents + Integrations previously fell back to emoji (🤖 / 🔌), which read
+  // as AI-template slop next to the clean iconoir line-icon set. Give them
+  // real line icons so every nav row is visually consistent.
+  agents: Community,
+  integrations: Puzzle,
 };
+
+// The sidebar is three labeled groups. `tasks` is special — it renders via
+// TasksNavButton (the primary Work surface, with the attention badge + chime
+// the Inbox button used to carry); the rest are SIDEBAR_TOOLS ids. Order
+// within each group is the display order. (The `routines` tool shows as
+// "Scheduled Tasks" via APP_LABELS.)
+const NAV_SECTIONS: ReadonlyArray<{
+  label: string;
+  items: readonly string[];
+}> = [
+  {
+    label: "Work",
+    items: ["tasks", "routines", "activity"],
+  },
+  { label: "Knowledge", items: ["wiki", "graph"] },
+  {
+    label: "Config",
+    items: ["agents", "policies", "skills", "integrations", "health-check"],
+  },
+];
 
 export function AppList() {
   const currentApp = useCurrentApp();
-  // The Requests badge uses the channel-scoped /requests endpoint. Read
-  // the last-visited channel here so the badge reflects the user's
-  // working channel even while they're parked on a non-conversation
-  // surface (apps, wiki, notebooks).
-  const currentChannel = useFallbackChannelSlug();
-
-  const { data: requestsData } = useQuery({
-    queryKey: ["requests-badge", currentChannel],
-    queryFn: () => getRequests(currentChannel),
-    refetchInterval: 5_000,
-  });
 
   const { data: reviewsData } = useQuery({
     queryKey: ["reviews-badge"],
     queryFn: fetchReviews,
     refetchInterval: 15_000,
   });
-
-  const pendingCount = (requestsData?.requests ?? []).filter(
-    (r) => !r.status || r.status === "open" || r.status === "pending",
-  ).length;
-
   const pendingReviewsCount = (reviewsData ?? []).filter(
     (r) =>
       r.state === "pending" ||
@@ -79,43 +88,64 @@ export function AppList() {
       r.state === "changes-requested",
   ).length;
 
-  const overflowRef = useOverflow<HTMLDivElement>();
+  const [open, setOpen] = useState<Record<string, boolean>>({
+    Work: true,
+    Knowledge: true,
+    Config: true,
+  });
+  const toggle = (label: string) =>
+    setOpen((prev) => ({ ...prev, [label]: !prev[label] }));
+
+  const toolById = new Map(SIDEBAR_TOOLS.map((tool) => [tool.id, tool]));
+
+  function renderItem(id: string) {
+    if (id === "tasks") return <TasksNavButton key="tasks" />;
+    const tool = toolById.get(id as (typeof SIDEBAR_TOOLS)[number]["id"]);
+    if (!tool) return null;
+    const Icon = APP_ICONS[id];
+    const isActive =
+      id === "wiki"
+        ? WIKI_SURFACE_APPS.has(currentApp ?? "")
+        : currentApp === id;
+    const badge =
+      id === "wiki" && pendingReviewsCount > 0 ? pendingReviewsCount : null;
+    return (
+      <SidebarItem
+        key={id}
+        icon={
+          Icon ? (
+            <Icon className="sidebar-item-icon" />
+          ) : (
+            <span className="sidebar-item-emoji">{tool.icon}</span>
+          )
+        }
+        label={tool.label}
+        active={isActive}
+        onClick={() => navigateToSidebarApp(id)}
+        badge={
+          badge !== null ? (
+            <span className="sidebar-badge" aria-label={`${badge} pending`}>
+              {badge}
+            </span>
+          ) : undefined
+        }
+      />
+    );
+  }
 
   return (
     <div className="sidebar-scroll-wrap is-apps">
-      <div className="sidebar-apps" ref={overflowRef}>
-        {SIDEBAR_APPS.filter((app) => app.id !== "settings").map((app) => {
-          let badge: number | null = null;
-          if (app.id === "requests" && pendingCount > 0) badge = pendingCount;
-          if (app.id === "wiki" && pendingReviewsCount > 0)
-            badge = pendingReviewsCount;
-          const Icon = APP_ICONS[app.id];
-          const isActive =
-            app.id === "wiki"
-              ? WIKI_SURFACE_APPS.has(currentApp ?? "")
-              : currentApp === app.id;
-          return (
-            <button
-              type="button"
-              key={app.id}
-              className={`sidebar-item${isActive ? " active" : ""}`}
-              onClick={() => navigateToSidebarApp(app.id)}
-            >
-              {Icon ? (
-                <Icon className="sidebar-item-icon" />
-              ) : (
-                <span className="sidebar-item-emoji">{app.icon}</span>
-              )}
-              <span style={{ flex: 1 }}>{app.name}</span>
-              {badge !== null && (
-                <span className="sidebar-badge" aria-label={`${badge} pending`}>
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {NAV_SECTIONS.map((section) => (
+        <SidebarSection
+          key={section.label}
+          label={section.label}
+          open={open[section.label] ?? true}
+          onToggle={() => toggle(section.label)}
+          data-testid={`sidebar-section-${section.label.toLowerCase()}`}
+        >
+          <div className="sidebar-apps">{section.items.map(renderItem)}</div>
+        </SidebarSection>
+      ))}
     </div>
   );
 }

@@ -1,0 +1,1056 @@
+/*
+ * onboarding-wizard.css — host shell styles for the visual stepped onboarding.
+ *
+ * Owns the full-viewport host: the split layout (mock office / visual on one
+ * side, copy + inputs on the other), the "01 / 05" step marker, the footer
+ * (Back · progress dots · Next/Finish), and the error line. The per-step
+ * content + visuals live in the step screens and reuse the office-tour-slides
+ * stylesheet for the shared visual primitives (mock sidebar, agent card,
+ * fan-out, wiki tree).
+ *
+ * Tokens only — no hardcoded color, spacing, radius, or font. Renders in nex,
+ * nex-dark, and noir-gold. Motion is transform/opacity only and is disabled
+ * under prefers-reduced-motion.
+ *
+ * Class map:
+ *   .onboarding-wizard               full-viewport host
+ *   .onboarding-wizard-step-marker   top-left "01 / 05" wayfinding
+ *   .onboarding-wizard-body          the split canvas (holds the active step)
+ *   .onboarding-wizard-error         seed-failure line (role=alert)
+ *   .onboarding-wizard-footer        Back · dots · Next/Finish row
+ *   .onboarding-wizard-footer-side   left + right footer cells
+ *   .onboarding-wizard-footer-side-end  right cell modifier
+ *   .onboarding-wizard-kbd-hint      arrow-key hint (step 1, no Back)
+ *   .onboarding-wizard-dots          progress-dot rail (role=img)
+ *   .onboarding-wizard-dot           one dot (aria-hidden)
+ *   .onboarding-wizard-dot-active    active dot modifier
+ */
+
+.onboarding-wizard {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(
+      120% 100% at 100% 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 60%
+    ),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+.onboarding-wizard-step-marker {
+  position: absolute;
+  top: var(--space-5);
+  left: var(--space-6);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  /* --text-secondary (not -tertiary): the tertiary tier falls below contrast
+     for a small mono marker against the warm gradient. */
+  color: var(--text-secondary);
+}
+
+.onboarding-wizard-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: calc(var(--space-8) + var(--space-4)) var(--space-6) var(--space-6);
+  overflow: hidden;
+}
+
+/* The step screens lay out as a two-column split; the host just gives them the
+   stage. A step renders <copy column> + <visual stage> and keys its entrance
+   off data-active. See office-tour-slides.css for the shared split rules. */
+.onboarding-wizard-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Rendered Remotion clip used as a step's stage visual. The clip is a
+   self-contained product window on its own soft backdrop, so it sits cleanly
+   on any onboarding page theme. Constrained so it never dwarfs the copy column. */
+.onboarding-wizard-clip {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  margin: auto;
+  border-radius: var(--radius-lg);
+}
+
+.onboarding-wizard-error {
+  margin: 0 var(--space-6) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.onboarding-wizard-footer {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border);
+}
+
+.onboarding-wizard-footer-side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.onboarding-wizard-footer-side-end {
+  justify-content: flex-end;
+}
+
+/* Footer buttons use the app's native .btn system (so the primary CTA is our
+   accent purple, not the shadcn blue --primary). Keep them from shrinking or
+   wrapping in the 1fr / auto / 1fr footer grid. The native .btn already
+   carries comfortable padding and a 44px min hit area. */
+.onboarding-wizard-footer-side > .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.onboarding-wizard-kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.onboarding-wizard-kbd-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.onboarding-wizard-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.onboarding-wizard-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--border-dark);
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.onboarding-wizard-dot-active {
+  background: var(--accent);
+  transform: scale(1.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-wizard-dot {
+    transition: none;
+  }
+}
+
+/* ── Meet step (01): office name + example chips ─────────────────────────── */
+
+.onboarding-meet-name-field {
+  max-width: 360px;
+}
+
+.onboarding-meet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  margin-top: var(--space-2);
+}
+
+.onboarding-meet-chip {
+  padding: var(--space-1) var(--space-2-5);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 160ms ease-out;
+}
+
+.onboarding-meet-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.onboarding-meet-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.onboarding-meet-chip:active {
+  transform: translateY(0);
+}
+
+.onboarding-meet-name-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+/* The optional email field sits under the office name and matches its width so
+   the two read as one stack on the welcome step. */
+.onboarding-meet-email-field {
+  max-width: 360px;
+}
+
+/* Non-blocking "that is not an email" warning under the optional email field.
+   The field never gates advancing, so this nudges in the danger tone without
+   reading as a hard error. */
+.onboarding-meet-email-hint--invalid {
+  color: var(--danger);
+}
+
+/* ── Team-step inputs (the one real input step) ──────────────────────────── */
+
+.onboarding-team-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  margin-top: var(--space-4);
+}
+
+.onboarding-team-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.onboarding-team-input,
+.onboarding-team-textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  background: var(--input-bg, var(--bg-card));
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+.onboarding-team-textarea {
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.onboarding-team-input:focus-visible,
+.onboarding-team-textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.onboarding-blueprint-empty {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-meet-chip,
+  .onboarding-pack-card,
+  .onboarding-team-agent,
+  .onboarding-add-custom {
+    transition: none;
+  }
+}
+
+/* The agent brief is the right-rail card: name + what it does + heartbeat
+   switch + the three traits that make an agent an agent. */
+.onboarding-agent-brief {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 360px;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card-soft);
+}
+
+.onboarding-agent-brief-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.onboarding-agent-brief-avatar {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.onboarding-agent-brief-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* The team-step fields inside the brief card should not carry the default
+   top margin (the card's gap handles spacing). */
+.onboarding-agent-brief .onboarding-team-field {
+  margin-top: 0;
+}
+
+/* The team step's right rail centers the brief card rather than stacking the
+   tour's sidebar + agent card; override the agents-stage flex defaults. */
+.office-tour-slide-stage--team {
+  align-items: stretch;
+  justify-content: center;
+}
+
+/* ── First-issue step (05) ───────────────────────────────────────────────── */
+
+.onboarding-first-issue-field {
+  width: 100%;
+}
+
+.onboarding-first-issue-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.onboarding-first-issue-reset {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.onboarding-first-issue-reset:hover {
+  text-decoration: underline;
+}
+
+.onboarding-first-issue-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.onboarding-first-issue-textarea {
+  min-height: 120px;
+  margin-top: var(--space-1-5);
+}
+
+.onboarding-first-issue-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* The keep-in-touch consent row on the final step. Only rendered when an email
+   was captured; the address is attached to the PostHog person at Finish only
+   while this box is checked. */
+.onboarding-keep-in-touch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  max-width: 420px;
+  cursor: pointer;
+}
+
+.onboarding-keep-in-touch-box {
+  margin-top: 2px;
+  width: var(--space-4);
+  height: var(--space-4);
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.onboarding-keep-in-touch-copy {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Analytics-consent block on the final step: two honest, independent toggles
+   (anonymous events, typed-text-masked recordings), both checked by default. Reuses
+   the keep-in-touch row primitives for the checkboxes. */
+.onboarding-analytics-consent {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  max-width: 420px;
+}
+
+.onboarding-analytics-consent-heading {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.onboarding-analytics-consent .onboarding-keep-in-touch {
+  margin-top: var(--space-3);
+}
+
+.onboarding-analytics-consent-note {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+  margin: var(--space-3) 0 0;
+}
+
+/* The first-issue right rail: a mock CEO DM that mirrors the text the user is
+   writing, so they see the handoff destination before Finish. */
+.office-tour-slide-stage--first-issue {
+  align-items: stretch;
+  justify-content: center;
+}
+
+.onboarding-handoff-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 360px;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card-soft);
+}
+
+.onboarding-handoff-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.onboarding-handoff-avatar {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.onboarding-handoff-who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.onboarding-handoff-name {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.onboarding-handoff-handle {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.onboarding-handoff-route {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.onboarding-handoff-bubble {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-warm);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  /* The mirrored issue can be long; keep it tidy inside the card. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.onboarding-handoff-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.onboarding-handoff-send {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--bg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.onboarding-handoff-note {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+/* Narrow viewports: stack the split so the copy reads above the visual, and
+   pull the footer columns in. The step screens own the column stacking; the
+   host only relaxes the marker offset. */
+@media (max-width: 720px) {
+  .onboarding-wizard-step-marker {
+    top: var(--space-4);
+    left: var(--space-4);
+  }
+
+  .onboarding-wizard-body {
+    padding: calc(var(--space-8)) var(--space-4) var(--space-4);
+  }
+
+  /* The 1fr / auto / 1fr footer cannot fit a long skip label plus Next plus
+     Back plus dots at phone width, so stack it: progress dots on top, Back
+     centered, then the skip and the primary action full-width and thumb-near.
+     The arrow-key hint is dropped on small screens (no physical arrows). */
+  .onboarding-wizard-footer {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .onboarding-wizard-dots {
+    order: -1;
+    justify-content: center;
+  }
+
+  .onboarding-wizard-footer-side {
+    justify-content: center;
+  }
+
+  .onboarding-wizard-footer-side-end {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .onboarding-wizard-footer-side-end > .btn {
+    width: 100%;
+  }
+
+  .onboarding-wizard-footer-side > .btn {
+    white-space: normal;
+  }
+
+  .onboarding-wizard-kbd-hint {
+    display: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Team step v2 — blueprint pack selection separated from an opt-in
+   custom agent, plus a type bump (the prior --text-xs / --text-sm
+   sizes read too small on a focused full-screen step).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Bigger, more legible team-step type. */
+.onboarding-team-label {
+  font-size: var(--text-sm);
+}
+.onboarding-team-input,
+.onboarding-team-textarea {
+  font-size: var(--text-base);
+}
+.onboarding-agent-brief-title {
+  font-size: var(--text-lg);
+}
+
+/* The chosen pack, shown under the blueprint cards as the default team. */
+.onboarding-pack {
+  margin-top: var(--space-4);
+}
+.onboarding-pack-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+}
+.onboarding-pack-hint {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+/* Right-rail education: what every agent is. */
+.onboarding-agent-edu {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  padding: var(--space-4);
+}
+.onboarding-agent-edu-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Opt-in custom-agent affordance. Quiet dashed button until invoked. */
+.onboarding-add-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  margin-top: var(--space-4);
+  padding: var(--space-2-5) var(--space-4);
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.onboarding-add-custom:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.onboarding-add-custom:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+.onboarding-add-custom-plus {
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+/* "Remove" on the expanded custom-agent card. */
+.onboarding-custom-remove {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.onboarding-custom-remove:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+/* The team stage stacks the education card and the custom affordance. */
+.office-tour-slide-stage--team {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  justify-content: flex-start;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Team step v3 — full-width, roomy. Pack cards with icons + space,
+   and a prominent select/unselect agent list on selection. Larger
+   type throughout (the prior step read too small and too cramped).
+   ═══════════════════════════════════════════════════════════════ */
+
+.onboarding-team-full {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2) var(--space-4);
+}
+
+.onboarding-team-full[data-active="true"] {
+  animation: onboarding-team-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes onboarding-team-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.onboarding-team-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Pack cards: roomy, icon-anchored, responsive multi-column. */
+.onboarding-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: var(--space-3);
+}
+
+.onboarding-pack-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  text-align: left;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+
+.onboarding-pack-card:hover {
+  border-color: var(--border-dark);
+  transform: translateY(-2px);
+}
+
+.onboarding-pack-card:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.onboarding-pack-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+  background: var(--accent-bg);
+}
+
+.onboarding-pack-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.onboarding-pack-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  /* A custom pack name or long token must wrap, never overflow the card. */
+  overflow-wrap: anywhere;
+}
+
+.onboarding-pack-card-name {
+  font-size: var(--text-xl);
+  font-weight: 650;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.onboarding-pack-card-desc {
+  font-size: var(--text-base);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.onboarding-pack-card-count {
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Selected pack's agents — the prominent select/unselect list. The roster is a
+   <fieldset> for native checkbox-group semantics, so reset the element's
+   default margin/padding/min-inline-size and let the rules below own the box. */
+.onboarding-pack-team {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  min-inline-size: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-warm);
+}
+
+/* The pack drawer: a full-width row in the pack grid that animates its REAL
+   height open and shut via the grid-template-rows 0fr -> 1fr technique. The
+   inner clips its content so the roster slides rather than pops, giving it the
+   feel of a real drawer opening under the selected card. */
+.onboarding-pack-drawer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.onboarding-pack-drawer.is-open {
+  grid-template-rows: 1fr;
+}
+
+.onboarding-pack-drawer-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-pack-drawer {
+    transition: none;
+  }
+}
+
+/* The roster panel inside the drawer. The accent border ties it back to the
+   selected (accent) card so the open card and its drawer read as one unit. */
+.onboarding-pack-team--inline {
+  border: 2px solid var(--accent);
+}
+
+.onboarding-pack-team-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.onboarding-pack-team-sub {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.onboarding-pack-team-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.onboarding-pack-team-hint {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.onboarding-team-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-2);
+}
+
+.onboarding-team-agent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    opacity 0.15s;
+}
+
+.onboarding-team-agent:hover {
+  border-color: var(--border-dark);
+}
+
+.onboarding-team-agent:not(.is-picked) {
+  opacity: 0.55;
+}
+
+.onboarding-team-agent-check {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.onboarding-team-agent-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.onboarding-team-agent-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  /* Long agent names or @handles wrap inside the row instead of overflowing. */
+  overflow-wrap: anywhere;
+}
+
+.onboarding-team-agent-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onboarding-team-agent-handle {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.onboarding-team-agent-role {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.onboarding-team-agent-lead {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+}
+
+.onboarding-team-prompt {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+}
+
+.onboarding-team-custom {
+  display: flex;
+  flex-direction: column;
+}
+
+.onboarding-custom-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .onboarding-custom-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-team-full[data-active="true"] {
+    animation: none;
+  }
+}
+
+/* "Start from scratch" — a quieter, dashed sibling of the pack cards. */
+.onboarding-pack-card--scratch {
+  border-style: dashed;
+  background: transparent;
+}
+.onboarding-pack-card--scratch .onboarding-pack-card-icon {
+  opacity: 0.8;
+}
+.onboarding-pack-card--scratch.is-selected {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* Scratch-chosen confirmation note (vs the neutral "pick a pack" prompt). */
+.onboarding-team-prompt--scratch {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+/* ── Touch ergonomics ──────────────────────────────────────────────────────
+   On coarse pointers, the small text and pill controls need a 44px hit area
+   even though their visible text stays the same size (the larger target is
+   invisible padding, not bigger type). The agent checkbox rows are already
+   tall enough (the whole <label> row is the target, min-height 64px), and the
+   footer buttons inherit min-height: 44px from the base .btn. */
+@media (pointer: coarse) {
+  .onboarding-meet-chip,
+  .onboarding-first-issue-reset,
+  .onboarding-custom-remove {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .onboarding-add-custom {
+    min-height: 44px;
+  }
+}

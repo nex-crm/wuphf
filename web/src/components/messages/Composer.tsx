@@ -6,9 +6,15 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import { getConfig, type Message, postMessage } from "../../api/client";
+import {
+  cancelRequest,
+  getConfig,
+  type Message,
+  postMessage,
+} from "../../api/client";
 import { useCommands } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { useRequests } from "../../hooks/useRequests";
 import {
   extractTaggedMentions,
   parseMentions,
@@ -134,14 +140,26 @@ function emptyHistoryState(): HistoryState {
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
-export function Composer() {
-  const currentChannel = useChannelSlug() ?? "general";
+export function Composer({ channel }: { channel?: string } = {}) {
+  // Prefer an explicit channel (the task-detail chat passes the task's channel,
+  // where useChannelSlug() is null). Fall back to the channel route slug so the
+  // channel surface behaves exactly as before.
+  const routeChannel = useChannelSlug();
+  const currentChannel = channel ?? routeChannel ?? "general";
   const setLastMessageId = useAppStore((s) => s.setLastMessageId);
   const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
+  const pendingComposerDraft = useAppStore((s) => s.pendingComposerDraft);
+  const consumePendingComposerDraft = useAppStore(
+    (s) => s.consumePendingComposerDraft,
+  );
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
   const [acIdx, setAcIdx] = useState(0);
+  // Guards the cancel-then-send path so a fast double-Enter cannot
+  // fire two send POSTs before sendMutation.isPending flips. Cleared
+  // in finally() after the inner send mutates (or fails synchronously).
+  const [isPreSendPending, setIsPreSendPending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -151,6 +169,22 @@ export function Composer() {
     staleTime: 60_000,
   });
   const { data: members = [] } = useOfficeMembers();
+  // If the human chooses to type into the channel instead of clicking a
+  // blocking interview's button, treat that as "I'm replying in chat
+  // instead." Cancel the interview so the broker unblocks, and let the
+  // agent see the typed message as the new context. Channel-scoped to
+  // match the broker's gate: a blocking request only parks chat in ITS
+  // channel now, so typing in #general must not cancel an approval that
+  // is pending in some task channel.
+  const { pending: pendingRequests } = useRequests();
+  const blockingPending = useMemo(
+    () =>
+      pendingRequests.find(
+        (r) =>
+          r.blocking === true && (!r.channel || r.channel === currentChannel),
+      ) ?? null,
+    [pendingRequests, currentChannel],
+  );
   const leadSlug = useMemo(
     () => resolveLeadSlug(cfg?.team_lead_slug, members),
     [cfg?.team_lead_slug, members],
@@ -174,6 +208,32 @@ export function Composer() {
   useEffect(() => {
     historyRef.current = emptyHistoryState();
   }, []);
+
+  // Consume a one-shot composer prefill (e.g. the office tour finish handoff
+  // seeds an example first issue in the CEO DM). Fires when a draft targeting
+  // this channel appears, whether the user navigated here or was already here.
+  // consumePendingComposerDraft clears it so it never re-applies on a revisit.
+  useEffect(() => {
+    if (
+      !pendingComposerDraft ||
+      pendingComposerDraft.channel !== currentChannel
+    ) {
+      return;
+    }
+    const draft = consumePendingComposerDraft(currentChannel);
+    if (draft === null) return;
+    setText(draft);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const end = el.value.length;
+      el.setSelectionRange(end, end);
+      setCaret(end);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    });
+  }, [pendingComposerDraft, currentChannel, consumePendingComposerDraft]);
 
   const resetRecall = useCallback(() => {
     historyRef.current = emptyHistoryState();
@@ -243,36 +303,63 @@ export function Composer() {
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || sendMutation.isPending) return;
+    if (!trimmed || sendMutation.isPending || isPreSendPending) return;
 
-    // Handle slash commands
-    if (trimmed.startsWith("/")) {
-      const consumed = handleSlashCommand(trimmed, {
-        leadSlug,
-        sendAsMessage: (rewritten) => {
-          sendMutation.mutate({
-            content: rewritten,
-            tagged: extractTaggedMentions(rewritten, knownSlugs),
-          });
-        },
-        clearMessages: clearCurrentChannelMessages,
-        channel: currentChannel,
-      });
-      if (consumed) {
-        // Persist the *raw* command to history so Ctrl+P replays `/ask foo`,
-        // not the rewritten `@ceo foo`. Matches user expectation.
-        pushHistory(currentChannel, trimmed);
-        resetComposer();
-        return;
+    // If a blocking interview is pending, cancel it before sending so the
+    // broker doesn't 409 the message. The agent will see the cancellation
+    // plus the human's free-form reply on its next turn and react to that
+    // instead of the dead choice list.
+    const pendingId = blockingPending?.id ?? null;
+    const dismissPending = pendingId
+      ? cancelRequest(pendingId)
+          .then(() => {
+            void queryClient.invalidateQueries({ queryKey: ["requests"] });
+            void queryClient.invalidateQueries({
+              queryKey: ["requests-badge"],
+            });
+          })
+          .catch((err: unknown) => {
+            // If cancel races with another resolver the request is already
+            // gone; don't block the send on it.
+            console.warn("composer: failed to cancel blocking request", err);
+          })
+      : Promise.resolve();
+
+    const send = () => {
+      // Handle slash commands
+      if (trimmed.startsWith("/")) {
+        const consumed = handleSlashCommand(trimmed, {
+          leadSlug,
+          sendAsMessage: (rewritten) => {
+            sendMutation.mutate({
+              content: rewritten,
+              tagged: extractTaggedMentions(rewritten, knownSlugs),
+            });
+          },
+          clearMessages: clearCurrentChannelMessages,
+          channel: currentChannel,
+        });
+        if (consumed) {
+          pushHistory(currentChannel, trimmed);
+          resetComposer();
+          return;
+        }
       }
-    }
 
-    pushHistory(currentChannel, trimmed);
-    sendMutation.mutate({
-      content: trimmed,
-      tagged: extractTaggedMentions(trimmed, knownSlugs),
-    });
-    resetComposer();
+      pushHistory(currentChannel, trimmed);
+      sendMutation.mutate({
+        content: trimmed,
+        tagged: extractTaggedMentions(trimmed, knownSlugs),
+      });
+      resetComposer();
+    };
+
+    if (pendingId) {
+      setIsPreSendPending(true);
+      void dismissPending.then(send).finally(() => setIsPreSendPending(false));
+    } else {
+      send();
+    }
   }, [
     text,
     sendMutation,
@@ -281,6 +368,9 @@ export function Composer() {
     resetComposer,
     knownSlugs,
     clearCurrentChannelMessages,
+    blockingPending,
+    queryClient,
+    isPreSendPending,
   ]);
 
   /**
@@ -480,7 +570,7 @@ export function Composer() {
         <button
           type="button"
           className="composer-send"
-          disabled={!text.trim() || sendMutation.isPending}
+          disabled={!text.trim() || sendMutation.isPending || isPreSendPending}
           onClick={handleSend}
           aria-label="Send message"
         >

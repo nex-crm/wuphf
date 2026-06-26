@@ -90,6 +90,7 @@ func handleTeamRequest(ctx context.Context, _ *mcp.CallToolRequest, args TeamReq
 		"required":       required,
 		"secret":         args.Secret,
 		"reply_to":       replyTo,
+		"issue_id":       strings.TrimSpace(args.IssueID),
 	}, &created); err != nil {
 		return toolError(err), nil, nil
 	}
@@ -110,6 +111,11 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 	options, recommendedID := normalizeHumanRequestOptions("interview", args.RecommendedOptionID, args.Options)
 	var created struct {
 		ID string `json:"id"`
+		// AlreadyAnswered/Answer: the broker's semantic dedupe found a
+		// recently-answered similar interview — the human's existing answer
+		// comes back inline and no new card was raised.
+		AlreadyAnswered bool   `json:"already_answered"`
+		Answer          string `json:"answer"`
 	}
 	if err := brokerPostJSON(ctx, "/requests", map[string]any{
 		"kind":           "interview",
@@ -123,11 +129,24 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 		"blocking":       false,
 		"required":       false,
 		"reply_to":       location.ReplyToID,
+		"issue_id":       strings.TrimSpace(args.IssueID),
 	}, &created); err != nil {
 		return toolError(err), nil, nil
 	}
 	if strings.TrimSpace(created.ID) == "" {
 		return toolError(fmt.Errorf("interview request did not return an ID")), nil, nil
+	}
+	if created.AlreadyAnswered {
+		// A semantically-similar interview was answered recently — return
+		// the human's existing answer immediately instead of raising a
+		// duplicate card and polling.
+		payload, _ := json.MarshalIndent(map[string]any{
+			"interview_id": created.ID,
+			"answered":     true,
+			"answer":       created.Answer,
+			"note":         "already answered by the human: a teammate asked the same question recently; reuse this answer instead of re-asking.",
+		}, "", "  ")
+		return textResult(string(payload)), nil, nil
 	}
 
 	timeout := time.After(30 * time.Minute)

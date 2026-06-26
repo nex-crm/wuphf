@@ -104,6 +104,9 @@
           },
           "correctness": {
             "noUndeclaredDependencies": "off"
+          },
+          "style": {
+            "noRestrictedImports": "off"
           }
         }
       }

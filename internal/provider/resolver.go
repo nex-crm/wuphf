@@ -15,9 +15,13 @@ type ProviderKindResolver func(agentSlug string) string
 // DefaultStreamFnResolver returns a StreamFnResolver that picks a provider's
 // StreamFn factory by Kind. Resolution order:
 //
-//  1. Per-agent kind from kindResolver (if non-nil and returns non-empty)
-//  2. Install-wide kind from config.ResolveLLMProvider
-//  3. Claude Code (default fallback for unknown / unregistered Kinds)
+//  1. Per-agent kind from kindResolver (if non-nil and returns non-empty).
+//     This is always honored — the global runtime never overrides an
+//     existing agent's per-agent binding.
+//  2. Install-wide kind from config.ResolveLLMProvider — the
+//     default-for-new-agents fallback used at agent creation time and
+//     when an agent has no per-agent binding.
+//  3. Claude Code (default fallback for unknown / unregistered Kinds).
 //
 // kindResolver is what makes per-agent ProviderBindings (an Ollama agent
 // alongside Claude agents in the same team) actually take effect on the
@@ -25,6 +29,9 @@ type ProviderKindResolver func(agentSlug string) string
 //
 // Config is re-read on each call so runtime provider changes (e.g., a /provider
 // switch from the TUI) take effect on the next agent turn without restart.
+// The install-wide LLMProvider is intentionally a default-for-new-agents
+// only — changing it never replays through existing agents' bindings. To
+// change an existing agent's runtime, edit it through the AgentProfilePanel.
 func DefaultStreamFnResolver(client *api.Client, kindResolver ProviderKindResolver) agent.StreamFnResolver {
 	// TODO: thread client into provider-specific StreamFn factories (see issue #186).
 	return func(agentSlug string) agent.StreamFn {

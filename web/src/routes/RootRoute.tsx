@@ -4,7 +4,9 @@ import {
   lazy,
   type ReactNode,
   Suspense,
+  useCallback,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import {
@@ -14,18 +16,22 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 
-import { get, initApi } from "../api/client";
+import {
+  ApiError,
+  get,
+  getInjectedAnalyticsConfig,
+  initApi,
+} from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
 import { ChannelParticipants } from "../components/messages/ChannelParticipants";
 import { Composer } from "../components/messages/Composer";
-import { DMView } from "../components/messages/DMView";
-import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
-import { TypingIndicator } from "../components/messages/TypingIndicator";
-import { SplashScreen } from "../components/onboarding/SplashScreen";
-import { Wizard } from "../components/onboarding/Wizard";
+import { PrePickScreen } from "../components/onboarding/PrePickScreen";
+import { OfficeTour } from "../components/onboarding/tour/OfficeTour";
+import { useOfficeTour } from "../components/onboarding/tour/useOfficeTour";
+import { OnboardingWizard } from "../components/onboarding/wizard/OnboardingWizard";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "../components/ui/ProviderSwitcher";
 import { ToastContainer } from "../components/ui/Toast";
@@ -33,10 +39,22 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useOfficeTasks } from "../hooks/useOfficeTasks";
+import {
+  configureAnalytics,
+  identifyWorkspace,
+  track,
+  trackPageview,
+} from "../lib/analytics";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
-import { useAppStore } from "../stores/app";
-import { type AppPanelId, isAppPanelId } from "./routeRegistry";
+import { directChannelSlug, useAppStore } from "../stores/app";
+import {
+  type AppPanelId,
+  type FirstClassAppId,
+  isAppPanelId,
+  isFirstClassAppId,
+} from "./routeRegistry";
 import {
   type CurrentRoute,
   useChannelSlug,
@@ -73,19 +91,19 @@ const ArtifactsApp = lazy(() =>
     default: m.ArtifactsApp,
   })),
 );
-const OfficeOverviewApp = lazy(() =>
-  import("../components/apps/OfficeOverviewApp").then((m) => ({
-    default: m.OfficeOverviewApp,
+const RoutinesApp = lazy(() =>
+  import("../components/apps/RoutinesApp").then((m) => ({
+    default: m.RoutinesApp,
   })),
 );
-const CalendarApp = lazy(() =>
-  import("../components/apps/CalendarApp").then((m) => ({
-    default: m.CalendarApp,
+const RoutineDetailRoute = lazy(() =>
+  import("../components/apps/routines/RoutineDetailRoute").then((m) => ({
+    default: m.RoutineDetailRoute,
   })),
 );
-const ConsoleApp = lazy(() =>
-  import("../components/apps/ConsoleApp").then((m) => ({
-    default: m.ConsoleApp,
+const RoutineComposer = lazy(() =>
+  import("../components/apps/routines/RoutineComposer").then((m) => ({
+    default: m.RoutineComposer,
   })),
 );
 const GraphApp = lazy(() => import("../components/apps/GraphApp"));
@@ -99,14 +117,14 @@ const PoliciesApp = lazy(() =>
     default: m.PoliciesApp,
   })),
 );
-const ReceiptsApp = lazy(() =>
-  import("../components/apps/ReceiptsApp").then((m) => ({
-    default: m.ReceiptsApp,
-  })),
-);
 const SettingsApp = lazy(() =>
   import("../components/apps/SettingsApp").then((m) => ({
     default: m.SettingsApp,
+  })),
+);
+const IntegrationsApp = lazy(() =>
+  import("../components/apps/IntegrationsApp").then((m) => ({
+    default: m.IntegrationsApp,
   })),
 );
 const SkillsApp = lazy(() =>
@@ -114,17 +132,7 @@ const SkillsApp = lazy(() =>
     default: m.SkillsApp,
   })),
 );
-const TasksApp = lazy(() =>
-  import("../components/apps/TasksApp").then((m) => ({
-    default: m.TasksApp,
-  })),
-);
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
-const DecisionInbox = lazy(() =>
-  import("../components/lifecycle/DecisionInbox").then((m) => ({
-    default: m.DecisionInbox,
-  })),
-);
 const DecisionPacketRoute = lazy(() =>
   import("../components/lifecycle/DecisionPacketRoute").then((m) => ({
     default: m.DecisionPacketRoute,
@@ -132,6 +140,53 @@ const DecisionPacketRoute = lazy(() =>
 );
 const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
 const Wiki = lazy(() => import("../components/wiki/Wiki"));
+const ArticleView = lazy(() =>
+  import("../components/rich-artifacts/ArticleView").then((m) => ({
+    default: m.ArticleView,
+  })),
+);
+const ReviewQueueKanban = lazy(
+  () => import("../components/review/ReviewQueueKanban"),
+);
+// Tasks surface (list + detail + new).
+const TasksList = lazy(() =>
+  import("../components/lifecycle/TasksList").then((m) => ({
+    default: m.TasksList,
+  })),
+);
+const TaskDocumentRoute = lazy(() =>
+  import("../components/lifecycle/TaskDocumentRoute").then((m) => ({
+    default: m.TaskDocumentRoute,
+  })),
+);
+const TaskNewForm = lazy(() =>
+  import("../components/lifecycle/TaskNewForm").then((m) => ({
+    default: m.TaskNewForm,
+  })),
+);
+// New-task home composer — the app's landing surface (index route).
+const TaskComposer = lazy(() =>
+  import("../components/tasks/TaskComposer").then((m) => ({
+    default: m.TaskComposer,
+  })),
+);
+// Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
+const AgentsTool = lazy(() =>
+  import("../components/agents/AgentsTool").then((m) => ({
+    default: m.AgentsTool,
+  })),
+);
+const AgentDetail = lazy(() =>
+  import("../components/agents/AgentsTool").then((m) => ({
+    default: m.AgentDetail,
+  })),
+);
+// Full-screen skill SKILL.md editor + preview.
+const SkillDetailRoute = lazy(() =>
+  import("./SkillDetailRoute").then((m) => ({
+    default: m.SkillDetailRoute,
+  })),
+);
 
 function LazyPanelFallback() {
   return (
@@ -169,6 +224,29 @@ class ErrorBoundary extends Component<
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
     // eslint-disable-next-line no-console
     console.error("[WUPHF ErrorBoundary]", error, info);
+
+    // Auto-recover from stale lazy-chunk hashes after a FE rebuild.
+    // The browser holds an old index.html that points at deleted hashed
+    // bundles; the only correct fix is to refetch index.html.
+    const message = String(error?.message ?? "");
+    const isChunkError =
+      /Failed to fetch dynamically imported module/i.test(message) ||
+      /Importing a module script failed/i.test(message) ||
+      error?.name === "ChunkLoadError";
+    // Record the failure shape (class name + chunk flag) — never the raw
+    // message, which can contain content.
+    track("app_error", {
+      boundary: "root",
+      error_name: error?.name || "Error",
+      is_chunk_error: isChunkError,
+    });
+    if (isChunkError && typeof window !== "undefined") {
+      const key = "wuphf:chunk-reload-attempted";
+      if (!window.sessionStorage.getItem(key)) {
+        window.sessionStorage.setItem(key, String(Date.now()));
+        window.location.reload();
+      }
+    }
   }
 
   render() {
@@ -278,18 +356,15 @@ function navigateNotebookEntry(
 }
 
 const APP_PANELS = {
-  tasks: TasksApp,
-  requests: InboxRedirect,
+  requests: TasksRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
-  calendar: CalendarApp,
+  routines: RoutinesApp,
   skills: SkillsApp,
   activity: ArtifactsApp,
-  overview: OfficeOverviewApp,
-  receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
+  integrations: IntegrationsApp,
   settings: SettingsApp,
-  console: ConsoleApp,
 } satisfies Record<AppPanelId, ComponentType>;
 
 function ConversationView() {
@@ -299,8 +374,6 @@ function ConversationView() {
     <div className="conversation-shell">
       <div className="conversation-chat">
         <MessageFeed />
-        <TypingIndicator />
-        <InterviewBar />
         <Composer />
       </div>
       <ChannelParticipants channelSlug={channelSlug} />
@@ -308,9 +381,69 @@ function ConversationView() {
   );
 }
 
+/**
+ * In the task-scoped model a business task's channel is reached through the
+ * task, not as a parallel chat surface. A direct `/channels/$slug` visit
+ * (typed URL, search hit, command palette) for a channel owned by a business
+ * task redirects to that task's detail, closing the dual-surface gap.
+ *
+ * System-managed channels are deliberately NOT redirected: #general (owned by
+ * the archived Backup & Migration task) and folded legacy channels stay
+ * directly readable via the conversation view, because redirecting the
+ * coordination channel to an archived system task is worse than the dual
+ * surface. A channel with no owning task also falls through to the view, so a
+ * channel with history is never dead-ended.
+ */
+function ChannelRedirect({ channelSlug }: { channelSlug: string }) {
+  const { data: tasks, isPending } = useOfficeTasks();
+  const owningTaskId = useMemo(() => {
+    const slug = channelSlug.trim().toLowerCase();
+    const owner = (tasks ?? []).find(
+      (t) => (t.channel ?? "").trim().toLowerCase() === slug,
+    );
+    return owner && !owner.system ? owner.id : undefined;
+  }, [tasks, channelSlug]);
+
+  useEffect(() => {
+    if (owningTaskId) {
+      void router.navigate({
+        to: "/tasks/$taskId",
+        params: { taskId: owningTaskId },
+        replace: true,
+      });
+    }
+  }, [owningTaskId]);
+
+  // Redirecting (owning task found) or still resolving the task list → render
+  // nothing so the conversation surface never flashes. Resolved with no owning
+  // task → fall back to the conversation view so the channel stays reachable.
+  if (owningTaskId || isPending) return null;
+  return <ConversationView />;
+}
+
 interface WikiSurfaceProps {
   current: "wiki" | "notebooks" | "reviews";
   route: CurrentRoute;
+}
+
+/**
+ * When a wiki splat path collides with a sibling Wiki-surface tab
+ * (`/wiki/notebooks`, `/wiki/reviews`), redirect to the canonical
+ * top-level route instead of trying to load a non-existent article.
+ * `/wiki/notebooks` used to leave the right pane stuck on
+ * "Loading article…" because fetchArticle would 404 across all
+ * candidate paths and the loader never reconciled — see issue #935.
+ */
+function wikiTabRedirectTarget(
+  articlePath: string | null,
+): "/notebooks" | "/reviews" | null {
+  if (articlePath === "notebooks" || articlePath === "notebooks/") {
+    return "/notebooks";
+  }
+  if (articlePath === "reviews" || articlePath === "reviews/") {
+    return "/reviews";
+  }
+  return null;
 }
 
 function WikiSurface({ current, route }: WikiSurfaceProps) {
@@ -320,6 +453,29 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
   const [articleRefreshNonce, setArticleRefreshNonce] = useState(0);
 
   const articlePath = route.kind === "wiki-article" ? route.articlePath : null;
+  const tabRedirect = wikiTabRedirectTarget(articlePath);
+  useEffect(() => {
+    if (!tabRedirect) return;
+    void router.navigate({ to: tabRedirect, replace: true });
+  }, [tabRedirect]);
+  if (tabRedirect) {
+    return (
+      <div className="wiki-shell" data-testid="wiki-tab-redirect">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: 1,
+            color: "var(--text-tertiary)",
+            fontSize: 14,
+          }}
+        >
+          Redirecting…
+        </div>
+      </div>
+    );
+  }
   const pamArticlePath = current === "wiki" ? articlePath : null;
   const notebookAgentSlug =
     route.kind === "notebook-agent" || route.kind === "notebook-entry"
@@ -354,22 +510,25 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
             onNavigateWiki={(path) => navigateWikiArticle(path || null)}
           />
         )}
-        {current === "reviews" && <InboxRedirect />}
+        {current === "reviews" && (
+          <ReviewQueueKanban onOpenEntry={navigateNotebookEntry} />
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * InboxRedirect navigates the user from the deprecated /apps/requests
- * and /reviews surfaces to the unified Inbox. Phase 2 collapsed both
- * surfaces into one Decision Inbox; Phase 2b deletes the heavy
- * RequestsApp + ReviewQueueKanban components and routes the deep
- * links through this stub so existing bookmarks keep working.
+ * TasksRedirect navigates the user to the Task board. It backs both the
+ * deprecated `/apps/requests` panel and the retired `/inbox` route: the
+ * standalone Inbox was consolidated into the board (its attention items
+ * live in the "Needs human input" lane), so every old entry point lands
+ * on `/tasks`. Keeps existing `/apps/requests` and `/inbox` bookmarks
+ * working without resurrecting the surface.
  */
-function InboxRedirect() {
+function TasksRedirect() {
   useEffect(() => {
-    void router.navigate({ to: "/inbox", replace: true });
+    void router.navigate({ to: "/tasks", replace: true });
   }, []);
   return (
     <div className="app-panel active" data-testid="legacy-redirect-inbox">
@@ -383,7 +542,53 @@ function InboxRedirect() {
           fontSize: 14,
         }}
       >
-        Redirecting to Inbox…
+        Redirecting to Tasks…
+      </div>
+    </div>
+  );
+}
+
+/**
+ * FirstClassAppRedirect navigates the user from a `/apps/$id` URL whose
+ * `$id` is a first-class app (wiki, inbox, tasks, agents) to that app's
+ * canonical dedicated route. Users who type a sidebar-label-style URL by
+ * hand (e.g. `/#/apps/wiki`) used to hit "Page not found" because
+ * first-class apps live at their own paths, not under `/apps`. Mirrors
+ * `InboxRedirect` so the route ↔ sidebar mapping is forgiving without
+ * the route registry sprouting alias entries.
+ */
+const FIRST_CLASS_APP_TARGETS: Record<
+  FirstClassAppId,
+  "/wiki" | "/tasks" | "/agents"
+> = {
+  wiki: "/wiki",
+  // The Inbox was consolidated into the board — send `/apps/inbox` straight
+  // to /tasks rather than double-hopping through the retired /inbox route.
+  inbox: "/tasks",
+  tasks: "/tasks",
+  agents: "/agents",
+};
+
+function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
+  useEffect(() => {
+    void router.navigate({ to: FIRST_CLASS_APP_TARGETS[appId], replace: true });
+  }, [appId]);
+  return (
+    <div
+      className="app-panel active"
+      data-testid={`legacy-redirect-first-class-${appId}`}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Redirecting…
       </div>
     </div>
   );
@@ -409,7 +614,6 @@ function UnknownAppPanel({ appId }: { appId: string }) {
 }
 
 function AppPanel({ appId }: { appId: AppPanelId }) {
-  if (appId === "tasks") return <TaskAppPanel taskId={null} />;
   const Panel = APP_PANELS[appId];
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
@@ -418,18 +622,10 @@ function AppPanel({ appId }: { appId: AppPanelId }) {
   );
 }
 
-function TaskAppPanel({ taskId }: { taskId: string | null }) {
-  return (
-    <div className="app-panel active" data-testid="app-page-tasks">
-      <TasksApp taskId={taskId} />
-    </div>
-  );
-}
-
 /**
  * On every conversation-route mount: (1) record the channel as the
  * `lastConversationalChannel` fallback so off-conversation surfaces
- * (ConsoleApp, RequestsApp, sidebar request badge) keep pointing at
+ * (RequestsApp, sidebar request badge) keep pointing at
  * the user's working channel; (2) clear the unread badge for that
  * channel — the legacy `setCurrentChannel` / `enterDM` callers used to
  * zero `unreadByChannel[ch]` as part of the same atomic write, and
@@ -448,8 +644,7 @@ function useTrackLastConversationalChannel(route: CurrentRoute): void {
     (s) => s.setLastConversationalChannel,
   );
   const clearUnread = useAppStore((s) => s.clearUnread);
-  const channelSlug =
-    route.kind === "channel" || route.kind === "dm" ? route.channelSlug : null;
+  const channelSlug = route.kind === "channel" ? route.channelSlug : null;
   useEffect(() => {
     if (channelSlug) {
       setLastConversationalChannel(channelSlug);
@@ -468,21 +663,29 @@ function MainContent() {
   useTrackLastConversationalChannel(route);
 
   switch (route.kind) {
+    case "home":
+      return <TaskComposer />;
     case "channel":
-      return <ConversationView />;
-    case "dm":
-      return (
-        <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
-      );
+      return <ChannelRedirect channelSlug={route.channelSlug} />;
     case "app":
+      // `/apps/wiki` and `/apps/inbox` are not app-panel routes — the
+      // sidebar navigates to `/wiki` and `/inbox` directly — but users
+      // who type a sidebar-label-style URL by hand should not hit
+      // "Page not found". Forward them to the canonical first-class
+      // route instead.
+      if (isFirstClassAppId(route.appId)) {
+        return <FirstClassAppRedirect appId={route.appId} />;
+      }
       if (!isAppPanelId(route.appId)) {
         return <UnknownAppPanel appId={route.appId} />;
       }
       return <AppPanel appId={route.appId} />;
     case "task-board":
-      return <TaskAppPanel taskId={null} />;
+      return <TasksList />;
     case "task-detail":
-      return <TaskAppPanel taskId={route.taskId} />;
+      return <TaskDocumentRoute taskId={route.taskId} />;
+    case "task-new":
+      return <TaskNewForm />;
     case "wiki":
     case "wiki-article":
       return <WikiSurface current="wiki" route={route} />;
@@ -501,10 +704,32 @@ function MainContent() {
       return <WikiSurface current="notebooks" route={route} />;
     case "reviews":
       return <WikiSurface current="reviews" route={route} />;
+    case "article":
+      return <ArticleView articleId={route.articleId} />;
     case "inbox":
-      return <DecisionInbox />;
+      // The standalone Inbox was consolidated into the Task board; `/inbox`
+      // is kept only as a redirect for old bookmarks.
+      return <TasksRedirect />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
+    case "agents":
+      return <AgentsTool />;
+    case "agent-detail":
+      return <AgentDetail agentSlug={route.agentSlug} tab={route.tab} />;
+    case "skill-detail":
+      return <SkillDetailRoute skillName={route.skillName} />;
+    case "routine-detail":
+      return (
+        <div className="app-panel active" data-testid="app-page-routines">
+          <RoutineDetailRoute routineSlug={route.routineSlug} />
+        </div>
+      );
+    case "routine-new":
+      return (
+        <div className="app-panel active" data-testid="app-page-routines">
+          <RoutineComposer />
+        </div>
+      );
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that
@@ -564,6 +789,65 @@ function NotFoundSurface({ pathname }: { pathname: string }) {
   );
 }
 
+// ── Broker-unreachable fallback ────────────────────────────────────────
+//
+// During a broker wedge (503s / timeouts on the bootstrap queries) the app
+// used to render a blank white body. Classify bootstrap failures: a broker
+// that RESPONDED with a client error (e.g. 404 — onboarding not mounted on
+// a fresh install) falls through to the onboarding gate as before; a 5xx,
+// network failure, or timeout means the broker is unreachable/wedged and
+// gets this honest full-page state instead of a blank body.
+
+/** Exported for the bootstrap-fallback regression test. */
+export function isBrokerUnreachableError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status >= 500;
+  }
+  // Anything non-HTTP (fetch TypeError, AbortSignal timeout surfaced as
+  // "Broker not responding — request timed out.") means we never got an
+  // answer from the broker.
+  return true;
+}
+
+const BOOT_RETRY_MS = 5_000;
+
+function BrokerUnreachableScreen({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      data-testid="broker-unreachable"
+      role="alert"
+      style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 12,
+        padding: 32,
+        textAlign: "center",
+        color: "var(--text-secondary)",
+        fontSize: 14,
+      }}
+    >
+      <strong style={{ fontSize: 16, color: "var(--text)" }}>
+        WUPHF can&rsquo;t reach the office broker — retrying…
+      </strong>
+      <span style={{ color: "var(--text-tertiary)" }}>
+        The broker isn&rsquo;t answering. We retry automatically every few
+        seconds; you can also retry now.
+      </span>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={onRetry}
+        data-testid="broker-unreachable-retry"
+      >
+        Retry now
+      </button>
+    </div>
+  );
+}
+
 function RoutedBody() {
   const matches = useMatches();
   const leaf = matches.at(-1);
@@ -598,14 +882,130 @@ function RoutedBody() {
 
 export default function RootRoute() {
   const [apiReady, setApiReady] = useState(false);
-  const [showSplash, setShowSplash] = useState(false);
   const theme = useAppStore((s) => s.theme);
   const onboardingComplete = useAppStore((s) => s.onboardingComplete);
   const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
+  // After PrePickScreen, track whether the backend CEO phase machine is
+  // running. When true, Shell renders OnboardingDMRoute instead of RoutedBody.
+  // Flips false when the onboarding state returns onboarded=true.
+  //
+  // Flow: PrePickScreen → inCeoOnboarding=true → Shell+OnboardingDMRoute
+  //       → broker sets phase="bridge" done → onboarded=true → normal Shell
+  const [inCeoOnboarding, setInCeoOnboarding] = useState(false);
+  // onboarding phase from /onboarding/state — set once on boot if available.
+  const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
+  // Broker-unreachable bootstrap failure (5xx / network / timeout). While
+  // set, the shell renders BrokerUnreachableScreen — never a blank body.
+  // bootAttempt re-runs the bootstrap effect (Retry button + auto-retry).
+  const [bootError, setBootError] = useState(false);
+  const [bootAttempt, setBootAttempt] = useState(0);
+
+  // Manual SPA pageviews (autocapture is off). We subscribe to the router
+  // singleton rather than useRouterState so this works even where RootRoute is
+  // rendered without a RouterProvider (the bootstrap-fallback tests). Fires the
+  // matched route pattern plus pathname on every navigation; a no-op until
+  // analytics is configured.
+  useEffect(() => {
+    const emit = () => {
+      const loc = router.state.location;
+      const { matches } = router.state;
+      const routeId = matches[matches.length - 1]?.routeId ?? "";
+      if (loc?.pathname) trackPageview(routeId || loc.pathname, loc.pathname);
+    };
+    emit();
+    return router.subscribe("onResolved", emit);
+  }, []);
+
+  // Group events by workspace, keyed by a hashed id (never the raw id or name)
+  // so cohort analysis is possible without identifying the workspace. Gated on
+  // apiReady so it only runs after a successful boot — that keeps it out of the
+  // bootstrap-fallback path (and its mocked get() sequence) entirely. Reads via
+  // get() (not a hook) so it needs no provider context. No-op until analytics
+  // is configured.
+  useEffect(() => {
+    if (!apiReady) return;
+    let cancelled = false;
+    void get<{
+      workspace_id?: string;
+      blueprint?: string;
+      company_size?: string;
+    }>("/config")
+      .then((cfg) => {
+        if (!cancelled && cfg?.workspace_id) {
+          identifyWorkspace(cfg.workspace_id, {
+            blueprint: cfg.blueprint,
+            company_size: cfg.company_size,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [apiReady]);
+
+  // When CEO onboarding is active (phase set, not "complete"), pin a
+  // generic landing URL (#general) to the home composer (index `/`) so the
+  // URL is sensible the moment the broker flips onboarded=true and the
+  // office Shell mounts. The new-task composer is the app's landing surface,
+  // so completing onboarding drops the user there. The onboarding
+  // conversation itself renders full-screen via OnboardingChat regardless of
+  // the URL, so this only governs where the user lands once onboarding
+  // completes. Already-onboarded users (onboardingComplete === true) skip the
+  // whole inCeoOnboarding branch and never hit this redirect.
+  useEffect(() => {
+    if (!(inCeoOnboarding || bootPhase)) return;
+    // Only redirect when the user is on a non-home generic destination
+    // (#general). Root (`#/`, `""`) already renders the composer, and
+    // explicit deep-links (e.g. a specific /tasks/$id) should be preserved.
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const onGenericRoute =
+      hash === "#/channels/general" || hash.startsWith("#/?");
+    if (onGenericRoute) {
+      void router.navigate({ to: "/", replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inCeoOnboarding, bootPhase]);
+
   useKeyboardShortcuts();
   useBrokerEvents(apiReady);
+
+  // Guided office tour. The first-run auto-open is now OWNED BY THE VISUAL
+  // ONBOARDING WIZARD (the four education slides moved into the pre-office
+  // wizard steps), so we pass `enabled={false}` to suppress the post-office
+  // auto-open. The replay path is independent of `enabled` in useOfficeTour:
+  // the `requestShowOfficeTour()` window-event listener stays bound, so Help →
+  // "Replay the office tour" still overlays the tour on the live office.
+  const officeTour = useOfficeTour(false);
+
+  // Finish handoff (spec section 4): drop the user mid-action in the CEO DM
+  // with an example first issue already typed into the composer, instead of
+  // dead-ending on "Done". We seed a one-shot, channel-scoped draft in the
+  // app store; the Composer consumes and clears it on mount/when its channel
+  // matches (see stores/app.ts pendingComposerDraft + Composer.tsx). This is
+  // the controlled-state-safe alternative to writing the textarea imperatively.
+  const handleTourFinish = useCallback(() => {
+    const ceoChannel = directChannelSlug("ceo");
+    useAppStore
+      .getState()
+      .setPendingComposerDraft(
+        ceoChannel,
+        "Audit our CRM for duplicate accounts, deals missing an owner, and opportunities with no activity in 30 days, then propose a cleanup plan",
+      );
+    // The legacy `/dm/$agentSlug` route was removed in the task-scoped
+    // restructure (DMs fold into task channels). It was only sugar over
+    // `/channels/<directChannelSlug(agentSlug)>`, so navigate to the same
+    // destination directly — the channel the draft was just seeded into.
+    void router.navigate({
+      to: "/channels/$channelSlug",
+      params: { channelSlug: ceoChannel },
+    });
+    // Deps intentionally empty: router and directChannelSlug are module-level
+    // imports and useAppStore.getState() is Zustand's imperative escape hatch,
+    // so nothing from render scope is captured.
+  }, []);
 
   useEffect(() => {
     const href = getTheme(theme).cssPath;
@@ -625,32 +1025,79 @@ export default function RootRoute() {
 
   useEffect(() => {
     let cancelled = false;
+    let unreachable = false;
     initApi()
       .then(() => {
         if (cancelled) return;
         setBrokerConnected(true);
-        return get<{ onboarded?: boolean }>("/onboarding/state");
+        // Configure product analytics from the broker's runtime injection
+        // (dormant unless a PostHog key resolves; respects the consent
+        // toggles). Best-effort and non-blocking — never gates boot.
+        configureAnalytics(getInjectedAnalyticsConfig() ?? undefined);
+        return get<{ onboarded?: boolean; phase?: string }>(
+          "/onboarding/state",
+        );
       })
       .then((s) => {
         if (cancelled || !s) return;
+        setBootError(false);
         if (s.onboarded === true) {
           setOnboardingComplete(true);
+        } else if (typeof s.phase === "string" && s.phase) {
+          // Resume mid-onboarding: broker already started the CEO phase machine.
+          setBootPhase(s.phase);
+          setInCeoOnboarding(true);
         }
       })
-      .catch(() => {
-        // Endpoint unreachable — fall through to wizard. Safer default for
-        // fresh installs where the broker may not have mounted onboarding yet.
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isBrokerUnreachableError(err)) {
+          // Broker wedged (5xx) or never answered (network failure /
+          // timeout): render the honest full-page fallback instead of a
+          // blank body or a misleading fresh-install screen.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[WUPHF boot] broker unreachable (attempt ${bootAttempt + 1})`,
+            err,
+          );
+          unreachable = true;
+          setBootError(true);
+          return;
+        }
+        // Broker answered with a client error (e.g. onboarding endpoint
+        // not mounted on a fresh install) — clear any prior wedge state
+        // and fall through to PrePickScreen.
+        setBootError(false);
       })
       .finally(() => {
-        if (!cancelled) setApiReady(true);
+        // Keep apiReady false while unreachable so SSE hooks stay idle and
+        // the fallback owns the page until a retry succeeds.
+        if (!(cancelled || unreachable)) setApiReady(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [setBrokerConnected, setOnboardingComplete]);
+  }, [bootAttempt, setBrokerConnected, setOnboardingComplete]);
+
+  // Auto-retry while the broker is unreachable — the fallback copy promises
+  // "retrying…", so keep that promise without requiring a click. Reads
+  // bootAttempt (not a functional update) so a failed retry — which leaves
+  // bootError true but bumps the attempt — re-arms the timer.
+  useEffect(() => {
+    if (!bootError) return;
+    const next = bootAttempt + 1;
+    const timer = setTimeout(() => {
+      setBootAttempt(next);
+    }, BOOT_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [bootError, bootAttempt]);
 
   let body: ReactNode;
-  if (!apiReady) {
+  if (bootError) {
+    body = (
+      <BrokerUnreachableScreen onRetry={() => setBootAttempt((a) => a + 1)} />
+    );
+  } else if (!apiReady) {
     body = (
       <div
         style={{
@@ -665,16 +1112,41 @@ export default function RootRoute() {
         Connecting to broker...
       </div>
     );
-  } else if (showSplash) {
-    body = <SplashScreen onDone={() => setShowSplash(false)} />;
   } else if (!onboardingComplete) {
-    body = (
-      <Wizard
-        onComplete={() => {
-          setShowSplash(true);
-        }}
-      />
-    );
+    if (inCeoOnboarding || bootPhase) {
+      // Visual stepped wizard — full-screen, NOT inside the office Shell. The
+      // user is not "in the office" yet. The wizard educates with a persistent
+      // mock office and creates the team (pick a blueprint, brief the first
+      // agent, write the first issue), then POSTs /onboarding/complete to seed
+      // the office and flip onboarded=true. Its onComplete fires after the seed
+      // succeeds, so we flip onboardingComplete here and the office Shell mounts
+      // via the branch below with the first issue already seeded into the CEO
+      // DM composer (pendingComposerDraft, set inside the wizard hook).
+      body = (
+        <OnboardingWizard onComplete={() => setOnboardingComplete(true)} />
+      );
+    } else {
+      // Provider picker. No phase set yet — user hasn't picked a runtime.
+      // After they pick, setInCeoOnboarding(true) to enter the wizard.
+      body = (
+        <PrePickScreen
+          onComplete={(info) => {
+            // Issue #979: when the broker reports phase=complete at pick time
+            // (session-loss recovery), skip the wizard hand-off entirely and
+            // route straight into the office. Otherwise enter the normal
+            // onboarding hand-off: PrePickScreen has just POSTed
+            // /onboarding/transition phase=greet, so RootRoute renders the
+            // visual OnboardingWizard until it seeds the office and calls
+            // onComplete.
+            if (info?.phaseAlreadyComplete) {
+              setOnboardingComplete(true);
+              return;
+            }
+            setInCeoOnboarding(true);
+          }}
+        />
+      );
+    }
   } else {
     body = (
       <Shell>
@@ -684,6 +1156,16 @@ export default function RootRoute() {
             single source of truth for navigation state — RoutedBody
             reads it via useCurrentRoute. */}
         <Outlet />
+        {/* Replay only: an already-onboarded user reopened the tour from Help,
+            so it overlays the live office at --z-modal. First-run shows the
+            tour as the surface above (no Shell behind), per the converged arc. */}
+        {officeTour.open && officeTour.replay ? (
+          <OfficeTour
+            open={true}
+            onClose={officeTour.skip}
+            onFinish={handleTourFinish}
+          />
+        ) : null}
       </Shell>
     );
   }

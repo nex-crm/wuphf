@@ -25,9 +25,19 @@ func TestLifecycleIndexInvariantAfterRandomTransitions(t *testing.T) {
 
 	b := newTestBroker(t)
 	b.mu.Lock()
+	// Preserve only system tasks then append the test tasks so indexes
+	// are stable (task-general is at an unknown position after broker init).
+	systemTasks := make([]teamTask, 0)
+	for _, tk := range b.tasks {
+		if tk.System {
+			systemTasks = append(systemTasks, tk)
+		}
+	}
+	b.tasks = systemTasks
 	for i := 0; i < taskCount; i++ {
-		b.tasks = append(b.tasks, teamTask{ID: fmt.Sprintf("task-%d", i), LifecycleState: LifecycleStateIntake})
-		b.indexLifecycleLocked(b.tasks[i].ID, "", LifecycleStateIntake)
+		task := teamTask{ID: fmt.Sprintf("task-%d", i), LifecycleState: LifecycleStateIntake}
+		b.tasks = append(b.tasks, task)
+		b.indexLifecycleLocked(task.ID, "", LifecycleStateIntake)
 	}
 	b.mu.Unlock()
 
@@ -48,15 +58,24 @@ func TestLifecycleIndexInvariantAfterRandomTransitions(t *testing.T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	taskState := make(map[string]LifecycleState, taskCount)
+	// Build taskState from all tasks (system tasks have stable archived state
+	// and are included so the index cross-check is complete).
+	taskState := make(map[string]LifecycleState, len(b.tasks))
 	for i := range b.tasks {
 		taskState[b.tasks[i].ID] = b.tasks[i].LifecycleState
 	}
-	if len(taskState) != taskCount {
-		t.Fatalf("task count changed: got %d, want %d", len(taskState), taskCount)
+	// Verify the test's own tasks are all present (system tasks are bonus).
+	nonSystemCount := 0
+	for _, tk := range b.tasks {
+		if !tk.System {
+			nonSystemCount++
+		}
+	}
+	if nonSystemCount != taskCount {
+		t.Fatalf("task count changed: got %d non-system tasks, want %d", nonSystemCount, taskCount)
 	}
 
-	seen := make(map[string]LifecycleState, taskCount)
+	seen := make(map[string]LifecycleState, len(taskState))
 	for state, bucket := range b.lifecycleIndex {
 		for _, id := range bucket {
 			if prev, dup := seen[id]; dup {
@@ -74,7 +93,7 @@ func TestLifecycleIndexInvariantAfterRandomTransitions(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != taskCount {
+	if len(seen) != len(taskState) {
 		// Find the missing IDs to make the failure debuggable.
 		var missing []string
 		for id := range taskState {
@@ -82,7 +101,7 @@ func TestLifecycleIndexInvariantAfterRandomTransitions(t *testing.T) {
 				missing = append(missing, id)
 			}
 		}
-		t.Fatalf("expected every task ID to appear in exactly one bucket; missing %v (got %d, want %d)", missing, len(seen), taskCount)
+		t.Fatalf("expected every task ID to appear in exactly one bucket; missing %v (got %d, want %d)", missing, len(seen), len(taskState))
 	}
 }
 

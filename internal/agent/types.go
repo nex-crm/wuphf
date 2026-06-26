@@ -30,7 +30,6 @@ type AgentConfig struct {
 	Tools             []string     `json:"tools,omitempty"`
 	Budget            *BudgetLimit `json:"budget,omitempty"`
 	AutoDecideTimeout int          `json:"autoDecideTimeout,omitempty"`
-	PermissionMode    string       `json:"permissionMode,omitempty"`
 	AllowedTools      []string     `json:"allowedTools,omitempty"`
 }
 

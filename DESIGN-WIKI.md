@@ -298,10 +298,49 @@ The three preview mocks produced during /design-consultation are saved at:
 
 Open them in a browser while implementing. Every component, spacing value, and interaction above is grounded in V3.
 
+## Iconography
+
+Crisp monochrome **line icons** (lucide), never emoji. Emoji read as toy-ish and
+break the editorial posture; lucide icons inherit the row's ink and feel like a
+crafted index.
+
+- **File tree:** folder = `Folder` in the warm accent (`--wk-amber`) so structure
+  reads at a glance; file leaves take a **type-reflecting** icon classified the
+  same way the viewer dispatcher routes them — `FileSpreadsheet` (csv/xlsx),
+  `FileCode2` (source), `FileImage`, `FileVideo`, `NotebookText`, `GitBranch`
+  (mermaid), `Presentation` (pptx), `FileText` (docs/pdf/page), `AppWindow`
+  (embedded app), `Globe` (website), `File` (fallback). Idle icons are
+  `--wk-text-tertiary`; the selected row lifts its icon to full `--wk-text`.
+- **Size/weight:** ~15px, `strokeWidth ~1.75`. `aria-hidden` (the row label names
+  the node for assistive tech).
+
+## Editor (WYSIWYG)
+
+The article editor is a full-bleed writing surface that matches the published
+reader, not a boxed widget.
+
+- **Full-page:** entering Edit drops the reader chrome (title, breadcrumb,
+  hatnote, related rails) and the right rail; the column spans the article +
+  rail tracks (`.wk-article-col--editing { grid-column: 2 / -1 }`) and the editor
+  fills the content height.
+- **Warm + theme-aware:** the editor's vendored token names map to the host
+  `--wk-*` tokens (paper surface, warm ink, gold/olive accent), so it follows the
+  active app theme (Nex Light / Dark / Noir Gold) with no editor-local overrides.
+- **Prose = reader:** body renders in the serif face (matches the article body);
+  UI chrome stays sans, code stays mono — true WYSIWYG.
+- **Menus:** slash / bubble / link / mention popovers are warm paper cards with a
+  hairline border, soft elevation, a soft-gold hover, and a gold-rail active row.
+  Accent fills use a low-opacity `color-mix` off `--wk-amber` (parchment, not
+  highlighter).
+- **Relative assets:** `./assets/x.png` in article markdown resolves against the
+  article's directory through the wiki file API in both the reader and the editor.
+
 ## Decisions Log
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-06-03 | Tree icons: emoji → lucide line icons, gold folders | /design-consultation "Warm Editorial KB". Emoji read toy-ish; monochrome line icons + a gold folder accent make the tree a crafted KB index. |
+| 2026-06-03 | Editor remapped to `--wk-*` + serif prose + full-page + warm menus | Borrow the reference KB's craft (rhythm, calm surface) onto WUPHF's warm identity; WYSIWYG should match the reader and follow the app theme. |
 | 2026-04-19 | DESIGN-WIKI.md created | /design-consultation session. V3 (full Wikipedia IA + modern typography) selected over V1 (modernized only) and V2 (hybrid, partial Wikipedia IA). |
 | 2026-04-19 | Light mode only in v1 | Memorable-thing anchor is Wikipedia, which is light. Dark mode breaks the pattern-match. Revisit v1.1. |
 | 2026-04-19 | Serif body (Source Serif 4) over sans | Every team wiki is sans; serif body signals "reference material" vs "notes to self". Weightier, distinct. |

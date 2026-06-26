@@ -11,8 +11,8 @@ import {
 // blocking signals + the TUI's Esc-to-cancel flow).
 //
 // Wuphf's signature differentiator: agents can BLOCK on a human answer. The
-// broker holds a request, the web client polls /requests, and InterviewBar +
-// HumanInterviewOverlay render an actionable prompt above the composer. While
+// broker holds a request, the web client polls /requests, and InterviewBar
+// renders an actionable prompt above the composer. While
 // any blocking request is pending, /api/messages returns 409 (broker.go —
 // handlePostMessage), and Composer maps that to the "Answer or dismiss the
 // request above to send messages." toast. Zero web coverage of this loop today —
@@ -36,16 +36,20 @@ test.describe("wuphf web human interview", () => {
     test.setTimeout(60_000);
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
-    await waitForShellReady(page);
-
-    // Seed a blocking request via the same endpoint the broker uses to
-    // emit interviews. `from` must be a real seeded agent slug so the
-    // bar's `@<from>` chip renders against a known role.
-    const firstAgent = page.locator("button[data-agent-slug]").first();
+    // `from` must be a real seeded agent slug so the bar's `@<from>` chip
+    // renders against a known role. Read it from the Agents tool (agents
+    // moved there from the sidebar); no waitForShellReady on /#/agents — that
+    // waits for the channel composer, which this surface lacks.
+    await page.goto("/#/agents");
+    const firstAgent = page
+      .locator(".agents-tool-card[data-agent-slug]")
+      .first();
     await expect(firstAgent).toBeVisible({ timeout: 10_000 });
     const agentSlug = await firstAgent.getAttribute("data-agent-slug");
     expect(agentSlug).toBeTruthy();
+
+    await page.goto("/#/channels/general");
+    await waitForShellReady(page);
 
     const question = `should we ship feature X? (interview ${Date.now()})`;
     const resp = await request.post("/api/requests", {
@@ -80,21 +84,13 @@ test.describe("wuphf web human interview", () => {
     await expect(bar).toContainText(`@${agentSlug}`);
     await expect(bar).toContainText(question);
 
-    // While blocking, the broker rejects new messages with 409 → composer
-    // surfaces "Answer or dismiss the request above..." (Composer.tsx:336). Send
-    // through the UI and assert the toast — this is the contract the TUI
-    // exercises under session-full-e2e.sh's Esc/blocking path.
+    // v3 behavior: the broker still 409s a raw POST while blocked, but the
+    // composer no longer surfaces that as an error — typing in chat is treated
+    // as "I'll answer in chat instead" and CANCELS the pending request before
+    // sending (Composer.tsx — blockingPending → cancelRequest). So the
+    // explicit answer path is the one to assert: click the recommended option
+    // in the bar.
     const composer = page.locator(".composer-input");
-    await composer.fill("attempt during block");
-    await page.locator(".composer-send").click();
-    await expect(
-      page
-        .locator(".animate-fade")
-        .filter({ hasText: /answer or dismiss the request above/i })
-        .first(),
-    ).toBeVisible({ timeout: 5_000 });
-
-    // Answer the request by clicking the recommended option.
     await bar.getByRole("button", { name: /Yes — ship it/ }).click();
 
     // The bar dismisses once the answer resolves and useRequests invalidates.

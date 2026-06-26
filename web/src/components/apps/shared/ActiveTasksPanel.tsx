@@ -58,7 +58,10 @@ export function ActiveTasksPanel({
           <div
             key={t.id}
             className="app-card"
-            style={{ marginBottom: 6, cursor: clickable ? "pointer" : "default" }}
+            style={{
+              marginBottom: 6,
+              cursor: clickable ? "pointer" : "default",
+            }}
             onClick={onTaskClick ? () => onTaskClick(t.id) : undefined}
             onKeyDown={clickable ? handleKeyDown : undefined}
             role={clickable ? "button" : undefined}

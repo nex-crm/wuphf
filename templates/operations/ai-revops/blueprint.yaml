@@ -1,0 +1,511 @@
+id: ai-revops
+name: AI RevOps
+display_name: AI RevOps
+icon: "📊"
+kind: revenue_operations
+category: services
+outcome: "Stand up an AI RevOps team that keeps the CRM clean and the funnel honest."
+description: A RevOps team of agents that operates on the CRM you already have, dedupes records, backfills owners, and keeps the pipeline trustworthy.
+objective: Run continuous CRM hygiene and pipeline operations so the revenue data stays trustworthy and every handoff is backed by evidence.
+estimated_setup_minutes: 6
+first_tasks:
+  - id: crm-hygiene-audit
+    title: "Audit the CRM for hygiene debt"
+    prompt: |
+      Audit the CRM I will connect during the call. Find duplicate accounts, deals missing an owner, opportunities with no activity in 30 days, and stage values that do not match reality. Quantify each problem, then propose a cleanup plan with the riskiest changes gated behind my approval.
+    expected_output: "A one-page hygiene report with counts per problem and a prioritized cleanup plan, with destructive changes flagged for approval."
+  - id: pipeline-truth-brief
+    title: "Write the pipeline-truth brief"
+    prompt: |
+      Write a pipeline-truth brief: define what a clean account, a clean deal, and a real opportunity look like for us. Capture our stage definitions, the dedupe policy, the owner-assignment rule, and the staleness thresholds. This becomes the rulebook every agent reads before it touches a record.
+    expected_output: "A rulebook with stage definitions, dedupe policy, owner rule, and staleness thresholds, each grounded in a concrete example."
+skills:
+  - name: "CRM hygiene"
+    purpose: "Find and fix duplicates, missing owners, and stale records without breaking real data."
+  - name: "Pipeline analysis"
+    purpose: "Turn raw CRM state into an honest read of the funnel."
+  - name: "Outbound operations"
+    purpose: "Run outreach and follow-up loops behind explicit human approval."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the operations lead, hygiene, analyst, and outreach agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally against your connected CRM and tools."
+example_artifacts:
+  - kind: report
+    title: "CRM hygiene report"
+  - kind: brief
+    title: "Pipeline-truth rulebook"
+  - kind: plan
+    title: "Outbound and follow-up plan"
+default_reviewer: ceo
+reviewer_paths:
+  "team/pipeline/**": analyst
+  "team/hygiene/**": revops
+  "team/reviews/**": reviewer
+employee_blueprints:
+  - workflow-automation-builder
+
+starter:
+  lead_slug: ceo
+  general_channel_description: "Command deck for the {{brand_name}} RevOps operation."
+  kickoff_prompt: "Stand up the {{brand_name}} RevOps operation. Operate on the CRM we already have: keep records clean, keep the funnel honest, and keep every outbound send and destructive record change behind human approval."
+  agents:
+    - slug: ceo
+      emoji: "⚙️"
+      name: CEO
+      role: Owns priorities, approvals, and escalation decisions
+      checked: true
+      type: lead
+      built_in: true
+    - slug: revops
+      emoji: "🧹"
+      name: RevOps
+      role: "Keeps the CRM clean: dedupes accounts, backfills owners, flags stale deals"
+      employee_blueprint: workflow-automation-builder
+      checked: true
+      type: specialist
+      expertise:
+        - CRM hygiene
+        - Deduplication
+        - Data backfill
+      personality: Allergic to dirty data. Fixes the record, leaves an audit trail, never guesses on a destructive merge.
+    - slug: analyst
+      emoji: "📈"
+      name: Analyst
+      role: Watches the funnel and reports the honest numbers
+      checked: true
+      type: specialist
+      expertise:
+        - Pipeline analysis
+        - Conversion math
+        - Forecasting
+      personality: Refuses to round up. Will tell you the pipeline is thinner than it looks, with the query to prove it.
+    - slug: ae
+      emoji: "📤"
+      name: Outreach
+      role: Drafts and sequences outbound, always behind approval
+      checked: true
+      type: specialist
+      expertise:
+        - Outbound
+        - Sequencing
+        - Follow-up loops
+      personality: Treats every send as on-the-record. Drafts fast, but never hits send without a human nod.
+    - slug: reviewer
+      emoji: "🔎"
+      name: Reviewer
+      role: Owns QA, evidence, and approval gates
+      checked: true
+      type: specialist
+      expertise:
+        - Evidence review
+        - Change QA
+        - Approval gates
+      personality: Keeps the operation durable and visible. No change ships without proof of what it touched.
+  channels:
+    - slug: "{{command_slug}}"
+      name: "{{command_slug}}"
+      description: "Executive control room for the {{brand_name}} RevOps operation."
+      members: [revops, analyst, reviewer]
+    - slug: hygiene
+      name: hygiene
+      description: "CRM cleanup: dedupe, owner backfill, and stale-record sweeps."
+      members: [revops, reviewer]
+    - slug: pipeline
+      name: pipeline
+      description: "Funnel reporting, forecasts, and the honest read of the numbers."
+      members: [analyst, revops]
+    - slug: outreach
+      name: outreach
+      description: "Outbound drafts, sequences, and follow-up loops behind approval."
+      members: [ae, analyst]
+    - slug: review
+      name: review
+      description: "Track outcomes, evidence, and the next hygiene iteration."
+      members: [reviewer, analyst]
+  tasks:
+    - channel: hygiene
+      owner: revops
+      title: "Run the first CRM hygiene sweep"
+      details: "Dedupe accounts, backfill missing owners, and flag stale opportunities, with destructive changes gated."
+    - channel: pipeline
+      owner: analyst
+      title: "Establish the pipeline-truth baseline"
+      details: "Define clean records and produce the honest first read of the funnel."
+    - channel: outreach
+      owner: ae
+      title: "Draft the first follow-up sequence"
+      details: "Sequence re-engagement for stale-but-real opportunities, queued for approval."
+    - channel: review
+      owner: reviewer
+      title: "Set the hygiene scorecard and review cadence"
+      details: "Define success metrics, the review rhythm, and the evidence trail for each iteration."
+
+bootstrap_config:
+  channel_name: "{{brand_name}}"
+  channel_slug: "{{brand_slug}}"
+  niche: "An AI RevOps team that operates on the CRM you already have and keeps it trustworthy."
+  audience: "RevOps leaders, founders, and sales teams drowning in CRM hygiene"
+  positioning: "RevOps as an operating system: clean records, an honest funnel, and outbound that stays behind approval."
+  content_pillars:
+    - "CRM hygiene"
+    - "Pipeline truth"
+    - "Outbound operations"
+  content_series:
+    - "Hygiene sweeps"
+    - "Funnel reviews"
+    - "Outreach retros"
+  monetization_hooks:
+    - "hygiene audit"
+    - "pipeline reporting"
+    - "outbound operations"
+    - "retainer"
+  publishing_cadence: "Weekly pipeline review"
+  lead_magnet:
+    name: "CRM Hygiene Scorecard"
+    cta: "Open the hygiene scorecard"
+    path: "/hygiene-scorecard"
+  monetization_assets:
+    - stage: "Day 0"
+      name: "CRM Hygiene Scorecard"
+      slot: "command_room"
+      cta: "Open the hygiene scorecard"
+    - stage: "Operate"
+      name: "Pipeline Truth Report"
+      slot: "pipeline_lane"
+      cta: "Open the pipeline report"
+    - stage: "Grow"
+      name: "Outbound Operations Kit"
+      slot: "outreach_lane"
+      cta: "Open the outreach kit"
+  kpi_tracking:
+    - name: "Duplicate accounts merged"
+      target: "Backlog cleared in 30 days"
+      why: "Proves the hygiene lane is making the CRM trustworthy."
+    - name: "Deals with a real owner"
+      target: "> 98%"
+      why: "Shows the funnel can actually be worked, not just counted."
+    - name: "Stale opportunities resolved"
+      target: "Weekly sweep, < 5% aged 30+ days"
+      why: "Keeps the pipeline honest instead of inflated."
+    - name: "Approved outbound conversion"
+      target: "Within 30 days"
+      why: "Confirms operations turn clean data into revenue, not just tidy records."
+
+automation:
+  - id: control-plane
+    kicker: Build now
+    title: Control plane + workspace defaults
+    copy: Load the RevOps pack, queue seed, hygiene lanes, and approval boundaries from template data instead of rebuilding them in the browser.
+    status: build_now
+    footer: "Single source of truth: template + runtime state."
+  - id: hygiene-engine
+    kicker: Build now
+    title: CRM hygiene packets
+    copy: Turn hygiene goals into reusable cleanup packets with explicit before/after counts and approval gates on destructive changes.
+    status: build_now
+    footer: Hygiene sweeps seed the first queue automatically.
+  - id: pipeline-engine
+    kicker: Build now
+    title: Pipeline reporting templates
+    copy: Generate funnel reports, forecasts, and stage-truth checks from the current CRM state.
+    status: build_now
+    footer: Template-derived definitions shape the report prompt.
+  - id: approval-plane
+    kicker: Build now
+    title: Approval boundaries stay explicit
+    copy: Every run carries its own human approval list so record merges, outbound sends, and account changes are blocked until approved.
+    status: build_now
+    footer: Approval policy is data-driven from the template.
+  - id: review-loop
+    kicker: Build now
+    title: Metrics and review loop
+    copy: Track hygiene throughput, funnel accuracy, and outreach outcomes so the operation improves each iteration.
+    status: build_now
+    footer: A weekly review loop is seeded by default.
+
+monetization_ladder:
+  - kicker: "Step 1"
+    title: "hygiene audit"
+    copy: "Turn the hygiene audit into a reusable commercial lane in the operating system."
+    footer: "Loaded from the RevOps ladder."
+  - kicker: "Step 2"
+    title: "pipeline reporting"
+    copy: "Turn pipeline reporting into a reusable commercial lane in the operating system."
+    footer: "Loaded from the RevOps ladder."
+  - kicker: "Step 3"
+    title: "outbound operations"
+    copy: "Turn outbound operations into a reusable commercial lane in the operating system."
+    footer: "Loaded from the RevOps ladder."
+  - kicker: "Step 4"
+    title: "retainer"
+    copy: "Turn the retainer into a reusable commercial lane in the operating system."
+    footer: "Loaded from the RevOps ladder."
+
+queue_seed:
+  - id: hygiene-sweep
+    title: "Run the first CRM hygiene sweep"
+    format: "Operational work item"
+    stage_index: 0
+    score: 96
+    unit_cost: 8
+    eta: "Iteration 1"
+    monetization: "hygiene audit"
+    state: "active"
+  - id: pipeline-baseline
+    title: "Establish the pipeline-truth baseline"
+    format: "Operational work item"
+    stage_index: 1
+    score: 91
+    unit_cost: 9
+    eta: "Iteration 2"
+    monetization: "pipeline reporting"
+    state: "active"
+  - id: outreach-sequence
+    title: "Draft the first follow-up sequence"
+    format: "Operational work item"
+    stage_index: 2
+    score: 85
+    unit_cost: 10
+    eta: "Iteration 3"
+    monetization: "outbound operations"
+    state: "active"
+  - id: hygiene-scorecard
+    title: "Set the hygiene scorecard and review cadence"
+    format: "Operational work item"
+    stage_index: 3
+    score: 82
+    unit_cost: 10
+    eta: "Iteration 4"
+    monetization: "retainer"
+    state: "active"
+
+stages:
+  - id: discover
+    name: Discover
+    engine: planning
+    description: "Connect the CRM and find the hygiene and funnel debt."
+    exit_criteria: "The hygiene and pipeline problems are quantified and durable."
+  - id: design
+    name: Design
+    engine: planning
+    description: "Turn the directive into a hygiene plan and pipeline rulebook."
+    exit_criteria: "Starter tasks, channels, and the rulebook exist."
+  - id: operate
+    name: Operate
+    engine: execution
+    description: "Run the cleanup sweeps and produce the funnel reports."
+    exit_criteria: "The first hygiene and pipeline bundle is reviewable."
+  - id: validate
+    name: Validate
+    engine: review
+    description: "Review changes, confirm nothing real broke, and capture evidence."
+    exit_criteria: "Evidence is persisted and destructive changes were approved."
+  - id: grow
+    name: Grow
+    engine: operations
+    description: "Run the loop on a cadence with scorecards and approved outreach."
+    exit_criteria: "The RevOps operation has a repeatable weekly rhythm."
+
+artifacts:
+  - id: hygiene_report
+    name: Hygiene report
+    description: "Counts of duplicates, missing owners, and stale records, plus the cleanup plan."
+  - id: pipeline_rulebook
+    name: Pipeline rulebook
+    description: "Stage definitions, dedupe policy, owner rule, and staleness thresholds."
+  - id: execution_packet
+    name: Execution packet
+    description: "The current run's changes, before/after counts, and handoff context."
+  - id: funnel_report
+    name: Funnel report
+    description: "The honest read of the pipeline with the queries behind it."
+
+capabilities:
+  - id: planning
+    name: Planning and decomposition
+    kind: planning
+    description: "Turn the directive into hygiene and pipeline workstreams."
+  - id: hygiene
+    name: CRM hygiene and cleanup
+    kind: execution
+    description: "Dedupe, backfill, and resolve stale records with an audit trail."
+  - id: integrations
+    name: Integrations and handoffs
+    kind: integration
+    integrations: [github, gmail, slack, google-drive]
+    description: "Use the connected CRM and tools as execution surfaces."
+  - id: approvals
+    name: Operations and approvals
+    kind: execution
+    description: "Run the workflows, enforce approvals, and keep state durable."
+  - id: analytics
+    name: Metrics and review
+    kind: analysis
+    description: "Track hygiene throughput, funnel accuracy, and loop improvements."
+
+approval_rules:
+  - id: record-mutation
+    trigger: data_mutation
+    description: Human approval required before merging, deleting, or bulk-editing real CRM records.
+  - id: public-send
+    trigger: public_send_or_publish
+    description: Human approval required before any outbound send or externally visible update.
+  - id: external-accounts
+    trigger: connect_account
+    description: Human approval required before linking or authorizing a real external account.
+  - id: spend
+    trigger: spend_money
+    description: Human approval required before vendor spend, ad spend, or budget commitments.
+
+connections:
+  - name: "CRM integration lane"
+    integration: github
+    owner: Operations
+    priority: critical
+    purpose: "Use the connected CRM and change tracking as the hygiene execution surface."
+    smoke_test: "Run a dry-run dedupe on a sandbox record and persist evidence."
+    blocker: "Needs approved CRM credentials before any live record mutation."
+  - name: "Gmail outreach lane"
+    integration: gmail
+    owner: Revenue
+    priority: critical
+    purpose: "Use Gmail for approved outbound, follow-up, and customer communication."
+    smoke_test: "Draft a dry-run follow-up and persist evidence without sending."
+    blocker: "Needs approved Gmail credentials before any live send."
+  - name: "Slack operations lane"
+    integration: slack
+    owner: Operations
+    priority: important
+    purpose: "Use Slack for team coordination and approval handoffs."
+    smoke_test: "Run a dry-run update and persist evidence."
+    blocker: "Needs approved Slack credentials before any live message."
+  - name: "Google Drive evidence lane"
+    integration: google-drive
+    owner: Knowledge
+    priority: important
+    purpose: "Use Drive for hygiene reports, rulebooks, and evidence."
+    smoke_test: "Write a mock report bundle and confirm persistence."
+    blocker: "Needs approved Drive credentials before any live file mutation."
+
+workflows:
+  - id: hygiene-dry-run
+    name: Hygiene dry-run
+    trigger: manual
+    mode: dry_run
+    integrations: [github, google-drive]
+    checklist:
+      - Confirm hygiene scope
+      - Produce before/after counts
+      - Persist evidence
+    description: Validate the CRM hygiene path and produce before/after counts without live side effects.
+    definition:
+      provider: one
+      key: hygiene-dry-run
+    smoke_test:
+      name: Hygiene dry-run
+      mode: dry_run
+      proof: Hygiene evidence persisted without touching live records.
+      inputs:
+        operation_name: AI RevOps
+  - id: pipeline-report
+    name: Pipeline report
+    trigger: manual
+    mode: dry_run
+    integrations: [google-drive, github]
+    checklist:
+      - Confirm source inputs
+      - Produce the funnel report
+      - Persist audit evidence
+    description: Validate the pipeline-report path and produce the first honest funnel read.
+    definition:
+      provider: one
+      key: pipeline-report
+    smoke_test:
+      name: Pipeline report
+      mode: dry_run
+      proof: Pipeline evidence persisted successfully.
+      inputs:
+        operation_name: AI RevOps
+  - id: outreach-pilot
+    name: Outreach pilot
+    trigger: manual
+    mode: mock
+    integrations: [gmail, slack]
+    checklist:
+      - Confirm outreach scope
+      - Run the mock sequence
+      - Persist outreach evidence
+    description: Validate the approved-outreach path for a re-engagement sequence.
+    definition:
+      provider: one
+      key: outreach-pilot
+    smoke_test:
+      name: Outreach pilot
+      mode: mock
+      proof: Outreach evidence persisted successfully.
+      inputs:
+        operation_name: AI RevOps
+  - id: review-handoff
+    name: Review handoff
+    trigger: manual
+    mode: mock
+    integrations: [slack, google-drive]
+    checklist:
+      - Confirm handoff checklist
+      - Confirm review gate
+      - Persist review evidence
+    description: Validate the review handoff and the evidence trail for each iteration.
+    definition:
+      provider: one
+      key: review-handoff
+    smoke_test:
+      name: Review handoff
+      mode: mock
+      proof: Review evidence persisted successfully.
+      inputs:
+        operation_name: AI RevOps
+
+wiki_schema:
+  dirs:
+    - team/hygiene/
+    - team/pipeline/
+    - team/playbooks/
+    - team/decisions/
+    - team/inbox/
+  bootstrap:
+    - path: team/hygiene/dedupe-policy.md
+      title: "Dedupe and merge policy"
+      skeleton: |
+        # Dedupe and merge policy
+
+        _(How we decide two records are the same, which fields survive a merge, and what we never auto-merge. The agents read this before touching a record. Update it the first time a merge goes wrong.)_
+    - path: team/pipeline/stage-definitions.md
+      title: "Stage definitions and the pipeline rulebook"
+      skeleton: |
+        # Stage definitions
+
+        _(What each pipeline stage actually means, the entry and exit criteria, and what counts as a real opportunity. This is the source of truth the analyst reports against.)_
+    - path: team/playbooks/owner-assignment.md
+      title: "Owner assignment and routing"
+      skeleton: |
+        # Owner assignment and routing
+
+        _(How we decide who owns an account or deal, how we backfill a missing owner, and the routing rules for new records. Document the exceptions, they are where hygiene breaks.)_
+    - path: team/decisions/ops-log.md
+      title: "RevOps decisions log"
+      skeleton: |
+        # RevOps decisions log
+
+        _(One dated entry per non-trivial operations decision: what we changed in the CRM, what we rejected, and what would make us revisit. Keep entries short; link to the evidence.)_
+    - path: team/inbox/raw-signals.md
+      title: "Raw funnel signals"
+      skeleton: |
+        # Raw funnel signals
+
+        _(Unprocessed observations from sweeps, reports, and calls: odd data, broken stages, recurring complaints. The team reviews this page and promotes patterns up to playbooks/ or hygiene/.)_

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +93,20 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 	// rather than a broken onboarding flow). Log and move on.
 	b.materializeBlueprintWiki(bp)
 
+	// Seed the team/getting-started/ pages here too. The wizard onboarding
+	// completes through THIS path (onboardingCompleteFn), not the chat-phase
+	// runSeedPhase where materializeGettingStarted is also wired, so without
+	// this call a wizard-onboarded office lands on a wiki with no Getting
+	// Started section (and on the scratch path, no wiki content at all, since
+	// materializeBlueprintWiki no-ops without a WikiSchema). Mirrors the
+	// runSeedPhase seed; best-effort and idempotent (skip-if-exists). The
+	// trailing index regen mirrors runSeedPhase so index/all.md reflects the
+	// pages that land via atomicWrite outside the WikiWorker commit path.
+	b.materializeGettingStarted()
+	regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "wizard complete")
+	cancel()
+
 	// Sync the company name captured during onboarding to the workspace
 	// registry so the rail can display it without a separate API call.
 	companyName = strings.TrimSpace(companyName)
@@ -103,6 +116,13 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 				log.Printf("onboarding: sync company name to registry: %v", err)
 			}
 		}
+		// Re-derive the Linear-style Issue ID prefix now that the workspace
+		// has a real company name (e.g. "Nex" → NEX-1). Any Issues minted
+		// before onboarding completed keep their OFFICE-N IDs; new ones
+		// pick up the company-derived prefix.
+		b.mu.Lock()
+		b.refreshIDPrefixFromWorkspaceLocked()
+		b.mu.Unlock()
 	}
 
 	return nil
@@ -117,22 +137,24 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 // blueprint without a WikiSchema (e.g. a synthesized from-scratch
 // blueprint) is silently skipped.
 //
-// Important: this runs OUTSIDE the broker lock (see caller), and uses the
-// wiki worker's Repo for the commit so we go through the same
-// per-commit-identity plumbing as regular agent writes. If the worker is
-// not yet live (memory backend != markdown), we log and return — the
-// skeletons stay on disk untracked and will be folded into the next
-// RecoverDirtyTree pass. That's not ideal but it's the honest fallback.
+// Important: this runs OUTSIDE the broker lock (see caller), and initializes
+// the wiki worker before writing when the markdown backend is active. That
+// keeps skeleton files and git history coupled from the first render. If the
+// worker is not live (memory backend != markdown), we still materialize files
+// best-effort for read-only fallback, but no git commit is possible.
 func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	if bp.WikiSchema == nil {
 		return
 	}
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		log.Printf("onboarding: resolve runtime home for wiki materialization: WUPHF_RUNTIME_HOME unset (config.RuntimeHomeDir returned empty)")
-		return
+	b.ensureWikiWorker()
+	worker := b.WikiWorker()
+
+	wikiRoot := ""
+	if worker != nil && worker.Repo() != nil {
+		wikiRoot = worker.Repo().Root()
+	} else {
+		wikiRoot = WikiRootDir()
 	}
-	wikiRoot := filepath.Join(home, ".wuphf", "wiki")
 	result, err := operations.MaterializeWiki(context.Background(), wikiRoot, bp.WikiSchema)
 	if err != nil {
 		log.Printf("onboarding: wiki materialize failed (wiki left empty): %v", err)
@@ -146,10 +168,8 @@ func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	if len(result.ArticlesCreated) == 0 && len(result.DirsCreated) == 0 {
 		return
 	}
-	worker := b.WikiWorker()
 	if worker == nil || worker.Repo() == nil {
-		// Non-markdown backend — skeletons stay on disk, will surface via
-		// RecoverDirtyTree on the next markdown-backend launch.
+		// Non-markdown backend — skeletons stay on disk as read-only files.
 		return
 	}
 	repo := worker.Repo()
@@ -210,11 +230,11 @@ func scratchFoundingTeamBlueprint(companyName, description, directive string) op
 		displayName = "Your company"
 	}
 	agents := []operations.StarterAgent{
-		{Slug: "ceo", Name: "CEO", Role: "lead", PermissionMode: "plan", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
-		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
-		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", PermissionMode: "auto", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
-		{Slug: "pm", Name: "Product Manager", Role: "product", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
-		{Slug: "designer", Name: "Designer", Role: "design", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
+		{Slug: "ceo", Name: "CEO", Role: "lead", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
+		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
+		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
+		{Slug: "pm", Name: "Product Manager", Role: "product", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
+		{Slug: "designer", Name: "Designer", Role: "design", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
 	}
 	channels := []operations.StarterChannel{
 		{Slug: "general", Name: "general", Description: "Primary coordination channel.", Members: []string{"ceo", "gtm-lead", "founding-engineer", "pm", "designer"}},
@@ -272,8 +292,36 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	b.messages = nil
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
+	// Seed the "Backup & Migration" system task that owns #general so the
+	// ~141 fallback call sites that post to "general" keep working.
+	b.ensureBackupMigrationTaskLocked()
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
 		return err
+	}
+	// Pack/blueprint seeds follow the same contract as every other create
+	// path: the human choosing the pack IS the authorization, so seeded
+	// starter lanes land as Issues that are immediately executable — owner
+	// set → Running with the owner dispatched through the task_created
+	// action, ownerless → Ready until staffed. Dispatch is gated only by
+	// ownership; there is no start-approval ceremony. The Backup &
+	// Migration system task is exempt.
+	for i := range b.tasks {
+		if b.tasks[i].System || b.tasks[i].LifecycleState != "" {
+			continue
+		}
+		b.tasks[i].TaskType = "issue"
+		target := LifecycleStateReady
+		if owner := strings.TrimSpace(b.tasks[i].Owner); owner != "" && !isAutoOwner(owner) {
+			target = LifecycleStateRunning
+		}
+		if err := b.applyLifecycleStateLocked(&b.tasks[i], target); err != nil {
+			log.Printf("onboarding: land seeded task %s in %s: %v", b.tasks[i].ID, target, err)
+			continue
+		}
+		// Wake the owner through the same notify path a composer create
+		// uses (task_created → notifyTaskActionsLoop → sendTaskUpdate).
+		b.appendActionLocked("task_created", "office", normalizeChannelSlug(b.tasks[i].Channel),
+			b.tasks[i].CreatedBy, truncateSummary(b.tasks[i].Title, 140), b.tasks[i].ID)
 	}
 	// Signal subscribers (the launcher) that the office roster was replaced
 	// wholesale. Individual member_created events aren't emitted by this path
@@ -289,8 +337,16 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 
 	// Lead-only warning: the wizard sent agents=[] (explicit empty = every
 	// toggle unchecked). The seed helper fell back to lead-only; surface
-	// that via a system message so the user knows the team is minimal.
-	if selectedAgents != nil && len(selectedAgents) == 0 && len(b.members) == 1 {
+	// that via a system message so the user knows the team is minimal. The
+	// built-in Librarian is always present and doesn't count as a specialist,
+	// so a roster of lead + Librarian is still "lead only".
+	nonLibrarianMembers := 0
+	for i := range b.members {
+		if !isLibrarianSlug(b.members[i].Slug) {
+			nonLibrarianMembers++
+		}
+	}
+	if selectedAgents != nil && len(selectedAgents) == 0 && nonLibrarianMembers == 1 {
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -305,11 +361,10 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	if skipTask {
 		// Without a seeded task, #general would otherwise be empty (or hold
 		// only the lead-only warning) and the office looks broken on first
-		// open. Post a system welcome plus a presence line from the lead so
-		// the channel always has an affordance for what to do next AND feels
-		// staffed rather than abstract. The presence line is marked Kind=
-		// "demo_seed" so the launcher's notification path treats it as inert
-		// — it must not trigger an LLM dispatch.
+		// open. Post a system welcome so the channel always has an
+		// affordance for what to do next. No staged agent presence lines:
+		// the core loop wants a real first paint, not a fake-staffed one
+		// (core-loop R6 removed the demo_seed machinery).
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -319,18 +374,6 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 			Content:   welcomeMessageForMembers(b.members),
 			Timestamp: now,
 		})
-		if leadSlug, leadName := leadSlugAndName(b.members); leadSlug != "" {
-			b.counter++
-			b.appendMessageLocked(channelMessage{
-				ID:        fmt.Sprintf("msg-%d", b.counter),
-				From:      leadSlug,
-				Channel:   "general",
-				Kind:      "demo_seed",
-				Content:   fmt.Sprintf("%s online. Drop a directive in the composer and I'll break it down and dispatch the team.", leadName),
-				Tagged:    []string{},
-				Timestamp: now,
-			})
-		}
 		// seedFromBlueprintLocked mutated b.members/channels/tasks above; we
 		// must persist that even when the user skipped the kickoff task.
 		// Returning early without saveLocked() silently loses the seeded team
@@ -463,17 +506,19 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 		members = blankSlateOfficeMembersFromAgents(agents, leadSlug, nil)
 	}
 	if len(members) > 0 {
-		return members
+		// The Librarian is built-in, like the lead — present in every workspace
+		// regardless of blueprint or agent selection.
+		return ensureLibrarianMember(members)
 	}
 	// Defensive fallback used only when the blueprint had zero parseable
 	// agents. Keeps the broker from crashing on empty rosters.
 	now := time.Now().UTC().Format(time.RFC3339)
-	return []officeMember{
-		{Slug: "founder", Name: "Founder", Role: "Founder", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "auto", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
-	}
+	return ensureLibrarianMember([]officeMember{
+		{Slug: "founder", Name: "Founder", Role: "Founder", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", CreatedBy: "wuphf", CreatedAt: now},
+	})
 }
 
 func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlug string, filter func(string) bool) []officeMember {
@@ -496,16 +541,15 @@ func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlu
 			role = name
 		}
 		members = append(members, officeMember{
-			Slug:           slug,
-			Name:           name,
-			Role:           role,
-			Expertise:      normalizeStringList(agent.Expertise),
-			Personality:    strings.TrimSpace(agent.Personality),
-			PermissionMode: blankSlatePermissionMode(agent.Type),
-			AllowedTools:   nil,
-			CreatedBy:      "wuphf",
-			CreatedAt:      now,
-			BuiltIn:        agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
+			Slug:         slug,
+			Name:         name,
+			Role:         role,
+			Expertise:    normalizeStringList(agent.Expertise),
+			Personality:  strings.TrimSpace(agent.Personality),
+			AllowedTools: nil,
+			CreatedBy:    "wuphf",
+			CreatedAt:    now,
+			BuiltIn:      agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
 		})
 	}
 	return members
@@ -625,7 +669,13 @@ func blankSlateOfficeTasksFromBlueprint(blueprint operations.Blueprint) []teamTa
 		if channel == "" {
 			channel = "general"
 		}
-		owner := normalizeChannelSlug(starter.Owner)
+		// normalizeChannelSlug("") returns "general" (lobby fallback) —
+		// an ownerless starter task must stay ownerless so it lands READY
+		// and dispatches on assignment, not on a phantom "general" owner.
+		owner := ""
+		if strings.TrimSpace(starter.Owner) != "" {
+			owner = normalizeChannelSlug(starter.Owner)
+		}
 		tasks = append(tasks, teamTask{
 			ID:        fmt.Sprintf("%s-%d", prefix, i+1),
 			Channel:   channel,
@@ -651,15 +701,6 @@ func taskIDPrefix(bp operations.Blueprint) string {
 		return id
 	}
 	return "blank-slate"
-}
-
-func blankSlatePermissionMode(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "lead", "human":
-		return "plan"
-	default:
-		return "auto"
-	}
 }
 
 func memberSlugsFromMembers(members []officeMember) []string {

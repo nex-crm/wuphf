@@ -6,8 +6,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { deriveBreadcrumbs } from "./useObjectBreadcrumb";
+
 import type { CurrentRoute } from "../routes/useCurrentRoute";
+import { deriveBreadcrumbs } from "./useObjectBreadcrumb";
 
 describe("deriveBreadcrumbs", () => {
   it("returns empty array for channel routes", () => {
@@ -20,16 +21,17 @@ describe("deriveBreadcrumbs", () => {
     expect(deriveBreadcrumbs(route)).toEqual([]);
   });
 
-  it("returns [@agent] for dm routes (no invalid #/dm parent)", () => {
+  it("returns [Agents, @agent] for agent-detail routes", () => {
     const route: CurrentRoute = {
-      kind: "dm",
+      kind: "agent-detail",
       agentSlug: "gaia",
-      channelSlug: "gaia__human",
     };
     const crumbs = deriveBreadcrumbs(route);
-    expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Agent: gaia");
-    expect(crumbs[0].href).toBe("#/dm/gaia");
+    expect(crumbs).toHaveLength(2);
+    expect(crumbs[0].label).toBe("Agents");
+    expect(crumbs[0].href).toBe("#/agents");
+    expect(crumbs[1].label).toBe("Agent: gaia");
+    expect(crumbs[1].href).toBe("#/agents/gaia");
   });
 
   it("returns [Tasks] for task-board route", () => {
@@ -120,10 +122,10 @@ describe("deriveBreadcrumbs", () => {
     expect(crumbs[0].label).toBe("Settings");
   });
 
-  it("returns [Console] for console app route", () => {
-    const route: CurrentRoute = { kind: "app", appId: "console" };
+  it("returns [Graph] for graph app route", () => {
+    const route: CurrentRoute = { kind: "app", appId: "graph" };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Console");
+    expect(crumbs[0].label).toBe("Graph");
   });
 });

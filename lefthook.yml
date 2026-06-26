@@ -46,18 +46,6 @@ pre-commit:
         - "node_modules/**"
         - "coverage/**"
 
-    biome-broker:
-      # @wuphf/broker has its own biome config that mirrors @wuphf/protocol's
-      # Node-only rule set (kebab-case filenames, no console, no enums).
-      root: packages/broker
-      glob: "packages/broker/**/*.{js,ts,json}"
-      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
-      stage_fixed: true
-      exclude:
-        - "dist/**"
-        - "node_modules/**"
-        - "coverage/**"
-
     gofmt:
       glob: "*.go"
       run: |
@@ -71,10 +59,16 @@ pre-commit:
 
     go-vet:
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
+        - "packages/protocol/testdata/**/*.go"
       run: go vet ./...
 
     golangci-lint:
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
+        - "packages/protocol/testdata/**/*.go"
       run: golangci-lint run ./...
 
     no-secrets:
@@ -135,14 +129,18 @@ pre-push:
       # Go suite. CI still runs the full Go matrix on every PR, so any
       # cross-language interface drift surfaces there in <5min.
       #
-      # Excludes packages/protocol/testdata/**/*.go: those files are
+      # Excludes packages/protocol/testdata Go files: those are
       # `//go:build ignore` reference programs, NOT part of the wuphf
       # binary build. Letting them trigger the full Go suite would
       # double-bill protocol-only PRs (the protocol-wire-contract hook
       # below already exercises the verifier directly via `go run`).
+      # Both patterns are needed: `*.go` matches files directly in
+      # testdata/ (e.g. verifier-reference.go) — `**/*.go` alone does
+      # not — and `**/*.go` covers any future nested testdata package.
       files: bash scripts/changed-files-since-base.sh
       glob: "*.go"
       exclude:
+        - "packages/protocol/testdata/*.go"
         - "packages/protocol/testdata/**/*.go"
       run: bash scripts/test-go.sh
     web-unit:
@@ -155,30 +153,6 @@ pre-push:
         cd web
         bun run typecheck
         bun run test
-    desktop-typecheck:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
-      run: |
-        cd apps/desktop
-        bun run typecheck
-    desktop-test:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
-      run: |
-        cd apps/desktop
-        bun run test
-    desktop-check-ipc-allowlist:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
-      run: |
-        cd apps/desktop
-        bun run check:ipc-allowlist
-    desktop-check-invariants:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
-      run: |
-        cd apps/desktop
-        bun run check:invariants
     smoke:
       # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
       # worktrees registered against the invoking repo, cross-test state
@@ -241,56 +215,6 @@ pre-push:
       files: bash scripts/changed-files-since-base.sh
       glob: "packages/protocol/{src/**,tests/**,scripts/**}"
       run: bash packages/protocol/scripts/check-invariants.sh
-    broker-typecheck:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "packages/broker/**/*.{ts,json}"
-      run: |
-        cd packages/broker
-        bun run typecheck
-    broker-test:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "packages/broker/**/*.{ts,json}"
-      run: |
-        cd packages/broker
-        bun run test
-    llm-router-test:
-      files: bash scripts/changed-files-since-base.sh
-      glob: "packages/llm-router/**/*.{ts,json}"
-      run: |
-        cd packages/llm-router
-        bunx vitest run
-    broker-invariants:
-      # Custom invariant checks for broker-grade rules Biome cannot express:
-      # bind host is loopback only, bearer comparison goes through
-      # `tokenMatches` (timingSafeEqual), no electron imports, all
-      # @wuphf/protocol imports go through the package root. See
-      # `packages/broker/scripts/check-invariants.sh` for full rationale.
-      files: bash scripts/changed-files-since-base.sh
-      glob: "packages/broker/{src/**,tests/**,scripts/**}"
-      run: bash packages/broker/scripts/check-invariants.sh
-    installer-invariants:
-      files: bash scripts/changed-files-since-base.sh
-      # check-invariants.sh scans .github/workflows/release-rewrite.yml for
-      # forbidden literals + action SHA pinning + cert paths, so workflow
-      # edits MUST trigger this hook even when nothing under apps/installer-stub
-      # changes — otherwise an unpinned action / forbidden literal slips past
-      # pre-push and only surfaces at the CI installer-invariants job.
-      glob: "{apps/installer-stub/**,.github/workflows/release-rewrite.yml}"
-      run: |
-        bash apps/installer-stub/scripts/check-invariants.sh
-        bash apps/installer-stub/scripts/check-invariants-self-test.sh
-        WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 \
-          WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 \
-          bash apps/installer-stub/scripts/verify-latest-yml.sh
-        # M4 regression: setDefaultCache must not mutate parent process.env
-        # (was leaking ELECTRON_CACHE / ELECTRON_BUILDER_CACHE into subsequent
-        # commands). The unit test runs in <100ms and is the only automated
-        # gate for that invariant — apps/installer-stub/package.json's bun
-        # test script is not invoked anywhere else in CI or pre-push.
-        node apps/installer-stub/scripts/run-builder.test.js
-        # Issue #771: self-test for the packaged-runtime-deps check (the real
-        # post-build gate lives in release-rewrite.yml's per-platform jobs).
-        node apps/installer-stub/scripts/check-packaged-runtime-deps.test.mjs
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt

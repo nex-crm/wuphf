@@ -45,19 +45,39 @@ type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedA
 // seeds the team and fires the first CEO turn) without the broker token.
 // Pass a nil middleware only in tests — RegisterRoutes substitutes a passthrough.
 //
+// TransitionFunc is the broker callback invoked when the phase advances.
+// The broker uses this to emit the next CEO suggestion card into b.messages
+// on the CEO DM and perform any phase-transition side effects.
+// phase is the new phase the state machine just entered.
+type TransitionFunc func(phase string, s *State) error
+
+// RegisterRoutes wires the onboarding HTTP endpoints onto mux.
+//
 // Routes registered:
 //
 //	GET  /onboarding/state
 //	POST /onboarding/progress
 //	POST /onboarding/complete
 //	GET  /onboarding/prereqs
+//	POST /onboarding/verify
+//	GET  /onboarding/install-steps
 //	POST /onboarding/validate-key
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
 //	POST /onboarding/checklist/dismiss
 //	POST /onboarding/scan
 //	POST /onboarding/upload-context
+//	POST /onboarding/transition   (Phase 2)
+//	POST /onboarding/answer       (Phase 2)
+//	POST /onboarding/suggestion/ack (Phase 2)
 func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
+	RegisterRoutesWithTransition(mux, completeFn, nil, packSlug, authMiddleware, wikiRoot)
+}
+
+// RegisterRoutesWithTransition is like RegisterRoutes but also accepts a
+// TransitionFunc that the broker supplies to receive phase-transition events.
+// Pass nil transitionFn to skip the broker callback (legacy path / tests).
+func RegisterRoutesWithTransition(mux *http.ServeMux, completeFn CompleteFunc, transitionFn TransitionFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
 	if authMiddleware == nil {
 		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
 	}
@@ -65,6 +85,8 @@ func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string
 	mux.HandleFunc("/onboarding/progress", authMiddleware(HandleProgress))
 	mux.HandleFunc("/onboarding/complete", authMiddleware(makeHandleComplete(completeFn)))
 	mux.HandleFunc("/onboarding/prereqs", authMiddleware(HandlePrereqs))
+	mux.HandleFunc("/onboarding/verify", authMiddleware(HandleVerify))
+	mux.HandleFunc("/onboarding/install-steps", authMiddleware(HandleInstallSteps))
 	mux.HandleFunc("/onboarding/validate-key", authMiddleware(HandleValidateKey))
 	mux.HandleFunc("/onboarding/templates", authMiddleware(makeHandleTemplates(packSlug)))
 	mux.HandleFunc("/onboarding/blueprints", authMiddleware(HandleBlueprints))
@@ -74,6 +96,10 @@ func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string
 	mux.HandleFunc("/onboarding/checklist/", authMiddleware(HandleChecklistDone))
 	mux.HandleFunc("/onboarding/scan", authMiddleware(makeHandleScan(wikiRoot)))
 	mux.HandleFunc("/onboarding/upload-context", authMiddleware(handleUploadContext))
+	// Phase 2 — deterministic CEO conversation handlers.
+	mux.HandleFunc("/onboarding/transition", authMiddleware(makeHandleTransition(transitionFn)))
+	mux.HandleFunc("/onboarding/answer", authMiddleware(HandleAnswer))
+	mux.HandleFunc("/onboarding/suggestion/ack", authMiddleware(HandleSuggestionAck))
 }
 
 // HandleState handles GET /onboarding/state.
@@ -102,6 +128,14 @@ func HandleState(w http.ResponseWriter, r *http.Request) {
 		"partial":             s.Partial,
 		"checklist":           s.Checklist,
 		"onboarded":           s.Onboarded(),
+		// v2 fields.
+		"phase":                   s.Phase,
+		"ceo_dm_channel_id":       s.CEODMChannelID,
+		"pending_suggestion":      s.PendingSuggestion,
+		"form_answers":            s.FormAnswers,
+		"first_issue_id":          s.FirstIssueID,
+		"first_issue_approved_at": s.FirstIssueApprovedAt,
+		"activated":               s.Activated(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
@@ -175,6 +209,11 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		ScanCompleted bool     `json:"scan_completed"`
 		OwnerName     string   `json:"owner_name"`
 		OwnerRole     string   `json:"owner_role"`
+		// Product analytics consent captured by the wizard's two toggles.
+		// Pointers so a legacy client that omits them leaves config alone
+		// (default ON resolves at read time). See docs/specs/product-analytics.md.
+		AnalyticsTelemetryEnabled        *bool `json:"analytics_telemetry_enabled,omitempty"`
+		AnalyticsSessionRecordingEnabled *bool `json:"analytics_session_recording_enabled,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -223,9 +262,11 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		}
 	}
 
-	// Persist company/owner fields only after validation and completeFn succeed
-	// so duplicate or invalid requests don't overwrite config state.
-	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted {
+	// Persist company/owner fields and analytics consent only after validation
+	// and completeFn succeed so duplicate or invalid requests don't overwrite
+	// config state.
+	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted ||
+		body.AnalyticsTelemetryEnabled != nil || body.AnalyticsSessionRecordingEnabled != nil {
 		if cfg, err := config.Load(); err == nil {
 			if website != "" {
 				cfg.CompanyWebsite = website
@@ -238,6 +279,16 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 			}
 			if website != "" || ownerName != "" || ownerRole != "" {
 				cfg.PendingCompanySeed = !body.ScanCompleted
+			}
+			// Copy into fresh locals so the stored pointer doesn't alias the
+			// decoded request body.
+			if body.AnalyticsTelemetryEnabled != nil {
+				v := *body.AnalyticsTelemetryEnabled
+				cfg.AnalyticsTelemetryEnabled = &v
+			}
+			if body.AnalyticsSessionRecordingEnabled != nil {
+				v := *body.AnalyticsSessionRecordingEnabled
+				cfg.AnalyticsSessionRecordingEnabled = &v
 			}
 			if err := config.Save(cfg); err != nil {
 				log.Printf("onboarding: complete: failed to persist company fields: %v", err)
@@ -419,9 +470,78 @@ func HandlePrereqs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	results := CheckAll()
+	results := CheckAll(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(results)
+}
+
+// HandleVerify handles POST /onboarding/verify.
+// Body: {"runtime": string}. The runtime may also be supplied as the
+// ?runtime= query parameter (the body takes precedence when both are set).
+// Returns a VerifyResult JSON classifying the runtime as
+// pass | not_installed | auth_required by reusing CheckOne plus the
+// per-runtime session probe.
+//
+// A 10s request deadline bounds the underlying subprocess probes (CheckOne's
+// own per-call timeout is 10s for --version and 3s for the session probe, so
+// a single runtime stays well inside this budget). Matches the client-side
+// 5s budget on /onboarding/prereqs spirit while leaving slack for a probe
+// under load.
+func HandleVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Accept the runtime from the JSON body first, falling back to the query
+	// parameter. An empty or absent body is tolerated so the ?runtime= form
+	// works on its own.
+	runtime := strings.TrimSpace(r.URL.Query().Get("runtime"))
+	var body struct {
+		Runtime string `json:"runtime"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+		if b := strings.TrimSpace(body.Runtime); b != "" {
+			runtime = b
+		}
+	}
+	if runtime == "" {
+		http.Error(w, "runtime required", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result := VerifyRuntime(ctx, runtime)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// HandleInstallSteps handles GET /onboarding/install-steps?runtime=<name>.
+// Returns {"runtime": string, "steps": []InstallStep} with the per-runtime
+// guided setup. This is cheap, static metadata (no subprocess), kept separate
+// from the live /onboarding/verify probe so the guided picker can render the
+// steps without paying for a check.
+func HandleInstallSteps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	runtime := strings.TrimSpace(r.URL.Query().Get("runtime"))
+	if runtime == "" {
+		http.Error(w, "runtime required", http.StatusBadRequest)
+		return
+	}
+	steps := InstallSteps(runtime)
+	if steps == nil {
+		steps = []InstallStep{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"runtime": runtime,
+		"steps":   steps,
+	})
 }
 
 // HandleValidateKey handles POST /onboarding/validate-key.
@@ -827,6 +947,323 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string][]string{"paths": paths})
+}
+
+// legalPhaseTransitions defines the valid next-phase set for each current phase
+// in the deterministic CEO conversation state machine (Phase 2 scope).
+// LLM phases (draft/approve/kickoff) are included for forward-compat but are
+// not wired in Phase 2.
+var legalPhaseTransitions = map[string]map[string]bool{
+	"": {
+		PhaseGreet: true,
+	},
+	PhaseGreet: {
+		PhaseIdentity: true,
+	},
+	PhaseIdentity: {
+		PhaseWebsite: true,
+	},
+	PhaseWebsite: {
+		PhaseScan:      true,
+		PhaseBlueprint: true, // skip scan if no website
+	},
+	PhaseScan: {
+		PhaseBlueprint: true,
+		// Recovery path after a scan failure: re-enter PhaseWebsite so the
+		// user can supply a different URL. (#934)
+		PhaseWebsite: true,
+	},
+	PhaseBlueprint: {
+		PhaseTeam: true,
+		PhaseSeed: true, // scratch path skips team
+	},
+	PhaseTeam: {
+		PhaseSeed: true,
+	},
+	PhaseSeed: {
+		PhaseBridge: true,
+	},
+	PhaseBridge: {
+		PhaseComplete: true, // "look around first"
+	},
+	PhaseDraft: {
+		PhaseApprove: true,
+	},
+	PhaseApprove: {
+		PhaseKickoff: true,
+	},
+	PhaseKickoff: {
+		PhaseComplete: true,
+	},
+}
+
+// IsLegalTransition reports whether the transition from currentPhase to
+// nextPhase is allowed by the state machine. Exported so broker_onboarding_phase2.go
+// can validate transitions before accepting them, and for use in tests.
+func IsLegalTransition(currentPhase, nextPhase string) bool {
+	allowed, ok := legalPhaseTransitions[currentPhase]
+	if !ok {
+		return false
+	}
+	return allowed[nextPhase]
+}
+
+// makeHandleTransition returns the POST /onboarding/transition handler.
+func makeHandleTransition(transitionFn TransitionFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleTransition(w, r, transitionFn)
+	}
+}
+
+// handleTransition handles POST /onboarding/transition.
+// Body: {"phase": string}
+// Validates the requested phase transition, persists the new phase cursor,
+// and invokes the TransitionFunc (when non-nil) so the broker can emit the
+// next CEO suggestion card.
+//
+// Returns 400 for invalid transitions, 500 on persistence errors.
+func handleTransition(w http.ResponseWriter, r *http.Request, transitionFn TransitionFunc) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	next := strings.TrimSpace(body.Phase)
+	if next == "" {
+		http.Error(w, "phase required", http.StatusBadRequest)
+		return
+	}
+
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate the requested transition.
+	allowed, ok := legalPhaseTransitions[s.Phase]
+	if !ok || !allowed[next] {
+		http.Error(w, fmt.Sprintf("invalid transition from %q to %q", s.Phase, next), http.StatusBadRequest)
+		return
+	}
+
+	s.Phase = next
+
+	// Setting CompletedAt at the bridge→complete transition path satisfies the
+	// spec rule: "CompletedAt is set at end of bridge phase regardless of
+	// first issue."
+	if next == PhaseComplete && s.CompletedAt == "" {
+		s.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+		s.Version = currentStateVersion
+	}
+
+	if err := Save(s); err != nil {
+		http.Error(w, "failed to save state", http.StatusInternalServerError)
+		return
+	}
+
+	// Notify broker so it can emit the next CEO message on the DM.
+	if transitionFn != nil {
+		if err := transitionFn(next, s); err != nil {
+			// Log server-side; the state is already persisted so this is
+			// best-effort. A transient broker error should not fail the
+			// transition from the client's perspective.
+			log.Printf("onboarding: transition broker callback failed (phase=%s): %v", next, err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":    true,
+		"phase": next,
+	})
+}
+
+// HandleAnswer handles POST /onboarding/answer.
+// Body: {"field": string, "value": any}
+// Commits a single FormAnswers field. String values are sanitized via
+// onboardingSanitizeString. Persists state on each call (~10-12 writes
+// per full onboarding per spec).
+func HandleAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Field string      `json:"field"`
+		Value interface{} `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	field := strings.TrimSpace(body.Field)
+	if field == "" {
+		http.Error(w, "field required", http.StatusBadRequest)
+		return
+	}
+
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+
+	if err := applyFormAnswer(s, field, body.Value); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := Save(s); err != nil {
+		http.Error(w, "failed to save state", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// applyFormAnswer writes a single field value into s.FormAnswers.
+// String values are sanitized. Unknown fields return an error.
+func applyFormAnswer(s *State, field string, value interface{}) error {
+	sanitizeStr := func(v interface{}) string {
+		str, _ := v.(string)
+		return onboardingSanitizeString(strings.TrimSpace(str))
+	}
+	switch field {
+	case "company_name":
+		s.FormAnswers.CompanyName = sanitizeStr(value)
+		// Mirror to top-level CompanyName for back-compat with v1 callers.
+		s.CompanyName = s.FormAnswers.CompanyName
+	case "description":
+		s.FormAnswers.Description = sanitizeStr(value)
+	case "priority":
+		s.FormAnswers.Priority = sanitizeStr(value)
+	case "website_url":
+		s.FormAnswers.WebsiteURL = sanitizeStr(value)
+	case "owner_name":
+		s.FormAnswers.OwnerName = sanitizeStr(value)
+	case "owner_role":
+		s.FormAnswers.OwnerRole = sanitizeStr(value)
+	case "owner_email":
+		// Founder email captured on the welcome step. PII, stored locally; the
+		// remote keep-in-touch send is gated separately on the web side. Reject
+		// non-string payloads (as picked_agents / scan_complete do) so a
+		// malformed request cannot silently clear a previously stored address.
+		raw, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("owner_email must be a string")
+		}
+		s.FormAnswers.OwnerEmail = sanitizeStr(raw)
+	case "blueprint_id":
+		s.FormAnswers.BlueprintID = normalizeBlueprintAnswer(sanitizeStr(value))
+	case "picked_agents":
+		raw, ok := value.([]interface{})
+		if !ok {
+			return fmt.Errorf("picked_agents must be an array")
+		}
+		agents := make([]string, 0, len(raw))
+		for _, v := range raw {
+			if slug := strings.TrimSpace(fmt.Sprintf("%v", v)); slug != "" {
+				agents = append(agents, onboardingSanitizeString(slug))
+			}
+		}
+		s.FormAnswers.PickedAgents = agents
+	case "scan_complete":
+		b, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("scan_complete must be a boolean")
+		}
+		s.FormAnswers.ScanComplete = b
+	case "task_prompt":
+		prompt := sanitizeStr(value)
+		if prompt == "" {
+			return fmt.Errorf("task_prompt required")
+		}
+		s.FormAnswers.TaskPrompt = prompt
+	default:
+		return fmt.Errorf("unknown field %q", field)
+	}
+	return nil
+}
+
+func normalizeBlueprintAnswer(value string) string {
+	switch strings.TrimSpace(value) {
+	case blankSlateStarterTemplateID, "from-scratch", "blank-slate":
+		return ""
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+// onboardingSanitizeString collapses structural delimiters that could be used
+// for confused-deputy injection in CEO suggestion payloads. Mirrors the logic
+// of sanitizeContextValue in internal/teammcp/actions.go (kept in sync;
+// neither is imported by the other to avoid a circular dep — teammcp imports
+// team which imports onboarding).
+func onboardingSanitizeString(s string) string {
+	if s == "" {
+		return s
+	}
+	r := strings.NewReplacer(
+		"\r\n", " ",
+		"\n", " ",
+		"\r", " ",
+		" ", " ", // U+2028 LINE SEPARATOR
+		" ", " ", // U+2029 PARAGRAPH SEPARATOR
+		"•", "·", // U+2022 BULLET → U+00B7 MIDDLE DOT
+	)
+	cleaned := r.Replace(s)
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
+// HandleSuggestionAck handles POST /onboarding/suggestion/ack.
+// Body: {"suggestion_id": string}
+// Clears PendingSuggestion if the ID matches the current pending suggestion.
+// Idempotent: acking an already-cleared or mismatched ID is a no-op (200).
+func HandleSuggestionAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		SuggestionID string `json:"suggestion_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(body.SuggestionID)
+	if id == "" {
+		http.Error(w, "suggestion_id required", http.StatusBadRequest)
+		return
+	}
+
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+
+	if s.PendingSuggestion != nil && s.PendingSuggestion.ID == id {
+		s.PendingSuggestion = nil
+		if err := Save(s); err != nil {
+			http.Error(w, "failed to save state", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // HandleChecklistDismiss handles POST /onboarding/checklist/dismiss.

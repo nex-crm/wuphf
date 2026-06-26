@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 type Capability string
@@ -24,6 +25,35 @@ const (
 	CapabilityRelayEvent      Capability = "relay_event"
 )
 
+func DisplayPlatformName(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "Unknown"
+	}
+	parts := strings.FieldsFunc(strings.ReplaceAll(platform, "_", "-"), func(r rune) bool { return r == '-' })
+	for i, part := range parts {
+		switch strings.ToLower(part) {
+		case "gmail":
+			parts[i] = "Gmail"
+		case "github":
+			parts[i] = "GitHub"
+		case "hubspot":
+			parts[i] = "HubSpot"
+		case "slackbot":
+			parts[i] = "Slack"
+		case "googlecalendar":
+			parts[i] = "Google Calendar"
+		case "googledrive":
+			parts[i] = "Google Drive"
+		default:
+			if part != "" {
+				parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+			}
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // Provider exposes a provider-agnostic action plane for external systems.
 type Provider interface {
 	Name() string
@@ -43,6 +73,16 @@ type Provider interface {
 	ActivateRelay(ctx context.Context, req RelayActivateRequest) (RelayResult, error)
 	ListRelayEvents(ctx context.Context, opts RelayEventsOptions) (RelayEventsResult, error)
 	GetRelayEvent(ctx context.Context, id string) (RelayEventDetail, error)
+}
+
+// IntegrationProvider is implemented by action providers that can manage
+// external account connections, not just use already-connected accounts.
+type IntegrationProvider interface {
+	Provider
+	ListIntegrationCatalog(ctx context.Context, opts IntegrationCatalogOptions) (IntegrationCatalogResult, error)
+	StartIntegrationConnection(ctx context.Context, req IntegrationConnectRequest) (IntegrationConnectResult, error)
+	GetIntegrationConnectionStatus(ctx context.Context, req IntegrationStatusRequest) (IntegrationConnectResult, error)
+	DisconnectIntegration(ctx context.Context, req IntegrationDisconnectRequest) (IntegrationDisconnectResult, error)
 }
 
 type GuideResult struct {
@@ -71,6 +111,104 @@ type ConnectionsResult struct {
 	Search      string       `json:"search,omitempty"`
 	Hint        string       `json:"hint,omitempty"`
 	Connections []Connection `json:"connections"`
+}
+
+type IntegrationCatalogOptions struct {
+	Search    string
+	Connected string
+	Limit     int
+	Cursor    string
+}
+
+type IntegrationCatalogItem struct {
+	Provider          string       `json:"provider"`
+	Platform          string       `json:"platform"`
+	Name              string       `json:"name"`
+	Description       string       `json:"description,omitempty"`
+	Category          string       `json:"category,omitempty"`
+	LogoURL           string       `json:"logo_url,omitempty"`
+	State             string       `json:"state"`
+	ConnectionKey     string       `json:"connection_key,omitempty"`
+	ConnectionName    string       `json:"connection_name,omitempty"`
+	CanConnect        bool         `json:"can_connect"`
+	CanDisconnect     bool         `json:"can_disconnect"`
+	Connections       []Connection `json:"connections,omitempty"`
+	LastActionAt      string       `json:"last_action_at,omitempty"`
+	LastActionSummary string       `json:"last_action_summary,omitempty"`
+}
+
+type IntegrationCatalogResult struct {
+	Items      []IntegrationCatalogItem `json:"items"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+	Hint       string                   `json:"hint,omitempty"`
+}
+
+type IntegrationConnectRequest struct {
+	Provider string `json:"provider,omitempty"`
+	Platform string `json:"platform"`
+}
+
+type IntegrationStatusRequest struct {
+	Provider  string `json:"provider,omitempty"`
+	Platform  string `json:"platform,omitempty"`
+	ConnectID string `json:"connect_id,omitempty"`
+}
+
+type IntegrationConnectResult struct {
+	Provider      string `json:"provider"`
+	Platform      string `json:"platform"`
+	Status        string `json:"status"`
+	AuthURL       string `json:"auth_url,omitempty"`
+	ConnectID     string `json:"connect_id,omitempty"`
+	ConnectionKey string `json:"connection_key,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
+	Instructions  string `json:"instructions,omitempty"`
+	// AuthMode classifies how this toolkit authenticates: "oauth" (the
+	// hosted redirect flow), or "api_key"/"bearer"/"basic" (the user supplies
+	// their own credentials — Composio cannot mint a managed OAuth app).
+	AuthMode string `json:"auth_mode,omitempty"`
+	// RequiredFields is non-empty when Status == "needs_fields": the frontend
+	// must collect these values and POST them back to /integrations/connect/
+	// credentials. Drives the API-key entry card so toolkits like Instantly
+	// (which 400 on use_composio_managed_auth) get a real connect path instead
+	// of an opaque error.
+	RequiredFields []IntegrationConnectField `json:"required_fields,omitempty"`
+}
+
+// IntegrationConnectField describes one credential input the user must supply
+// for a non-OAuth toolkit (e.g. an API key). Mirrors the field metadata
+// Composio exposes for a toolkit's connected-account initiation.
+type IntegrationConnectField struct {
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	// Secret marks credential fields the UI should render as a password input
+	// (API keys, tokens) so they are masked on screen.
+	Secret   bool `json:"secret,omitempty"`
+	Required bool `json:"required,omitempty"`
+}
+
+// IntegrationConnectCredentialsRequest carries the user-supplied credentials
+// for a non-OAuth toolkit back to the broker, which hands them to Composio to
+// create a custom-auth config + connected account.
+type IntegrationConnectCredentialsRequest struct {
+	Provider string            `json:"provider,omitempty"`
+	Platform string            `json:"platform"`
+	Fields   map[string]string `json:"fields"`
+}
+
+type IntegrationDisconnectRequest struct {
+	Provider      string `json:"provider,omitempty"`
+	Platform      string `json:"platform,omitempty"`
+	ConnectionKey string `json:"connection_key"`
+}
+
+type IntegrationDisconnectResult struct {
+	OK            bool   `json:"ok"`
+	Provider      string `json:"provider"`
+	Platform      string `json:"platform,omitempty"`
+	ConnectionKey string `json:"connection_key"`
+	Status        string `json:"status"`
 }
 
 type Action struct {

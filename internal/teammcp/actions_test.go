@@ -142,9 +142,9 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 	t.Run("DryRun bypasses", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: true,
-		})
+		}, false, nil, false)
 		if err != nil {
 			t.Fatalf("DryRun must bypass approval, got err=%v", err)
 		}
@@ -154,9 +154,9 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 		t.Setenv("WUPHF_UNSAFE", "1")
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: false,
-		})
+		}, false, nil, false)
 		if err != nil {
 			t.Fatalf("WUPHF_UNSAFE=1 must bypass approval, got err=%v", err)
 		}
@@ -165,9 +165,9 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 	t.Run("read-only action_id bypasses", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_FETCH_MAILS", DryRun: false,
-		})
+		}, false, nil, false)
 		if err != nil {
 			t.Fatalf("read-only action_id must bypass approval, got err=%v", err)
 		}
@@ -207,12 +207,14 @@ func TestBuildActionApprovalSpecGmailSend(t *testing.T) {
 		"• Subject: Welcome to Nex",
 		"• Body: Hi Alex, Welcome aboard! Nazz",
 		"Action: GMAIL_SEND_EMAIL via Gmail",
-		"Account: live::gmail::default::abc123",
 		"Channel: #general",
 	} {
 		if !strings.Contains(spec.Context, want) {
 			t.Errorf("Context missing %q\n--- got ---\n%s", want, spec.Context)
 		}
+	}
+	if strings.Contains(spec.Context, "live::gmail::default::abc123") {
+		t.Fatalf("context should not foreground raw One connection IDs:\n%s", spec.Context)
 	}
 }
 
@@ -299,9 +301,9 @@ func TestBuildActionApprovalSpecPayloadEdgeCases(t *testing.T) {
 			Platform: "gmail",
 			ActionID: "GMAIL_SEND_EMAIL",
 			Data: map[string]any{
-				"to":           "alex@nex.ai",
-				"access_token": "super-secret-token",
-				"password":     "nope",
+				"to":          "alex@nex.ai",
+				"accessToken": "super-secret-token",
+				"password":    "nope",
 			},
 		})
 		if strings.Contains(spec.Context, "super-secret-token") || strings.Contains(spec.Context, "nope") {
@@ -309,6 +311,32 @@ func TestBuildActionApprovalSpecPayloadEdgeCases(t *testing.T) {
 		}
 		if !strings.Contains(spec.Context, "alex@nex.ai") {
 			t.Fatalf("approval context dropped recipient:\n%s", spec.Context)
+		}
+	})
+
+	t.Run("redacts secret-shaped keys inside array objects", func(t *testing.T) {
+		spec := buildActionApprovalSpec("growthops", "general", TeamActionExecuteArgs{
+			Platform: "gmail",
+			ActionID: "GMAIL_SEND_EMAIL",
+			Data: map[string]any{
+				"recipients": []any{
+					map[string]any{
+						"email":        "alex@nex.ai",
+						"access_token": "super-secret-token",
+						"headers": map[string]any{
+							"authorization": "Bearer nope",
+						},
+					},
+				},
+			},
+		})
+		for _, leaked := range []string{"super-secret-token", "Bearer nope", "access_token", "authorization", "headers"} {
+			if strings.Contains(spec.Context, leaked) {
+				t.Fatalf("approval context leaks redacted array value %q:\n%s", leaked, spec.Context)
+			}
+		}
+		if !strings.Contains(spec.Context, "alex@nex.ai") {
+			t.Fatalf("approval context dropped safe array value:\n%s", spec.Context)
 		}
 	})
 
@@ -391,6 +419,57 @@ func TestBuildActionApprovalSpecPayloadEdgeCases(t *testing.T) {
 		}
 		if !strings.Contains(spec.Context, "primary@x.com") {
 			t.Fatalf("expected primary recipient, got:\n%s", spec.Context)
+		}
+	})
+
+	t.Run("direct field wins over nested envelope", func(t *testing.T) {
+		spec := buildActionApprovalSpec("growthops", "general", TeamActionExecuteArgs{
+			Platform: "gmail",
+			ActionID: "GMAIL_SEND_EMAIL",
+			Data: map[string]any{
+				"request": map[string]any{
+					"body": map[string]any{
+						"to": "nested@example.com",
+					},
+				},
+				"to": "top-level@example.com",
+			},
+		})
+		if !strings.Contains(spec.Context, "• To: top-level@example.com") {
+			t.Fatalf("expected direct recipient to win, got:\n%s", spec.Context)
+		}
+	})
+
+	t.Run("surfaces nested One payload fields", func(t *testing.T) {
+		spec := buildActionApprovalSpec("growthops", "general", TeamActionExecuteArgs{
+			Platform: "hubspot",
+			ActionID: "HUBSPOT_UPDATE_CONTACT",
+			Data: map[string]any{
+				"request": map[string]any{
+					"body": map[string]any{
+						"email":           "buyer@example.com",
+						"lifecycle_stage": "qualified lead",
+						"properties": map[string]any{
+							"company_domain": "example.com",
+							"owner_note":     "Asked for renewal pricing.",
+						},
+					},
+				},
+			},
+			ConnectionKey: "live::hubspot::default::abc123",
+		})
+		for _, want := range []string{
+			"• Email: buyer@example.com",
+			"• Status: qualified lead",
+			"• Properties Company Domain: example.com",
+			"• Properties Owner Note: Asked for renewal pricing.",
+		} {
+			if !strings.Contains(spec.Context, want) {
+				t.Fatalf("nested payload context missing %q:\n%s", want, spec.Context)
+			}
+		}
+		if strings.Contains(spec.Context, "live::hubspot::default::abc123") {
+			t.Fatalf("context should omit raw One connection ID:\n%s", spec.Context)
 		}
 	})
 }

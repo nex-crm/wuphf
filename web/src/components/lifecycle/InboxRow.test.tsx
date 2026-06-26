@@ -48,7 +48,9 @@ describe("<InboxRow>", () => {
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: (_n, el) => el.classList.contains("inbox-row") }),
+      screen.getByRole("button", {
+        name: (_n, el) => el.classList.contains("inbox-row"),
+      }),
     );
     expect(onOpen).toHaveBeenCalledWith("task-2741");
   });
@@ -62,7 +64,9 @@ describe("<InboxRow>", () => {
         onSelect={() => undefined}
       />,
     );
-    const btn = screen.getByRole("button", { name: (_n, el) => el.classList.contains("inbox-row") });
+    const btn = screen.getByRole("button", {
+      name: (_n, el) => el.classList.contains("inbox-row"),
+    });
     expect(btn.tagName).toBe("BUTTON");
   });
 });

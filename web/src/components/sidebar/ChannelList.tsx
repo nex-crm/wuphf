@@ -5,7 +5,7 @@ import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { ChannelWizard, useChannelWizard } from "../channels/ChannelWizard";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
-import { SidebarItemLabel } from "./SidebarItemLabel";
+import { SidebarItem } from "./SidebarItem";
 
 function navigateToChannel(channelSlug: string): void {
   void router.navigate({
@@ -37,35 +37,28 @@ function ChannelRow({
   const buttonLabel = unreadCount > 0 ? `${name}, ${unreadCount} unread` : name;
 
   return (
-    <button
-      type="button"
-      className={`sidebar-item${active ? " active" : ""}`}
+    <SidebarItem
+      icon="#"
+      label={name}
+      active={active}
       onClick={() => onSelect(channel.slug)}
       aria-label={buttonLabel}
       title={title}
-    >
-      <span
-        style={{
-          color: "currentColor",
-          width: 18,
-          textAlign: "center",
-          flexShrink: 0,
-        }}
-      >
-        #
-      </span>
-      <SidebarItemLabel>{name}</SidebarItemLabel>
-      {unreadCount > 0 && (
-        <span className="sidebar-badge" title={`${unreadCount} unread`}>
-          {unreadLabel}
-        </span>
-      )}
-      {shortcutIdx !== null && (
-        <span className="sidebar-shortcut" aria-hidden="true">
-          <Kbd size="sm">{`${MOD_KEY}${shortcutIdx}`}</Kbd>
-        </span>
-      )}
-    </button>
+      badge={
+        unreadCount > 0 ? (
+          <span className="sidebar-badge" title={`${unreadCount} unread`}>
+            {unreadLabel}
+          </span>
+        ) : undefined
+      }
+      shortcut={
+        shortcutIdx !== null ? (
+          <span className="sidebar-shortcut" aria-hidden="true">
+            <Kbd size="sm">{`${MOD_KEY}${shortcutIdx}`}</Kbd>
+          </span>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -95,24 +88,13 @@ export function ChannelList() {
               />
             );
           })}
-          <button
-            type="button"
-            className="sidebar-item sidebar-add-btn"
+          <SidebarItem
+            variant="add"
+            icon="+"
+            label="New Channel"
             onClick={wizard.show}
             title="Create a new channel"
-          >
-            <span
-              style={{
-                width: 18,
-                textAlign: "center",
-                flexShrink: 0,
-                display: "inline-block",
-              }}
-            >
-              +
-            </span>
-            <span>New Channel</span>
-          </button>
+          />
         </div>
       </div>
       <ChannelWizard open={wizard.open} onClose={wizard.hide} />

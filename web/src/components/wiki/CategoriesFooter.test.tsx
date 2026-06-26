@@ -5,25 +5,25 @@ import { describe, expect, it, vi } from "vitest";
 import CategoriesFooter from "./CategoriesFooter";
 
 describe("<CategoriesFooter>", () => {
-  it("renders a chip per tag", () => {
-    render(<CategoriesFooter tags={["Mid-market", "Logistics", "Q1 2026"]} />);
+  it("renders a labeled category link per slug pointing at the category page", () => {
+    render(<CategoriesFooter tags={["companies", "people", "playbooks"]} />);
     expect(screen.getByText("Categories:")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Mid-market" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Logistics" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Q1 2026" })).toBeInTheDocument();
+    const companies = screen.getByRole("link", { name: "Companies" });
+    expect(companies).toBeInTheDocument();
+    expect(companies).toHaveAttribute("href", "#/wiki/_category/companies");
+    expect(screen.getByRole("link", { name: "People" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Playbooks" })).toBeInTheDocument();
   });
 
-  it("fires onSelect instead of navigating", async () => {
+  it("fires onSelect with the slug instead of navigating", async () => {
     // Arrange
     const onSelect = vi.fn();
     const user = userEvent.setup();
-    render(<CategoriesFooter tags={["Logistics"]} onSelect={onSelect} />);
+    render(<CategoriesFooter tags={["companies"]} onSelect={onSelect} />);
     // Act
-    await user.click(screen.getByRole("link", { name: "Logistics" }));
+    await user.click(screen.getByRole("link", { name: "Companies" }));
     // Assert
-    expect(onSelect).toHaveBeenCalledWith("Logistics");
+    expect(onSelect).toHaveBeenCalledWith("companies");
   });
 
   it("renders nothing when empty", () => {

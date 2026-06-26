@@ -5,8 +5,8 @@ import { type APIRequestContext, expect, type Page } from "@playwright/test";
 // directory but does not pick this up as a test (Playwright matches `.spec.`
 // by default — see playwright.config.ts).
 //
-// Smoke + Wizard predate this file and inline their own copies. New specs
-// (chat, slash-commands, dm, mentions, interview) import from here so the
+// Wizard predates this file and inlines its own copies. Other specs (smoke,
+// chat, slash-commands, mentions, interview, …) import from here so the
 // React-error and shell-readiness contracts stay in one place.
 
 export function collectReactErrors(page: Page): () => string[] {

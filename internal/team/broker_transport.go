@@ -40,12 +40,28 @@ type brokerTransportHost struct {
 // ReceiveMessage delivers an inbound message from a channel-bound adapter to
 // the office by calling PostInboundSurfaceMessage. Returns
 // transport.ErrBindingChannelMissing if the declared channel does not exist.
+//
+// Slack HUMAN participants post as the "human:<slack user id>" actor (the same
+// convention gate clicks use) so the broker classifies them as human:
+// isHumanMessageSender → mention auto-promote rights, the lead's
+// human-response instruction, and the FromHuman queue fast-path (priority over
+// whatever the office is doing). Telegram keeps its display-name attribution
+// unchanged.
 func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Message) error {
-	_, err := h.broker.PostInboundSurfaceMessage(
-		msg.Participant.DisplayName,
+	from := msg.Participant.DisplayName
+	if msg.Participant.Human && msg.Participant.AdapterName == "slack" && strings.TrimSpace(msg.Participant.Key) != "" {
+		from = "human:" + strings.ToLower(strings.TrimSpace(msg.Participant.Key))
+	}
+	// ThreadKey carries the surface's thread root (Slack thread_ts). When set,
+	// route through the thread-aware path so a reply inside a task's thread is
+	// folded into that task (ReplyTo + SourceTaskID) instead of landing as
+	// loose channel chatter.
+	_, err := h.broker.PostInboundSurfaceMessageInThread(
+		from,
 		msg.Binding.ChannelSlug,
 		msg.Text,
 		msg.Participant.AdapterName,
+		msg.ThreadKey,
 	)
 	if err != nil {
 		if errors.Is(err, ErrChannelNotFound) {

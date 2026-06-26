@@ -37,11 +37,20 @@ type Config struct {
 	MemoryBackend  string `json:"memory_backend,omitempty"`
 	OneAPIKey      string `json:"one_api_key,omitempty"`
 	ComposioAPIKey string `json:"composio_api_key,omitempty"`
-	ActionProvider string `json:"action_provider,omitempty"`
-	Email          string `json:"email,omitempty"`
-	WorkspaceID    string `json:"workspace_id,omitempty"`
-	WorkspaceSlug  string `json:"workspace_slug,omitempty"`
-	LLMProvider    string `json:"llm_provider,omitempty"`
+	// Composio user-key auth (fallback when the CLI can't mint a project ak_
+	// key — the current composio CLI no longer writes one via `dev init`). The
+	// SDK accepts EITHER a project `ak_` key (sent as x-api-key) OR the
+	// user-scoped `uak_` session key paired with org + project ids (sent as
+	// x-user-api-key / x-org-id / x-project-id). These hold the latter;
+	// ComposioAPIKey, when set, takes precedence.
+	ComposioUserAPIKey string `json:"composio_user_api_key,omitempty"`
+	ComposioOrgID      string `json:"composio_org_id,omitempty"`
+	ComposioProjectID  string `json:"composio_project_id,omitempty"`
+	ActionProvider     string `json:"action_provider,omitempty"`
+	Email              string `json:"email,omitempty"`
+	WorkspaceID        string `json:"workspace_id,omitempty"`
+	WorkspaceSlug      string `json:"workspace_slug,omitempty"`
+	LLMProvider        string `json:"llm_provider,omitempty"`
 	// LLMProviderPriority is an ordered list of provider identifiers (same
 	// vocabulary as LLMProvider — "claude-code", "codex", "opencode", etc.) that agents
 	// should try in order when picking a runtime. LLMProvider remains the
@@ -66,6 +75,8 @@ type Config struct {
 	TaskReminderMinutes int      `json:"task_reminder_minutes,omitempty"`
 	TaskRecheckMinutes  int      `json:"task_recheck_minutes,omitempty"`
 	TelegramBotToken    string   `json:"telegram_bot_token,omitempty"`
+	SlackBotToken       string   `json:"slack_bot_token,omitempty"`
+	SlackAppToken       string   `json:"slack_app_token,omitempty"`
 	CompanyName         string   `json:"company_name,omitempty"`
 	CompanyDescription  string   `json:"company_description,omitempty"`
 	CompanyGoals        string   `json:"company_goals,omitempty"`
@@ -76,6 +87,18 @@ type Config struct {
 	CompanyWebsite      string   `json:"company_website,omitempty"`
 	CompanyFilePaths    []string `json:"company_file_paths,omitempty"`
 	PendingCompanySeed  bool     `json:"pending_company_seed,omitempty"`
+
+	// Product analytics consent (PostHog). Two independent channels:
+	// anonymous usage events and session recordings (typed text masked). Both
+	// default ON when unset (nil) so legacy installs keep the documented
+	// default, but the whole analytics layer is dormant unless a PostHog
+	// project key is configured (build-time VITE_PUBLIC_POSTHOG_KEY or
+	// WUPHF_POSTHOG_KEY env), so an unset flag is moot until analytics is
+	// actually wired up. The pointer type distinguishes "never chosen"
+	// (default ON) from an explicit opt-out (false), which a plain bool
+	// with omitempty could not. See docs/specs/product-analytics.md.
+	AnalyticsTelemetryEnabled        *bool `json:"analytics_telemetry_enabled,omitempty"`
+	AnalyticsSessionRecordingEnabled *bool `json:"analytics_session_recording_enabled,omitempty"`
 
 	OpenclawBridges    []OpenclawBridgeBinding `json:"openclaw_bridges,omitempty"`
 	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`
@@ -586,6 +609,92 @@ func ResolveComposioAPIKey() string {
 	return strings.TrimSpace(cfg.ComposioAPIKey)
 }
 
+// ResolveComposioUserAPIKey resolves the user-scoped Composio session key
+// (`uak_…`). Resolution: WUPHF_COMPOSIO_USER_API_KEY env > config file.
+func ResolveComposioUserAPIKey() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_USER_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioUserAPIKey)
+}
+
+// ResolveComposioOrgID resolves the Composio org id used with the user key.
+func ResolveComposioOrgID() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_ORG_ID")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioOrgID)
+}
+
+// ResolveComposioProjectID resolves the Composio project id used with the user
+// key. Optional: the SDK falls back to the org's default project when absent.
+func ResolveComposioProjectID() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_PROJECT_ID")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioProjectID)
+}
+
+// IsComposioConfigured reports whether Composio has usable credentials: either
+// a project `ak_` key, or the user-key pair (`uak_` + org id). Project id is
+// optional. Used to drive the `composio_key_set` flag the onboarding UI gates
+// on, so user-key sign-ins flip the office out of the first-run state too.
+func IsComposioConfigured() bool {
+	if ResolveComposioAPIKey() != "" {
+		return true
+	}
+	return ResolveComposioUserAPIKey() != "" && ResolveComposioOrgID() != ""
+}
+
+// IsAnalyticsTelemetryEnabled reports whether anonymous product-analytics
+// events may be sent. Default ON when the operator has not explicitly opted
+// out (nil flag). The analytics layer is still dormant unless a PostHog key is
+// configured, so this only takes effect once analytics is wired up.
+func (c Config) IsAnalyticsTelemetryEnabled() bool {
+	return c.AnalyticsTelemetryEnabled == nil || *c.AnalyticsTelemetryEnabled
+}
+
+// IsAnalyticsSessionRecordingEnabled reports whether session recordings
+// (with typed text masked) may be captured. Default ON when not explicitly
+// opted out (nil).
+func (c Config) IsAnalyticsSessionRecordingEnabled() bool {
+	return c.AnalyticsSessionRecordingEnabled == nil || *c.AnalyticsSessionRecordingEnabled
+}
+
+// ResolvePostHogKey returns the PostHog project (write-only) API key used for
+// product analytics, from env only. Empty means the backend injects no key, in
+// which case the frontend falls back to the build-time VITE_PUBLIC_POSTHOG_KEY
+// (which is also empty in a stock OSS build, keeping analytics dormant).
+// Resolution: WUPHF_POSTHOG_KEY env > POSTHOG_KEY env.
+func ResolvePostHogKey() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_POSTHOG_KEY")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("POSTHOG_KEY"))
+}
+
+// ResolvePostHogHost returns the PostHog ingestion host from env, or empty to
+// let the frontend use its build-time default (us.i.posthog.com).
+// Resolution: WUPHF_POSTHOG_HOST env > POSTHOG_HOST env.
+func ResolvePostHogHost() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_POSTHOG_HOST")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("POSTHOG_HOST"))
+}
+
 // ResolveTelegramBotToken returns the stored Telegram bot token from config.
 func ResolveTelegramBotToken() string {
 	if v := strings.TrimSpace(os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")); v != "" {
@@ -600,6 +709,48 @@ func SaveTelegramBotToken(token string) {
 	cfg, _ := Load()
 	cfg.TelegramBotToken = strings.TrimSpace(token)
 	_ = Save(cfg)
+}
+
+// ResolveSlackBotToken returns the Slack bot token used for the Web API
+// (chat.postMessage, users.info, conversations.members). This is the
+// workspace-scoped "xoxb-" token issued when the app is installed.
+// Resolution: SLACK_BOT_TOKEN env > config file.
+func ResolveSlackBotToken() string {
+	if v := strings.TrimSpace(os.Getenv("SLACK_BOT_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackBotToken)
+}
+
+// ResolveSlackAppToken returns the Slack app-level token used to open a
+// Socket Mode connection for inbound events. This is the app-scoped "xapp-"
+// token with the connections:write scope; it is distinct from the bot token
+// and is required only for the inbound (Socket Mode) half of the bridge.
+// Resolution: SLACK_APP_TOKEN env > config file.
+func ResolveSlackAppToken() string {
+	if v := strings.TrimSpace(os.Getenv("SLACK_APP_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackAppToken)
+}
+
+// SaveSlackTokens persists the Slack bot and app tokens to config.json. Empty
+// values are stored as-is so a caller can clear a token by passing "". Returns
+// an error rather than silently dropping Load/Save failures: a failed Load
+// would otherwise write an EMPTY config back over every other persisted field.
+func SaveSlackTokens(botToken, appToken string) error {
+	cfg, err := Load()
+	if err != nil {
+		return fmt.Errorf("save slack tokens: load config: %w", err)
+	}
+	cfg.SlackBotToken = strings.TrimSpace(botToken)
+	cfg.SlackAppToken = strings.TrimSpace(appToken)
+	if err := Save(cfg); err != nil {
+		return fmt.Errorf("save slack tokens: %w", err)
+	}
+	return nil
 }
 
 // CompanyContextBlock returns a prompt fragment with company context for agent
@@ -693,7 +844,14 @@ func ResolveMinimaxAPIKey() string {
 }
 
 // ResolveComposioUserID resolves the Composio user identity WUPHF should use.
-// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email.
+// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email >
+// workspace identifier > "default".
+//
+// The user_id only namespaces this office's connected accounts on Composio's
+// side — any stable string works. It must never be empty once Composio is
+// signed in, or the catalog (which gates on a non-empty identity) stays blank
+// even though available integrations don't need a per-user identity. So a
+// signed-in office with no recorded email still falls back to a stable id.
 func ResolveComposioUserID() string {
 	if ResolveNoNex() {
 		return ""
@@ -705,7 +863,12 @@ func ResolveComposioUserID() string {
 		return v
 	}
 	cfg, _ := Load()
-	return strings.TrimSpace(cfg.Email)
+	for _, candidate := range []string{cfg.Email, cfg.WorkspaceSlug, cfg.WorkspaceID} {
+		if v := strings.TrimSpace(candidate); v != "" {
+			return v
+		}
+	}
+	return "default"
 }
 
 // ResolveActionProvider resolves the preferred external action provider.

@@ -4,12 +4,33 @@ import { useQuery } from "@tanstack/react-query";
 import { getUsage } from "../../api/platform";
 import { formatTokens, formatUSD } from "../../lib/format";
 
+/**
+ * Poll cadence for the usage aggregate. The popover refreshes faster
+ * while open (the user is watching the meter); the collapsed pill still
+ * refreshes on its own so it can NEVER sit on a stale $0.0000 while
+ * agents burn tokens (v1#9: pill showed $0.0000 for 75 minutes while
+ * the popover knew $45.74). useBrokerEvents additionally invalidates
+ * the ["usage"] query on agent-activity SSE events, so the pill tracks
+ * spend with turn activity rather than waiting out the interval.
+ */
+export const USAGE_REFETCH_OPEN_MS = 5_000;
+export const USAGE_REFETCH_CLOSED_MS = 15_000;
+
+/**
+ * The regression that motivated this helper: the interval was
+ * `open ? 5000 : false` — the pill never refetched while collapsed.
+ * Exported so the test pins "closed still refetches".
+ */
+export function usageRefetchInterval(open: boolean): number {
+  return open ? USAGE_REFETCH_OPEN_MS : USAGE_REFETCH_CLOSED_MS;
+}
+
 export function UsagePanel() {
   const [open, setOpen] = useState(false);
   const { data: usage } = useQuery({
     queryKey: ["usage"],
     queryFn: () => getUsage(),
-    refetchInterval: open ? 5000 : false,
+    refetchInterval: usageRefetchInterval(open),
   });
 
   const totalCost = usage?.total?.cost_usd ?? 0;
@@ -38,7 +59,10 @@ export function UsagePanel() {
           <path d="m9 18 6-6-6-6" />
         </svg>
         Usage
-        <span style={{ marginLeft: "auto", fontWeight: 400 }}>
+        <span
+          style={{ marginLeft: "auto", fontWeight: 400 }}
+          data-testid="usage-pill-cost"
+        >
           {formatUSD(totalCost)}
         </span>
       </button>
@@ -84,7 +108,12 @@ export function UsagePanel() {
                   Session: {formatTokens(usage?.session?.total_tokens ?? 0)}{" "}
                   tokens
                 </span>
-                <span className="usage-total-cost">{formatUSD(totalCost)}</span>
+                <span
+                  className="usage-total-cost"
+                  data-testid="usage-popover-cost"
+                >
+                  {formatUSD(totalCost)}
+                </span>
               </div>
             </>
           )}

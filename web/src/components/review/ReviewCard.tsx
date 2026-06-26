@@ -16,8 +16,16 @@ type DemandGrade = "urgent" | "waiting" | "fresh";
 /** Hours a card must sit in a pending/in-review column to reach each tier. */
 const GRADE_THRESHOLDS = { urgent: 48, waiting: 12 } as const;
 
-function computeGrade(submittedTs: string, state: ReviewItem["state"]): DemandGrade | null {
-  if (state === "approved" || state === "archived" || state === "rejected" || state === "expired") {
+function computeGrade(
+  submittedTs: string,
+  state: ReviewItem["state"],
+): DemandGrade | null {
+  if (
+    state === "approved" ||
+    state === "archived" ||
+    state === "rejected" ||
+    state === "expired"
+  ) {
     return null;
   }
   const ageHours = (Date.now() - new Date(submittedTs).getTime()) / 3_600_000;
@@ -30,8 +38,16 @@ function computeGrade(submittedTs: string, state: ReviewItem["state"]): DemandGr
  * Returns a fill ratio 0–1 representing how "stale" the card is, capped at
  * GRADE_THRESHOLDS.urgent * 2h. Used to render the timeout-fill bar.
  */
-function computeTimeoutFill(submittedTs: string, state: ReviewItem["state"]): number {
-  if (state === "approved" || state === "archived" || state === "rejected" || state === "expired") {
+function computeTimeoutFill(
+  submittedTs: string,
+  state: ReviewItem["state"],
+): number {
+  if (
+    state === "approved" ||
+    state === "archived" ||
+    state === "rejected" ||
+    state === "expired"
+  ) {
     return 0;
   }
   const ageHours = (Date.now() - new Date(submittedTs).getTime()) / 3_600_000;
@@ -60,7 +76,11 @@ export default function ReviewCard({
       onClick={() => onOpen(review.id)}
       aria-label={`Open review for ${review.entry_title}`}
       data-testid="nb-review-card"
-      style={fillRatio > 0 ? ({ "--nb-timeout-fill": fillPct } as React.CSSProperties) : undefined}
+      style={
+        fillRatio > 0
+          ? ({ "--nb-timeout-fill": fillPct } as React.CSSProperties)
+          : undefined
+      }
     >
       {/* Timeout fill bar — grows left-to-right as the card ages. */}
       {fillRatio > 0 && (

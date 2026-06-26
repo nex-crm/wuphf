@@ -1,8 +1,10 @@
-import type { FrozenArgs } from "./frozen-args.ts";
-import type { ApprovalClaims } from "./receipt-types.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 
 export type BudgetValidationResult = { ok: true } | { ok: false; reason: string };
+
+interface FrozenArgsBudgetView {
+  readonly canonicalJson: string;
+}
 
 /**
  * A single receipt larger than 10 MiB can force parsers, canonicalizers, and
@@ -124,11 +126,62 @@ export const MAX_MERKLE_ROOT_CERT_CHAIN_BYTES = 64 * 1024;
 export const MAX_APPROVAL_TOKEN_LIFETIME_MS = 30 * 60 * 1000;
 
 /**
- * Ed25519 signatures are 64 raw bytes (roughly 88 base64 chars). 4 KiB leaves
- * room for envelope/version metadata while failing attacker-sized strings
- * before regex scans or downstream signature verification.
+ * Approval token ids are ULID-shaped challenge handles: 26 ASCII bytes.
  */
-export const MAX_APPROVAL_SIGNATURE_BYTES = 4 * 1024;
+export const MAX_APPROVAL_TOKEN_ID_BYTES = 26;
+
+/**
+ * Approval request ids are ULID-shaped projection handles: 26 ASCII bytes.
+ */
+export const MAX_APPROVAL_REQUEST_ID_BYTES = 26;
+
+/**
+ * Claim ids are broker-local replay/accounting handles, not payload storage.
+ * 128 bytes matches receipt-local ids while keeping signed claim keys compact.
+ */
+export const MAX_APPROVAL_CLAIM_ID_BYTES = 128;
+
+/**
+ * Existing branded ids carried inside approval tokens already have stricter
+ * regex shapes. This cap gives the approval codec a shared UTF-8 byte guard
+ * before brand-specific validation runs.
+ */
+export const MAX_APPROVAL_IDENTIFIER_BYTES = 256;
+
+/**
+ * Approval claim canonical JSON is the human-reviewed and challenge-bound
+ * projection. 64 KiB leaves room for substantial review context while bounding
+ * canonicalization before WebAuthn verification.
+ */
+export const MAX_APPROVAL_CLAIM_CANONICAL_JSON_BYTES = 64 * 1024;
+
+/**
+ * Approval scope canonical JSON is the replay target projection. It should be
+ * narrower than the claim; 8 KiB is enough for endpoint origins, credential
+ * handles, and receipt/write ids without turning scope into payload storage.
+ */
+export const MAX_APPROVAL_SCOPE_CANONICAL_JSON_BYTES = 8 * 1024;
+
+/**
+ * Cost ceiling ids and approval reasons are signed text fields. Keep them
+ * bounded independently so malformed values fail before full claim
+ * canonicalization.
+ */
+export const MAX_APPROVAL_COST_CEILING_ID_BYTES = 128;
+export const MAX_APPROVAL_REASON_BYTES = 8 * 1024;
+
+/**
+ * Endpoint origins are URLs, not request bodies. Reuse the runner endpoint
+ * scale so allowlist approval cannot smuggle large transport metadata.
+ */
+export const MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES = 2 * 1024;
+
+/**
+ * WebAuthn assertion members are base64url strings. The total assertion budget
+ * is the wire contract; the per-field cap exists so each string is budgeted
+ * through this module before regex validation.
+ */
+export const MAX_WEBAUTHN_ASSERTION_FIELD_BYTES = 16 * 1024;
 
 /**
  * WebAuthn assertions are usually a few KiB. 16 KiB gives authenticators room
@@ -329,6 +382,35 @@ export const MAX_RUNNER_STDIO_CHUNK_BYTES = 64 * 1024;
 export const MAX_RUNNER_ERROR_BYTES = 8 * 1024;
 
 // ────────────────────────────────────────────────────────────────────────────
+// Route envelope budgets (consumed by packages/protocol/src/route-envelopes.ts)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Thread list routes are projections, not export endpoints. Keep one response
+ * bounded so callers page broader thread history through broker storage.
+ */
+export const MAX_ROUTE_THREAD_LIST_ITEMS = 256;
+
+/**
+ * Approval list routes are read-model projections, not export endpoints. Keep
+ * them page-bounded so response validation cannot materialize arbitrary broker
+ * history in one envelope.
+ */
+export const MAX_ROUTE_APPROVAL_LIST_ITEMS = 256;
+
+/**
+ * Route error codes are stable machine labels; messages are human diagnostics.
+ */
+export const MAX_ROUTE_ERROR_CODE_BYTES = 128;
+export const MAX_ROUTE_ERROR_MESSAGE_BYTES = 8 * 1024;
+
+/**
+ * Route list cursors are opaque pagination tokens. Keep them compact so list
+ * responses cannot smuggle unbounded transport state.
+ */
+export const MAX_ROUTE_CURSOR_BYTES = 1024;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Credential IPC budgets (consumed by packages/protocol/src/credential-ipc.ts)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -397,7 +479,7 @@ export function validateReceiptBudget(receipt: unknown): BudgetValidationResult 
   return { ok: true };
 }
 
-export function validateFrozenArgsBudget(frozen: FrozenArgs): BudgetValidationResult {
+export function validateFrozenArgsBudget(frozen: FrozenArgsBudgetView): BudgetValidationResult {
   const canonicalJson = stringProperty(frozen, "canonicalJson");
   if (canonicalJson === undefined) return { ok: true };
   return validateUtf8StringBudget(
@@ -494,11 +576,101 @@ export function validateMerkleRootCertChainBudget(certChainPem: string): BudgetV
   );
 }
 
-export function validateApprovalTokenLifetime(claims: ApprovalClaims): BudgetValidationResult {
-  const issuedAt = objectProperty(claims, "issuedAt");
-  const expiresAt = objectProperty(claims, "expiresAt");
-  if (!(issuedAt instanceof Date) || !(expiresAt instanceof Date)) return { ok: true };
-  return validateApprovalTokenLifetimeValues(issuedAt, expiresAt);
+export function validateApprovalTokenIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_TOKEN_ID_BYTES, "ApprovalTokenId bytes");
+}
+
+export function validateApprovalRequestIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_REQUEST_ID_BYTES, "ApprovalRequestId bytes");
+}
+
+export function validateApprovalClaimIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_CLAIM_ID_BYTES, "ApprovalClaimId bytes");
+}
+
+export function validateApprovalIdentifierBudget(
+  value: string,
+  label: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_IDENTIFIER_BYTES, label);
+}
+
+export function validateApprovalClaimCanonicalJsonBudget(
+  canonicalJson: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalJson,
+    MAX_APPROVAL_CLAIM_CANONICAL_JSON_BYTES,
+    "ApprovalClaim canonical JSON bytes",
+  );
+}
+
+export function validateApprovalScopeCanonicalJsonBudget(
+  canonicalJson: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalJson,
+    MAX_APPROVAL_SCOPE_CANONICAL_JSON_BYTES,
+    "ApprovalScope canonical JSON bytes",
+  );
+}
+
+export function validateApprovalCostCeilingIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_APPROVAL_COST_CEILING_ID_BYTES,
+    "ApprovalClaim.costCeilingId bytes",
+  );
+}
+
+export function validateApprovalEndpointOriginBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES,
+    "ApprovalClaim.endpointOrigin bytes",
+  );
+}
+
+export function validateApprovalReasonBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_REASON_BYTES, "ApprovalClaim.reason bytes");
+}
+
+export function validateWebAuthnAssertionFieldBudget(
+  value: string,
+  label: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_WEBAUTHN_ASSERTION_FIELD_BYTES, label);
+}
+
+export function validateWebAuthnAssertionBudget(canonicalJson: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalJson,
+    MAX_WEBAUTHN_ASSERTION_BYTES,
+    "WebAuthnAssertion canonical JSON bytes",
+  );
+}
+
+export function validateRouteErrorCodeBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_CODE_BYTES, "RouteError.error bytes");
+}
+
+export function validateRouteErrorMessageBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_MESSAGE_BYTES, "RouteError.message bytes");
+}
+
+export function validateRouteCursorBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_ROUTE_CURSOR_BYTES,
+    "RouteListResponse.nextCursor bytes",
+  );
+}
+
+export function validateApprovalTokenLifetime(value: {
+  readonly notBefore: number;
+  readonly expiresAt: number;
+}): BudgetValidationResult {
+  return validateApprovalTokenLifetimeValues(value.notBefore, value.expiresAt);
 }
 
 function validateReceiptCollectionBudgets(receipt: unknown): BudgetValidationResult {
@@ -673,53 +845,252 @@ function validateMaybeSignedApprovalTokenBudget(
   value: unknown,
   label: string,
 ): BudgetValidationResult {
-  const signature = stringProperty(value, "signature");
+  const tokenId = stringProperty(value, "tokenId");
+  if (tokenId !== undefined) {
+    const tokenIdBudget = validateApprovalTokenIdBudget(tokenId);
+    if (!tokenIdBudget.ok) return prefixBudgetReason(`${label}.tokenId`, tokenIdBudget);
+  }
+
+  const claim = objectProperty(value, "claim");
+  const claimBudget = validateMaybeApprovalClaimBudget(claim, `${label}.claim`);
+  if (!claimBudget.ok) return claimBudget;
+
+  const scope = objectProperty(value, "scope");
+  const scopeBudget = validateMaybeApprovalScopeBudget(scope, `${label}.scope`);
+  if (!scopeBudget.ok) return scopeBudget;
+
+  const issuedTo = stringProperty(value, "issuedTo");
+  if (issuedTo !== undefined) {
+    const issuedToBudget = validateApprovalIdentifierBudget(issuedTo, `${label}.issuedTo bytes`);
+    if (!issuedToBudget.ok) return issuedToBudget;
+  }
+
+  const signature = objectProperty(value, "signature");
   if (signature !== undefined) {
-    const signatureBudget = validateUtf8StringBudget(
-      signature,
-      MAX_APPROVAL_SIGNATURE_BYTES,
-      "approvalToken.signature bytes",
-    );
-    if (!signatureBudget.ok) return prefixBudgetReason(label, signatureBudget);
+    const assertionBudget = validateMaybeWebAuthnAssertionBudget(signature, `${label}.signature`);
+    if (!assertionBudget.ok) return assertionBudget;
   }
 
-  const claims = objectProperty(value, "claims");
-  if (claims === undefined) return { ok: true };
-
-  const webauthnAssertion = stringProperty(claims, "webauthnAssertion");
-  if (webauthnAssertion !== undefined) {
-    const assertionBudget = validateUtf8StringBudget(
-      webauthnAssertion,
-      MAX_WEBAUTHN_ASSERTION_BYTES,
-      "approvalToken.claims.webauthnAssertion bytes",
-    );
-    if (!assertionBudget.ok) return prefixBudgetReason(label, assertionBudget);
-  }
-
-  const issuedAt = objectProperty(claims, "issuedAt");
-  const expiresAt = objectProperty(claims, "expiresAt");
-  if (!(issuedAt instanceof Date) || !(expiresAt instanceof Date)) return { ok: true };
-  const result = validateApprovalTokenLifetimeValues(issuedAt, expiresAt);
+  const notBefore = objectProperty(value, "notBefore");
+  const expiresAt = objectProperty(value, "expiresAt");
+  if (typeof notBefore !== "number" || typeof expiresAt !== "number") return { ok: true };
+  const result = validateApprovalTokenLifetimeValues(notBefore, expiresAt);
   return result.ok ? result : prefixBudgetReason(label, result);
 }
 
+function validateMaybeApprovalClaimBudget(value: unknown, label: string): BudgetValidationResult {
+  if (typeof value !== "object" || value === null) return { ok: true };
+
+  const claimId = stringProperty(value, "claimId");
+  if (claimId !== undefined) {
+    const claimIdBudget = validateApprovalClaimIdBudget(claimId);
+    if (!claimIdBudget.ok) return prefixBudgetReason(`${label}.claimId`, claimIdBudget);
+  }
+
+  const kind = stringProperty(value, "kind");
+  if (kind !== undefined) {
+    const kindBudget = validateApprovalIdentifierBudget(kind, `${label}.kind bytes`);
+    if (!kindBudget.ok) return kindBudget;
+  }
+
+  if (kind === "cost_spike_acknowledgement") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const costCeilingId = stringProperty(value, "costCeilingId");
+    if (costCeilingId !== undefined) {
+      const costCeilingBudget = validateApprovalCostCeilingIdBudget(costCeilingId);
+      if (!costCeilingBudget.ok) {
+        return prefixBudgetReason(`${label}.costCeilingId`, costCeilingBudget);
+      }
+    }
+  } else if (kind === "endpoint_allowlist_extension") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const providerKind = stringProperty(value, "providerKind");
+    if (providerKind !== undefined) {
+      const providerKindBudget = validateApprovalIdentifierBudget(
+        providerKind,
+        `${label}.providerKind bytes`,
+      );
+      if (!providerKindBudget.ok) return providerKindBudget;
+    }
+    const endpointOrigin = stringProperty(value, "endpointOrigin");
+    if (endpointOrigin !== undefined) {
+      const endpointBudget = validateApprovalEndpointOriginBudget(endpointOrigin);
+      if (!endpointBudget.ok) return prefixBudgetReason(`${label}.endpointOrigin`, endpointBudget);
+    }
+    const reason = stringProperty(value, "reason");
+    if (reason !== undefined) {
+      const reasonBudget = validateApprovalReasonBudget(reason);
+      if (!reasonBudget.ok) return prefixBudgetReason(`${label}.reason`, reasonBudget);
+    }
+  } else if (kind === "credential_grant_to_agent") {
+    const granteeAgentId = stringProperty(value, "granteeAgentId");
+    if (granteeAgentId !== undefined) {
+      const granteeBudget = validateApprovalIdentifierBudget(
+        granteeAgentId,
+        `${label}.granteeAgentId bytes`,
+      );
+      if (!granteeBudget.ok) return granteeBudget;
+    }
+    const credentialHandleId = stringProperty(value, "credentialHandleId");
+    if (credentialHandleId !== undefined) {
+      const credentialBudget = validateApprovalIdentifierBudget(
+        credentialHandleId,
+        `${label}.credentialHandleId bytes`,
+      );
+      if (!credentialBudget.ok) return credentialBudget;
+    }
+    const credentialScope = stringProperty(value, "credentialScope");
+    if (credentialScope !== undefined) {
+      const scopeBudget = validateApprovalIdentifierBudget(
+        credentialScope,
+        `${label}.credentialScope bytes`,
+      );
+      if (!scopeBudget.ok) return scopeBudget;
+    }
+  } else if (kind === "receipt_co_sign") {
+    const receiptId = stringProperty(value, "receiptId");
+    if (receiptId !== undefined) {
+      const receiptBudget = validateApprovalIdentifierBudget(receiptId, `${label}.receiptId bytes`);
+      if (!receiptBudget.ok) return receiptBudget;
+    }
+    const writeId = stringProperty(value, "writeId");
+    if (writeId !== undefined) {
+      const writeBudget = validateApprovalIdentifierBudget(writeId, `${label}.writeId bytes`);
+      if (!writeBudget.ok) return writeBudget;
+    }
+    const frozenArgsHash = stringProperty(value, "frozenArgsHash");
+    if (frozenArgsHash !== undefined) {
+      const hashBudget = validateApprovalIdentifierBudget(
+        frozenArgsHash,
+        `${label}.frozenArgsHash bytes`,
+      );
+      if (!hashBudget.ok) return hashBudget;
+    }
+    const riskClass = stringProperty(value, "riskClass");
+    if (riskClass !== undefined) {
+      const riskBudget = validateApprovalIdentifierBudget(riskClass, `${label}.riskClass bytes`);
+      if (!riskBudget.ok) return riskBudget;
+    }
+  }
+
+  return validateJsonProjectionBudget(value, validateApprovalClaimCanonicalJsonBudget, label);
+}
+
+function validateMaybeApprovalScopeBudget(value: unknown, label: string): BudgetValidationResult {
+  if (typeof value !== "object" || value === null) return { ok: true };
+
+  const claimId = stringProperty(value, "claimId");
+  if (claimId !== undefined) {
+    const claimIdBudget = validateApprovalClaimIdBudget(claimId);
+    if (!claimIdBudget.ok) return prefixBudgetReason(`${label}.claimId`, claimIdBudget);
+  }
+
+  const claimKind = stringProperty(value, "claimKind");
+  if (claimKind !== undefined) {
+    const kindBudget = validateApprovalIdentifierBudget(claimKind, `${label}.claimKind bytes`);
+    if (!kindBudget.ok) return kindBudget;
+  }
+
+  const role = stringProperty(value, "role");
+  if (role !== undefined) {
+    const roleBudget = validateApprovalIdentifierBudget(role, `${label}.role bytes`);
+    if (!roleBudget.ok) return roleBudget;
+  }
+
+  if (claimKind === "cost_spike_acknowledgement") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const costCeilingId = stringProperty(value, "costCeilingId");
+    if (costCeilingId !== undefined) {
+      const costCeilingBudget = validateApprovalCostCeilingIdBudget(costCeilingId);
+      if (!costCeilingBudget.ok) {
+        return prefixBudgetReason(`${label}.costCeilingId`, costCeilingBudget);
+      }
+    }
+  } else if (claimKind === "endpoint_allowlist_extension") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const providerKind = stringProperty(value, "providerKind");
+    if (providerKind !== undefined) {
+      const providerKindBudget = validateApprovalIdentifierBudget(
+        providerKind,
+        `${label}.providerKind bytes`,
+      );
+      if (!providerKindBudget.ok) return providerKindBudget;
+    }
+    const endpointOrigin = stringProperty(value, "endpointOrigin");
+    if (endpointOrigin !== undefined) {
+      const endpointBudget = validateApprovalEndpointOriginBudget(endpointOrigin);
+      if (!endpointBudget.ok) return prefixBudgetReason(`${label}.endpointOrigin`, endpointBudget);
+    }
+  } else if (claimKind === "credential_grant_to_agent") {
+    const granteeAgentId = stringProperty(value, "granteeAgentId");
+    if (granteeAgentId !== undefined) {
+      const granteeBudget = validateApprovalIdentifierBudget(
+        granteeAgentId,
+        `${label}.granteeAgentId bytes`,
+      );
+      if (!granteeBudget.ok) return granteeBudget;
+    }
+    const credentialHandleId = stringProperty(value, "credentialHandleId");
+    if (credentialHandleId !== undefined) {
+      const credentialBudget = validateApprovalIdentifierBudget(
+        credentialHandleId,
+        `${label}.credentialHandleId bytes`,
+      );
+      if (!credentialBudget.ok) return credentialBudget;
+    }
+  } else if (claimKind === "receipt_co_sign") {
+    const receiptId = stringProperty(value, "receiptId");
+    if (receiptId !== undefined) {
+      const receiptBudget = validateApprovalIdentifierBudget(receiptId, `${label}.receiptId bytes`);
+      if (!receiptBudget.ok) return receiptBudget;
+    }
+    const writeId = stringProperty(value, "writeId");
+    if (writeId !== undefined) {
+      const writeBudget = validateApprovalIdentifierBudget(writeId, `${label}.writeId bytes`);
+      if (!writeBudget.ok) return writeBudget;
+    }
+    const frozenArgsHash = stringProperty(value, "frozenArgsHash");
+    if (frozenArgsHash !== undefined) {
+      const hashBudget = validateApprovalIdentifierBudget(
+        frozenArgsHash,
+        `${label}.frozenArgsHash bytes`,
+      );
+      if (!hashBudget.ok) return hashBudget;
+    }
+  }
+
+  return validateJsonProjectionBudget(value, validateApprovalScopeCanonicalJsonBudget, label);
+}
+
 export function validateApprovalTokenLifetimeValues(
-  issuedAt: Date,
-  expiresAt: Date,
+  notBefore: number,
+  expiresAt: number,
 ): BudgetValidationResult {
-  const lifetimeMs = expiresAt.getTime() - issuedAt.getTime();
+  const lifetimeMs = expiresAt - notBefore;
   if (!Number.isFinite(lifetimeMs)) {
     return { ok: false, reason: "approval token lifetime must be finite" };
   }
-  // Lower-bound enforcement (strict `expiresAt > issuedAt`) lives in the
-  // per-field validators: `validateApprovalClaims` in receipt-validator.ts
-  // and `validateApprovalClaimsShape` in ipc.ts. Both surface path-anchored
-  // errors at `/approvals/N/signedToken/claims/expiresAt` (or the IPC
-  // equivalent). This budget validator owns only the upper bound — the
-  // 30-minute cap. Duplicating the lower bound here would short-circuit the
-  // per-field error path with a less useful top-level message at path "".
   if (lifetimeMs <= 0) {
-    return { ok: true };
+    return {
+      ok: false,
+      reason: "approval token expiresAt must be strictly greater than notBefore",
+    };
   }
   try {
     assertWithinBudget(lifetimeMs, MAX_APPROVAL_TOKEN_LIFETIME_MS, "approval token lifetime ms");
@@ -727,6 +1098,26 @@ export function validateApprovalTokenLifetimeValues(
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+function validateMaybeWebAuthnAssertionBudget(
+  value: unknown,
+  label: string,
+): BudgetValidationResult {
+  if (typeof value !== "object" || value === null) return { ok: true };
+  for (const field of [
+    "credentialId",
+    "authenticatorData",
+    "clientDataJson",
+    "signature",
+    "userHandle",
+  ]) {
+    const fieldValue = stringProperty(value, field);
+    if (fieldValue === undefined) continue;
+    const result = validateWebAuthnAssertionFieldBudget(fieldValue, `${label}.${field} bytes`);
+    if (!result.ok) return result;
+  }
+  return validateJsonProjectionBudget(value, validateWebAuthnAssertionBudget, label);
 }
 
 function arrayOrEmpty(value: unknown): readonly unknown[] {
@@ -771,6 +1162,23 @@ function prefixBudgetReason(
   result: { ok: false; reason: string },
 ): BudgetValidationResult {
   return { ok: false, reason: `${label}: ${result.reason}` };
+}
+
+function validateJsonProjectionBudget(
+  value: unknown,
+  validator: (json: string) => BudgetValidationResult,
+  label: string,
+): BudgetValidationResult {
+  const safety = validateJsonStringifySafety(value, label, new Set<object>());
+  if (!safety.ok) return safety;
+  try {
+    const json = JSON.stringify(value);
+    if (json === undefined) return { ok: true };
+    const result = validator(json);
+    return result.ok ? result : prefixBudgetReason(label, result);
+  } catch (err) {
+    return { ok: false, reason: `${label}: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 function validateSerializableStringFloor(value: unknown, budget: number): BudgetValidationResult {

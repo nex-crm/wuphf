@@ -61,16 +61,25 @@ type ipRateLimitBucket struct {
 type Broker struct {
 	channelStore      *channel.Store
 	messages          []channelMessage
-	agentIssues       []agentIssueRecord
+	incidents         []incidentRecord
 	members           []officeMember
 	memberIndex       map[string]int                  // slug → index into members; guarded by mu
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
+	webURL            string                          // base URL of the web UI, set by LaunchWeb; guarded by mu
 	channels          []teamChannel
+	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
 	oneOnOneAgent     string
 	focusMode         bool
-	tasks             []teamTask
+	// disablePlanFirstDefault turns OFF the structured-planning default
+	// (issueShouldPlanFirstLocked) so new top-level issues land Running instead
+	// of Planning. Zero value (false) keeps planning ON in production. The
+	// office-eval fixture sets it true so its post-execution mechanic checks are
+	// not gated behind plan approval — planning has dedicated coverage in
+	// broker_plan_approval_test.go. Guarded by mu.
+	disablePlanFirstDefault bool
+	tasks                   []teamTask
 	// lifecycleIndex is the inverse-index map maintained by the
 	// broker_lifecycle_transition.go layer. Inbox queries for "all tasks
 	// in state X" are O(1) lookups against this map instead of O(N) scans
@@ -96,74 +105,109 @@ type Broker struct {
 	// the durable source of truth. The two are kept in sync by
 	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
 	// grade. Guarded by b.mu.
-	reviewerGradesByTask    map[string][]ReviewerGrade
-	requests                []humanInterview
-	humanInvites            []humanInvite
-	humanSessions           []humanSession
-	humanSessionRevoke      map[string]chan struct{} // session ID → closed on revoke
-	actions                 []officeActionLog
-	signals                 []officeSignalRecord
-	decisions               []officeDecisionRecord
-	watchdogs               []watchdogAlert
-	scheduler               []schedulerJob
-	skills                  []teamSkill
-	skillDescEmbeddings     map[string][]float32         // slug → description embedding vector; guarded by mu
-	sharedMemory            map[string]map[string]string // namespace → key → value
-	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups      map[int64]string             // chat_id -> title, populated by transport
-	counter                 int
-	notificationSince       string
-	insightsSince           string
-	pendingInterview        *humanInterview
-	usage                   teamUsageState
-	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
-	messageSubscribers      map[int]chan channelMessage
-	actionSubscribers       map[int]chan officeActionLog
-	activity                map[string]agentActivitySnapshot
-	activitySubscribers     map[int]chan agentActivitySnapshot
-	officeSubscribers       map[int]chan officeChangeEvent
-	wikiSubscribers         map[int]chan wikiWriteEvent
-	notebookSubscribers     map[int]chan notebookWriteEvent
-	reviewSubscribers       map[int]chan ReviewStateChangeEvent
-	entitySubscribers       map[int]chan EntityBriefSynthesizedEvent
-	factSubscribers         map[int]chan EntityFactRecordedEvent
-	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
-	governorSubscribers     map[int]chan governorStatus
-	governor                *governor
-	headlessCtl             headlessDispatchController
-	wikiWorker              *WikiWorker
-	wikiInitMu              sync.Mutex
-	wikiInitErr             error
-	autoNotebookWriter      *AutoNotebookWriter
-	humanWikiWriter         *HumanWikiIntentWriter
-	demandIndex             *NotebookDemandIndex
-	channelIntentDispatcher *ChannelIntentDispatcher
-	promotionSweep          *PromotionSweep
-	wikiIndex               *WikiIndex
-	wikiExtractor           *Extractor
-	wikiDLQ                 *DLQ
-	wikiSectionsCache       *wikiSectionsCache
-	reviewLog               *ReviewLog
-	reviewResolver          ReviewerResolver
-	inboxCursorMu           sync.RWMutex
-	userInboxCursors        map[string]InboxCursor
-	factLog                 *FactLog
-	readLog                 *ReadLog
-	entityGraph             *EntityGraph
-	entitySynthesizer       *EntitySynthesizer
-	wikiCompressor          *WikiCompressor
-	teamLearningLog         *LearningLog
-	playbookSynthesizer     *PlaybookSynthesizer
-	pamDispatcher           *PamDispatcher
-	scanTracker             *scanStatusTracker
-	nextSubscriberID        int
-	agentStreams            map[string]*agentStreamBuffer
-	mu                      sync.Mutex
-	officeMemberMutationMu  sync.Mutex
-	stateWriteMu            sync.Mutex
-	stateWriteSeq           atomic.Uint64
-	stateWriteApplied       atomic.Uint64
+	reviewerGradesByTask map[string][]ReviewerGrade
+	requests             []humanInterview
+	approvalAudit        []ApprovalAuditEntry
+	// connectionRegistry is the persisted, last-known connection state per
+	// platform — a dedicated map in broker state, NOT a projection over the
+	// 150-entry action ring. Read by the action resolver to gate external
+	// actions; refreshed by probe + connect/disconnect events. Guarded by b.mu.
+	connectionRegistry map[string]connectionRegistryEntry
+	// actionGrants are persisted, human-issued standing approvals for a specific
+	// (agent, platform, action_id). The resolver reads them to skip the approval
+	// modal for pre-authorized actions. Human-minted only. Guarded by b.mu.
+	actionGrants []actionGrant
+	// composioSignin is the in-memory "Sign in with Composio" CLI flow state
+	// (broker_composio_signin.go). Carries its own mutex; zero value ready.
+	composioSignin      composioSigninFlow
+	humanInvites        []humanInvite
+	humanSessions       []humanSession
+	humanSessionRevoke  map[string]chan struct{} // session ID → closed on revoke
+	actions             []officeActionLog
+	distillInFlight     map[string]struct{}
+	signals             []officeSignalRecord
+	decisions           []officeDecisionRecord
+	watchdogs           []watchdogAlert
+	scheduler           []schedulerJob
+	schedulerRuns       map[string][]schedulerRun      // per-slug fire history; ring buffer
+	schedulerActivity   map[string][]schedulerActivity // per-slug lifecycle log; ring buffer
+	schedulerRevisions  map[string][]schedulerRevision // per-slug edit snapshots; ring buffer
+	skills              []teamSkill
+	skillDescEmbeddings map[string][]float32         // slug → description embedding vector; guarded by mu
+	sharedMemory        map[string]map[string]string // namespace → key → value
+	lastTaggedAt        map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot    map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups  map[int64]string             // chat_id -> title, populated by transport
+	counter             int
+	// idPrefix is the Linear-style prefix used for new Issue IDs (e.g.
+	// "NEX" → NEX-1, NEX-2). Derived from the workspace's company_name
+	// via deriveIDPrefix; refreshed on broker init + when the human
+	// updates the company name during onboarding. Existing task-N IDs
+	// are left untouched — only new allocations carry the new prefix.
+	// Guarded by b.mu.
+	idPrefix          string
+	notificationSince string
+	insightsSince     string
+	pendingInterview  *humanInterview
+	usage             teamUsageState
+	externalDelivered map[string]struct{}            // message IDs already queued for external delivery
+	slackTaskCards    map[string]slackTaskCardRecord // task ID → posted Slack lifecycle card (persisted)
+	slackSpawns       map[string]slackSpawnRecord    // slug → pending agent spawn awaiting /slack/agents/spawn/complete (persisted)
+	// slackSpawnAuthTest is the auth.test seam for the spawn-complete flow;
+	// nil means the real Slack Web API. Tests inject a fake.
+	slackSpawnAuthTest        slackSpawnAuthTestFunc
+	messageSubscribers        map[int]chan channelMessage
+	actionSubscribers         map[int]chan officeActionLog
+	activity                  map[string]agentActivitySnapshot
+	activitySubscribers       map[int]chan agentActivitySnapshot
+	officeSubscribers         map[int]chan officeChangeEvent
+	wikiSubscribers           map[int]chan wikiWriteEvent
+	notebookSubscribers       map[int]chan notebookWriteEvent
+	reviewSubscribers         map[int]chan ReviewStateChangeEvent
+	entitySubscribers         map[int]chan EntityBriefSynthesizedEvent
+	factSubscribers           map[int]chan EntityFactRecordedEvent
+	wikiSectionsSubscribers   map[int]chan WikiSectionsUpdatedEvent
+	wikiCategoriesSubscribers map[int]chan WikiCategoriesUpdatedEvent
+	governorSubscribers       map[int]chan governorStatus
+	governor                  *governor
+	headlessCtl               headlessDispatchController
+	wikiWorker                *WikiWorker
+	wikiInitMu                sync.Mutex
+	wikiInitErr               error
+	autoNotebookWriter        *AutoNotebookWriter
+	humanWikiWriter           *HumanWikiIntentWriter
+	obsidianWatcher           *ObsidianWatcher
+	demandIndex               *NotebookDemandIndex
+	channelIntentDispatcher   *ChannelIntentDispatcher
+	promotionSweep            *PromotionSweep
+	wikiIndex                 *WikiIndex
+	wikiExtractor             *Extractor
+	wikiDLQ                   *DLQ
+	wikiSectionsCache         *wikiSectionsCache
+	wikiCategoriesCache       *wikiCategoriesCache
+	reviewLog                 *ReviewLog
+	reviewResolver            ReviewerResolver
+	inboxCursorMu             sync.RWMutex
+	userInboxCursors          map[string]InboxCursor
+	factLog                   *FactLog
+	readLog                   *ReadLog
+	entityGraph               *EntityGraph
+	entitySynthesizer         *EntitySynthesizer
+	wikiCompressor            *WikiCompressor
+	teamLearningLog           *LearningLog
+	playbookSynthesizer       *PlaybookSynthesizer
+	pamDispatcher             *PamDispatcher
+	scanTracker               *scanStatusTracker
+	nextSubscriberID          int
+	agentStreams              map[string]*agentStreamBuffer
+	// mu is the broker's single big lock. contendedMutex == sync.Mutex
+	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
+	// long holder wedging every endpoint is visible in the log.
+	mu                     contendedMutex
+	officeMemberMutationMu sync.Mutex
+	stateWriteMu           sync.Mutex
+	stateWriteSeq          atomic.Uint64
+	stateWriteApplied      atomic.Uint64
 	// configMu serializes handleConfig POST reads/writes so concurrent
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
@@ -206,14 +250,15 @@ type Broker struct {
 	// (so admit + revoke + invite-create all flow through the same surface)
 	// instead of the legacy HTTP path. Atomic so the controller's read does
 	// not contend with adapter registration on a different goroutine.
-	shareTransport     atomic.Pointer[ShareTransport]
-	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn  func(context.Context, string) (generatedChannelTemplate, error)
-	policies           []officePolicy // active office operating rules
-	rateLimitBuckets   map[string]ipRateLimitBucket
-	rateLimitWindow    time.Duration
-	rateLimitRequests  int
-	lastRateLimitPrune time.Time
+	shareTransport      atomic.Pointer[ShareTransport]
+	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
+	generateChannelFn   func(context.Context, string) (generatedChannelTemplate, error)
+	generateAgentFileFn func(ctx context.Context, relPath, hint string) (string, error)
+	policies            []officePolicy // active office operating rules
+	rateLimitBuckets    map[string]ipRateLimitBucket
+	rateLimitWindow     time.Duration
+	rateLimitRequests   int
+	lastRateLimitPrune  time.Time
 
 	// Agent-scoped buckets — applied to authenticated agent traffic even though
 	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
@@ -223,6 +268,17 @@ type Broker struct {
 	agentRateLimitRequests  int
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
+
+	// Slack transport hot-start lifecycle (broker_slack_transport.go). The
+	// transport is started in-process — at boot by RegisterTransports and at
+	// runtime by handleSlackConnect — so connecting a channel from the web app
+	// brings Socket Mode up live, with no broker re-exec. slackTransportMu guards
+	// the start/stop pair; slackTransport is the live adapter (nil when not
+	// running) and slackTransportStop cancels its goroutines and waits for them
+	// to drain (nil when not running).
+	slackTransportMu   sync.Mutex
+	slackTransport     *SlackTransport
+	slackTransportStop func()
 
 	// nowFn is the clock used by rate-limit logic. nil means time.Now.
 	// Inject a fake clock in tests to avoid real-time sleeps.
@@ -238,18 +294,6 @@ type Broker struct {
 	skillCompileInflight  bool
 	skillCompileCoalesced bool
 	skillScanner          *SkillScanner
-	// Skill synthesizer (Stage B) plumbing. Same coalesce semantics as
-	// Stage A; metrics + counters live on skillCompileMetrics.StageBProposalsTotal.
-	skillSynthesizer    *SkillSynthesizer
-	skillSynthInflight  bool
-	skillSynthCoalesced bool
-	// Hermes-style per-agent activity counter (Stage B'). Increments on
-	// every agent MCP tool call; resets on team_skill_create / team_skill_patch;
-	// fires a "skill_review_nudge" task when the threshold is crossed. Owns
-	// its own mutex so it can be hit from the tool-event hot path without
-	// blocking on b.mu. Lazily constructed by ensureSkillCounter so tests
-	// that never spawn a real agent pay no cost.
-	skillCounter *SkillCounter
 	// recentlyRejectedSkills holds in-memory snapshots of skills rejected in
 	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
@@ -391,6 +435,11 @@ func NewBrokerAt(statePath string) *Broker {
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
 	b.bootstrapHumanHasPostedLocked()
+	// Resolve the Linear-style ID prefix from the workspace registry's
+	// company_name so any tasks minted from here forward carry e.g.
+	// NEX-N instead of task-N. Failure-tolerant: refresh keeps the
+	// existing (or default) prefix if the registry isn't readable.
+	b.refreshIDPrefixFromWorkspaceLocked()
 	b.mu.Unlock()
 	// Baseline the governor to any usage restored from the state file so a new
 	// session doesn't trip an instant budget pause on its first turn.
@@ -435,6 +484,12 @@ func (b *Broker) Start() error {
 	// lifecycle index. Idempotent across restarts and per-process
 	// guarded so additional startup hooks invoking it are no-ops.
 	b.MigrateLifecycleStatesOnce()
+	// Phase 6 migration: the product is now pure task-scoped, so every chat
+	// channel must be owned by a task to stay navigable. Fold any legacy
+	// free-standing channel or DM with history into an archived owning task
+	// (mirrors the Backup & Migration task that owns #general). Idempotent;
+	// runs after lifecycle migration + channel/member seeding above.
+	b.MigrateLegacyChannelsOnce()
 	// Seed company context from previous onboarding skip, if pending.
 	// configMu guards the read-modify-write so a concurrent broker retry
 	// goroutine re-arming the flag under the same lock cannot race with
@@ -462,6 +517,7 @@ func (b *Broker) Start() error {
 	b.mu.Unlock()
 
 	b.ensureWikiSectionsCache()
+	b.ensureWikiCategoriesCache()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.ensureWikiCompressor()
@@ -538,6 +594,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
+	// Single derived-stats source: every surface-level count (header
+	// strip, board lane headers, dashboard tiles, inbox badge, wiki
+	// home) reads this one endpoint so the numbers cannot drift.
+	mux.HandleFunc("/office/stats", b.requireAuth(b.handleOfficeStats))
 	mux.HandleFunc("/office-members/generate", b.requireAuth(b.handleGenerateMember))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
 	mux.HandleFunc("/channels/dm", b.requireAuth(b.handleCreateDM))
@@ -547,6 +607,12 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
 	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
 	mux.HandleFunc("/wiki/write-human", b.requireAuth(b.handleWikiWriteHuman))
+	// Per-agent instruction files (SOUL/IDENTITY/OPERATIONS/TOOLS + office
+	// USER.md). Separate from /wiki/* so they use the strict agent-file path
+	// allowlist and skip the team/ article index. See broker_agent_files_http.go.
+	mux.HandleFunc("/agent-files/read", b.requireAuth(b.handleAgentFileRead))
+	mux.HandleFunc("/agent-files/write", b.requireAuth(b.handleAgentFileWrite))
+	mux.HandleFunc("/agent-files/generate", b.requireAuth(b.handleAgentFileGenerate))
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
 	mux.HandleFunc("/humans/me", b.handleHumanMe)
 	mux.HandleFunc("/humans/invites", b.requireAuth(b.handleHumanInvites))
@@ -558,24 +624,45 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
+	mux.HandleFunc("/wiki/tree", b.requireAuth(b.handleWikiTree))
+	mux.HandleFunc("/wiki/file", b.requireAuth(b.handleWikiFile))
+	// /wiki/app/ serves embedded HTML app bundles WITHOUT requireAuth: a
+	// sandboxed app has an opaque origin and cannot send the bearer token, so
+	// (like /web-token) the handler's loopback RemoteAddr + Host gate is the
+	// boundary. Trailing slash = path-prefix route.
+	mux.HandleFunc("/wiki/app/", b.handleWikiApp)
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/wiki/visual", b.requireAuth(b.handleWikiVisualArtifact))
 	mux.HandleFunc("/wiki/archive/sweep", b.requireAuth(b.handleWikiArchiveSweep))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
+	mux.HandleFunc("/wiki/categories", b.requireAuth(b.handleWikiCategories))
+	mux.HandleFunc("/wiki/categories/", b.requireAuth(b.handleWikiCategory))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
 	mux.HandleFunc("/wiki/maintenance/suggest", b.requireAuth(b.handleWikiMaintenanceSuggest))
 	mux.HandleFunc("/wiki/extract/replay", b.requireAuth(b.handleWikiExtractReplay))
 	mux.HandleFunc("/wiki/dlq", b.requireAuth(b.handleWikiDLQ))
 	mux.HandleFunc("/wiki/compress", b.requireAuth(b.handleWikiCompress))
+	mux.HandleFunc("/wiki/page", b.requireAuth(b.handleWikiPageDelete))
+	mux.HandleFunc("/wiki/page/create", b.requireAuth(b.handleWikiPageCreate))
+	mux.HandleFunc("/wiki/page/move", b.requireAuth(b.handleWikiPageMove))
+	mux.HandleFunc("/wiki/page/rename", b.requireAuth(b.handleWikiPageRename))
+	mux.HandleFunc("/wiki/upload", b.requireAuth(b.handleWikiUpload))
+	// Slice 5: per-article version history, per-commit diff, append-only restore.
+	// /wiki/history/ is a path-prefix route — the article path is the suffix.
+	mux.HandleFunc("/wiki/history/", b.requireAuth(b.handleWikiHistory))
+	mux.HandleFunc("/wiki/diff", b.requireAuth(b.handleWikiDiff))
+	mux.HandleFunc("/wiki/restore", b.requireAuth(b.handleWikiRestore))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
+	mux.HandleFunc("/notebook/entry", b.requireAuth(b.handleNotebookEntry))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
 	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
 	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
 	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
@@ -608,10 +695,24 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
 	mux.HandleFunc("/reset-dm", b.requireAuth(b.handleResetDM))
 	mux.HandleFunc("/policies", b.requireAuth(b.handlePolicies))
+	mux.HandleFunc("/policies/", b.requireAuth(b.handlePoliciesSubpath))
 	mux.HandleFunc("/signals", b.requireAuth(b.handleSignals))
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
 	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
+	mux.HandleFunc("/approval-audit", b.requireAuth(b.handleApprovalAudit))
+	mux.HandleFunc("/integrations", b.requireAuth(b.handleIntegrations))
+	mux.HandleFunc("/integrations/connect", b.requireAuth(b.handleIntegrationConnect))
+	mux.HandleFunc("/integrations/connect-credentials", b.requireAuth(b.handleIntegrationConnectCredentials))
+	mux.HandleFunc("/integrations/connect-status", b.requireAuth(b.handleIntegrationConnectStatus))
+	mux.HandleFunc("/integrations/disconnect", b.requireAuth(b.handleIntegrationDisconnect))
+	mux.HandleFunc("/integrations/audit", b.requireAuth(b.handleIntegrationAudit))
+	mux.HandleFunc("/integrations/resolve", b.requireAuth(b.handleIntegrationResolve))
+	mux.HandleFunc("/integrations/grants", b.requireAuth(b.handleIntegrationGrants))
+	// "Sign in with Composio" — the broker drives the composio CLI so the
+	// user never copy/pastes an API key. See broker_composio_signin.go.
+	mux.HandleFunc("/integrations/composio/signin/start", b.requireAuth(b.handleComposioSigninStart))
+	mux.HandleFunc("/integrations/composio/signin/status", b.requireAuth(b.handleComposioSigninStatus))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
@@ -629,6 +730,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
+	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
+	mux.HandleFunc("/slack/agents", b.requireAuth(b.handleSlackAgents))
+	mux.HandleFunc("/slack/agents/spawn", b.requireAuth(b.handleSlackAgentsSpawn))
+	mux.HandleFunc("/slack/agents/spawn/complete", b.requireAuth(b.handleSlackAgentsSpawnComplete))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
@@ -653,9 +758,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workspaces/trash", b.withAuth(b.handleWorkspacesTrash))
 	mux.HandleFunc("/workspaces/onboarding", b.withAuth(b.handleWorkspacesOnboarding))
 	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
-	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
-	// completeFn posts the first task as a human message and seeds the team.
-	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
+	// Onboarding: state/progress/complete + deterministic CEO phase machine.
+	// completeFn posts the first task as a human message and seeds the team;
+	// transitionFn emits deterministic CEO onboarding cards into the CEO DM.
+	onboarding.RegisterRoutesWithTransition(mux, b.onboardingCompleteFn, b.ceoOnboardingTransitionFn(), b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
 	// After a successful wipe, b.Reset clears live in-memory broker state so the
 	// broker stays up without repersisting stale messages back onto disk.
@@ -708,6 +814,21 @@ func (b *Broker) Stop() {
 			close(b.stopCh)
 		})
 	}
+
+	// Snapshot the obsidian watcher and stop it BEFORE cancelling the
+	// lifecycle context. The watcher has trailing-edge debounce timers
+	// that fire callbacks via time.AfterFunc; those callbacks call
+	// Repo.Commit with the lifecycle context, so cancelling first would
+	// drop in-flight Obsidian-side edits at the commit step. The watcher's
+	// own Stop drains pending timers + commit goroutines under the
+	// pending WaitGroup, so this is the only correct order.
+	b.mu.Lock()
+	obsidianWatcher := b.obsidianWatcher
+	b.mu.Unlock()
+	if obsidianWatcher != nil {
+		_ = obsidianWatcher.Stop()
+	}
+
 	if b.lifecycleCancel != nil {
 		b.lifecycleCancel()
 	}
@@ -765,8 +886,7 @@ func (b *Broker) Stop() {
 // to the attacker's origin. Validate both RemoteAddr AND Host here.
 
 // SSE handlers and the tool-event audit channel (handleEvents,
-// handleAgentStream, handleAgentToolEvent, recordAgentToolEvent,
-// SkillCounter helpers) moved to broker_sse.go.
+// handleAgentStream, handleAgentToolEvent) moved to broker_sse.go.
 
 // ServeWebUI starts a static file server for the web UI on the given port.
 // Returns an error if the port cannot be bound (e.g. already in use).
@@ -882,6 +1002,21 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 	return out
 }
 
+// SetWebURL records the web UI's base URL so surfaces that link back to the
+// app (e.g. the Slack App Home tab) can build real links.
+func (b *Broker) SetWebURL(url string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.webURL = strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+// WebURL returns the web UI's base URL, or "" before LaunchWeb has run.
+func (b *Broker) WebURL() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.webURL
+}
+
 // EnsureBridgedMember registers a bridged external agent as an office member
 // so it appears in the sidebar and can be @mentioned. Idempotent — calling with
 // an existing slug is a no-op. CreatedBy tags the source (e.g. "openclaw") so
@@ -971,6 +1106,20 @@ func (b *Broker) EnsureDirectChannel(agentSlug string) (string, error) {
 
 // PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
 func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
+	return b.postInboundSurfaceMessage(from, channel, content, provider, "")
+}
+
+// PostInboundSurfaceMessageInThread is the thread-aware inbound path: when a
+// surface reply arrives inside a thread (threadRootKey is the surface's thread
+// root id — Slack's thread_ts), the broker maps it to the task whose thread
+// root that is and folds the reply into the task's thread (ReplyTo +
+// SourceTaskID). This is what keeps a foreign agent's in-thread reply scoped
+// to the task instead of leaking into the channel's shared context.
+func (b *Broker) PostInboundSurfaceMessageInThread(from, channel, content, provider, threadRootKey string) (channelMessage, error) {
+	return b.postInboundSurfaceMessage(from, channel, content, provider, threadRootKey)
+}
+
+func (b *Broker) postInboundSurfaceMessage(from, channel, content, provider, threadRootKey string) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
@@ -996,6 +1145,45 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		SourceLabel: provider,
 		Content:     strings.TrimSpace(content),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	// Thread mapping: a reply inside a task's Slack thread is folded into that
+	// task's internal thread so the task context (and only that task) sees it.
+	// Set before appendMessageLocked, whose owner-based auto-stamp does NOT
+	// fire for non-owner foreign agents or humans — the thread is the only
+	// signal that ties their reply to the task.
+	// Scope the fold to Slack and to the message's own channel: the root key is
+	// a Slack thread_ts, so a non-Slack inbound (Telegram reply_to, etc.) or a
+	// reply that lands in a different channel must never be folded into a Slack
+	// task thread by a key collision or replay.
+	if provider == "slack" {
+		if root := b.slackTaskByRootTSLocked(threadRootKey); root != nil &&
+			normalizeChannelSlug(root.Channel) == channel {
+			msg.SourceTaskID = root.ID
+			if strings.TrimSpace(msg.ReplyTo) == "" && strings.TrimSpace(root.ThreadID) != "" {
+				msg.ReplyTo = strings.TrimSpace(root.ThreadID)
+			}
+		}
+	}
+	// Promote @slug mentions into tags, mirroring handlePostMessage's
+	// auto-promote: surface humans (Slack/Telegram) expect "@agent" to
+	// notify exactly like web humans do. Same lead-routing guard as the web
+	// path: when the lead is mentioned, do NOT fan out to other mentioned
+	// agents — the human's intent is for the lead to route.
+	if b.senderMayAutoPromoteLocked(from) {
+		mentioned := extractMentionedSlugs(msg.Content)
+		leadSlug := officeLeadSlugFrom(b.members)
+		leadMentioned := leadSlug != "" && containsString(mentioned, leadSlug)
+		for _, slug := range mentioned {
+			if b.findMemberLocked(slug) == nil {
+				continue
+			}
+			if leadMentioned && slug != leadSlug {
+				continue
+			}
+			if !containsString(msg.Tagged, slug) {
+				msg.Tagged = append(msg.Tagged, slug)
+			}
+		}
 	}
 	msg = b.appendMessageLocked(msg)
 	// Mark as already delivered so it doesn't bounce back to the same surface
@@ -1027,13 +1215,16 @@ func (b *Broker) Reset() {
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
 	b.messages = nil
-	b.agentIssues = nil
+	b.incidents = nil
 	b.members = defaultOfficeMembers()
 	b.channels = defaultTeamChannels()
 	b.sessionMode = mode
 	b.oneOnOneAgent = agent
 	b.tasks = []teamTask{}
 	b.requests = nil
+	b.approvalAudit = nil
+	b.connectionRegistry = nil
+	b.actionGrants = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
 	b.humanSessionRevoke = nil
@@ -1043,6 +1234,12 @@ func (b *Broker) Reset() {
 	b.watchdogs = nil
 	b.policies = nil
 	b.scheduler = nil
+	// Clear scheduler history maps so a workspace reset can't surface
+	// stale runs / activity / revisions on a freshly recreated routine
+	// that happens to reuse a prior slug.
+	b.schedulerRuns = nil
+	b.schedulerActivity = nil
+	b.schedulerRevisions = nil
 	b.pendingInterview = nil
 	b.activity = make(map[string]agentActivitySnapshot)
 	b.memberPresence = make(map[string]memberPresenceRecord)
@@ -1104,6 +1301,13 @@ func (b *Broker) SetGenerateChannelFn(fn func(context.Context, string) (generate
 	b.generateChannelFn = fn
 }
 
+// SetGenerateAgentFileFn injects the LLM authoring path for prose instruction
+// files (SOUL/OPERATIONS/USER). Optional: when unset, /agent-files/generate
+// returns 503 and the UI simply hides the "Generate with AI" affordance.
+func (b *Broker) SetGenerateAgentFileFn(fn func(ctx context.Context, relPath, hint string) (string, error)) {
+	b.generateAgentFileFn = fn
+}
+
 // SetAgentLogRoot overrides where /agent-logs reads task JSONL from.
 // Used by tests; production uses agent.DefaultTaskLogRoot().
 func (b *Broker) SetAgentLogRoot(root string) {
@@ -1120,12 +1324,35 @@ func (b *Broker) FocusModeEnabled() bool {
 
 func (b *Broker) findChannelLocked(slug string) *teamChannel {
 	slug = normalizeChannelSlug(slug)
-	for i := range b.channels {
-		if b.channels[i].Slug == slug {
-			return &b.channels[i]
-		}
+	// Channel-per-task makes b.channels grow with the office, so the old
+	// linear scan was O(channels) per call on hot paths (membership checks,
+	// access control, startup reconciliation). Index by slug instead.
+	if len(b.channelIndex) != len(b.channels) {
+		b.rebuildChannelIndexLocked()
+	}
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
+	}
+	// A miss may be genuine OR a stale index left by a same-length slice
+	// replacement (snapshot rollback / state load) that the length check
+	// can't detect. Rebuild once and retry so we never return a false
+	// negative for a channel that actually exists. Hits never reach here, so
+	// the hot lookup path stays O(1).
+	b.rebuildChannelIndexLocked()
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
 	}
 	return nil
+}
+
+// rebuildChannelIndexLocked rebuilds channelIndex from b.channels. Callers must
+// hold b.mu. findChannelLocked's length-check + rebuild-on-miss keep the map in
+// sync with the slice across appends, removes, and same-length replacements.
+func (b *Broker) rebuildChannelIndexLocked() {
+	b.channelIndex = make(map[string]int, len(b.channels))
+	for i := range b.channels {
+		b.channelIndex[b.channels[i].Slug] = i
+	}
 }
 
 // ensureDMConversationLocked returns the DM conversation for the given slug,
@@ -1175,6 +1402,18 @@ func (b *Broker) findMemberLocked(slug string) *officeMember {
 		return &b.members[i]
 	}
 	return nil
+}
+
+// hasMember reports whether the roster contains slug. Lock-safe wrapper around
+// findMemberLocked for callers that do not already hold b.mu (e.g. HTTP
+// handlers).
+func (b *Broker) hasMember(slug string) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.findMemberLocked(slug) != nil
 }
 
 // rebuildMemberIndexLocked rebuilds memberIndex from b.members. Callers must

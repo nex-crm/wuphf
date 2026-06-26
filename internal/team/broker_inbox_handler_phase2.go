@@ -53,6 +53,7 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 	if rawFilter == "" {
 		rawFilter = string(InboxFilterAll)
 	}
+	cursor := b.InboxCursor(inboxCursorKeyForActor(actor))
 	// Always pull the unfiltered union for the caller so counts cover
 	// every visible kind, regardless of the kind=<kind> trim below.
 	allItems, err := b.inboxItemsForActor(actor, InboxFilterAll)
@@ -60,6 +61,7 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	stampUnread(allItems, cursor)
 	counts := inboxCountsForItems(allItems, startOfTodayUTC())
 
 	items, err := b.inboxItemsForActor(actor, InboxFilter(rawFilter))
@@ -70,6 +72,21 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	stampUnread(items, cursor)
+
+	// InboxFilterUnread narrows the bucket-passed rows to items whose
+	// IsUnread flag is set. The lifecycle index has no per-actor read
+	// state so this is a post-fetch trim; it operates only on rows
+	// already authorized by inboxItemsForActor above.
+	if InboxFilter(rawFilter) == InboxFilterUnread {
+		filtered := items[:0]
+		for _, item := range items {
+			if item.IsUnread {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 
 	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
@@ -91,6 +108,30 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// stampUnread populates each item's IsUnread flag against the actor's
+// cursor. An item is unread when its UpdatedAt (or CreatedAt fallback)
+// is strictly after cursor.LastSeenAt — a zero cursor marks everything
+// unread so a brand-new user sees the full backlog highlighted on
+// first load.
+func stampUnread(items []InboxItem, cursor InboxCursor) {
+	lastSeen := cursor.LastSeenAt
+	for i := range items {
+		ts := parseBrokerTimestamp(items[i].UpdatedAt)
+		if ts.IsZero() {
+			ts = parseBrokerTimestamp(items[i].CreatedAt)
+		}
+		if ts.IsZero() {
+			items[i].IsUnread = false
+			continue
+		}
+		if lastSeen.IsZero() {
+			items[i].IsUnread = true
+			continue
+		}
+		items[i].IsUnread = ts.After(lastSeen)
+	}
+}
+
 // inboxCountsForItems derives the badge counts from the caller's
 // auth-filtered item list. The counts only cover task-kind items —
 // requests and reviews live in their own counters and v1's
@@ -101,6 +142,9 @@ func inboxCountsForItems(items []InboxItem, todayCutoff time.Time) InboxCounts {
 	var counts InboxCounts
 	cutoffMs := todayCutoff.UnixMilli()
 	for _, item := range items {
+		if item.IsUnread {
+			counts.Unread++
+		}
 		if item.Kind != InboxItemKindTask || item.TaskRow == nil {
 			continue
 		}
@@ -109,7 +153,7 @@ func inboxCountsForItems(items []InboxItem, todayCutoff time.Time) InboxCounts {
 			counts.DecisionRequired++
 		case LifecycleStateRunning:
 			counts.Running++
-		case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner:
+		case LifecycleStateBlocked, LifecycleStateQueuedBehindOwner, LifecycleStateRejected:
 			counts.Blocked++
 		case LifecycleStateApproved:
 			// ElapsedMs measures age, not absolute time, so derive
@@ -155,7 +199,7 @@ func (b *Broker) handleInboxCursor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b.SetInboxCursor(actor.Slug, InboxCursor{
+	b.SetInboxCursor(inboxCursorKeyForActor(actor), InboxCursor{
 		LastSeenAt:        body.LastSeenAt,
 		AcknowledgedKinds: body.AcknowledgedKinds,
 	})

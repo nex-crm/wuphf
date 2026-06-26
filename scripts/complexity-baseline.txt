@@ -41,11 +41,6 @@ web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognit
 web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/ThreadPanel.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Composer wiring fans out into mutation, autocomplete, and slash-command branches that share state.
-web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
-web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
-web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
-web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
-web/src/components/onboarding/wizard/LocalLLMPicker.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -74,3 +69,4 @@ web/src/styles/global.css|lint/complexity/noImportantStyles|1|Reduced-motion ove
 web/src/styles/lifecycle.css|lint/complexity/noImportantStyles|1|Reduced-motion override must beat animation declaration.
 web/src/styles/lifecycle.css|lint/complexity/noImportantStyles|2|Reduced-motion override must beat animation declaration.
 web/src/styles/lifecycle.css|lint/complexity/noImportantStyles|3|Reduced-motion override must beat animation declaration.
+web/src/components/onboarding/LocalProviderPicker.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Ported from wizard/LocalLLMPicker.tsx which baselined this complexity for a focused follow-up refactor.

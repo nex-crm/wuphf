@@ -44,3 +44,11 @@ vi.stubGlobal(
     throw new Error("Unexpected fetch in test environment");
   }),
 );
+
+// Disable EventSource in tests. happy-dom ships an EventSource, but the
+// hot-loop reconnect logic keeps the vitest worker alive past test
+// teardown (no server is listening on the SSE URL), which manifested as
+// "Worker exited unexpectedly" after the suite ran the wall-clock to
+// minutes. Components that open SSE check for `EventSource` and bail
+// when it's undefined.
+vi.stubGlobal("EventSource", undefined);

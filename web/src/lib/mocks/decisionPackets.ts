@@ -65,7 +65,7 @@ const ROW_SEVERITY_TOKEN: InboxRow = {
   title: "Add severity tier styling to badge component",
   assignment:
     "Owner abandoned mid-run. Re-spawn or kill the task — 1 dead-end logged.",
-  state: "blocked_on_pr_merge",
+  state: "blocked",
   severityCounts: counts({ major: 1 }),
   lastChangedAt: "2026-05-09T21:18:00Z",
   elapsed: "42m",
@@ -131,6 +131,7 @@ export const POPULATED_INBOX: InboxPayload = {
     running: 7,
     blocked: 2,
     approvedToday: 11,
+    unread: 3,
   },
   refreshedAt: NOW,
 };
@@ -142,6 +143,7 @@ export const EMPTY_INBOX: InboxPayload = {
     running: 7,
     blocked: 2,
     approvedToday: 11,
+    unread: 0,
   },
   refreshedAt: NOW,
 };

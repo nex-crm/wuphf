@@ -8,15 +8,23 @@ import (
 	"runtime"
 )
 
-// detectPathShadows returns other wuphf executables found on pathEnv besides
-// selfExec. Paths are returned in PATH order and de-duplicated by real path
-// (so a symlink pointing at the running binary is correctly ignored).
+// detectPathShadows returns other wuphf executables on pathEnv that would
+// actually shadow selfExec — i.e. earlier in PATH order than the running
+// binary, since shell resolution picks the first match. Candidates that come
+// AFTER self in PATH cannot shadow it; warning about those was the U-05
+// boot-noise bug (#942).
 //
-// Candidates that resolve to a sibling file in the same directory as the
-// running binary are ignored too — this is the npm install layout, where
-// the PATH entry symlinks at `wuphf.js` (a launcher) but the native binary
-// is `wuphf` in the same node_modules/wuphf/bin dir. They are one install,
-// not a shadow.
+// When selfExec is NOT on pathEnv at all (e.g. running ./wuphf from a build
+// dir), nothing on PATH can shadow it for THIS invocation. We treat that case
+// as no-shadow too: the user clearly invoked the binary by explicit path, and
+// spamming them on every source build was the other half of the bug.
+//
+// Results are de-duplicated by real path (so a symlink pointing at the running
+// binary is correctly ignored). Candidates that resolve to a sibling file in
+// the same directory as the running binary are ignored too — this is the npm
+// install layout, where the PATH entry symlinks at `wuphf.js` (a launcher) but
+// the native binary is `wuphf` in the same node_modules/wuphf/bin dir. They
+// are one install, not a shadow.
 //
 // Extracted for tests — os.Executable() and os.Getenv() are injected by the
 // caller so unit tests can drive deterministic PATH layouts.
@@ -34,7 +42,8 @@ func detectPathShadows(selfExec, pathEnv string) []string {
 		exe = "wuphf.exe"
 	}
 	seen := map[string]bool{selfReal: true}
-	var shadows []string
+	var earlier []string
+	selfOnPath := false
 	for _, dir := range filepath.SplitList(pathEnv) {
 		if dir == "" {
 			continue
@@ -51,6 +60,11 @@ func detectPathShadows(selfExec, pathEnv string) []string {
 		if err != nil {
 			real = cand
 		}
+		if real == selfReal {
+			// Reached self's PATH entry. Anything after cannot shadow.
+			selfOnPath = true
+			break
+		}
 		if seen[real] {
 			continue
 		}
@@ -62,9 +76,15 @@ func detectPathShadows(selfExec, pathEnv string) []string {
 			continue
 		}
 		seen[real] = true
-		shadows = append(shadows, cand)
+		earlier = append(earlier, cand)
 	}
-	return shadows
+	// If self isn't on PATH at all, the user invoked it by explicit path and a
+	// shell `wuphf` call elsewhere is a known different binary — not a surprise
+	// shadow worth warning about every boot.
+	if !selfOnPath {
+		return nil
+	}
+	return earlier
 }
 
 // warnPathShadow writes a one-time warning to w when other wuphf executables

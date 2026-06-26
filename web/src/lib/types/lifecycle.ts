@@ -15,14 +15,121 @@
 
 /** Lifecycle position of a task. Source of truth on the broker (`teamTask.LifecycleState`). */
 export type LifecycleState =
+  | "drafting"
+  | "planning"
   | "intake"
   | "ready"
   | "running"
   | "review"
   | "decision"
-  | "blocked_on_pr_merge"
+  | "blocked"
+  | "queued_behind_owner"
   | "changes_requested"
-  | "approved";
+  | "approved"
+  | "rejected"
+  | "archived";
+
+/**
+ * Runtime membership for LifecycleState, exhaustive by construction: a
+ * `Record<LifecycleState, true>` fails to compile if a union member is
+ * missing, so `isLifecycleState` can never silently omit a state (a prior
+ * hand-maintained copy had dropped `queued_behind_owner`). Lets wire-shape
+ * `string` values — `Task.lifecycle_state`, card payload `lifecycle_state` —
+ * be narrowed to the typed union.
+ */
+const ALL_LIFECYCLE_STATES: Record<LifecycleState, true> = {
+  drafting: true,
+  planning: true,
+  intake: true,
+  ready: true,
+  running: true,
+  review: true,
+  decision: true,
+  blocked: true,
+  queued_behind_owner: true,
+  changes_requested: true,
+  approved: true,
+  rejected: true,
+  archived: true,
+};
+
+export function isLifecycleState(value: unknown): value is LifecycleState {
+  return (
+    typeof value === "string" && Object.hasOwn(ALL_LIFECYCLE_STATES, value)
+  );
+}
+
+/**
+ * User-facing board stage. The board groups the granular
+ * `LifecycleState` values into a smaller set of columns it derives in
+ * TypeScript via `stageForState`. The `scheduled` stage is the one
+ * exception — it is fed by routines (the scheduler), not by any
+ * lifecycle_state, so `stageForState` never returns it.
+ */
+export type LifecycleStage =
+  | "scheduled"
+  | "backlog"
+  | "in_progress"
+  | "blocked"
+  | "needs_human"
+  | "done"
+  | "archive";
+
+/** Left-to-right column order for the task board. */
+export const STAGE_ORDER: readonly LifecycleStage[] = [
+  "scheduled",
+  "backlog",
+  "in_progress",
+  "blocked",
+  "needs_human",
+  "done",
+  "archive",
+];
+
+/** Column header label per stage. */
+export const STAGE_LABELS: Record<LifecycleStage, string> = {
+  scheduled: "Scheduled Tasks",
+  backlog: "Backlog",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  needs_human: "Needs human input",
+  done: "Done",
+  archive: "Archive",
+};
+
+/**
+ * Project a granular lifecycle_state onto the board stage it belongs in.
+ *
+ * Never returns "scheduled" — that column is fed by routines, not
+ * lifecycle_state. Any unknown / unmapped value falls back to "backlog"
+ * so a newer broker state still lands somewhere readable instead of
+ * being dropped.
+ */
+export function stageForState(s: LifecycleState): LifecycleStage {
+  switch (s) {
+    case "drafting":
+    case "intake":
+    case "ready":
+      return "backlog";
+    case "planning":
+    case "running":
+    case "review":
+    case "changes_requested":
+      return "in_progress";
+    case "blocked":
+    case "queued_behind_owner":
+      return "blocked";
+    case "decision":
+      return "needs_human";
+    case "approved":
+      return "done";
+    case "archived":
+    case "rejected":
+      return "archive";
+    default:
+      return "backlog";
+  }
+}
 
 /** Severity tier on a reviewer grade. CodeRabbit-shaped. */
 export type Severity = "critical" | "major" | "minor" | "nitpick" | "skipped";
@@ -32,7 +139,8 @@ export type InboxFilter =
   | "decision_required"
   | "running"
   | "blocked"
-  | "approved";
+  | "approved"
+  | "unread";
 
 /**
  * One acceptance-criterion checkbox. Toggled by the owner agent during
@@ -173,6 +281,20 @@ export interface InboxRow {
   elapsed: string;
   /** True when elapsed should render in red (decision sitting >5m). */
   isUrgent: boolean;
+  /**
+   * Typed-blocker task IDs from teamTask.BlockedOn. Empty for tasks
+   * that are not blocked; populated for blocked and any
+   * other state the broker carries a dependency on.
+   */
+  blockedOn?: string[];
+  /**
+   * Free-text reason the broker attached to the task. For blocked
+   * tasks this is the actual "why" (agent timeout, manual block).
+   * Truncated by the broker for inbox payload size.
+   */
+  details?: string;
+  /** RFC3339 timestamp of the task's last mutation. */
+  updatedAt?: string;
 }
 
 /**
@@ -184,6 +306,12 @@ export interface InboxCounts {
   running: number;
   blocked: number;
   approvedToday: number;
+  /**
+   * Number of items whose latest activity post-dates the caller's
+   * InboxCursor.LastSeenAt. Drives the "Unread" sidebar pill and the
+   * top-bar attention badge.
+   */
+  unread: number;
 }
 
 /** Top-level inbox payload returned by the (mocked, soon-real) API. */
@@ -202,6 +330,13 @@ export interface InboxPayload {
  */
 export interface DecisionPacket {
   taskId: string;
+  /**
+   * Slug of the task's own channel (channel-per-task model). Not part of the
+   * persisted packet — the GET /tasks/{id} response carries it on the `task`
+   * snapshot, and the API layer lifts it onto the packet so the discussion
+   * empty state can link to the conversation.
+   */
+  channel?: string;
   title: string;
   lifecycleState: LifecycleState;
   ownerSlug: string;
@@ -228,6 +363,28 @@ export const STATE_PILL_TOKENS: Record<
   LifecycleState,
   { bg: string; text: string; label: string }
 > = {
+  /**
+   * drafting: explicitly PARKED (composer Backlog/park, or a legacy
+   * persisted draft) — agents can comment but not dispatch; the human
+   * starts it from the task page. Uses brand-accent tokens (--accent-bg /
+   * --accent) to signal "yours to start" — distinct from intake/ready
+   * (--bg-row-active) which use a neutral palette.
+   */
+  drafting: {
+    bg: "var(--accent-bg)",
+    text: "var(--accent)",
+    label: "parked",
+  },
+  /**
+   * planning: structured planning (Plan mode) — the owner is writing a plan
+   * read-only and the human approves it before execution. Uses accent tokens
+   * like drafting because it is also pre-execution and awaits a human approval.
+   */
+  planning: {
+    bg: "var(--accent-bg)",
+    text: "var(--accent)",
+    label: "planning",
+  },
   intake: {
     bg: "var(--bg-row-active)",
     text: "var(--text-secondary)",
@@ -253,10 +410,15 @@ export const STATE_PILL_TOKENS: Record<
     text: "var(--success-500)",
     label: "decision",
   },
-  blocked_on_pr_merge: {
+  blocked: {
     bg: "var(--warning-200)",
     text: "var(--warning-500)",
     label: "blocked",
+  },
+  queued_behind_owner: {
+    bg: "var(--warning-200)",
+    text: "var(--warning-500)",
+    label: "queued",
   },
   changes_requested: {
     bg: "var(--bg-row-active)",
@@ -267,6 +429,21 @@ export const STATE_PILL_TOKENS: Record<
     bg: "var(--bg-row-active)",
     text: "var(--text-tertiary)",
     label: "approved",
+  },
+  rejected: {
+    bg: "var(--danger-200, var(--warning-200))",
+    text: "var(--danger-500, var(--warning-500))",
+    label: "rejected",
+  },
+  /**
+   * archived: terminal, muted. Lands in the board's Archive column
+   * alongside rejected. Styled neutral (no accent / no alarm color) to
+   * read as "filed away, no longer in flight".
+   */
+  archived: {
+    bg: "var(--bg-row-active)",
+    text: "var(--text-tertiary)",
+    label: "archived",
   },
 };
 
@@ -362,7 +539,18 @@ export const FILTER_TO_STATES: Record<
   ReadonlyArray<LifecycleState>
 > = {
   decision_required: ["decision"],
-  running: ["intake", "ready", "running", "review"],
-  blocked: ["blocked_on_pr_merge", "changes_requested"],
+  // drafting is surfaced in the issues route, not the inbox; include it in
+  // running so inbox rows with this state still land somewhere readable.
+  running: ["drafting", "planning", "intake", "ready", "running", "review"],
+  blocked: [
+    "blocked",
+    "queued_behind_owner",
+    "changes_requested",
+    "rejected",
+  ],
   approved: ["approved"],
+  // Unread is post-filtered against the actor's cursor on the server,
+  // not against a fixed state set. Leave the state list empty so any
+  // call site that walks states for "unread" produces no false matches.
+  unread: [],
 };

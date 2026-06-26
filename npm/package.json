@@ -12,7 +12,8 @@
     "scripts/download-cloudflared.js",
     "scripts/postinstall.js",
     "scripts/version-check.js",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
@@ -38,7 +39,7 @@
   "bugs": {
     "url": "https://github.com/nex-crm/wuphf/issues"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "keywords": [
     "wuphf",
     "ai-agents",

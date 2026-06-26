@@ -6,7 +6,8 @@
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -25,10 +26,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
-    "@types/node": "^22.10.0",
+    "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "2.1.9",
     "fast-check": "^4.7.0",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "typescript": "^6.0.3",
+    "vitest": "2.1.9"
   }
 }

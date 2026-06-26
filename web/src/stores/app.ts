@@ -64,16 +64,22 @@ if (typeof document !== "undefined") {
 interface SidebarSectionsState {
   agents: boolean;
   channels: boolean;
+  // Tasks group, between Channels and Tools.
+  tasks: boolean;
   apps: boolean;
 }
 
 const SIDEBAR_SECTIONS_KEY = "wuphf-sidebar-sections";
-const SIDEBAR_BG_KEY = "wuphf-sidebar-bg";
 
 const _storedSidebarSections = ((): SidebarSectionsState => {
+  // v3 MVP (2026-05-25 product call): Channels are first-class and open
+  // by default. Chat is the primary surface; the agent subspace is an
+  // additional view. Existing sessions keep whatever value they previously
+  // persisted.
   const def: SidebarSectionsState = {
     agents: true,
     channels: true,
+    tasks: true,
     apps: true,
   };
   try {
@@ -83,19 +89,11 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
     return {
       agents: parsed.agents ?? def.agents,
       channels: parsed.channels ?? def.channels,
+      tasks: parsed.tasks ?? def.tasks,
       apps: parsed.apps ?? def.apps,
     };
   } catch {
     return def;
-  }
-})();
-
-const _storedSidebarBg = ((): string | null => {
-  try {
-    const v = localStorage.getItem(SIDEBAR_BG_KEY);
-    return v?.trim() ? v : null;
-  } catch {
-    return null;
   }
 })();
 
@@ -119,6 +117,15 @@ export function directChannelSlug(
   return a > b ? `${b}__${a}` : `${a}__${b}`;
 }
 
+/**
+ * Sentinel "channel" the onboarding wizard seeds the first-issue draft under so
+ * the home composer (TaskComposer) picks it up on landing. It is NOT a real
+ * channel slug — the leading "@" can never collide with one — so the #general
+ * ConversationView Composer can't consume the handoff out from under the home
+ * surface the founder actually lands on.
+ */
+export const HOME_COMPOSER_DRAFT_CHANNEL = "@home";
+
 export interface AppStore {
   // Connection
   brokerConnected: boolean;
@@ -133,12 +140,13 @@ export interface AppStore {
   toggleSidebarAgents: () => void;
   sidebarChannelsOpen: boolean;
   toggleSidebarChannels: () => void;
+  /** Tasks group open/closed state. */
+  sidebarTasksOpen: boolean;
+  toggleSidebarTasks: () => void;
   sidebarAppsOpen: boolean;
   toggleSidebarApps: () => void;
   sidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
-  sidebarBg: string | null;
-  setSidebarBg: (color: string | null) => void;
 
   // Thread panel — captures the originating channel alongside the message id
   // so that replies posted while the user has navigated away from the channel
@@ -187,6 +195,17 @@ export interface AppStore {
    */
   composerSearchInitialQuery: string;
   setComposerSearchInitialQuery: (q: string) => void;
+
+  /**
+   * One-shot composer prefill keyed by channel. Set when a flow wants to drop
+   * the user into a channel with text already in the box — for example, the
+   * office tour finish handoff seeds an example first issue in the CEO DM.
+   * The Composer consumes and clears it when its channel matches, so it never
+   * re-applies on a later visit to the same channel.
+   */
+  pendingComposerDraft: { channel: string; text: string } | null;
+  setPendingComposerDraft: (channel: string, text: string) => void;
+  consumePendingComposerDraft: (channel: string) => string | null;
 
   // Help modal — /help slash command surface
   composerHelpOpen: boolean;
@@ -258,6 +277,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     persistSidebarSections({
       agents: next,
       channels: get().sidebarChannelsOpen,
+      tasks: get().sidebarTasksOpen,
       apps: get().sidebarAppsOpen,
     });
   },
@@ -268,6 +288,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     persistSidebarSections({
       agents: get().sidebarAgentsOpen,
       channels: next,
+      tasks: get().sidebarTasksOpen,
+      apps: get().sidebarAppsOpen,
+    });
+  },
+  sidebarTasksOpen: _storedSidebarSections.tasks,
+  toggleSidebarTasks: () => {
+    const next = !get().sidebarTasksOpen;
+    set({ sidebarTasksOpen: next });
+    persistSidebarSections({
+      agents: get().sidebarAgentsOpen,
+      channels: get().sidebarChannelsOpen,
+      tasks: next,
       apps: get().sidebarAppsOpen,
     });
   },
@@ -278,20 +310,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     persistSidebarSections({
       agents: get().sidebarAgentsOpen,
       channels: get().sidebarChannelsOpen,
+      tasks: get().sidebarTasksOpen,
       apps: next,
     });
   },
   sidebarCollapsed: false,
   toggleSidebarCollapsed: () =>
     set({ sidebarCollapsed: !get().sidebarCollapsed }),
-  sidebarBg: _storedSidebarBg,
-  setSidebarBg: (color) => {
-    try {
-      if (color) localStorage.setItem(SIDEBAR_BG_KEY, color);
-      else localStorage.removeItem(SIDEBAR_BG_KEY);
-    } catch {}
-    set({ sidebarBg: color });
-  },
 
   activeThread: null,
   setActiveThread: (thread) => set({ activeThread: thread }),
@@ -354,6 +379,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setSearchOpen: (v) => set({ searchOpen: v }),
   composerSearchInitialQuery: "",
   setComposerSearchInitialQuery: (q) => set({ composerSearchInitialQuery: q }),
+
+  pendingComposerDraft: null,
+  setPendingComposerDraft: (channel, text) =>
+    set({ pendingComposerDraft: { channel, text } }),
+  consumePendingComposerDraft: (channel) => {
+    const pending = get().pendingComposerDraft;
+    if (!pending || pending.channel !== channel) return null;
+    set({ pendingComposerDraft: null });
+    return pending.text;
+  },
 
   composerHelpOpen: false,
   setComposerHelpOpen: (v) => set({ composerHelpOpen: v }),

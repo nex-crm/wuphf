@@ -25,9 +25,9 @@ func TestLifecycleMigrationCartesianSweep(t *testing.T) {
 	// LifecycleState. Any tuple outside the canonical set must cleanly
 	// fall through to LifecycleStateUnknown — never to a partial or
 	// surprising in-between value.
-	pipelineStages := []string{"", "triage", "implement", "review", "ship"}
+	pipelineStages := []string{"", "triage", "implement", "review", "ship", "archived"}
 	reviewStates := []string{"", "pending_review", "ready_for_review", "approved", "not_required"}
-	statuses := []string{"", "open", "in_progress", "review", "blocked", "done", "completed", "canceled", "cancelled"}
+	statuses := []string{"", "open", "in_progress", "review", "blocked", "done", "completed", "canceled", "cancelled", "archived"}
 	blockedValues := []bool{false, true}
 
 	// Sanity: all canonical migration map keys must resolve to a canonical
@@ -81,11 +81,11 @@ func TestLifecycleMigrationKnownTuplesResolveCanonical(t *testing.T) {
 	}{
 		{"pipeline running implement", "implement", "pending_review", "in_progress", false, LifecycleStateRunning},
 		{"pipeline review ready", "review", "ready_for_review", "in_progress", false, LifecycleStateReview},
-		{"pipeline blocked on pr merge canonical", "review", "ready_for_review", "blocked", true, LifecycleStateBlockedOnPRMerge},
+		{"pipeline blocked on pr merge canonical", "review", "ready_for_review", "blocked", true, LifecycleStateBlocked},
 		{"pipeline queued behind owner canonical", "triage", "pending_review", "open", true, LifecycleStateQueuedBehindOwner},
 		{"pipeline approved ship", "ship", "approved", "done", false, LifecycleStateApproved},
-		{"bare blocked status only", "", "", "blocked", true, LifecycleStateBlockedOnPRMerge},
-		{"bare blocked status, blocked=false (legacy bug fix)", "", "", "blocked", false, LifecycleStateBlockedOnPRMerge},
+		{"bare blocked status only", "", "", "blocked", true, LifecycleStateBlocked},
+		{"bare blocked status, blocked=false (legacy bug fix)", "", "", "blocked", false, LifecycleStateBlocked},
 		{"bare open", "", "", "open", false, LifecycleStateReady},
 		{"bare open blocked", "", "", "open", true, LifecycleStateQueuedBehindOwner},
 		{"bare done", "", "", "done", false, LifecycleStateApproved},
@@ -208,6 +208,56 @@ func TestLifecycleMigrationLegacyMergedToApproved(t *testing.T) {
 	}
 	if !foundApproved {
 		t.Fatalf("CanonicalLifecycleStates is missing LifecycleStateApproved")
+	}
+}
+
+func TestLifecycleMigrationLegacyBlockedOnPRMergeToBlocked(t *testing.T) {
+	// The PR-style review/merge model is retired; the persisted state value
+	// "blocked_on_pr_merge" must load as the honest generic "blocked" so prod
+	// snapshots on disk keep resolving to a real, active-board state instead
+	// of falling through to the unknown/backlog fallback.
+	legacy := []byte(`{
+		"id":"OFFICE-3",
+		"channel":"general",
+		"title":"timed out before the rename",
+		"status":"blocked",
+		"lifecycle_state":"blocked_on_pr_merge"
+	}`)
+
+	var task teamTask
+	if err := task.UnmarshalJSON(legacy); err != nil {
+		t.Fatalf("UnmarshalJSON legacy state: %v", err)
+	}
+	if task.LifecycleState != LifecycleStateBlocked {
+		t.Fatalf("legacy lifecycle_state %q should normalize to LifecycleStateBlocked, got %q",
+			"blocked_on_pr_merge", task.LifecycleState)
+	}
+
+	// Re-saving must emit the new value and never the retired one.
+	out, err := task.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON after normalization: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"lifecycle_state":"blocked"`)) {
+		t.Fatalf("post-normalization MarshalJSON should write the new state name; got: %s", out)
+	}
+	if bytes.Contains(out, []byte(`"lifecycle_state":"blocked_on_pr_merge"`)) {
+		t.Fatalf("post-normalization MarshalJSON should NOT write the retired state name; got: %s", out)
+	}
+
+	// The retired value must be gone from the canonical enum, and the new
+	// one present — a half-applied rename should fail loud.
+	foundBlocked := false
+	for _, s := range CanonicalLifecycleStates() {
+		if s == LifecycleStateBlocked {
+			foundBlocked = true
+		}
+		if string(s) == "blocked_on_pr_merge" {
+			t.Fatalf("CanonicalLifecycleStates still includes the retired %q state; rename incomplete", "blocked_on_pr_merge")
+		}
+	}
+	if !foundBlocked {
+		t.Fatalf("CanonicalLifecycleStates is missing LifecycleStateBlocked")
 	}
 }
 

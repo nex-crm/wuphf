@@ -1,7 +1,15 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_SANITIZED_JSON_NODES, MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
-import { SanitizedString, type SanitizedStringPolicy } from "../src/sanitized-string.ts";
+import { MOAT_DISALLOWED_RANGES, MOAT_UNICODE_VERSION } from "../src/moat-disallowed-table.ts";
+import { frozenNfkc } from "../src/nfkc.ts";
+import {
+  isMoatDisallowedCodePoint,
+  SanitizedString,
+  type SanitizedStringOptions,
+  type SanitizedStringPolicy,
+} from "../src/sanitized-string.ts";
+import moatTableJson from "../testdata/moat-disallowed-table.json";
 
 type JsonPrimitive = null | boolean | number | string;
 type JsonValue = JsonPrimitive | JsonValue[] | JsonRecord;
@@ -11,6 +19,11 @@ interface JsonRecord {
 
 const MOAT_NUM_RUNS = 1000;
 const JSON_NUM_RUNS = 1000;
+
+// The Unicode version of the runtime executing this test file. The frozen
+// moat table is pinned to a fixed version; the live-Unicode cross-check below
+// only applies when the two match.
+const { unicode: RUNTIME_UNICODE_VERSION } = process.versions;
 
 const BIDI_CHARS = [
   "\u202a",
@@ -91,6 +104,81 @@ const tagCharArb = fc
 const jsonObjectArb = fc
   .jsonValue()
   .filter((value): value is JsonRecord => isJsonRecord(value) && canExpectedRoundTripJson(value));
+
+// Code points the moat (allowlist) policy must strip but the default denylist
+// keeps — at least one per rejected class (Cc/Cf/Cn/Co + non-`C*`
+// Default_Ignorable). `Cs` (surrogates) is intentionally absent: a lone
+// surrogate is rejected by `rejectLoneSurrogates` before the moat ever runs,
+// and a paired surrogate is a valid astral character. `fc.string({ unit:
+// "grapheme" })` emits printable text only and structurally almost never
+// produces these, so the moat property tests below would run near-vacuously
+// without an arbitrary that deliberately injects them.
+const MOAT_DISALLOWED_SAMPLE = [
+  "\u00ad", // SOFT HYPHEN — Cf
+  "\u061c", // ARABIC LETTER MARK — Cf
+  "\u200e", // LEFT-TO-RIGHT MARK — Cf
+  "\ufeff", // BYTE ORDER MARK — Cf
+  "\u0378", // UNASSIGNED — Cn
+  "\u034f", // COMBINING GRAPHEME JOINER — Default_Ignorable, not C*
+  "\u115f", // HANGUL CHOSEONG FILLER — Default_Ignorable, Lo
+  "\u1160", // HANGUL JUNGSEONG FILLER — Default_Ignorable, Lo
+  "\ufe0f", // VARIATION SELECTOR-16 — Default_Ignorable, Mn
+  "\u17b4", // KHMER VOWEL INHERENT AQ — Default_Ignorable
+  "\ue000", // PRIVATE USE — Co (BMP)
+  String.fromCodePoint(0xe0100), // VARIATION SELECTOR-17 — astral Default_Ignorable
+  String.fromCodePoint(0xf0000), // SUPPLEMENTARY PRIVATE USE AREA-A — astral Co
+  String.fromCodePoint(0x100000), // SUPPLEMENTARY PRIVATE USE AREA-B — astral Co
+] as const;
+const moatDisallowedCharArb = fc.constantFrom(...MOAT_DISALLOWED_SAMPLE);
+// Interleave moat-disallowed code points through ordinary sanitizable text so
+// every property run feeds the moat something it must actually strip.
+const moatInterleavedStringArb = fc
+  .array(fc.tuple(sanitizableStringArb, moatDisallowedCharArb), { minLength: 1, maxLength: 16 })
+  .chain((segments) => fc.tuple(fc.constant(segments), sanitizableStringArb))
+  .map(
+    ([segments, tail]) =>
+      `${segments.map(([chunk, invisible]) => `${chunk}${invisible}`).join("")}${tail}`,
+  );
+// Bare combining marks. `fc.string({ unit: "grapheme" })` never emits a string
+// that *starts* with one (a grapheme cluster always opens with a base), so
+// `moatInterleavedStringArb` can never place a moat code point between a base
+// letter and a combining mark — exactly the boundary the MAJOR-1 idempotence
+// fix exists for. This arbitrary builds that boundary explicitly: stripping
+// the middle code point from `base + <moat> + mark` leaves `base + mark`
+// adjacent for NFKC to compose. Without the re-normalize fix the
+// NFKC-stability and idempotence properties below pass vacuously.
+const COMBINING_MARK_SAMPLE = [
+  "\u0301", // COMBINING ACUTE ACCENT
+  "\u0300", // COMBINING GRAVE ACCENT
+  "\u0308", // COMBINING DIAERESIS
+  "\u0327", // COMBINING CEDILLA
+  "\u093c", // DEVANAGARI SIGN NUKTA
+] as const;
+const baseLetterArb = fc.constantFrom("a", "e", "n", "o", "u", "c", "\u0928");
+const combiningMarkArb = fc.constantFrom(...COMBINING_MARK_SAMPLE);
+const moatComposableStringArb = fc
+  .array(fc.tuple(baseLetterArb, moatDisallowedCharArb, combiningMarkArb), {
+    minLength: 1,
+    maxLength: 12,
+  })
+  .map((triples) =>
+    triples.map(([base, invisible, mark]) => `${base}${invisible}${mark}`).join(""),
+  );
+// Union of ordinary interleaving and the composition-boundary case, so the
+// MAJOR-1 property tests exercise both stripping coverage and re-composition.
+const moatStressStringArb = fc.oneof(moatInterleavedStringArb, moatComposableStringArb);
+// JSON whose string keys and values carry moat-disallowed code points, so the
+// allowlist JSON round-trip property exercises moat key/value stripping —
+// `fc.jsonValue()` keys are printable ASCII only and never trigger it.
+const moatJsonStringArb = fc
+  .tuple(sanitizableStringArb, moatDisallowedCharArb, sanitizableStringArb)
+  .map(([prefix, invisible, suffix]) => `${prefix}${invisible}${suffix}`)
+  .filter(canExpectedSanitizeText);
+const moatJsonObjectArb = fc
+  .dictionary(moatJsonStringArb, fc.oneof(moatJsonStringArb, fc.integer(), fc.boolean()), {
+    minKeys: 1,
+  })
+  .filter((value) => canExpectedRoundTripJson(value, "allowlist"));
 
 describe("SanitizedString", () => {
   it("is idempotent after NFKC and stripping", () => {
@@ -246,6 +334,299 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown("a\u200db", { policy: "allow-zwj" }).value).toBe("a\u200db");
   });
 
+  describe("allowlist policy", () => {
+    const opts = { policy: "allowlist" as const };
+
+    it("passes printable ASCII unchanged", () => {
+      expect(SanitizedString.fromUnknown("hello world", opts).value).toBe("hello world");
+      expect(SanitizedString.fromUnknown("a1b2_c-d.e", opts).value).toBe("a1b2_c-d.e");
+    });
+
+    it("preserves tab, newline, and carriage return (allowed whitespace, not invisibles)", () => {
+      // U+0009/000A/000D are `Cc` and match `\p{C}`, but the moat must not
+      // strip them — they carry the line structure a signed multi-line
+      // payload depends on. Every other policy keeps them; allowlist must too.
+      expect(SanitizedString.fromUnknown("a\tb\nc\rd", opts).value).toBe("a\tb\nc\rd");
+      expect(SanitizedString.fromUnknown("line one\nline two", opts).value).toBe(
+        "line one\nline two",
+      );
+    });
+
+    it("passes common non-Latin scripts (letters, marks, numbers, punctuation)", () => {
+      // Hiragana, Katakana, Han, Hangul, Cyrillic, Arabic, Devanagari, Greek.
+      expect(SanitizedString.fromUnknown("\u3053\u3093\u306b\u3061\u306f", opts).value).toBe(
+        "\u3053\u3093\u306b\u3061\u306f",
+      );
+      expect(SanitizedString.fromUnknown("\u5317\u4eac", opts).value).toBe("\u5317\u4eac");
+      expect(SanitizedString.fromUnknown("\uc548\ub155", opts).value).toBe("\uc548\ub155");
+      expect(SanitizedString.fromUnknown("\u041f\u0440\u0438\u0432\u0435\u0442", opts).value).toBe(
+        "\u041f\u0440\u0438\u0432\u0435\u0442",
+      );
+      expect(SanitizedString.fromUnknown("\u0645\u0631\u062d\u0628\u0627", opts).value).toBe(
+        "\u0645\u0631\u062d\u0628\u0627",
+      );
+      expect(SanitizedString.fromUnknown("\u0928\u092e\u0938\u094d\u0924\u0947", opts).value).toBe(
+        "\u0928\u092e\u0938\u094d\u0924\u0947",
+      );
+      expect(
+        SanitizedString.fromUnknown("\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1", opts).value,
+      ).toBe("\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1");
+    });
+
+    it("passes emoji (without ZWJ, since ZWJ is Cf)", () => {
+      expect(SanitizedString.fromUnknown("\ud83d\ude80", opts).value).toBe("\ud83d\ude80");
+      expect(SanitizedString.fromUnknown("\ud83d\ude00\u2b50\ud83d\udcaf", opts).value).toBe(
+        "\ud83d\ude00\u2b50\ud83d\udcaf",
+      );
+    });
+
+    it("strips soft hyphen U+00AD (Cf \u2014 accepted by default policy, rejected by allowlist)", () => {
+      // U+00AD is Cf "Format". The default denylist does not strip it; the
+      // allowlist moat does. This is the canonical example of the policy
+      // adding coverage beyond strip-zero-width.
+      expect(SanitizedString.fromUnknown("foo\u00adbar").value).toBe("foo\u00adbar");
+      expect(SanitizedString.fromUnknown("foo\u00adbar", opts).value).toBe("foobar");
+    });
+
+    it("strips private-use code points (Co \u2014 never legitimate text)", () => {
+      // U+E000 sits in the BMP Private Use Area. Apps sometimes use these for
+      // app-specific glyphs but the rendered text contract MUST NOT accept
+      // them \u2014 they are invisible-on-most-systems and trivially used for
+      // tracking / homograph attacks.
+      expect(SanitizedString.fromUnknown("a\ue000b", opts).value).toBe("ab");
+      // U+F8FF is the Apple logo PUA point.
+      expect(SanitizedString.fromUnknown("a\uf8ffb", opts).value).toBe("ab");
+      // Supplementary Private Use Area-A (U+F0000) and -B (U+100000) are
+      // astral Co code points. The moat iterates by code point, so an astral
+      // regression would not be caught by the BMP cases above.
+      expect(SanitizedString.fromUnknown(`a${String.fromCodePoint(0xf0000)}b`, opts).value).toBe(
+        "ab",
+      );
+      expect(SanitizedString.fromUnknown(`a${String.fromCodePoint(0x100000)}b`, opts).value).toBe(
+        "ab",
+      );
+    });
+
+    it("strips every bidi/format control, not just the U+202A-E and U+2066-9 ranges", () => {
+      // U+061C ARABIC LETTER MARK is Cf and is NOT in the default denylist.
+      // Allowlist must catch it.
+      expect(SanitizedString.fromUnknown("a\u061cb").value).toBe("a\u061cb");
+      expect(SanitizedString.fromUnknown("a\u061cb", opts).value).toBe("ab");
+      // U+200E LEFT-TO-RIGHT MARK is Cf, also not in the default denylist.
+      expect(SanitizedString.fromUnknown("a\u200eb").value).toBe("a\u200eb");
+      expect(SanitizedString.fromUnknown("a\u200eb", opts).value).toBe("ab");
+    });
+
+    it("strips ZWJ (allowlist supersedes allow-zwj)", () => {
+      // allow-zwj is meant to coexist with the default denylist for emoji
+      // sequences. The allowlist contract is stricter \u2014 even under an
+      // explicit `policy: "allowlist"` ZWJ is stripped because it's Cf.
+      expect(SanitizedString.fromUnknown("a\u200db", opts).value).toBe("ab");
+    });
+
+    it("re-normalizes after stripping so output is NFKC-stable", () => {
+      // MAJOR-1 regression. Stripping a code point can leave neighbours that
+      // NFKC would compose (strip U+034F from `a U+034F U+0301` and the now-
+      // adjacent `a U+0301` composes to `\u00e1`). The moat re-normalizes after
+      // stripping; without that, output is not NFKC-stable and re-sanitizing
+      // yields different bytes \u2014 fatal for the cosign path, which re-sanitizes
+      // at its own trust boundary and compares bytes. `moatStressStringArb`
+      // includes the `base + <moat> + combining-mark` case, so reverting the
+      // re-normalize fix makes this property fail (verified) rather than pass
+      // vacuously.
+      fc.assert(
+        fc.property(moatStressStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // Stable under the FROZEN normaliser — production normalises with
+          // frozenNfkc, not the runtime, so the oracle must too.
+          expect(out).toBe(frozenNfkc(out));
+          // Stripping plus canonical re-composition is non-increasing in code
+          // points: the moat only ever removes, never inserts.
+          expect([...out].length).toBeLessThanOrEqual([...frozenNfkc(input)].length);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("is idempotent under repeated allowlist sanitization", () => {
+      // Re-sanitizing a moat-clean string must be a no-op \u2014 the cosign codec
+      // re-sanitizes under `allowlist` at its own trust boundary. Driven from
+      // `moatStressStringArb` (which exposes a re-composition boundary) so the
+      // property fails against the pre-fix code instead of passing vacuously.
+      fc.assert(
+        fc.property(moatStressStringArb, (input) => {
+          const once = SanitizedString.fromUnknown(input, opts).value;
+          const twice = SanitizedString.fromUnknown(once, opts).value;
+          expect(twice).toBe(once);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("never lets a Unicode C* code point through, except allowed whitespace", () => {
+      fc.assert(
+        fc.property(moatInterleavedStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // No assigned format, unassigned, private-use, or surrogate code
+          // points should survive. Tab/newline/carriage return are `Cc` but
+          // intentionally-allowed whitespace, so strip them before asserting.
+          // Lone surrogates are already rejected earlier. The live `\p{C}`
+          // regex is an independent cross-check against the frozen table.
+          const withoutAllowedWhitespace = out.replace(/[\t\n\r]/g, "");
+          expect(/\p{C}/u.test(withoutAllowedWhitespace)).toBe(false);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it.each([
+      { label: "U+115F HANGUL CHOSEONG FILLER", codePoint: 0x115f },
+      { label: "U+1160 HANGUL JUNGSEONG FILLER", codePoint: 0x1160 },
+      { label: "U+034F COMBINING GRAPHEME JOINER", codePoint: 0x034f },
+      { label: "U+FE0F VARIATION SELECTOR-16", codePoint: 0xfe0f },
+      { label: "U+E0100 VARIATION SELECTOR-17", codePoint: 0xe0100 },
+      { label: "U+17B4 KHMER VOWEL INHERENT AQ", codePoint: 0x17b4 },
+    ])("strips $label — a default-ignorable the denylist + \\p{C} both miss", ({ codePoint }) => {
+      const ch = String.fromCodePoint(codePoint);
+      // Prove the regex distinction: \p{C} alone would NOT catch this.
+      expect(/\p{C}/u.test(ch)).toBe(false);
+      expect(/\p{Default_Ignorable_Code_Point}/u.test(ch)).toBe(true);
+      // Default policy keeps it; the moat strips it.
+      expect(SanitizedString.fromUnknown(`a${ch}b`).value).toBe(`a${ch}b`);
+      expect(SanitizedString.fromUnknown(`a${ch}b`, opts).value).toBe("ab");
+    });
+
+    it("never lets any default-ignorable code point through, except allowed whitespace", () => {
+      fc.assert(
+        fc.property(moatInterleavedStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // Tab/newline/carriage return match `\p{C}` but are intentionally
+          // allowed; strip them before asserting the moat rejected the rest.
+          // The live `\p{C}` + `\p{Default_Ignorable_Code_Point}` regex is an
+          // independent cross-check against the frozen table the moat uses.
+          const withoutAllowedWhitespace = out.replace(/[\t\n\r]/g, "");
+          expect(/[\p{C}\p{Default_Ignorable_Code_Point}]/u.test(withoutAllowedWhitespace)).toBe(
+            false,
+          );
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("re-composes neighbours exposed by stripping a default-ignorable joiner", () => {
+      // The concrete MAJOR-1 case: U+034F COMBINING GRAPHEME JOINER sits
+      // between `a` and U+0301 COMBINING ACUTE specifically to block their
+      // composition. Stripping it must not leave a non-NFKC string behind.
+      const once = SanitizedString.fromUnknown("a\u034f\u0301", opts).value;
+      expect(once).toBe("\u00e1");
+      expect(SanitizedString.fromUnknown(once, opts).value).toBe(once);
+      // Devanagari: NA + VARIATION SELECTOR-1 + nukta composes to U+0929.
+      const devanagari = SanitizedString.fromUnknown("\u0928\ufe00\u093c", opts).value;
+      expect(devanagari).toBe("\u0929");
+      expect(SanitizedString.fromUnknown(devanagari, opts).value).toBe(devanagari);
+    });
+
+    it("returns empty text for empty and all-disallowed input", () => {
+      // Edge cases the interleave arbitraries never generate (they always mix
+      // in a sanitizable chunk): empty input, and input that is *entirely*
+      // moat-disallowed must sanitize to "" \u2014 not throw, not pass anything
+      // through.
+      expect(SanitizedString.fromUnknown("", opts).value).toBe("");
+      expect(SanitizedString.fromUnknown("\u00ad\u200e\ufeff\u034f", opts).value).toBe("");
+      expect(SanitizedString.fromUnknown(String.fromCodePoint(0xf0000, 0xe0100), opts).value).toBe(
+        "",
+      );
+    });
+  });
+
+  describe("policy validation", () => {
+    it("throws on an unknown policy string instead of silently using the default", () => {
+      // The security-critical failure mode: an untyped caller passes a typo
+      // ("allow-list") and silently gets the weaker default denylist. The
+      // sanitizer must fail closed.
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: "allow-list" as SanitizedStringPolicy }),
+      ).toThrow(/unknown policy "allow-list"/);
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: "" as SanitizedStringPolicy }),
+      ).toThrow(/unknown policy/);
+    });
+
+    it("throws on a non-object options argument instead of silently using the default", () => {
+      // An untyped caller that passes the policy positionally (a bare
+      // "allowlist" string, or an array) has `.policy` read as `undefined`
+      // and would silently get the weaker default denylist. Fail closed.
+      // `null` is the easy-to-miss case: `typeof null === "object"`, so a
+      // loose object test would let it through. Keep it in the table.
+      for (const malformed of ["allowlist", [], null, 42, true]) {
+        expect(() =>
+          SanitizedString.fromUnknown("x", malformed as unknown as SanitizedStringOptions),
+        ).toThrow(/options must be a plain object/);
+      }
+    });
+
+    it("throws on non-plain-object or prototype-smuggled options instead of downgrading", () => {
+      // A Map / class instance / Object.create(...) carrier passes a loose
+      // `typeof === "object"` test but is not a plain object; its `.policy`
+      // reads as undefined (silent default) or is reachable only through the
+      // prototype chain. Require an Object.prototype/null prototype.
+      const mapOptions = new Map([["policy", "allowlist"]]);
+      expect(() =>
+        SanitizedString.fromUnknown("x", mapOptions as unknown as SanitizedStringOptions),
+      ).toThrow(/options must be a plain object/);
+      const inheritedPolicy = Object.create({ policy: "allowlist" }) as SanitizedStringOptions;
+      expect(() => SanitizedString.fromUnknown("x", inheritedPolicy)).toThrow(
+        /options must be a plain object/,
+      );
+    });
+
+    it("throws on an accessor `policy` instead of running caller code", () => {
+      // An accessor `policy` would execute arbitrary caller code before
+      // sanitization runs. Resolve `policy` only as an own data property.
+      const accessorOptions = {} as SanitizedStringOptions;
+      Object.defineProperty(accessorOptions, "policy", {
+        get() {
+          return "allowlist";
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      expect(() => SanitizedString.fromUnknown("x", accessorOptions)).toThrow(
+        /policy must be an own data property/,
+      );
+    });
+
+    it("accepts a null-prototype options object with an own data policy", () => {
+      // A null-prototype plain object has no prototype-smuggling surface, so
+      // it is a valid carrier; an own data `policy` resolves normally.
+      const nullProtoOptions = Object.create(null) as SanitizedStringOptions;
+      Object.defineProperty(nullProtoOptions, "policy", {
+        value: "allowlist",
+        enumerable: true,
+      });
+      expect(SanitizedString.fromUnknown("a\u00adb", nullProtoOptions).value).toBe("ab");
+    });
+
+    it("throws on a non-string policy instead of silently using the default", () => {
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: 1 as unknown as SanitizedStringPolicy }),
+      ).toThrow(/policy must be a string/);
+    });
+
+    it("accepts every declared policy without throwing", () => {
+      const policies: readonly SanitizedStringPolicy[] = [
+        "strip-zero-width",
+        "allow-zwj",
+        "allowlist",
+      ];
+      for (const policy of policies) {
+        expect(SanitizedString.fromUnknown("ok", { policy }).value).toBe("ok");
+      }
+      // Absent policy → default, no throw.
+      expect(SanitizedString.fromUnknown("ok").value).toBe("ok");
+    });
+  });
+
   it.each([
     { left: "e\u0301", right: "\u00e9", expected: "\u00e9" },
     { left: "\u212b", right: "\u00c5", expected: "\u00c5" },
@@ -298,6 +679,40 @@ describe("SanitizedString", () => {
     );
   });
 
+  it("keeps JSON object output parseable under the allowlist policy", () => {
+    // `moatJsonObjectArb` injects moat-disallowed code points into every key
+    // and value, so this property actually exercises moat key/value stripping
+    // — `fc.jsonValue()` keys are printable ASCII only and never would. The
+    // arbitrary already re-filters with `canExpectedRoundTripJson(_,
+    // "allowlist")`, so any input whose keys only collide *after* the moat
+    // strips them (e.g. `{ "x\u00ady": 1, "xy": 2 }`) is excluded here and
+    // covered instead by the explicit collision test below.
+    fc.assert(
+      fc.property(moatJsonObjectArb, (input) => {
+        const result = SanitizedString.fromUnknown(input, { policy: "allowlist" }).value;
+        const parsed = JSON.parse(result) as JsonValue;
+        const expected = expectedSanitizeJsonValue(projectJson(input), "allowlist");
+
+        expect(typeof result).toBe("string");
+        expect(parsed).toEqual(expected);
+      }),
+      { numRuns: JSON_NUM_RUNS },
+    );
+  });
+
+  it("throws on a moat-induced JSON key collision under the allowlist policy", () => {
+    // Two keys distinct under the default denylist collapse to the same key
+    // once the moat strips the soft hyphen. The sanitizer must reject the
+    // ambiguous object rather than silently drop a field.
+    const collision = JSON.parse('{"x\u00ady": 1, "xy": 2}') as JsonValue;
+    expect(() => SanitizedString.fromUnknown(collision, { policy: "allowlist" })).toThrow(
+      /sanitized key collision/,
+    );
+    // The same object is fine under the default policy — U+00AD is kept, so
+    // the two keys stay distinct.
+    expect(() => SanitizedString.fromUnknown(collision)).not.toThrow();
+  });
+
   it("coerces null and undefined to empty text", () => {
     expect(SanitizedString.fromUnknown(null).value).toBe("");
     expect(SanitizedString.fromUnknown(undefined).value).toBe("");
@@ -307,6 +722,16 @@ describe("SanitizedString", () => {
     expect(() => SanitizedString.fromUnknown("\ud800")).toThrow(/lone surrogate/);
     expect(() => SanitizedString.fromUnknown("\ud800x")).toThrow(/lone surrogate/);
     expect(() => SanitizedString.fromUnknown("\udc00")).toThrow(/lone surrogate/);
+  });
+
+  it("rejects lone surrogate code units under the allowlist policy too", () => {
+    // `Cs` (surrogate) is in the moat's rejected set, but production rejects
+    // lone surrogates before the policy branch ever runs. Pin that the
+    // high-stakes path is no weaker than the default one.
+    const opts = { policy: "allowlist" as const };
+    expect(() => SanitizedString.fromUnknown("\ud800", opts)).toThrow(/lone surrogate/);
+    expect(() => SanitizedString.fromUnknown("\ud800x", opts)).toThrow(/lone surrogate/);
+    expect(() => SanitizedString.fromUnknown("\udc00", opts)).toThrow(/lone surrogate/);
   });
 
   it.each([
@@ -575,6 +1000,63 @@ describe("SanitizedString", () => {
   });
 });
 
+describe("frozen moat table", () => {
+  // The moat classifies against a frozen range table, not the runtime's live
+  // `\p{...}` data, so the classification boundary is the same on every
+  // Node/Bun/ICU version. (NFKC normalization is frozen too — via frozenNfkc;
+  // see nfkc.ts.) These tests pin the embedded table to the cross-language
+  // wire artifact testdata/moat-disallowed-table.json (which the Go reference
+  // verifier-reference.go independently checks).
+
+  it("matches the cross-language testdata artifact", () => {
+    expect(MOAT_UNICODE_VERSION).toBe(moatTableJson.unicodeVersion);
+    expect(MOAT_DISALLOWED_RANGES).toEqual(moatTableJson.disallowedRanges);
+  });
+
+  it("is sorted, non-overlapping, and non-adjacent", () => {
+    // A malformed table silently breaks the binary search the moat relies on.
+    // Guard against a vacuous pass on an empty table — the loop body would
+    // never run and every assertion below would be skipped.
+    expect(MOAT_DISALLOWED_RANGES.length).toBeGreaterThan(0);
+    let previousEnd = -2;
+    for (const [start, end] of MOAT_DISALLOWED_RANGES) {
+      expect(start).toBeLessThanOrEqual(end);
+      expect(start).toBeGreaterThan(previousEnd + 1);
+      previousEnd = end;
+    }
+  });
+
+  it("classifies every curated vector as the artifact expects", () => {
+    // The vectors encode human-verified expectations across Cc/Cf/Cn/Co/Cs and
+    // default-ignorables; the Go reference asserts the same set independently.
+    // Guard against a vacuous pass on an empty vector array.
+    expect(moatTableJson.classificationVectors.length).toBeGreaterThan(0);
+    for (const vector of moatTableJson.classificationVectors) {
+      expect(isMoatDisallowedCodePoint(vector.codePoint)).toBe(vector.disallowed);
+    }
+  });
+
+  // Belt-and-suspenders: on a runtime whose Unicode version matches the pinned
+  // table, the frozen ranges must equal the live `\p{C}` +
+  // `\p{Default_Ignorable_Code_Point}` union — this catches a stale table
+  // after an intentional Unicode bump that forgot to regenerate. The frozen
+  // table legitimately differs from a *newer* runtime's live data (that is the
+  // whole point of freezing), so the check is genuinely inapplicable off the
+  // pinned version. `skipIf` records it as an explicit, visible skip rather
+  // than a silent always-pass — a reviewer can see it did not run and why.
+  it.skipIf(RUNTIME_UNICODE_VERSION !== MOAT_UNICODE_VERSION)(
+    `agrees with the live Unicode ${MOAT_UNICODE_VERSION} property data`,
+    () => {
+      const live = /[\p{C}\p{Default_Ignorable_Code_Point}]/u;
+      for (let cp = 0; cp <= 0x10ffff; cp++) {
+        if (isMoatDisallowedCodePoint(cp) !== live.test(String.fromCodePoint(cp))) {
+          throw new Error(`frozen table disagrees with live \\p{...} at U+${cp.toString(16)}`);
+        }
+      }
+    },
+  );
+});
+
 function canExpectedSanitizeText(input: string): boolean {
   try {
     expectedSanitizeText(input);
@@ -584,9 +1066,12 @@ function canExpectedSanitizeText(input: string): boolean {
   }
 }
 
-function canExpectedRoundTripJson(input: JsonRecord): boolean {
+function canExpectedRoundTripJson(
+  input: JsonRecord,
+  policy: SanitizedStringPolicy = "strip-zero-width",
+): boolean {
   try {
-    expectedSanitizeJsonValue(projectJson(input));
+    expectedSanitizeJsonValue(projectJson(input), policy);
     return true;
   } catch {
     return false;
@@ -637,8 +1122,14 @@ function expectedSanitizeText(
   input: string,
   policy: SanitizedStringPolicy = "strip-zero-width",
 ): string {
-  const normalized = input.normalize("NFKC");
-  rejectLoneSurrogates(normalized);
+  // Reject lone surrogates on the raw input, before normalising — production
+  // does it in this order, and the oracle must mirror production so it can
+  // never mask an order-sensitive bug. Normalisation uses `frozenNfkc`, not
+  // the runtime's `.normalize("NFKC")`: production is frozen, so the oracle
+  // must be too — otherwise it validates against the wrong NFKC on any host
+  // whose Unicode version differs from the pin.
+  rejectLoneSurrogates(input);
+  const normalized = frozenNfkc(input);
   let out = "";
   for (let i = 0; i < normalized.length; ) {
     const codePoint = normalized.codePointAt(i);
@@ -650,7 +1141,9 @@ function expectedSanitizeText(
     }
     i += codePoint > 0xffff ? 2 : 1;
   }
-  return out;
+  // Re-normalize after stripping — mirrors production's second frozenNfkc pass
+  // that makes the moat idempotent and its output NFKC-stable.
+  return frozenNfkc(out);
 }
 
 function containsBidiOverride(value: string): boolean {
@@ -708,6 +1201,21 @@ function isExpectedDisallowedCodePoint(codePoint: number, policy: SanitizedStrin
 
   // Mirrors production: U+180E + U+2060..U+2064 invisible format chars.
   if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  // Mirrors production's `allowlist` (moat) branch: strip every `C*` AND
+  // every Default_Ignorable_Code_Point, except the intentionally-allowed
+  // whitespace controls (tab/newline/carriage return). Classifies against the
+  // same frozen table production uses; the cross-language Go reference in
+  // verifier-reference.go is the independent oracle for that table.
+  if (
+    policy === "allowlist" &&
+    codePoint !== 0x09 &&
+    codePoint !== 0x0a &&
+    codePoint !== 0x0d &&
+    isMoatDisallowedCodePoint(codePoint)
+  ) {
     return true;
   }
 

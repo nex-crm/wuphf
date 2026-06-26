@@ -139,7 +139,13 @@ func TestGovernorCountsOnlyRealTurns(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		l.headless.mu.Lock()
-		_, running := l.headless.workers["fe"]
+		running := false
+		for lane := range l.headless.workers {
+			if lane.slug == "fe" {
+				running = true
+				break
+			}
+		}
 		l.headless.mu.Unlock()
 		if !running {
 			break

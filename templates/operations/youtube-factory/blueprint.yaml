@@ -1,5 +1,7 @@
 id: youtube-factory
 name: YouTube Factory
+display_name: YouTube Factory
+icon: "📹"
 kind: media_business
 category: media
 outcome: "Script, film, publish, and analyze a recurring YouTube channel."
@@ -60,7 +62,6 @@ starter:
       emoji: "👔"
       name: CEO
       role: Owns strategy, delegation, and commercial priorities
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -68,7 +69,6 @@ starter:
       emoji: "🔎"
       name: Research Lead
       role: Demand discovery, proof gathering, and topic scoring
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -81,7 +81,6 @@ starter:
       emoji: "✍️"
       name: Scriptwriter
       role: Hooks, outlines, scripts, and repurposing briefs
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -95,7 +94,6 @@ starter:
       name: Editor
       role: Production workflow, QA, handoffs, and publish packages
       employee_blueprint: workflow-automation-builder
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -108,7 +106,6 @@ starter:
       emoji: "🎯"
       name: Packaging Lead
       role: Titles, thumbnails, and click-through systems
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -121,7 +118,6 @@ starter:
       emoji: "📈"
       name: Growth Ops
       role: Publishing cadence, optimization loops, and analytics hygiene
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -134,7 +130,6 @@ starter:
       emoji: "💸"
       name: Monetization Lead
       role: Offers, lead magnets, sponsors, and revenue ops
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:

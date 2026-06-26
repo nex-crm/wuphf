@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
 
@@ -73,6 +74,105 @@ func TestHandleStateMethodNotAllowed(t *testing.T) {
 		HandleState(w, req)
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("status: got %d, want %d", w.Code, http.StatusMethodNotAllowed)
+		}
+	})
+}
+
+func TestHandleAnswerPersistsTaskPrompt(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"task_prompt","value":"Build Stripe webhooks\nwith retries"}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusOK, w.Body.String())
+		}
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.TaskPrompt != "Build Stripe webhooks with retries" {
+			t.Fatalf("task prompt = %q", s.FormAnswers.TaskPrompt)
+		}
+	})
+}
+
+func TestHandleAnswerPersistsOwnerEmail(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":"  maya@nex.ai  "}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusOK, w.Body.String())
+		}
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.OwnerEmail != "maya@nex.ai" {
+			t.Fatalf("owner email = %q, want %q", s.FormAnswers.OwnerEmail, "maya@nex.ai")
+		}
+	})
+}
+
+func TestHandleAnswerRejectsNonStringOwnerEmail(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		// Seed a valid email first.
+		seed := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":"maya@nex.ai"}`)),
+		)
+		HandleAnswer(httptest.NewRecorder(), seed)
+
+		// A non-string payload must be rejected with 400, not coerced to "".
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":123}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		// The previously stored value must survive the rejected request.
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.OwnerEmail != "maya@nex.ai" {
+			t.Fatalf("owner email was clobbered: got %q, want %q", s.FormAnswers.OwnerEmail, "maya@nex.ai")
+		}
+	})
+}
+
+func TestHandleAnswerRejectsEmptyTaskPrompt(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"task_prompt","value":"  \n\t  "}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
 		}
 	})
 }
@@ -188,6 +288,70 @@ func TestHandleCompletePostIdempotent(t *testing.T) {
 		}
 		if resp["redirect"] != "/" {
 			t.Errorf("expected redirect=/, got: %v", resp["redirect"])
+		}
+	})
+}
+
+// TestHandleCompletePersistsAnalyticsConsent verifies the wizard's two consent
+// toggles ride the complete body and persist to config — an explicit opt-out is
+// stored, and the resolver honors it. Default ON (nil) resolves at read time.
+func TestHandleCompletePersistsAnalyticsConsent(t *testing.T) {
+	withTempHome(t, func(home string) {
+		// Isolate config writes from any process-leaked WUPHF_RUNTIME_HOME.
+		t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(home, ".wuphf", "config.json"))
+
+		body := map[string]any{
+			"task":                                "ship the thing",
+			"skip_task":                           false,
+			"analytics_telemetry_enabled":         false,
+			"analytics_session_recording_enabled": true,
+		}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200\nbody: %s", w.Code, w.Body.String())
+		}
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("config.Load: %v", err)
+		}
+		if cfg.AnalyticsTelemetryEnabled == nil || *cfg.AnalyticsTelemetryEnabled {
+			t.Fatalf("telemetry opt-out not persisted: %+v", cfg.AnalyticsTelemetryEnabled)
+		}
+		if cfg.AnalyticsSessionRecordingEnabled == nil || !*cfg.AnalyticsSessionRecordingEnabled {
+			t.Fatalf("recording consent not persisted: %+v", cfg.AnalyticsSessionRecordingEnabled)
+		}
+		if cfg.IsAnalyticsTelemetryEnabled() {
+			t.Error("telemetry should resolve OFF after opt-out")
+		}
+	})
+}
+
+// TestHandleCompleteOmittingAnalyticsLeavesDefaults verifies a legacy client
+// that omits the consent fields does not write them (default ON resolves later).
+func TestHandleCompleteOmittingAnalyticsLeavesDefaults(t *testing.T) {
+	withTempHome(t, func(home string) {
+		t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(home, ".wuphf", "config.json"))
+		body := map[string]any{"task": "", "skip_task": true}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200\nbody: %s", w.Code, w.Body.String())
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("config.Load: %v", err)
+		}
+		if cfg.AnalyticsTelemetryEnabled != nil {
+			t.Errorf("expected telemetry unset, got %+v", cfg.AnalyticsTelemetryEnabled)
+		}
+		if !cfg.IsAnalyticsTelemetryEnabled() {
+			t.Error("unset telemetry should resolve ON")
 		}
 	})
 }
@@ -329,6 +493,20 @@ func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
 			t.Errorf("agents: got %v want empty/nil", gotAgents)
 		}
 	})
+}
+
+func TestApplyFormAnswerNormalizesScratchBlueprintIDs(t *testing.T) {
+	for _, raw := range []string{blankSlateStarterTemplateID, "from-scratch", "blank-slate"} {
+		t.Run(raw, func(t *testing.T) {
+			s := &State{}
+			if err := applyFormAnswer(s, "blueprint_id", raw); err != nil {
+				t.Fatalf("applyFormAnswer: %v", err)
+			}
+			if s.FormAnswers.BlueprintID != "" {
+				t.Fatalf("BlueprintID: got %q, want empty", s.FormAnswers.BlueprintID)
+			}
+		})
+	}
 }
 
 // TestHandleCompleteReturns500OnCompleteFnError verifies that if

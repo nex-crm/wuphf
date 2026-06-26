@@ -160,11 +160,12 @@ Those files own agent wake/routing: deciding which agent should receive a
 message or task packet and whether delivery goes through a headless queue or a
 pane target.
 
-Native OS notifications are part of the desktop shell boundary described in
-`docs/architecture/desktop-platform.md` on `origin/docs/desktop-plan`. That plan
-reserves Wails/native OS verbs for `desktop/oswails/`; current main does not
-contain that package yet. When that package lands, it should stay separate from
-`internal/team/notifier_*`.
+Native OS notifications are part of the desktop shell boundary. The desktop app
+now lives in the `nex-crm/nex-local` repo (Electron); the earlier Wails-based
+`desktop/oswails/` boundary explored in
+`docs/architecture/desktop-platform.md` (historical) was never built in this
+repo. Either way, OS-verb delivery stays separate from
+`internal/team/notifier_*`, which is agent wake/routing machinery.
 
 A safe TUI-removal patch should therefore look like this:
 

@@ -190,6 +190,10 @@ func initWorkspaces() {
 		// running on the legacy port).
 		fmt.Fprintf(os.Stderr, "workspace migration: %v\n", err)
 	}
+	if err := workspaces.EnsureCacheBackupExclusions(); err != nil {
+		// Non-fatal: cache backup exclusions are best-effort repair.
+		fmt.Fprintf(os.Stderr, "cache backup exclusions: %v\n", err)
+	}
 }
 
 // wireBrokerWorkspaces registers startup wiring for the launcher's broker.
@@ -643,7 +647,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 	}
 	wireBrokerWorkspaces(l)
 
-	fmt.Printf("Launching %s (%d agents)... the cast is assembling.\n", l.PackName(), l.AgentCount())
+	fmt.Printf("Launching %s... the cast is assembling.\n", l.PackName())
 
 	if err := l.Launch(); err != nil {
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
@@ -687,6 +691,23 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 }
 
 func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bool, collabMode bool, noOpen bool) {
+	// If a broker is already serving this workspace (a running desktop shell or
+	// another CLI), attach to it instead of booting a second broker — which
+	// killStaleBroker would otherwise kill on the shared port. Open it and exit.
+	if url, ok := team.RunningOfficeURL(); ok {
+		if noOpen {
+			fmt.Printf("\n  Office already running at %s\n\n", url)
+		} else {
+			fmt.Printf("\n  Office already running at %s — opening it.\n\n", url)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := openBrowser(ctx, url); err != nil {
+				fmt.Fprintf(os.Stderr, "  (couldn't open a browser automatically: %v)\n", err)
+			}
+		}
+		return
+	}
+
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -705,16 +726,18 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	shareController := newWebShareController(webPort)
 	tunnelController := newWebTunnelController()
 
-	// Clean up tunnel/share subprocesses when the process receives SIGINT or
-	// SIGTERM. Without this, cloudflared is left running as an orphan after
-	// Ctrl+C — especially problematic on Windows where child processes are not
-	// automatically reaped.
+	// Clean up tunnel/share subprocesses, the launcher (headless workers,
+	// broker, per-agent temp files), and then exit when the process receives
+	// SIGINT or SIGTERM. Without l.Kill() the per-launch temp directory
+	// ($TMPDIR/wuphf-launch-*) containing MCP configs and broker tokens
+	// would linger on disk after every Ctrl+C.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		sig := <-sigCh
 		_ = shareController.stop()
 		_ = tunnelController.stop()
+		_ = l.Kill()
 		// POSIX convention: a process killed by signal N exits with 128+N
 		// so process supervisors (systemd, npm, foreman) can distinguish a
 		// clean exit from an interrupted run. os.Exit(0) here would mask
@@ -735,7 +758,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		tunnelController.SetBroker(b)
 		b.SetWebTunnelController(tunnelController.start, tunnelController.status, tunnelController.stop)
 	})
-	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
+	fmt.Printf("Launching %s web view... the browser is the office now.\n", l.PackName())
 	if err := l.LaunchWeb(webPort); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -52,13 +52,12 @@ type brokerChannelSummary struct {
 
 type brokerOfficeMembersResponse struct {
 	Members []struct {
-		Slug           string   `json:"slug"`
-		Name           string   `json:"name"`
-		Role           string   `json:"role"`
-		Expertise      []string `json:"expertise"`
-		Personality    string   `json:"personality"`
-		PermissionMode string   `json:"permission_mode"`
-		BuiltIn        bool     `json:"built_in"`
+		Slug        string   `json:"slug"`
+		Name        string   `json:"name"`
+		Role        string   `json:"role"`
+		Expertise   []string `json:"expertise"`
+		Personality string   `json:"personality"`
+		BuiltIn     bool     `json:"built_in"`
 	} `json:"members"`
 }
 
@@ -195,6 +194,7 @@ type HumanInterviewArgs struct {
 	MySlug              string                 `json:"my_slug,omitempty" jsonschema:"Agent slug asking the question. Defaults to WUPHF_AGENT_SLUG."`
 	Options             []HumanInterviewOption `json:"options,omitempty" jsonschema:"Suggested answer options to show the human"`
 	RecommendedOptionID string                 `json:"recommended_option_id,omitempty" jsonschema:"Which option you recommend, if any"`
+	IssueID             string                 `json:"issue_id,omitempty" jsonschema:"Issue/task id this interview belongs to. Required when you are the owner of an active Issue — links the Inbox card back to the Issue so the human sees the breadcrumb."`
 }
 
 type HumanMessageArgs struct {
@@ -225,6 +225,7 @@ type TeamRequestArgs struct {
 	Required            bool                   `json:"required,omitempty" jsonschema:"Whether an answer is truly required before continuing"`
 	Secret              bool                   `json:"secret,omitempty" jsonschema:"Whether the answer should be treated as private in channel history"`
 	ReplyToID           string                 `json:"reply_to_id,omitempty" jsonschema:"Optional message ID this request belongs to"`
+	IssueID             string                 `json:"issue_id,omitempty" jsonschema:"Issue/task id this request belongs to. Pass it when you are the owner of an active Issue so the Inbox card links back."`
 }
 
 type TeamTasksArgs struct {
@@ -239,18 +240,39 @@ type TeamRuntimeStateArgs struct {
 	MessageLimit int    `json:"message_limit,omitempty" jsonschema:"How many recent messages to include when building the recovery summary (default 12, max 40)."`
 }
 
+// TeamTaskDeliverable is one concrete artifact a task must produce, used by
+// team_task action=define. Mirrors the broker's TaskDeliverable wire shape.
+type TeamTaskDeliverable struct {
+	Name   string `json:"name" jsonschema:"What gets produced (e.g. competitor brief, send report)"`
+	Format string `json:"format,omitempty" jsonschema:"The exact format the human expects (e.g. markdown table in the wiki, CSV, PR, Figma link)"`
+}
+
 type TeamTaskArgs struct {
-	Action        string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, resume, release"`
-	Channel       string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	ID            string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
-	Title         string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
-	Details       string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
-	Owner         string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
-	ThreadID      string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
-	TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
-	ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
-	DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
-	MySlug        string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	Action               string   `json:"action" jsonschema:"One of: create, define, claim, assign, submit_for_review, comment, request_changes, approve, reject, complete, block, resume, release, reopen. define (CEO/human only) sets the structured task definition — goal, deliverables, success_criteria, access_needed — call it on a task BEFORE assigning owners or creating subtasks. submit_for_review hands an in-progress task to its reviewer. comment leaves a PR-style note with no state change. request_changes (reviewer only) bounces the task back to its owner for revision — non-terminal. approve marks reviewed work as canonical and unblocks dependents. reject (reviewer only) marks the work as permanently un-landable; downstream dependents stay blocked. complete is for tasks that do not need structured review. reopen (CEO/human only) reverses a terminal close (done/approved/rejected/cancelled/archived): a task with a real owner lands back in running and re-engages that owner — use it when work was closed wrongly instead of creating a duplicate task. NOTE: while a HUMAN's request_changes objection is open on a task, approve/complete by any agent is refused; only the human can clear it."`
+	Channel              string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ID                   string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
+	Title                string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
+	Details              string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
+	Owner                string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
+	ThreadID             string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
+	TaskType             string   `json:"task_type,omitempty" jsonschema:"Use \"issue\" for any work scoped from a human request — that is what the Issues board renders (RULE ZERO). Other values (research, feature, launch, follow_up, bugfix, incident) are for sub-tasks created INSIDE an existing Issue, not for the Issue itself. When in doubt, pick \"issue\"."`
+	ExecutionMode        string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+	Effort               string   `json:"effort,omitempty" jsonschema:"Optional model-specific reasoning-effort level (e.g. \"high\" or \"max\" for claude, \"minimal\" or \"medium\" for codex). Applied at dispatch. Omit for the runtime default."`
+	Provider             string   `json:"provider,omitempty" jsonschema:"Optional per-task LLM runtime kind (claude-code, codex, opencode, …). The model/provider is a property of the task, not the agent; dispatch prefers it over the owner's binding. Omit to inherit the owner's runtime."`
+	Model                string   `json:"model,omitempty" jsonschema:"Optional per-task model id for the chosen provider (e.g. claude-opus-4-8, gpt-5.5). Omit to inherit the owner's binding or the install default."`
+	DependsOn            []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
+	VerificationKind     string   `json:"verification_kind,omitempty" jsonschema:"Machine-checkable definition of done (create and define actions). One of: command (shell command that must exit 0), artifact (file path or glob that must exist non-empty in the task worktree), url (http(s) URL that must answer 2xx), none. Set this on every task whose outcome can be checked mechanically — a test command for code, an artifact path for documents."`
+	VerificationSpec     string   `json:"verification_spec,omitempty" jsonschema:"The check itself: the shell command, artifact path/glob, or URL for verification_kind"`
+	VerificationRequired bool     `json:"verification_required,omitempty" jsonschema:"When true the broker runs the check on complete/approve and BLOCKS the transition until it passes. Prefer true whenever a reliable check exists."`
+	ParentIssueID        string   `json:"parent_issue_id,omitempty" jsonschema:"Parent Issue id when this is a sub-issue created INSIDE an existing Issue (create action only). Leave empty for top-level Issues. Each sub-issue gets its OWN dedicated chat channel, separate from the parent — its working chatter never lands in the parent's chat — and surfaces nested under the parent on the Issue board and detail view."`
+	ArtifactPath         string   `json:"artifact_path,omitempty" jsonschema:"Delivered-artifact reference: a wiki-relative path (e.g. team/playbooks/launch.md) or a visual-artifact id. Pass it on complete/approve (or submit_for_review). A task with a Definition CANNOT reach done until an artifact is recorded — publish the deliverable to the wiki first, then complete with this set."`
+	// action=define fields — the R4 structured intake contract. Goal is
+	// required for define; the broker stamps defined_at itself.
+	Goal            string                `json:"goal,omitempty" jsonschema:"For the define action only (required there): what is different in the world when this task is done, and why now. One or two sentences."`
+	Deliverables    []TeamTaskDeliverable `json:"deliverables,omitempty" jsonschema:"For the define action only: the concrete artifacts the task must produce, each with its exact format."`
+	SuccessCriteria []string              `json:"success_criteria,omitempty" jsonschema:"For the define action only: observable conditions that decide done; entries must be non-empty. Prefer machine-checkable criteria. When a criterion is machine-checkable AND the task has no verification yet, ALSO pass verification_kind/verification_spec/verification_required in the SAME define call — the broker enforces the check, it does NOT parse criteria text into commands."`
+	AccessNeeded    []string              `json:"access_needed,omitempty" jsonschema:"For the define action only: tool/context access the work needs (accounts, credentials, files, connected systems) gathered from the human during intake."`
+	MySlug          string                `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelsArgs struct{}
@@ -293,13 +315,12 @@ type TeamBridgeArgs struct {
 type TeamOfficeMembersArgs struct{}
 
 type TeamMemberArgs struct {
-	Action         string   `json:"action" jsonschema:"One of: create, remove"`
-	Slug           string   `json:"slug" jsonschema:"Stable agent slug like growthops or research-lead"`
-	Name           string   `json:"name,omitempty" jsonschema:"Display name for the office member"`
-	Role           string   `json:"role,omitempty" jsonschema:"Role/job title"`
-	Expertise      []string `json:"expertise,omitempty" jsonschema:"Optional expertise list"`
-	Personality    string   `json:"personality,omitempty" jsonschema:"Optional short personality description"`
-	PermissionMode string   `json:"permission_mode,omitempty" jsonschema:"Optional Claude permission mode"`
+	Action      string   `json:"action" jsonschema:"One of: create, remove"`
+	Slug        string   `json:"slug" jsonschema:"Stable agent slug like growthops or research-lead"`
+	Name        string   `json:"name,omitempty" jsonschema:"Display name for the office member"`
+	Role        string   `json:"role,omitempty" jsonschema:"Role/job title"`
+	Expertise   []string `json:"expertise,omitempty" jsonschema:"Optional expertise list"`
+	Personality string   `json:"personality,omitempty" jsonschema:"Optional short personality description"`
 	// Per-agent provider selection. Empty Provider means the agent inherits the
 	// install-wide default runtime. Set Provider to pick a specific runtime and
 	// (optionally) model for this agent: one team can mix Claude, Codex,
@@ -319,6 +340,9 @@ type TeamPlanArgs struct {
 		Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 		TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 		ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+		Effort        string   `json:"effort,omitempty" jsonschema:"Optional model-specific reasoning-effort level (e.g. \"high\" for claude, \"medium\" for codex). Omit for runtime default."`
+		Provider      string   `json:"provider,omitempty" jsonschema:"Optional per-task LLM runtime kind (claude-code, codex, …). Dispatch prefers it over the owner's binding. Omit to inherit."`
+		Model         string   `json:"model,omitempty" jsonschema:"Optional per-task model id for the chosen provider. Omit to inherit the owner's binding or the install default."`
 		DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
 	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
@@ -347,11 +371,12 @@ type TeamMemoryPromoteArgs struct {
 
 // TeamWikiWriteArgs is the contract for the team_wiki_write MCP tool.
 type TeamWikiWriteArgs struct {
-	MySlug      string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
-	ArticlePath string `json:"article_path" jsonschema:"Path within wiki root, e.g. team/people/nazz.md"`
-	Mode        string `json:"mode" jsonschema:"One of: create | replace | append_section"`
-	Content     string `json:"content" jsonschema:"Full article content (create/replace) or new section text (append_section)"`
-	CommitMsg   string `json:"commit_message" jsonschema:"Why this change — becomes the git commit message"`
+	MySlug       string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
+	ArticlePath  string `json:"article_path" jsonschema:"Path within wiki root, e.g. team/people/nazz.md"`
+	Mode         string `json:"mode" jsonschema:"One of: create | replace | append_section"`
+	Content      string `json:"content" jsonschema:"Full article content (create/replace) or new section text (append_section)"`
+	CommitMsg    string `json:"commit_message" jsonschema:"Why this change — becomes the git commit message"`
+	HumanRequest string `json:"human_request,omitempty" jsonschema:"Broker message ID for the recent human-authored request explicitly authorizing this direct wiki write. Required unless WUPHF_ENABLE_AGENT_WIKI_WRITE=true. For agent-authored knowledge not explicitly requested by the human, use notebook_write then notebook_promote instead."`
 }
 
 // TeamWikiReadArgs is the contract for team_wiki_read.

@@ -87,6 +87,18 @@ func isOneOnOneMode() bool {
 }
 
 func resolveSlug(input string) (string, error) {
+	// The model-supplied my_slug ARG is untrusted (the LLM picks it). The
+	// launcher-set WUPHF_AGENT_SLUG env is the trusted identity for this
+	// agent process. An agent must not be able to claim a reserved human/
+	// system identity or a privileged built-in slug (ceo/librarian) it was
+	// not launched as — otherwise it could forge created_by=human to clear
+	// the Plan-mode approval gate, or my_slug=librarian to gain direct wiki
+	// write authority. Reject a protected arg unless it matches the env slug.
+	arg := strings.TrimSpace(input)
+	envSlug := trustedEnvAgentSlug()
+	if arg != "" && isProtectedActorSlug(arg) && !strings.EqualFold(arg, envSlug) {
+		return "", fmt.Errorf("my_slug %q is a reserved or privileged slug and may not be set by the agent; it is taken from WUPHF_AGENT_SLUG", arg)
+	}
 	if slug := strings.TrimSpace(resolveSlugOptional(input)); slug != "" {
 		return slug, nil
 	}
@@ -97,10 +109,38 @@ func resolveSlugOptional(input string) string {
 	if slug := strings.TrimSpace(input); slug != "" {
 		return slug
 	}
+	return trustedEnvAgentSlug()
+}
+
+// trustedEnvAgentSlug returns the agent slug the launcher stamped on this
+// process via the environment. It is trusted because the broker — not the
+// model — sets it when spawning the agent.
+func trustedEnvAgentSlug() string {
 	if slug := strings.TrimSpace(os.Getenv("WUPHF_AGENT_SLUG")); slug != "" {
 		return slug
 	}
 	return strings.TrimSpace(os.Getenv("NEX_AGENT_SLUG"))
+}
+
+// isProtectedActorSlug reports whether a slug names an identity that crosses a
+// trust boundary if impersonated via the model-supplied my_slug argument:
+//   - human/you/system/nex/broker (and human:* sessions) — the human/system
+//     senders; claiming one forges created_by=human to clear the Plan-mode
+//     approval gate.
+//   - librarian — the only agent with direct wiki-write authority.
+//
+// These may only be claimed via the launcher-set env slug (the trusted
+// identity), never via the agent-chosen arg. "ceo" is intentionally NOT here:
+// it is a normal managed agent slug, it does not clear the Plan-mode gate
+// (the gate is human-only), and it grants no wiki authority — so the legitimate
+// CEO process uses my_slug=ceo without the env caveat.
+func isProtectedActorSlug(slug string) bool {
+	s := strings.ToLower(strings.TrimSpace(slug))
+	switch s {
+	case "human", "you", "system", "nex", "broker", "librarian", "ceo":
+		return true
+	}
+	return strings.HasPrefix(s, "human:")
 }
 
 func brokerGetJSON(ctx context.Context, path string, out any) error {

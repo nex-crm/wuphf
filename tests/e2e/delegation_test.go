@@ -58,6 +58,7 @@ func newTestAgentServiceWithStart(t *testing.T, resolver agent.StreamFnResolver,
 	pack := agent.GetPack("founding-team")
 	if pack == nil {
 		t.Fatal("founding-team pack not found")
+		return nil, nil
 	}
 
 	for _, cfg := range pack.Agents {
@@ -275,6 +276,7 @@ func TestDelegationParsing(t *testing.T) {
 	pack := agent.GetPack("founding-team")
 	if pack == nil {
 		t.Fatal("founding-team pack not found")
+		return
 	}
 
 	for _, cfg := range pack.Agents {
@@ -319,6 +321,7 @@ func TestPackBootstrap(t *testing.T) {
 	pack := agent.GetPack("founding-team")
 	if pack == nil {
 		t.Fatal("founding-team pack not found")
+		return
 	}
 
 	svc := agent.NewAgentService()

@@ -34,6 +34,13 @@ class FakeEventSource {
     this.listeners[name].push(fn);
   }
 
+  // The shared event-stream multiplexer (eventStream.ts) removes its listeners
+  // on teardown, so the mock must mirror the real EventSource interface or
+  // unmount throws "removeEventListener is not a function".
+  removeEventListener(name: string, fn: EventListener) {
+    this.listeners[name] = (this.listeners[name] ?? []).filter((l) => l !== fn);
+  }
+
   close() {}
 
   emit(name: string, data: unknown) {
@@ -50,6 +57,11 @@ class FakeEventSource {
     if (typeof this.onerror === "function") {
       this.onerror();
     }
+    // The shared-stream handle (eventStream.ts) wires the hook's error handler
+    // via addEventListener("error", …), not the onerror property, so dispatch
+    // to those listeners too or the disconnect-grace logic never fires.
+    const event = new Event("error");
+    for (const fn of this.listeners.error ?? []) fn(event);
   }
 }
 
@@ -111,6 +123,29 @@ describe("useBrokerEvents unread counts", () => {
       source.emit("message", {
         message: {
           id: "msg-1",
+          channel: "general",
+        },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel.general ?? 0).toBe(0);
+  });
+
+  it("ignores a query-string suffix on the active-channel hash (no unread bump)", () => {
+    // Regression (PR #634): a hash like "#/channels/general?modal=settings"
+    // once parsed the slug as "general?modal=settings", so the active-channel
+    // check failed and inbound messages bumped #general's unread while the
+    // user was watching it. activeBrokerChannel() must split on "?" first.
+    // (Migrated here from route-regressions.spec.ts, whose sidebar unread
+    // badge surface was removed in the task-scoped restructure.)
+    renderHarness();
+    const [source] = FakeEventSource.created;
+    window.location.hash = "#/channels/general?probe=1";
+
+    act(() => {
+      source.emit("message", {
+        message: {
+          id: "msg-q",
           channel: "general",
         },
       });

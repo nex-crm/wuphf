@@ -216,14 +216,6 @@ func TestFormatTelegramOutbound(t *testing.T) {
 		t.Fatalf("formatTelegramOutbound skill = %q, want %q", gotSkill, wantSkill)
 	}
 
-	// Skill proposal
-	proposalMsg := channelMessage{From: "system", Kind: "skill_proposal", Content: "New skill: auto-deploy"}
-	gotProposal := formatTelegramOutbound(proposalMsg)
-	wantProposal := "💡 <b>Skill proposed</b>: New skill: auto-deploy"
-	if gotProposal != wantProposal {
-		t.Fatalf("formatTelegramOutbound proposal = %q, want %q", gotProposal, wantProposal)
-	}
-
 	// Interview/decision message
 	decisionMsg := channelMessage{From: "ceo", Kind: "interview", Content: "Should we ship v2?", Title: "Release Decision"}
 	gotDecision := formatTelegramOutbound(decisionMsg)

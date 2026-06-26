@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 
+import { router } from "../../lib/router";
 import type {
   DecisionPacket,
+  FeedbackItem,
   LifecycleState,
   PacketBanner,
 } from "../../lib/types/lifecycle";
@@ -23,6 +25,7 @@ interface DecisionPacketViewProps {
   onRequestChanges: () => void;
   onDefer: () => void;
   onBlock: () => void;
+  onReject?: (body: string) => void | Promise<void>;
   onOpenInWorktree: () => void;
 }
 
@@ -50,6 +53,7 @@ export function DecisionPacketView({
   onRequestChanges,
   onDefer,
   onBlock,
+  onReject,
   onOpenInWorktree,
 }: DecisionPacketViewProps) {
   // Keyboard shortcuts — a / r / b / w / Esc per locked v1 design.
@@ -219,6 +223,11 @@ export function DecisionPacketView({
             ))}
           </div>
         </section>
+
+        <DiscussionSection
+          feedback={packet.spec.feedback ?? []}
+          channel={packet.channel}
+        />
       </main>
       <PacketActionSidebar
         packet={packet}
@@ -227,6 +236,7 @@ export function DecisionPacketView({
         onRequestChanges={onRequestChanges}
         onDefer={onDefer}
         onBlock={onBlock}
+        onReject={onReject}
         onOpenInWorktree={onOpenInWorktree}
       />
     </div>
@@ -257,7 +267,7 @@ function PacketLeftColumn({ packet }: { packet: DecisionPacket }) {
       </div>
       {packet.subIssues.length > 0 ? (
         <>
-          <h2>Sub-issues</h2>
+          <h2>Sub-tasks</h2>
           <div className="packet-deps">
             {packet.subIssues.map((sub) => (
               <div key={sub.taskId} className="packet-dep">
@@ -400,4 +410,73 @@ function formatHoursAgo(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return `${days}d ago`;
+}
+
+interface DiscussionSectionProps {
+  feedback: FeedbackItem[];
+  /** The task's own channel slug, used to link to the conversation. */
+  channel?: string;
+}
+
+function DiscussionSection({ feedback, channel }: DiscussionSectionProps) {
+  const channelSlug = channel?.trim();
+  return (
+    <section
+      className="packet-section packet-discussion"
+      aria-label="Discussion"
+      data-testid="packet-discussion"
+    >
+      <h3>
+        Discussion{" "}
+        <span className="count">
+          {feedback.length} {feedback.length === 1 ? "comment" : "comments"}
+        </span>
+      </h3>
+      {feedback.length === 0 ? (
+        <p className="packet-discussion-empty">
+          No review notes yet. Approvals, requested changes, and reviewer notes
+          appear here.{" "}
+          {channelSlug ? (
+            <>
+              Chat about this task in{" "}
+              <button
+                type="button"
+                className="packet-discussion-channel-link"
+                onClick={() =>
+                  void router.navigate({
+                    to: "/channels/$channelSlug",
+                    params: { channelSlug },
+                  })
+                }
+              >
+                #{channelSlug}
+              </button>
+              .
+            </>
+          ) : (
+            "Chat about this task in its channel."
+          )}
+        </p>
+      ) : (
+        <ol className="packet-discussion-thread">
+          {feedback.map((item, idx) => (
+            <li
+              key={`${item.appendedAt}-${idx}`}
+              className="packet-discussion-item"
+            >
+              <header className="packet-discussion-header">
+                <span className="packet-discussion-author">
+                  @{item.author || "unknown"}
+                </span>
+                <span className="packet-discussion-time">
+                  {formatHoursAgo(item.appendedAt)}
+                </span>
+              </header>
+              <div className="packet-discussion-body">{item.body}</div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }

@@ -7,6 +7,7 @@ import {
   type ReviewComment,
   type ReviewState,
 } from "../../api/notebook";
+import { stripStandaloneRichArtifactReferenceLines } from "../../lib/richArtifactReferences";
 import ByLineStrip from "./ByLineStrip";
 import DraftStamp from "./DraftStamp";
 import EntryBody from "./EntryBody";
@@ -30,6 +31,14 @@ interface NotebookEntryProps {
   /** Comments threaded against the active review, if any. */
   reviewComments?: ReviewComment[];
   reviewState?: ReviewState | null;
+  /** In-place review bar: when the entry has an actionable review, the
+   *  inline thread carries Approve / Request changes so the reviewer acts
+   *  on the notebook item itself instead of a detached drawer. */
+  onApproveReview?: () => void;
+  onRequestChangesReview?: (rationale: string) => void;
+  /** Last failed review action — rendered next to the thread so a broken
+   *  approve/request-changes is never silent. */
+  reviewActionError?: string | null;
   onNavigateCatalog?: () => void;
   onNavigateAgent?: (agentSlug: string) => void;
   onNavigateWiki?: (wikiPath: string) => void;
@@ -54,6 +63,9 @@ export default function NotebookEntryView({
   entry,
   reviewComments = [],
   reviewState,
+  onApproveReview,
+  onRequestChangesReview,
+  reviewActionError,
   onNavigateCatalog,
   onNavigateAgent,
   onNavigateWiki,
@@ -130,7 +142,10 @@ export default function NotebookEntryView({
         reviewerSlug={entry.reviewer_slug}
       />
 
-      <EntryBody markdown={entry.body_md} onWikiNavigate={onNavigateWiki} />
+      <EntryBody
+        markdown={stripStandaloneRichArtifactReferenceLines(entry.body_md)}
+        onWikiNavigate={onNavigateWiki}
+      />
 
       <NotebookVisualArtifacts
         agentSlug={entry.agent_slug}
@@ -146,10 +161,22 @@ export default function NotebookEntryView({
         />
       ) : null}
 
+      {reviewActionError ? (
+        <p
+          className="nb-error"
+          role="alert"
+          data-testid="nb-review-action-error"
+        >
+          Could not update this review: {reviewActionError}
+        </p>
+      ) : null}
+
       <InlineReviewThread
         reviewerSlug={entry.reviewer_slug}
         state={effectiveReviewState}
         comments={reviewComments}
+        onApprove={onApproveReview}
+        onRequestChanges={onRequestChangesReview}
       />
 
       <PromoteButton

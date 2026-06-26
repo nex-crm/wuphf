@@ -1,10 +1,4 @@
-import {
-  type KeyboardEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   fetchRichArtifact,
@@ -13,10 +7,7 @@ import {
   type RichArtifact,
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
-import RichArtifactFrame from "../rich-artifacts/RichArtifactFrame";
-
-const MODAL_FOCUSABLE_SELECTOR =
-  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
 
 interface NotebookVisualArtifactsProps {
   agentSlug: string;
@@ -25,6 +16,16 @@ interface NotebookVisualArtifactsProps {
   onNavigateWiki?: (wikiPath: string) => void;
 }
 
+interface LoadedArtifact {
+  artifact: RichArtifact;
+  detail?: RichArtifactDetail;
+  detailError?: string;
+}
+
+// NotebookVisualArtifacts renders every visual artifact attached to a
+// notebook entry inline, in document flow, as part of the entry itself.
+// No iframe, no modal, no Expand button. The artifact IS the content;
+// chrome around it would be lying about that.
 export default function NotebookVisualArtifacts({
   agentSlug,
   entrySlug,
@@ -35,25 +36,22 @@ export default function NotebookVisualArtifacts({
     () => normalizeNotebookSourcePath(sourcePath),
     [sourcePath],
   );
-  const [artifacts, setArtifacts] = useState<RichArtifact[]>([]);
-  const [detail, setDetail] = useState<RichArtifactDetail | null>(null);
-  const [inlineDetail, setInlineDetail] = useState<RichArtifactDetail | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState<LoadedArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [promoting, setPromoting] = useState(false);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const openRequestSeqRef = useRef(0);
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  // Per-artifact target path. Sharing one target across all artifacts
+  // attached to the same notebook entry would cause later promotions
+  // (mode: "replace") to overwrite earlier ones at the same wiki path.
+  const targetPathFor = useMemo(
+    () => (artifactId: string) =>
+      `team/drafts/${agentSlug}-${entrySlug}-${artifactId}-visual.md`,
+    [agentSlug, entrySlug],
+  );
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    setArtifacts([]);
-    setInlineDetail(null);
-    setDetail(null);
+    setLoaded([]);
     if (!canonicalSourcePath) {
       return () => {
         cancelled = true;
@@ -62,11 +60,28 @@ export default function NotebookVisualArtifacts({
     fetchRichArtifacts({ sourceMarkdownPath: canonicalSourcePath })
       .then(async (items) => {
         if (cancelled) return;
-        setArtifacts(items);
-        const [first] = items;
-        if (!first) return;
-        const firstDetail = await fetchRichArtifact(first.id);
-        if (!cancelled) setInlineDetail(firstDetail);
+        // Fetch each artifact's HTML up-front. Notebook entries usually
+        // have one (sometimes two) attached artifacts; eager-loading lets
+        // the embed render in the same paint as the rest of the entry.
+        const details = await Promise.all(
+          items.map(async (artifact) => {
+            try {
+              const detail = await fetchRichArtifact(artifact.id);
+              return { artifact, detail } satisfies LoadedArtifact;
+            } catch (err: unknown) {
+              // Surface the failure in the render path instead of leaving
+              // the slot stuck on "Loading visual…" forever.
+              return {
+                artifact,
+                detailError:
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to load visual artifact",
+              } satisfies LoadedArtifact;
+            }
+          }),
+        );
+        if (!cancelled) setLoaded(details);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -80,206 +95,84 @@ export default function NotebookVisualArtifacts({
     };
   }, [canonicalSourcePath]);
 
-  const activeArtifact = detail?.artifact ?? null;
-  const modalTitleId = activeArtifact
-    ? `nb-visual-artifact-modal-title-${activeArtifact.id}`
-    : undefined;
-  const defaultTarget = useMemo(
-    () => `team/drafts/${agentSlug}-${entrySlug}-visual.md`,
-    [agentSlug, entrySlug],
-  );
-
-  useEffect(() => {
-    if (!detail) return;
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    closeButtonRef.current?.focus();
-    return () => {
-      previousFocusRef.current?.focus();
-      previousFocusRef.current = null;
-    };
-  }, [detail]);
-
-  if (artifacts.length === 0 && !error) return null;
-
-  async function openArtifact(artifact: RichArtifact) {
-    openRequestSeqRef.current += 1;
-    const requestSeq = openRequestSeqRef.current;
-    setLoading(true);
+  async function promote(artifact: RichArtifact) {
+    setPromotingId(artifact.id);
     setError(null);
     try {
-      const nextDetail = await fetchRichArtifact(artifact.id);
-      if (requestSeq !== openRequestSeqRef.current) return;
-      setDetail(nextDetail);
-    } catch (err: unknown) {
-      if (requestSeq !== openRequestSeqRef.current) return;
-      setError(err instanceof Error ? err.message : "Failed to open artifact");
-    } finally {
-      if (requestSeq === openRequestSeqRef.current) setLoading(false);
-    }
-  }
-
-  async function promoteActiveArtifact() {
-    if (!activeArtifact) return;
-    setPromoting(true);
-    setError(null);
-    try {
-      const promoted = await promoteRichArtifact(activeArtifact.id, {
-        targetWikiPath: defaultTarget,
-        markdownSummary: `# ${activeArtifact.title}\n\n${activeArtifact.summary || "Promoted visual artifact."}\n`,
+      const promoted = await promoteRichArtifact(artifact.id, {
+        targetWikiPath: targetPathFor(artifact.id),
+        markdownSummary: `# ${artifact.title}\n\n${artifact.summary || "Promoted visual artifact."}\n`,
         mode: "replace",
       });
-      setArtifacts((items) =>
-        items.map((item) => (item.id === promoted.id ? promoted : item)),
-      );
-      setDetail((current) =>
-        current && current.artifact.id === promoted.id
-          ? { ...current, artifact: promoted }
-          : current,
-      );
-      setInlineDetail((current) =>
-        current && current.artifact.id === promoted.id
-          ? { ...current, artifact: promoted }
-          : current,
+      setLoaded((items) =>
+        items.map((item) =>
+          item.artifact.id === promoted.id
+            ? {
+                artifact: promoted,
+                detail: item.detail
+                  ? { ...item.detail, artifact: promoted }
+                  : undefined,
+              }
+            : item,
+        ),
       );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Promotion failed");
     } finally {
-      setPromoting(false);
+      setPromotingId(null);
     }
   }
 
-  function closeModal() {
-    openRequestSeqRef.current += 1;
-    setDetail(null);
-  }
-
-  function handleModalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeModal();
-      return;
-    }
-    if (event.key === "Tab") trapModalFocus(event, dialogRef.current);
-  }
+  if (loaded.length === 0 && !error) return null;
 
   return (
     <section className="nb-visual-artifacts" aria-label="Visual artifacts">
-      <div className="nb-visual-artifacts-head">
-        <h2>Visual artifacts</h2>
-        <span>{artifacts.length}</span>
-      </div>
-      <div className="nb-visual-artifact-list">
-        {artifacts.map((artifact) => (
-          <article key={artifact.id} className="nb-visual-artifact-card">
-            <div>
-              <h3>{artifact.title}</h3>
-              {artifact.summary ? <p>{artifact.summary}</p> : null}
-              <div className="rich-artifact-meta">
-                <span>{artifact.trustLevel}</span>
-                <span>{artifact.createdBy}</span>
-              </div>
-            </div>
-            <div className="nb-visual-artifact-actions">
-              {artifact.promotedWikiPath ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onNavigateWiki?.(artifact.promotedWikiPath ?? "")
-                  }
-                >
-                  Open wiki
-                </button>
-              ) : null}
+      {loaded.map(({ artifact, detail, detailError }) => (
+        <article
+          key={artifact.id}
+          className="nb-visual-artifact"
+          data-testid={`nb-visual-artifact-${artifact.id}`}
+        >
+          <header className="nb-visual-artifact-meta">
+            <span className="rich-artifact-trust">{artifact.trustLevel}</span>
+            {artifact.promotedWikiPath ? (
               <button
                 type="button"
+                className="nb-visual-artifact-action"
+                onClick={() =>
+                  onNavigateWiki?.(artifact.promotedWikiPath ?? "")
+                }
+              >
+                Open in wiki
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="nb-visual-artifact-action"
+                disabled={promotingId === artifact.id}
                 onClick={() => {
-                  void openArtifact(artifact);
+                  void promote(artifact);
                 }}
               >
-                Open
+                {promotingId === artifact.id ? "Promoting…" : "Promote to wiki"}
               </button>
-            </div>
-          </article>
-        ))}
-      </div>
-      {inlineDetail ? (
-        <div
-          className="rich-artifact-inline"
-          data-testid="nb-visual-artifact-inline"
-        >
-          <div className="rich-artifact-inline-head">
-            <h3>{inlineDetail.artifact.title}</h3>
-            <div className="rich-artifact-meta">
-              <span>{inlineDetail.artifact.trustLevel}</span>
-              <span>{inlineDetail.artifact.htmlPath}</span>
-            </div>
-          </div>
-          <RichArtifactFrame
-            title={inlineDetail.artifact.title}
-            html={inlineDetail.html}
-          />
-        </div>
-      ) : null}
+            )}
+          </header>
+          {detail ? (
+            <RichArtifactEmbed title={artifact.title} html={detail.html} />
+          ) : detailError ? (
+            <p className="nb-error" role="alert">
+              {detailError}
+            </p>
+          ) : (
+            <div className="nb-loading">Loading visual…</div>
+          )}
+        </article>
+      ))}
       {error ? (
         <p className="nb-error" role="alert">
           {error}
         </p>
-      ) : null}
-      {detail ? (
-        <div
-          ref={dialogRef}
-          className="rich-artifact-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={modalTitleId}
-          onKeyDown={handleModalKeyDown}
-        >
-          <div className="rich-artifact-modal-bar">
-            <div>
-              <h2 id={modalTitleId}>{detail.artifact.title}</h2>
-              <div className="rich-artifact-meta">
-                <span>{detail.artifact.trustLevel}</span>
-                <span>{detail.artifact.htmlPath}</span>
-              </div>
-            </div>
-            <div className="rich-artifact-modal-actions">
-              {detail.artifact.promotedWikiPath ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onNavigateWiki?.(detail.artifact.promotedWikiPath ?? "")
-                  }
-                >
-                  Open wiki
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={promoting}
-                  onClick={() => {
-                    void promoteActiveArtifact();
-                  }}
-                >
-                  {promoting ? "Promoting..." : "Promote"}
-                </button>
-              )}
-              <button ref={closeButtonRef} type="button" onClick={closeModal}>
-                Close
-              </button>
-            </div>
-          </div>
-          {loading ? (
-            <div className="nb-loading">Loading artifact...</div>
-          ) : (
-            <RichArtifactFrame
-              title={detail.artifact.title}
-              html={detail.html}
-            />
-          )}
-        </div>
       ) : null}
     </section>
   );
@@ -289,27 +182,4 @@ function normalizeNotebookSourcePath(path: string): string | null {
   const trimmed = path.trim();
   const match = trimmed.match(/agents\/[^/]+\/notebook\/[^/]+\.md$/);
   return match?.[0] ?? null;
-}
-
-function trapModalFocus(
-  event: KeyboardEvent<HTMLDivElement>,
-  dialog: HTMLDivElement | null,
-) {
-  const focusables = Array.from(
-    dialog?.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR) ?? [],
-  ).filter((element) => !element.hasAttribute("disabled"));
-  if (focusables.length === 0) {
-    event.preventDefault();
-    return;
-  }
-  const [first] = focusables;
-  const last = focusables.at(-1);
-  if (!(first && last)) return;
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
 }

@@ -135,19 +135,14 @@ func memberSpecFromEmployeeBlueprint(blueprint operations.EmployeeBlueprint, sta
 	name := firstNonEmpty(strings.TrimSpace(starter.Name), strings.TrimSpace(blueprint.Name), humanizeSlug(slug))
 	role := firstNonEmpty(strings.TrimSpace(starter.Role), strings.TrimSpace(blueprint.Role), name)
 	personality := firstNonEmpty(strings.TrimSpace(starter.Personality), strings.TrimSpace(blueprint.Summary), strings.TrimSpace(blueprint.Description))
-	permissionMode := strings.TrimSpace(starter.PermissionMode)
-	if permissionMode == "" {
-		permissionMode = "plan"
-	}
 	return MemberSpec{
-		Slug:           slug,
-		Name:           name,
-		Role:           role,
-		Expertise:      mergeUniqueStrings(normalizeStrings(blueprint.Skills), normalizeStrings(starter.Expertise)),
-		Personality:    personality,
-		PermissionMode: permissionMode,
-		AllowedTools:   normalizeStrings(blueprint.Tools),
-		System:         starter.BuiltIn || slug == lead || slug == "ceo" || slug == "operator",
+		Slug:         slug,
+		Name:         name,
+		Role:         role,
+		Expertise:    mergeUniqueStrings(normalizeStrings(blueprint.Skills), normalizeStrings(starter.Expertise)),
+		Personality:  personality,
+		AllowedTools: normalizeStrings(blueprint.Tools),
+		System:       starter.BuiltIn || slug == lead || slug == "ceo" || slug == "operator",
 	}
 }
 
@@ -156,18 +151,13 @@ func memberSpecFromStarterAgent(starter operations.StarterAgent, lead string) Me
 	if slug == "" {
 		return MemberSpec{}
 	}
-	permissionMode := strings.TrimSpace(starter.PermissionMode)
-	if permissionMode == "" {
-		permissionMode = "plan"
-	}
 	return MemberSpec{
-		Slug:           slug,
-		Name:           firstNonEmpty(strings.TrimSpace(starter.Name), humanizeSlug(slug)),
-		Role:           firstNonEmpty(strings.TrimSpace(starter.Role), humanizeSlug(slug)),
-		Expertise:      normalizeStrings(starter.Expertise),
-		Personality:    strings.TrimSpace(starter.Personality),
-		PermissionMode: permissionMode,
-		System:         starter.BuiltIn || slug == lead || slug == "ceo",
+		Slug:        slug,
+		Name:        firstNonEmpty(strings.TrimSpace(starter.Name), humanizeSlug(slug)),
+		Role:        firstNonEmpty(strings.TrimSpace(starter.Role), humanizeSlug(slug)),
+		Expertise:   normalizeStrings(starter.Expertise),
+		Personality: strings.TrimSpace(starter.Personality),
+		System:      starter.BuiltIn || slug == lead || slug == "ceo",
 	}
 }
 

@@ -2,7 +2,7 @@
 
 Each tutorial in this folder is a runnable scenario for one persona doing
 one realistic job. Tutorials are written for the documented ICP (see
-`docs/product-experience-test-2026-04-16-paperclip-cabinet-icp.md`) and
+`docs/product-experience-test-2026-04-16-paperclip-icp.md`) and
 serve as both onboarding docs and the integration spec the product must
 pass end-to-end.
 
@@ -30,8 +30,8 @@ The five named personas are:
 - **Alex Chen** — solo dev, ex-Stripe (Paperclip ICP).
 - **Jordan Park** — indie hacker, 3 products (Paperclip ICP).
 - **Sam Rivera** — CTO at an 8-person startup (both ICPs).
-- **Riley Walsh** — product engineer at a 30-person startup (Cabinet ICP).
-- **Morgan Lee** — agency founder, 6 people (Cabinet ICP).
+- **Riley Walsh** — product engineer at a 30-person startup (skeptical-engineer ICP).
+- **Morgan Lee** — agency founder, 6 people (skeptical-engineer ICP).
 
 Each tutorial follows the same three-section structure:
 

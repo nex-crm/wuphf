@@ -1,6 +1,7 @@
 import { assertWithinBudget, MAX_FROZEN_ARGS_BYTES } from "./budgets.ts";
 import * as canonicalJson from "./canonical-json.ts";
-import { type Sha256Hex, sha256Hex } from "./sha256.ts";
+import type { Sha256Hex } from "./sha256.ts";
+import { sha256Hex } from "./sha256-node.ts";
 
 const MAX_FROZEN_ARGS_PREFLIGHT_DEPTH = 64;
 

@@ -1,36 +1,26 @@
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 
 import {
   fetchRichArtifact,
-  type RichArtifact,
   type RichArtifactDetail,
+  resolveArtifactDestination,
 } from "../../api/richArtifacts";
-import RichArtifactFrame from "../rich-artifacts/RichArtifactFrame";
-
-const MODAL_FOCUSABLE_SELECTOR =
-  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+import { router } from "../../lib/router";
 
 interface MessageArtifactReferencesProps {
   artifactIds: string[];
 }
 
-interface ArtifactReferenceItem {
-  id: string;
-  detail?: RichArtifactDetail;
-  error?: string;
-}
-
+// MessageArtifactReferences renders a clickable preview card for each
+// artifact referenced by the message. The card carries the article title,
+// summary, trust pill, and an "Open article →" action that navigates to
+// the full-screen ArticleView. The article body is NOT inlined in the
+// chat bubble — that breaks the chat reading rhythm and made it look
+// like the agent had given the answer in chat when the actual article
+// (with embedded figures) lives elsewhere.
 export default function MessageArtifactReferences({
   artifactIds,
 }: MessageArtifactReferencesProps) {
-  const [activeDetail, setActiveDetail] = useState<RichArtifactDetail | null>(
-    null,
-  );
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
   const artifactQueries = useQueries({
     queries: artifactIds.map((id) => ({
       queryKey: ["rich-artifact-reference", id],
@@ -39,189 +29,87 @@ export default function MessageArtifactReferences({
     })),
   });
 
-  useEffect(() => {
-    if (!activeDetail) return;
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    closeButtonRef.current?.focus();
-    return () => {
-      previousFocusRef.current?.focus();
-      previousFocusRef.current = null;
-    };
-  }, [activeDetail]);
-
   if (artifactIds.length === 0) return null;
-
-  function closeDialog() {
-    setActiveDetail(null);
-  }
-
-  function handleDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeDialog();
-      return;
-    }
-    if (event.key === "Tab") trapModalFocus(event, dialogRef.current);
-  }
 
   return (
     <section
       className="message-artifact-references"
-      aria-label="Rich artifacts"
+      aria-label="Article references"
     >
       {artifactIds.map((id, index) => {
         const result = artifactQueries[index];
         return (
-          <MessageArtifactReference
+          <ArticleCard
             key={id}
-            item={{
-              id,
-              detail: result?.data,
-              error: queryErrorMessage(result?.error),
-            }}
-            onOpen={(detail) => setActiveDetail(detail)}
+            id={id}
+            detail={result?.data}
+            error={queryErrorMessage(result?.error)}
           />
         );
       })}
-      {activeDetail ? (
-        <div
-          ref={dialogRef}
-          className="rich-artifact-modal message-artifact-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={`message-artifact-modal-title-${activeDetail.artifact.id}`}
-          onKeyDown={handleDialogKeyDown}
-        >
-          <div className="rich-artifact-modal-bar">
-            <div>
-              <h2
-                id={`message-artifact-modal-title-${activeDetail.artifact.id}`}
-              >
-                {activeDetail.artifact.title}
-              </h2>
-              <div className="rich-artifact-meta">
-                <span>{activeDetail.artifact.trustLevel}</span>
-                <span>{activeDetail.artifact.htmlPath}</span>
-              </div>
-            </div>
-            <div className="rich-artifact-modal-actions">
-              {activeDetail.artifact.promotedWikiPath ? (
-                <a href={wikiHref(activeDetail.artifact.promotedWikiPath)}>
-                  Open wiki
-                </a>
-              ) : null}
-              <button ref={closeButtonRef} type="button" onClick={closeDialog}>
-                Close
-              </button>
-            </div>
-          </div>
-          <RichArtifactFrame
-            title={activeDetail.artifact.title}
-            html={activeDetail.html}
-          />
-        </div>
-      ) : null}
     </section>
   );
 }
 
-function MessageArtifactReference({
-  item,
-  onOpen,
-}: {
-  item: ArtifactReferenceItem;
-  onOpen: (detail: RichArtifactDetail) => void;
-}) {
-  if (item.error) {
-    return (
-      <article className="message-artifact-reference message-artifact-error">
-        <div>
-          <span className="message-artifact-kicker">HTML artifact</span>
-          <h4>{item.id}</h4>
-          <p>{item.error}</p>
-        </div>
-      </article>
-    );
-  }
-  const { detail } = item;
-  if (!detail) {
-    return (
-      <article className="message-artifact-reference" aria-busy="true">
-        <div>
-          <span className="message-artifact-kicker">HTML artifact</span>
-          <h4>{item.id}</h4>
-          <p>Loading artifact...</p>
-        </div>
-      </article>
-    );
-  }
-
-  const { artifact } = detail;
-  return (
-    <article
-      className="message-artifact-reference"
-      aria-label={`Rich artifact: ${artifact.title}`}
-    >
-      <div className="message-artifact-main">
-        <span className="message-artifact-kicker">
-          {artifact.kind === "wiki_visual" ? "Wiki visual" : "Notebook visual"}
-        </span>
-        <h4>{artifact.title}</h4>
-        {artifact.summary ? <p>{artifact.summary}</p> : null}
-        <div className="message-artifact-meta">
-          <span>{artifact.trustLevel}</span>
-          <span>{artifactSource(artifact)}</span>
-        </div>
-      </div>
-      <div className="message-artifact-actions">
-        {artifact.promotedWikiPath ? (
-          <a href={wikiHref(artifact.promotedWikiPath)}>Open wiki</a>
-        ) : null}
-        <button type="button" onClick={() => onOpen(detail)}>
-          Open
-        </button>
-      </div>
-    </article>
-  );
+interface ArticleCardProps {
+  id: string;
+  detail?: RichArtifactDetail;
+  error?: string;
 }
 
-function artifactSource(artifact: RichArtifact): string {
-  if (artifact.promotedWikiPath) return artifact.promotedWikiPath;
-  if (artifact.sourceMarkdownPath) return artifact.sourceMarkdownPath;
-  return `@${artifact.createdBy}`;
+function ArticleCard({ id, detail, error }: ArticleCardProps) {
+  if (error) {
+    return (
+      <div
+        className="message-artifact-card message-artifact-error"
+        role="alert"
+      >
+        <span className="message-artifact-kicker">Article</span>
+        <p>
+          Could not load article {id}: {error}
+        </p>
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className="message-artifact-card" aria-busy="true">
+        <span className="message-artifact-kicker">Article</span>
+        <p>Loading…</p>
+      </div>
+    );
+  }
+  const { artifact } = detail;
+  // Route the card to the canonical home of the artifact:
+  //   promoted_to_wiki     → /wiki/<path>
+  //   promoted_to_notebook → /notebooks/<owner>/<entry>
+  //   draft / unknown      → /articles/<id> (standalone fallback)
+  // resolveArtifactDestination is the single source of truth so the link
+  // shape stays consistent across chat, notebook, and any future surface.
+  const destination = resolveArtifactDestination(artifact);
+  return (
+    <button
+      type="button"
+      className="message-artifact-card message-artifact-card-clickable"
+      onClick={() => {
+        void router.navigate(destination);
+      }}
+      aria-label={`Open article: ${artifact.title}`}
+    >
+      <div className="message-artifact-card-head">
+        <span className="message-artifact-kicker">Article</span>
+        <span className="rich-artifact-trust">{artifact.trustLevel}</span>
+      </div>
+      <h4 className="message-artifact-card-title">{artifact.title}</h4>
+      {artifact.summary ? (
+        <p className="message-artifact-card-summary">{artifact.summary}</p>
+      ) : null}
+      <span className="message-artifact-card-action">Open article →</span>
+    </button>
+  );
 }
 
 function queryErrorMessage(error: unknown): string | undefined {
   if (!error) return undefined;
   return error instanceof Error ? error.message : "Failed to load artifact";
-}
-
-function wikiHref(path: string): string {
-  return `#/wiki/${encodeURI(path)}`;
-}
-
-function trapModalFocus(
-  event: KeyboardEvent<HTMLDivElement>,
-  dialog: HTMLDivElement | null,
-) {
-  const focusables = Array.from(
-    dialog?.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR) ?? [],
-  ).filter((element) => !element.hasAttribute("disabled"));
-  if (focusables.length === 0) {
-    event.preventDefault();
-    return;
-  }
-  const [first] = focusables;
-  const last = focusables.at(-1);
-  if (!(first && last)) return;
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
 }

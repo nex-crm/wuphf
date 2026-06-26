@@ -85,6 +85,16 @@ jobs:
 
       - name: Build React frontend
         working-directory: web
+        # Vite inlines import.meta.env.VITE_* into the bundle at build time, so
+        # the PostHog project key is baked into every published binary HERE,
+        # once, for the whole release. When POSTHOG_PROJECT_KEY is unset (forks,
+        # source builds), the value is empty and onboarding analytics stay
+        # dormant (see web/src/lib/analytics.ts getConfig). The phc_ project key
+        # is write-only and safe to ship in client code; the host falls back to
+        # us.i.posthog.com when POSTHOG_HOST is not set.
+        env:
+          VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+          VITE_PUBLIC_POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
         run: |
           bun install --frozen-lockfile
           bun run build

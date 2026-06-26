@@ -25,8 +25,17 @@ type Blueprint struct {
 	// scaffold, first tasks, and provider requirements for a pack
 	// before committing. Optional — older blueprints without these
 	// fields still load and degrade gracefully in the UI.
-	Outcome               string                  `json:"outcome,omitempty" yaml:"outcome,omitempty"`
-	Category              string                  `json:"category,omitempty" yaml:"category,omitempty"`
+	Outcome  string `json:"outcome,omitempty" yaml:"outcome,omitempty"`
+	Category string `json:"category,omitempty" yaml:"category,omitempty"`
+	// Icon is a single emoji or glyph used by the onboarding blueprint
+	// picker so each pack reads as a recognizable card rather than a
+	// bare label. Optional — the UI falls back to a generic icon when
+	// unset, so legacy blueprints still render.
+	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	// DisplayName is a short, scannable label for the picker (for
+	// example "Bookkeeping" rather than "Bookkeeping and Invoicing
+	// Service"). Optional — the picker falls back to Name when unset.
+	DisplayName           string                  `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	FirstTasks            []BlueprintFirstTask    `json:"first_tasks,omitempty" yaml:"first_tasks,omitempty"`
 	Skills                []BlueprintSkill        `json:"skills,omitempty" yaml:"skills,omitempty"`
 	Requirements          []BlueprintRequirement  `json:"requirements,omitempty" yaml:"requirements,omitempty"`
@@ -169,7 +178,6 @@ type StarterAgent struct {
 	EmployeeBlueprint string   `json:"employee_blueprint,omitempty" yaml:"employee_blueprint,omitempty"`
 	Checked           bool     `json:"checked,omitempty" yaml:"checked,omitempty"`
 	Type              string   `json:"type,omitempty" yaml:"type,omitempty"`
-	PermissionMode    string   `json:"permission_mode,omitempty" yaml:"permission_mode,omitempty"`
 	BuiltIn           bool     `json:"built_in,omitempty" yaml:"built_in,omitempty"`
 	Expertise         []string `json:"expertise,omitempty" yaml:"expertise,omitempty"`
 	Personality       string   `json:"personality,omitempty" yaml:"personality,omitempty"`

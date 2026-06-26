@@ -11,17 +11,40 @@
 
 /* ─── Sidebar ─── */
 .sidebar {
-  width: 260px;
+  /* Default width is intentionally narrow — most users were left with
+     little room for the main column. The Sidebar component supplies a
+     `--sidebar-resize-width` CSS variable via useResizablePane() so a
+     user-dragged width persists; the variable resolves to 220px when
+     unset. Mobile breakpoints further down override the width directly
+     and intentionally bypass the variable so persisted desktop widths
+     can't leak into the mobile overlay layout. */
+  width: var(--sidebar-resize-width, 280px);
   flex-shrink: 0;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* Open list sections own their scroll regions. The root remains a fallback
-     scroll container for windows too short to fit the fixed sidebar chrome. */
-  overflow-y: auto;
+  /* The sidebar itself doesn't scroll — header (.sidebar-header,
+     .sidebar-primary) and footer (.usage-toggle) are fixed flex items.
+     Only the middle .sidebar-scroll grows + scrolls. */
+  overflow: hidden;
+  /* Anchor the absolutely-positioned resize handle. */
+  position: relative;
+}
+/* Middle scroll region. Owns the section list and the overflow. The
+   chevron-pinned sticky title bars use this as their scroll container. */
+.sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-x: hidden;
+  overflow-y: auto;
+  /* Hide the scrollbar entirely — the brand-purple sidebar reads cleaner
+     without it; users still scroll via wheel/trackpad/keyboard. */
+  scrollbar-width: none;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* ─── Collapsed rail ─── */
@@ -106,7 +129,7 @@ html[data-theme="nex"] .sidebar-rail-bottom {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-modal);
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -304,7 +327,7 @@ html[data-theme="nex"]
 /* Shared top-panel height: sidebar header, channel header, DM banner, etc. */
 :root {
   --top-panel-h: 56px;
-  --sidebar-pad-x: 12px;
+  --sidebar-pad-x: 4px;
   --bottom-panel-h: 36px;
   /* 120px = workspace-rail (56px) + sidebar-rail (~56px) + 8px gap. Hardcoded
      because the underlying rails are not yet token-driven; revisit when
@@ -360,6 +383,18 @@ html[data-theme="nex"]
   background: var(--accent-bg);
   color: var(--text);
 }
+/* Attention indicator on a collapsed-rail tool icon (Tasks carries the
+   inbox_attention count, which has no room for a number in the 30px rail). */
+.sidebar-rail-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
 .sidebar-icon-btn > svg {
   width: 16px;
   height: 16px;
@@ -381,6 +416,22 @@ html[data-theme="nex"]
   font-size: 22px;
   letter-spacing: -0.01em;
   cursor: pointer;
+  /* Renders as the home button — reset native button chrome, keep the
+     logo type styling above. */
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  text-align: left;
+}
+.sidebar-logo:hover {
+  opacity: 0.85;
+}
+.sidebar-logo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 .sidebar-btn {
   width: 28px;
@@ -407,32 +458,79 @@ html[data-theme="nex"]
 }
 
 .sidebar-section {
-  padding: 8px var(--sidebar-pad-x) 0;
+  padding: 8px var(--sidebar-pad-x);
   flex-shrink: 0;
+  /* Synced with .sidebar-collapsible's grid-template-rows transition so
+     the title-to-body gap collapses in lockstep with the body opening. */
+  transition: padding-bottom 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* When the section is expanded, drop the bottom padding so the title
+   sits flush with the body. The collapsible body owns its own top
+   padding, so the spacing stays consistent. */
+.sidebar-section:has(> .sidebar-collapsible.is-open) {
+  padding-bottom: 0;
+}
+/* When the section is collapsed, drop the 4px buffer on the title bar —
+   there's no body underneath, so the buffer becomes wasted space. */
+.sidebar-section.is-collapsed .sidebar-section-title-bar {
+  padding-bottom: 0;
 }
 
 /* Inbox sits at the top of the sidebar as the primary attention
    surface. Mirrors .sidebar-item exactly so it gels with the rest
-   of the sidebar — just sits in its own region above the Agents /
-   Channels / Tools sections with a separator beneath. */
+   of the sidebar — flows into the section headers below without a
+   hard divider, matching how the sections flow into each other. */
 .sidebar-primary {
-  padding: 4px var(--sidebar-pad-x) 8px;
+  padding: 8px var(--sidebar-pad-x);
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
 }
 
-.sidebar-section + .sidebar-section,
-.sidebar-agents + .sidebar-section,
-.sidebar-channels + .sidebar-section,
-.sidebar-apps + .sidebar-section {
+/* Hairline between adjacent sections — matches `.usage-toggle`'s border-top.
+   Sections are direct siblings inside .sidebar-scroll now. */
+.sidebar-section + .sidebar-section {
   border-top: 1px solid var(--border);
 }
-.sidebar-section.is-collapsed {
-  padding-bottom: 0;
+.sidebar-section-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0px;
+  margin: 0;
+  /* Slack-style sticky headers — title bar pins to the top of the
+     scroll container while its section's body is on screen. When the
+     section's bottom edge reaches the pin line, the next section's
+     title bar takes over naturally because each is scoped to its own
+     section box. Opaque bg so list content underneath doesn't bleed
+     through. Negative side margins so the bg fills the section's
+     padding gutter at the left and right edges. The 4px padding-bottom
+     replaces the list body's old top padding so the buffer between
+     title and first row stays attached to the pinned header. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-card);
+  /* Extend the bg edge-to-edge into the section's gutters so the pinned
+     header completely opaques the sidebar width. */
+  margin-left: calc(var(--sidebar-pad-x) * -1);
+  margin-right: calc(var(--sidebar-pad-x) * -1);
+  padding-left: var(--sidebar-pad-x);
+  padding-right: var(--sidebar-pad-x);
+  padding-bottom: 4px;
+  /* `padding-bottom` collapses to 0 when the section is collapsed (see
+     `.sidebar-section.is-collapsed` rule below). `box-shadow` fades in
+     when the shared sticky-pin registry flips `data-stuck="true"` (see
+     web/src/components/sidebar/stickyPinRegistry.ts). Both animate on
+     the shared collapsible timing so nothing jumps. */
+  transition:
+    padding-bottom 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 150ms ease-out;
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
 }
-.sidebar-section.is-collapsed + .sidebar-section {
-  border-top: none;
+.sidebar-section-title-bar[data-stuck="true"] {
+  /* Soft drop shadow so scrolling content visibly slips behind the
+     pinned header. Kept low-key (10% black, 6px blur) so it reads as
+     elevation, not a hard line. */
+  box-shadow: 0 4px 6px -4px rgba(0, 0, 0, 0.2);
 }
 .sidebar-section-title {
   font-size: 10px;
@@ -440,19 +538,74 @@ html[data-theme="nex"]
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-tertiary);
-  margin: 0 0 8px;
   padding-left: 10px;
+}
+.sidebar-section-title-bar .sidebar-section-title {
+  margin: 0;
 }
 .sidebar-section-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  box-sizing: border-box;
   border: none;
   background: transparent;
   cursor: pointer;
-  padding: 4px 10px;
+  padding: 0 10px;
   font-family: inherit;
+  color: inherit;
+}
+.sidebar-section-chevron {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.sidebar-section-chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+.sidebar-section-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.sidebar-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-right: 6px;
+}
+.sidebar-section-action {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
+}
+.sidebar-section-action:hover {
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.04);
+}
+.sidebar-section-action:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+.sidebar-section-action.active {
+  color: var(--text);
+  background: var(--accent-bg);
 }
 .sidebar-section-toggle:hover {
   color: var(--text);
@@ -466,6 +619,7 @@ html[data-theme="nex"]
 .sidebar-item {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   width: 100%;
   padding: 6px 10px;
@@ -906,20 +1060,22 @@ html[data-theme="nex"]
   overflow: hidden;
 }
 .sidebar-scroll-wrap.is-agents {
-  flex: 1 1 auto;
-  max-height: 100%;
-  border-bottom: 1px solid var(--border);
+  flex: none;
 }
 .sidebar-collapsible {
   display: grid;
   grid-template-rows: 1fr;
-  transition: grid-template-rows 0.2s ease;
-  flex: 1 1 0;
+  /* Material-standard ease-in-out. Chrome's `grid-template-rows: 1fr → 0fr`
+     interpolation is finicky with steep custom curves (e.g. cubic-bezier
+     (0.77, 0, 0.175, 1) caused the transition to no-op). This curve plays
+     nice and stays in lockstep with the section's padding-bottom. */
+  transition: grid-template-rows 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* Sections hug content; the sidebar root owns the overflow scroll. */
+  flex: 0 0 auto;
   min-height: 0;
 }
 .sidebar-collapsible:not(.is-open) {
   grid-template-rows: 0fr;
-  flex: 0 0 auto;
 }
 .sidebar-collapsible > * {
   min-height: 0;
@@ -957,12 +1113,91 @@ html[data-theme="nex"]
 }
 
 .sidebar-agents {
-  padding: 4px var(--sidebar-pad-x) 4px;
+  /* No side padding — items already carry their own 10px gutter
+     (.sidebar-item padding) and align with the title text. Top padding
+     lives on the title bar's padding-bottom. */
+  padding: 0 0 4px;
+  /* Section bodies hug their content — the sidebar root owns scroll. */
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 1px;
+  overflow: visible;
+  margin-bottom: 8px;
+}
+
+/* v3 MVP — CEO/specialist org hierarchy in the sidebar.
+   The CEO row sits at the top with an "Orchestrator" pill; specialists
+   sit beneath under a "Reports to @ceo" label with a left-rail tree
+   stem on each row so the org chart is obvious at a glance. */
+.sidebar-agent-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-agent-group + .sidebar-agent-group {
+  margin-top: 8px;
+}
+.sidebar-agent-rank-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 0 10px;
+  margin-bottom: 2px;
+}
+.sidebar-agent-group--ceo .sidebar-agent {
+  background: color-mix(in srgb, var(--accent, #6cf) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #6cf) 24%, transparent);
+}
+.sidebar-agent-group--ceo .sidebar-agent.active {
+  background: color-mix(in srgb, var(--accent, #6cf) 18%, transparent);
+}
+.sidebar-agent-rail-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 6px;
+}
+.sidebar-agent-rail-tree-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.sidebar-agent-rail-tree-stem {
+  flex: 0 0 12px;
+  align-self: stretch;
+  position: relative;
+}
+.sidebar-agent-rail-tree-stem::before {
+  /* Vertical trunk that runs the full row height. */
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.18));
+}
+.sidebar-agent-rail-tree-stem::after {
+  /* Elbow into the row at vertical midpoint. */
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  width: 7px;
+  height: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.18));
+}
+.sidebar-agent-rail-tree-row:last-child .sidebar-agent-rail-tree-stem::before {
+  /* Trunk stops at the elbow on the last specialist. */
+  bottom: 50%;
+}
+.sidebar-agent-rail-tree-row .sidebar-agent-row {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
+  min-width: 0;
 }
 .sidebar-agents .sidebar-add-btn,
 .sidebar-channels .sidebar-add-btn {
@@ -1088,20 +1323,26 @@ html[data-theme="nex"]
 }
 
 .sidebar-channels {
-  padding: 4px var(--sidebar-pad-x) 4px;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
+  /* No side padding — items carry their own gutter via .sidebar-item. */
+  padding: 0 0 4px;
+  /* Section bodies hug their content — the sidebar root owns scroll. */
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 1px;
+  overflow: visible;
+  margin-bottom: 8px;
 }
 .sidebar-apps {
-  padding: 4px var(--sidebar-pad-x) 4px;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
+  /* No side padding — items carry their own gutter via .sidebar-item. */
+  padding: 0 0 4px;
+  /* Section bodies hug their content — the sidebar root owns scroll. */
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 1px;
+  overflow: visible;
+  margin-bottom: 8px;
 }
 
 /* Minimal hover-reveal scrollbars for sidebar scroll regions. */
@@ -1184,6 +1425,9 @@ html[data-theme="nex"]
   color: var(--text-secondary);
   font-family: var(--font-sans);
   text-align: left;
+  /* Bottom-of-sidebar chrome. The sidebar is a fixed-height flex column
+     and .sidebar-scroll above us takes the remaining space, so we sit
+     statically pinned to the bottom — no sticky needed. */
   flex-shrink: 0;
 }
 .usage-toggle:hover {
@@ -1859,7 +2103,7 @@ html[data-theme="nex"]
 .task-detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1993,9 +2237,9 @@ html[data-theme="nex"]
   border: 1px solid var(--border);
 }
 .task-detail-status-badge.status-done {
-  background: #e7f9ed;
-  color: #0b6b2a;
-  border-color: #c6eed2;
+  background: var(--success-100, #e7f9ed);
+  color: var(--success-500, #0b6b2a);
+  border-color: var(--success-200, #c6eed2);
 }
 .task-detail-status-badge.status-in_progress,
 .task-detail-status-badge.status-review {
@@ -2004,9 +2248,9 @@ html[data-theme="nex"]
   border-color: var(--accent-bg);
 }
 .task-detail-status-badge.status-blocked {
-  background: #fff4d6;
-  color: #7a5500;
-  border-color: #f2d98a;
+  background: var(--warning-100, #fff4d6);
+  color: var(--warning-500, #7a5500);
+  border-color: var(--warning-200, #f2d98a);
 }
 .task-detail-status-badge.status-canceled,
 .task-detail-status-badge.status-cancelled {
@@ -2150,7 +2394,13 @@ html[data-theme="nex"]
 
 /* ─── Thread Panel ─── */
 .thread-panel {
-  width: 380px;
+  /* Default width chosen to leave the main column room on a 13" laptop.
+     ThreadPanel supplies a `--thread-panel-resize-width` variable via
+     useResizablePane(); the variable resolves to 340px when unset. The
+     mobile media query below sets `width: 100%` and intentionally
+     bypasses the variable so a persisted desktop width can't shrink
+     the mobile overlay. */
+  width: var(--thread-panel-resize-width, 340px);
   flex-shrink: 0;
   background: var(--bg-card);
   border-left: 1px solid var(--border);
@@ -2158,6 +2408,8 @@ html[data-theme="nex"]
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  /* Anchor the absolutely-positioned resize handle. */
+  position: relative;
 }
 .thread-panel.open {
   display: flex;
@@ -2368,56 +2620,6 @@ html[data-theme="nex"]
   pointer-events: auto;
 }
 
-/* ─── Recent objects (sidebar panel) ─── */
-.recent-objects {
-  padding: 6px 0 4px;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.recent-objects-title {
-  padding: 6px var(--sidebar-pad-x) 4px;
-  margin-bottom: 0;
-}
-.recent-objects-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 2px 0;
-}
-.recent-objects-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 22px;
-  text-decoration: none;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-radius: 0;
-  transition:
-    background 0.12s,
-    color 0.12s;
-  white-space: nowrap;
-  overflow: hidden;
-  border: none;
-  background: transparent;
-}
-.recent-objects-item:hover {
-  background: var(--bg-warm);
-  color: var(--text);
-}
-.recent-objects-icon {
-  flex-shrink: 0;
-  opacity: 0.6;
-  color: var(--text-tertiary);
-}
-.recent-objects-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
 /* ─── DM Banner ─── */
 .dm-banner {
   display: none;
@@ -2492,80 +2694,12 @@ html[data-theme="nex"]
     height: 100%;
     z-index: 20;
   }
+  .sidebar.sidebar-collapsed {
+    width: 56px;
+  }
   .main {
     width: 100%;
   }
-}
-
-/* ─── Sidebar color picker (footer) ─── */
-.sidebar-color-picker {
-  padding: 8px var(--sidebar-pad-x) 10px;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  /* Pin to the bottom of the sidebar so it stays visible even when the
-     sidebar content overflows and the user scrolls up. The sidebar root
-     uses overflow-y:auto, which gives sticky a positioned ancestor. */
-  position: sticky;
-  bottom: 0;
-  background: var(--bg-card);
-  z-index: 2;
-  margin-top: auto;
-}
-.sidebar-color-picker-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-tertiary);
-  margin-bottom: 6px;
-}
-.sidebar-color-picker-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.sidebar-color-swatch {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  padding: 0;
-  cursor: pointer;
-  position: relative;
-  transition:
-    transform 0.1s,
-    box-shadow 0.1s;
-}
-.sidebar-color-swatch:hover {
-  transform: scale(1.08);
-}
-.sidebar-color-swatch:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus-ring-color);
-  outline-offset: var(--focus-ring-offset);
-}
-.sidebar-color-swatch.is-active {
-  box-shadow: 0 0 0 2px var(--accent, var(--text));
-}
-.sidebar-color-swatch-custom {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  line-height: 1;
-  color: var(--text-tertiary);
-  background: transparent;
-  overflow: hidden;
-}
-.sidebar-color-swatch-custom input[type="color"] {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  cursor: pointer;
-  opacity: 0;
 }
 
 /* ─── Agent event pill ───────────────────────────────────────────
@@ -3172,6 +3306,9 @@ html[data-theme="nex"]
   flex-direction: column;
   gap: 8px;
 }
+.collapsible-section-body[hidden] {
+  display: none;
+}
 
 .collapsible-count {
   display: inline-flex;
@@ -3535,7 +3672,10 @@ html[data-theme="nex"]
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
 }
 .governor-control-btn:hover:not(:disabled) {
   color: var(--text);
@@ -3549,4 +3689,523 @@ html[data-theme="nex"]
   color: var(--red);
   border-color: var(--red);
   background: var(--red-bg);
+}
+
+/* ─── Resizable pane drag handle ─────────────────────────────────
+   Thin vertical splitter anchored to a side pane's edge. The visible
+   rule is 1px wide so the layout doesn't shift, while a pseudo-element
+   expands the hit area to ~8px for easy grabbing. */
+.pane-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 50;
+  touch-action: none;
+  /* Keep keyboard focus visible without the default outline pushing
+     the rule away from the edge. */
+  outline: none;
+}
+
+.pane-resize-handle--right {
+  right: -1px;
+}
+
+.pane-resize-handle--left {
+  left: -1px;
+}
+
+.pane-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Expand horizontal hit area without nudging the visible rule. */
+  left: -3px;
+  right: -3px;
+}
+
+.pane-resize-handle:hover,
+.pane-resize-handle:focus-visible,
+.pane-resize-handle.is-active {
+  background: var(--cyan-500, #06b6d4);
+}
+
+.pane-resize-handle:focus-visible {
+  /* Visible focus marker without shifting layout. */
+  box-shadow: 0 0 0 1px var(--focus-ring-color, var(--cyan-500, #06b6d4));
+}
+
+/* Globally suppress text selection + force the resize cursor while a drag is
+   in progress, so the cursor doesn't flicker to text-select when the pointer
+   crosses the main content area mid-drag. */
+body.resizing-pane {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.resizing-pane * {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* ── Task nav (primary sidebar surface, task-scoped model) ───────────
+   Replaces the old Agents + Channels nav sections. Lists the operator's
+   tasks grouped by the seven board stages; each item opens the task
+   detail (which carries its channel). */
+.task-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px var(--sidebar-pad-x) 12px;
+}
+.task-nav-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 6px;
+}
+.task-nav-board-link {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.task-nav-board-link:hover {
+  color: var(--text);
+}
+.task-nav-new-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.task-nav-new-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.task-nav-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+.task-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+.task-nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 5px 6px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.task-nav-group-header:hover {
+  background: var(--bg-warm);
+}
+.task-nav-caret {
+  font-size: 9px;
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+.task-nav-group-label {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.task-nav-group-count {
+  min-width: 16px;
+  padding: 0 6px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-warm);
+  border-radius: var(--radius-full);
+}
+.task-nav-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+.task-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 5px 8px 5px 22px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.task-nav-item:hover {
+  background: var(--bg-warm);
+  color: var(--text);
+}
+.task-nav-item.active {
+  background: var(--accent-bg);
+  color: var(--text);
+}
+.task-nav-item-title {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Agents tool (roster grid + per-agent detail) ───────────────────
+   The dedicated Agents surface. Agents are first-class but not chat
+   surfaces; this is where the roster lives and agents are configured. */
+.agents-tool {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.agents-tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.agents-tool-heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.agents-tool-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 24px;
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+.agents-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+.agents-tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+.agents-tool-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.agents-tool-card-avatar {
+  position: relative;
+  display: inline-flex;
+}
+.agents-tool-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.agents-tool-card-role {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+}
+.agents-tool-card-status {
+  margin-top: 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.agents-tool-card-status.is-active {
+  color: var(--green);
+}
+.agent-detail-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The agent detail is a full-screen route, but AgentProfilePanel's base
+   `.agent-panel` class is a fixed 400px right-edge slide-in drawer (its other
+   use). Inside the detail route, neutralize the fixed positioning so the panel
+   fills the page instead of floating as a narrow right-hand panel. */
+.agent-detail-panel .agent-profile-panel {
+  position: static;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1;
+  border-left: none;
+  box-shadow: none;
+  z-index: auto;
+  animation: none;
+}
+
+/* ── New-task home composer ─────────────────────────────────────────────── */
+.task-composer-screen {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 32px 24px;
+}
+.task-composer {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-composer-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text, #111);
+  text-align: center;
+}
+.task-composer-subtitle {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.task-composer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal, 0 8px 28px rgba(0, 0, 0, 0.12));
+}
+.task-composer-input {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--bg-input, var(--bg-primary, #fff));
+  color: var(--text, var(--text-primary));
+}
+.task-composer-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.task-composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  background: var(--bg-input, var(--bg-primary, #fff));
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-full, 999px);
+  font-size: 12px;
+}
+.task-chip[data-disabled="true"] {
+  opacity: 0.55;
+}
+.task-chip-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.task-chip-select {
+  font: inherit;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--text, var(--text-primary));
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  max-width: 180px;
+}
+.task-chip-select:focus {
+  outline: none;
+}
+.task-chip-select:disabled {
+  cursor: not-allowed;
+}
+.task-composer-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.task-composer-hint strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.task-composer-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--red, #d33);
+}
+.task-composer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-composer-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text, var(--text-primary));
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    border-color 120ms ease;
+}
+.task-composer-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.task-composer-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.task-composer-btn-primary {
+  background: var(--accent, #5b8def);
+  color: var(--bg-primary, #fff);
+  border-color: transparent;
+}
+.task-composer-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: transparent;
+}
+
+/* ── Task channel chat (task detail → Channel tab) ──────────────────────
+   The task's own channel rendered as live chat: the agent conversation
+   (owner / CEO / Librarian) plus a composer for the human to post into it.
+   Replaces the old packet-comments timeline so the per-task chat is
+   actually reachable from the task. */
+.task-channel-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-3, 12px);
+}
+.task-channel-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding: var(--space-2, 8px) 0;
+}
+.task-channel-chat-empty {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: var(--space-4, 16px);
+  text-align: center;
+}
+.task-channel-chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3, 12px);
+}
+.task-channel-chat-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 2.75rem;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  line-height: 1.5;
+}
+.task-channel-chat-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.task-channel-chat-error {
+  color: var(--danger, #c0392b);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.task-channel-chat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.task-channel-chat-send {
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  background: var(--accent);
+  color: var(--bg-card);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.task-channel-chat-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.task-channel-chat-send:not(:disabled):hover {
+  filter: brightness(1.08);
 }

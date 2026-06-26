@@ -9,7 +9,7 @@ func TestToShortcode(t *testing.T) {
 	}{
 		{"🎉", ":tada:"},
 		{"🚀", ":rocket:"},
-		{"✅", ":check:"},
+		{"✅", ":white_check_mark:"},
 		{"🎉 launch 🚀", ":tada: launch :rocket:"},
 		{"hello world", "hello world"},
 		{"", ""},

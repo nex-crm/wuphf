@@ -15,6 +15,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
@@ -150,14 +151,24 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"llm_provider":            config.ResolveLLMProvider(""),
 			"llm_provider_configured": llmProviderConfigured,
 			"llm_provider_priority":   cfg.LLMProviderPriority,
-			"provider_endpoints":      cfg.ProviderEndpoints,
-			"memory_backend":          config.ResolveMemoryBackend(""),
-			"action_provider":         config.ResolveActionProvider(),
-			"team_lead_slug":          cfg.TeamLeadSlug,
-			"max_concurrent_agents":   cfg.MaxConcurrent,
-			"default_format":          config.ResolveFormat(""),
-			"default_timeout":         config.ResolveTimeout(""),
-			"blueprint":               cfg.ActiveBlueprint(),
+			// llm_provider_kinds is the non-gateway subset of the registered
+			// provider runtimes — the safe set to render in any UI runtime
+			// picker (Settings default-runtime, AgentProfilePanel runtime
+			// section, AgentWizard provider field). Gateway kinds (openclaw,
+			// hermes-agent) are excluded; the Integrations app surfaces them.
+			"llm_provider_kinds": provider.LLMProviderKinds(),
+			// gateway_kinds is the inverse — registered kinds that are
+			// gateway-controlled. Consumed by the Integrations app to
+			// enumerate which gateways are compiled in and connectable.
+			"gateway_kinds":         provider.GatewayKinds(),
+			"provider_endpoints":    cfg.ProviderEndpoints,
+			"memory_backend":        config.ResolveMemoryBackend(""),
+			"action_provider":       config.ResolveActionProvider(),
+			"team_lead_slug":        cfg.TeamLeadSlug,
+			"max_concurrent_agents": cfg.MaxConcurrent,
+			"default_format":        config.ResolveFormat(""),
+			"default_timeout":       config.ResolveTimeout(""),
+			"blueprint":             cfg.ActiveBlueprint(),
 			// Workspace
 			"email":          cfg.Email,
 			"workspace_id":   cfg.WorkspaceID,
@@ -181,10 +192,17 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gemini_key_set":       config.ResolveGeminiAPIKey() != "",
 			"minimax_key_set":      config.ResolveMinimaxAPIKey() != "",
 			"one_key_set":          config.ResolveOneSecret() != "",
-			"composio_key_set":     config.ResolveComposioAPIKey() != "",
+			"composio_key_set":     config.IsComposioConfigured(),
 			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
 			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
 			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
+			// Product analytics consent (PostHog). The two channels are
+			// independently toggleable; analytics_configured reports whether
+			// the backend injects a key (the frontend ORs this with its own
+			// build-time key to decide whether the toggles are meaningful).
+			"analytics_telemetry_enabled":         cfg.IsAnalyticsTelemetryEnabled(),
+			"analytics_session_recording_enabled": cfg.IsAnalyticsSessionRecordingEnabled(),
+			"analytics_configured":                config.ResolvePostHogKey() != "",
 			// Config file path (informational)
 			"config_path": config.ConfigPath(),
 		})
@@ -225,6 +243,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TelegramToken   *string `json:"telegram_bot_token,omitempty"`
 			OpenclawToken   *string `json:"openclaw_token,omitempty"`
 			OpenclawGateway *string `json:"openclaw_gateway_url,omitempty"`
+			// Product analytics consent toggles. Pointer => nil means "not
+			// sent, leave alone"; an explicit true/false round-trips.
+			AnalyticsTelemetry        *bool `json:"analytics_telemetry_enabled,omitempty"`
+			AnalyticsSessionRecording *bool `json:"analytics_session_recording_enabled,omitempty"`
 			// ProviderEndpoints is a partial-update map: keys present in
 			// the payload replace the corresponding entry; absent keys are
 			// preserved. Pass an empty value (`{"base_url":"","model":""}`)
@@ -460,6 +482,18 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			cfg.OpenclawGatewayURL = strings.TrimSpace(*body.OpenclawGateway)
 			changed = true
 		}
+		// Analytics consent toggles. Copy into a fresh local so the stored
+		// pointer doesn't alias the decoded request body.
+		if body.AnalyticsTelemetry != nil {
+			v := *body.AnalyticsTelemetry
+			cfg.AnalyticsTelemetryEnabled = &v
+			changed = true
+		}
+		if body.AnalyticsSessionRecording != nil {
+			v := *body.AnalyticsSessionRecording
+			cfg.AnalyticsSessionRecordingEnabled = &v
+			changed = true
+		}
 		if body.ProviderEndpoints != nil {
 			// Partial merge: only kinds present in the payload are touched,
 			// so the Settings UI can update one runtime's endpoint without
@@ -476,14 +510,23 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				if k == "" {
 					continue
 				}
-				// provider_endpoints keys must be runnable global LLM
-				// kinds (mlx-lm/ollama/exo/claude-code/codex/...) —
-				// openclaw, while a valid per-member binding, has no
-				// HTTP base_url + model concept and must not get a row
-				// in this map.
-				if !config.IsLLMProviderKindAllowed(k) {
+				// provider_endpoints keys must be registered runtime kinds
+				// — that includes both directly-dispatchable LLMs
+				// (claude-code/codex/opencode/mlx-lm/ollama/exo) and
+				// gateway-controlled HTTP runtimes (openclaw-http,
+				// hermes-agent) whose base_url + model the operator may
+				// legitimately want to override. The legacy openclaw
+				// bridge kind has no Register entry (it dispatches via
+				// the WebSocket bridge, not /v1/chat/completions) so
+				// provider.Lookup returns nil and the request is rejected.
+				//
+				// Using provider.Lookup (registry membership) instead of
+				// config.IsLLMProviderKindAllowed (non-gateway subset) is
+				// deliberate: the gateway/non-gateway split lives in the
+				// picker UIs, not in the endpoint-configuration surface.
+				if provider.Lookup(k) == nil {
 					http.Error(w, "unsupported provider_endpoints kind: "+strconv.Quote(k)+
-						" (allowed: "+strings.Join(config.AllowedLLMProviderKinds(), ", ")+")",
+						" (must be a registered runtime kind)",
 						http.StatusBadRequest)
 					return
 				}
@@ -845,7 +888,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			b.requests = filteredRequests
 			b.pendingInterview = firstBlockingRequest(b.requests)
-			b.pruneAgentIssuesByChannelLocked(slug)
+			b.pruneIncidentsByChannelLocked(slug)
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
@@ -959,6 +1002,13 @@ func (b *Broker) createChannelLocked(in channelCreateInput) (*teamChannel, *chan
 	}
 	b.channels = append(b.channels, ch)
 	if err := b.saveLocked(); err != nil {
+		// Roll back the in-memory append so a failed persist never leaves a
+		// ghost channel (one with no owning task that the UI can't reach, and
+		// that blocks a later create of the same slug with a phantom
+		// StatusConflict). Without this, createPerTaskChannelLocked's caller
+		// silently routes the task to #general instead of its own channel.
+		b.channels = b.channels[:len(b.channels)-1]
+		b.rebuildChannelIndexLocked()
 		return nil, &channelCreateError{Code: http.StatusInternalServerError, Msg: "failed to persist broker state"}
 	}
 	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
@@ -1278,7 +1328,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	for _, msg := range lastMessages {
-		msg = sanitizeChannelMessageSecrets(msg)
+		// redaction removed (core-loop R1)
 		content := msg.Content
 		if len(content) > 80 {
 			content = content[:80]

@@ -177,7 +177,7 @@ As of this week, new installs default to the markdown wiki instead of the Nex kn
 
 - Users can \`cat\` and \`git clone\` their team memory
 - No API key required to try it
-- File-over-app story matches WUPHF's MIT/self-hosted posture
+- File-over-app story matches WUPHF's source-available/self-hosted posture
 
 ## What it means
 

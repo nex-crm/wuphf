@@ -2,16 +2,20 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_CANONICAL_JSON_NODES, validateCanonicalJsonNodeBudget } from "../src/budgets.ts";
 import {
-  type ApprovalClaims,
   type AuditEventRecord,
+  asAgentId,
   asAgentSlug,
+  asApprovalClaimId,
   asApprovalId,
+  asApprovalTokenId,
+  asCredentialHandleId,
+  asCredentialScope,
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
-  asSignerIdentity,
   assertWithinBudget,
   asTaskId,
+  asTimestampMs,
   asToolCallId,
   asWriteId,
   type CommitRef,
@@ -22,7 +26,11 @@ import {
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
   lsnFromV1Number,
-  MAX_APPROVAL_SIGNATURE_BYTES,
+  MAX_APPROVAL_COST_CEILING_ID_BYTES,
+  MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES,
+  MAX_APPROVAL_IDENTIFIER_BYTES,
+  MAX_APPROVAL_REASON_BYTES,
+  MAX_APPROVAL_TOKEN_ID_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
@@ -46,6 +54,7 @@ import {
   MAX_THREAD_TITLE_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WEBAUTHN_ASSERTION_FIELD_BYTES,
   type MemoryWriteRef,
   type ReceiptSnapshot,
   receiptFromJson,
@@ -351,129 +360,276 @@ describe("resource budgets", () => {
   });
 
   it("bounds approval token lifetime at the edge", () => {
-    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+    const notBefore = 1_778_262_000_000;
     expect(
       validateApprovalTokenLifetime({
-        ...approvalClaimsFixture(),
-        issuedAt,
-        expiresAt: new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS),
+        notBefore,
+        expiresAt: notBefore + MAX_APPROVAL_TOKEN_LIFETIME_MS,
       }),
     ).toEqual({ ok: true });
 
     const result = validateApprovalTokenLifetime({
-      ...approvalClaimsFixture(),
-      issuedAt,
-      expiresAt: new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1),
+      notBefore,
+      expiresAt: notBefore + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1,
     });
 
     expectBudgetRejection(result, /approval token lifetime ms.*1800001 > 1800000/);
   });
 
-  it("does not reject zero or negative approval token lifetimes — that is the per-field validator's job", () => {
-    // The lower bound (`expiresAt > issuedAt`) is enforced at the proper
-    // per-field path by `validateApprovalClaims` (receipt-validator.ts) and
-    // `validateApprovalClaimsShape` (ipc.ts), where it produces a path-
-    // anchored error like `/approvals/N/signedToken/claims/expiresAt: must
-    // be after issuedAt`. The budget validator here owns only the upper
-    // bound (the 30-minute cap). Duplicating the lower bound would
-    // short-circuit the per-field error path with a less actionable
-    // top-level message.
-    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
-    expect(
+  it("rejects zero or negative approval token lifetimes", () => {
+    const notBefore = 1_778_262_000_000;
+    expectBudgetRejection(
       validateApprovalTokenLifetime({
-        ...approvalClaimsFixture(),
-        issuedAt,
-        expiresAt: issuedAt,
+        notBefore,
+        expiresAt: notBefore,
       }),
-    ).toEqual({ ok: true });
-    expect(
+      /expiresAt must be strictly greater than notBefore/,
+    );
+    expectBudgetRejection(
       validateApprovalTokenLifetime({
-        ...approvalClaimsFixture(),
-        issuedAt,
-        expiresAt: new Date(issuedAt.getTime() - 1),
+        notBefore,
+        expiresAt: notBefore - 1,
       }),
-    ).toEqual({ ok: true });
+      /expiresAt must be strictly greater than notBefore/,
+    );
   });
 
-  it("rejects approval token lifetimes with non-finite date inputs", () => {
-    class InfiniteTimeDate extends Date {
-      public override getTime(): number {
-        return Number.POSITIVE_INFINITY;
-      }
-    }
-
-    const validDate = new Date("2026-05-08T18:00:00.000Z");
+  it("rejects approval token lifetimes with non-finite numeric inputs", () => {
+    const validTimestamp = 1_778_262_000_000;
     const invalidCases: readonly {
-      readonly issuedAt: Date;
-      readonly expiresAt: Date;
+      readonly notBefore: number;
+      readonly expiresAt: number;
     }[] = [
       {
-        issuedAt: new Date(Number.NaN),
-        expiresAt: validDate,
+        notBefore: Number.NaN,
+        expiresAt: validTimestamp,
       },
       {
-        issuedAt: validDate,
-        expiresAt: new Date(Number.NaN),
+        notBefore: validTimestamp,
+        expiresAt: Number.NaN,
       },
       {
-        issuedAt: new InfiniteTimeDate("2026-05-08T18:00:00.000Z"),
-        expiresAt: validDate,
+        notBefore: Number.POSITIVE_INFINITY,
+        expiresAt: validTimestamp,
       },
       {
-        issuedAt: validDate,
-        expiresAt: new InfiniteTimeDate("2026-05-08T18:00:00.000Z"),
+        notBefore: validTimestamp,
+        expiresAt: Number.POSITIVE_INFINITY,
       },
     ];
 
     for (const invalidCase of invalidCases) {
-      expect(validateApprovalTokenLifetime({ ...approvalClaimsFixture(), ...invalidCase })).toEqual(
-        {
-          ok: false,
-          reason: "approval token lifetime must be finite",
-        },
-      );
+      expect(validateApprovalTokenLifetime(invalidCase)).toEqual({
+        ok: false,
+        reason: "approval token lifetime must be finite",
+      });
     }
   });
 
-  it("bounds nested signed approval token signatures in receipt budgets", () => {
-    const atCap = receiptWithWriteApprovalToken({
-      ...signedApprovalTokenFixture(),
-      signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES),
-    });
-    expect(validateReceiptBudget(atCap)).toEqual({ ok: true });
-
+  it("bounds nested approval token ids in receipt budgets", () => {
     const overCap = receiptWithWriteApprovalToken({
       ...signedApprovalTokenFixture(),
-      signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1),
+      tokenId: `A${"B".repeat(MAX_APPROVAL_TOKEN_ID_BYTES)}` as SignedApprovalToken["tokenId"],
     });
 
     expectBudgetRejection(
       validateReceiptBudget(overCap),
-      /receipt writes\[0\]\.approvalToken: approvalToken\.signature bytes.*4097 > 4096/,
+      /receipt writes\[0\]\.approvalToken\.tokenId: ApprovalTokenId bytes.*27 > 26/,
     );
   });
 
-  it("bounds nested signed approval token WebAuthn assertions in receipt budgets", () => {
-    const atCap = receiptWithWriteApprovalToken({
-      ...signedApprovalTokenFixture(),
-      claims: {
-        ...approvalClaimsFixture(),
-        webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES),
+  it("bounds nested approval token claim and scope fields in receipt budgets", () => {
+    const overCostAgent = receiptWithWriteApprovalToken(
+      costApprovalTokenFixture({
+        agentId: "a".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCostAgent),
+      /receipt writes\[0\]\.approvalToken\.claim\.agentId bytes.*257 > 256/,
+    );
+
+    const overCostCeiling = receiptWithWriteApprovalToken(
+      costApprovalTokenFixture({
+        costCeilingId: `A${"B".repeat(MAX_APPROVAL_COST_CEILING_ID_BYTES)}`,
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCostCeiling),
+      /receipt writes\[0\]\.approvalToken\.claim\.costCeilingId: ApprovalClaim\.costCeilingId bytes.*129 > 128/,
+    );
+
+    const overReason = receiptWithWriteApprovalToken(
+      endpointApprovalTokenFixture(
+        "a".repeat(MAX_APPROVAL_REASON_BYTES + 1),
+        "https://api.example",
+      ),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overReason),
+      /receipt writes\[0\]\.approvalToken\.claim\.reason: ApprovalClaim\.reason bytes.*8193 > 8192/,
+    );
+
+    const overEndpoint = receiptWithWriteApprovalToken(
+      endpointApprovalTokenFixture(
+        "approved",
+        `https://example.com/${"a".repeat(MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES)}`,
+      ),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overEndpoint),
+      /receipt writes\[0\]\.approvalToken\.claim\.endpointOrigin: ApprovalClaim\.endpointOrigin bytes/,
+    );
+
+    const overCredentialHandle = receiptWithWriteApprovalToken(
+      credentialGrantApprovalTokenFixture({
+        credentialHandleId: "c".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCredentialHandle),
+      /receipt writes\[0\]\.approvalToken\.claim\.credentialHandleId bytes.*257 > 256/,
+    );
+
+    const overCredentialScope = receiptWithWriteApprovalToken(
+      credentialGrantApprovalTokenFixture({
+        credentialScope: "s".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCredentialScope),
+      /receipt writes\[0\]\.approvalToken\.claim\.credentialScope bytes.*257 > 256/,
+    );
+
+    const overCostScopeAgent = costApprovalTokenFixture();
+    expectBudgetRejection(
+      validateReceiptBudget(
+        receiptWithWriteApprovalToken({
+          ...overCostScopeAgent,
+          scope: {
+            ...overCostScopeAgent.scope,
+            agentId: "a".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+          } as SignedApprovalToken["scope"],
+        }),
+      ),
+      /receipt writes\[0\]\.approvalToken\.scope\.agentId bytes.*257 > 256/,
+    );
+
+    const endpointScopeToken = endpointApprovalTokenFixture("approved", "https://api.example");
+    expectBudgetRejection(
+      validateReceiptBudget(
+        receiptWithWriteApprovalToken({
+          ...endpointScopeToken,
+          scope: {
+            ...endpointScopeToken.scope,
+            endpointOrigin: `https://example.com/${"a".repeat(MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES)}`,
+          } as SignedApprovalToken["scope"],
+        }),
+      ),
+      /receipt writes\[0\]\.approvalToken\.scope\.endpointOrigin: ApprovalClaim\.endpointOrigin bytes/,
+    );
+
+    const credentialScopeToken = credentialGrantApprovalTokenFixture();
+    expectBudgetRejection(
+      validateReceiptBudget(
+        receiptWithWriteApprovalToken({
+          ...credentialScopeToken,
+          scope: {
+            ...credentialScopeToken.scope,
+            credentialHandleId: "c".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+          } as SignedApprovalToken["scope"],
+        }),
+      ),
+      /receipt writes\[0\]\.approvalToken\.scope\.credentialHandleId bytes.*257 > 256/,
+    );
+  });
+
+  it("rejects hostile JSON shapes before receipt serialization", () => {
+    let toJsonGetterInvoked = false;
+    const toJsonPrototype = {};
+    Object.defineProperty(toJsonPrototype, "toJSON", {
+      enumerable: true,
+      get() {
+        toJsonGetterInvoked = true;
+        return () => undefined;
       },
     });
-    expect(validateReceiptBudget(atCap)).toEqual({ ok: true });
+    const toJsonAccessorReceipt = Object.assign(
+      Object.create(toJsonPrototype) as ReceiptSnapshot,
+      validReceiptFixture(),
+    );
 
-    const overCap = receiptWithWriteApprovalToken({
-      ...signedApprovalTokenFixture(),
-      claims: {
-        ...approvalClaimsFixture(),
-        webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1),
+    expectBudgetRejection(
+      validateReceiptBudget(toJsonAccessorReceipt),
+      /receipt serialized bytes: accessor toJSON at \$/,
+    );
+    expect(toJsonGetterInvoked).toBe(false);
+
+    let nestedGetterInvoked = false;
+    const accessorReceipt = { ...validReceiptFixture() };
+    Object.defineProperty(accessorReceipt, "triggerRef", {
+      enumerable: true,
+      get() {
+        nestedGetterInvoked = true;
+        return "message:01ARZ3NDEKTSV4RRFFQ69G5FAX";
       },
     });
 
     expectBudgetRejection(
-      validateReceiptBudget(overCap),
-      /receipt writes\[0\]\.approvalToken: approvalToken\.claims\.webauthnAssertion bytes.*16385 > 16384/,
+      validateReceiptBudget(accessorReceipt),
+      /receipt serialized bytes: accessor property at triggerRef/,
+    );
+    expect(nestedGetterInvoked).toBe(false);
+
+    const tokenWithBigIntClaim = receiptWithWriteApprovalToken(
+      endpointApprovalTokenFixture(1n as unknown as string, "https://api.example"),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(tokenWithBigIntClaim),
+      /approvalToken\.claim: Do not know how to serialize a BigInt/,
+    );
+  });
+
+  it("bounds nested WebAuthn assertions in receipt budgets", () => {
+    const overTotal = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      signature: {
+        ...webAuthnAssertionFixture(),
+        credentialId: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+        authenticatorData: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+        clientDataJson: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+        signature: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+      },
+    });
+    expectBudgetRejection(
+      validateReceiptBudget(overTotal),
+      /receipt writes\[0\]\.approvalToken\.signature: WebAuthnAssertion canonical JSON bytes/,
+    );
+
+    const overField = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      signature: {
+        ...webAuthnAssertionFixture(),
+        signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1),
+      },
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(overField),
+      /receipt writes\[0\]\.approvalToken\.signature\.signature bytes.*16385 > 16384/,
+    );
+  });
+
+  it("rejects embedded approval tokens that expire before they are valid", () => {
+    const token = signedApprovalTokenFixture();
+    const receipt = receiptWithWriteApprovalToken({
+      ...token,
+      expiresAt: token.notBefore,
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(receipt),
+      /receipt writes\[0\]\.approvalToken: approval token expiresAt must be strictly greater than notBefore/,
     );
   });
 
@@ -487,8 +643,8 @@ describe("resource budgets", () => {
           const markToJsonGetterInvoked = (): void => {
             toJsonGetterInvoked = true;
           };
-          const issuedAt = new Date("2026-05-08T18:00:00.000Z");
-          const expiresAt = new Date("2026-05-08T18:30:00.000Z");
+          const notBefore = 1_778_262_000_000;
+          const expiresAt = notBefore + MAX_APPROVAL_TOKEN_LIFETIME_MS;
 
           expect(
             validateFrozenArgsBudget(
@@ -507,10 +663,7 @@ describe("resource budgets", () => {
           ).toEqual({ ok: true });
           expect(
             validateApprovalTokenLifetime(
-              attachHostileToJson(
-                { ...approvalClaimsFixture(), issuedAt, expiresAt },
-                markToJsonGetterInvoked,
-              ),
+              attachHostileToJson({ notBefore, expiresAt }, markToJsonGetterInvoked),
             ),
           ).toEqual({ ok: true });
           expect(toJsonGetterInvoked).toBe(false);
@@ -838,24 +991,148 @@ function receiptWithWriteApprovalToken(approvalToken: SignedApprovalToken): Rece
 }
 
 function signedApprovalTokenFixture(): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_01");
+  const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  const writeId = asWriteId("write_01");
+  const frozenArgsHash = FrozenArgs.freeze({ amount: { from: 1000, to: 1500 } }).hash;
   return {
-    claims: approvalClaimsFixture(),
-    algorithm: "ed25519",
-    signerKeyId: "key-01",
-    signature: "ZmFrZS1zaWduYXR1cmUtZm9yLWRlbW8tcHVycG9zZXM=",
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "receipt_co_sign",
+      receiptId,
+      writeId,
+      frozenArgsHash,
+      riskClass: "high",
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId,
+      writeId,
+      frozenArgsHash,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: webAuthnAssertionFixture(),
   };
 }
 
-function approvalClaimsFixture(): ApprovalClaims {
+function endpointApprovalTokenFixture(reason: string, endpointOrigin: string): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_endpoint");
+  const agentId = asAgentId("agent_alpha");
+  const providerKind = asProviderKind("openai");
   return {
-    signerIdentity: asSignerIdentity("fd@example.com"),
-    role: "approver",
-    receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-    writeId: asWriteId("write_01"),
-    frozenArgsHash: FrozenArgs.freeze({ amount: { from: 1000, to: 1500 } }).hash,
-    riskClass: "high",
-    issuedAt: new Date("2026-05-08T18:00:00.000Z"),
-    expiresAt: new Date("2026-05-08T18:30:00.000Z"),
-    webauthnAssertion: "webauthn-attestation-blob",
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA1"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "endpoint_allowlist_extension",
+      agentId,
+      providerKind,
+      endpointOrigin,
+      reason,
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "endpoint_allowlist_extension",
+      role: "approver",
+      maxUses: 1,
+      agentId,
+      providerKind,
+      endpointOrigin,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: agentId,
+    signature: webAuthnAssertionFixture(),
+  };
+}
+
+function costApprovalTokenFixture(
+  overrides: { readonly agentId?: string; readonly costCeilingId?: string } = {},
+): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_cost");
+  const agentId = overrides.agentId ?? asAgentId("agent_alpha");
+  const costCeilingId = overrides.costCeilingId ?? "budget-prod-01";
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA2"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "cost_spike_acknowledgement",
+      agentId,
+      costCeilingId,
+      thresholdBps: 2500,
+      currentMicroUsd: 42_000_000,
+      ceilingMicroUsd: 20_000_000,
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId,
+      costCeilingId,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: webAuthnAssertionFixture(),
+  } as SignedApprovalToken;
+}
+
+function credentialGrantApprovalTokenFixture(
+  overrides: { readonly credentialHandleId?: string; readonly credentialScope?: string } = {},
+): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_credential");
+  const granteeAgentId = asAgentId("agent_alpha");
+  const credentialHandleId =
+    overrides.credentialHandleId ?? asCredentialHandleId("cred_budget0123456789ABCDEFGHIJKL");
+  const credentialScope = overrides.credentialScope ?? asCredentialScope("openai");
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA3"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "credential_grant_to_agent",
+      granteeAgentId,
+      credentialHandleId,
+      credentialScope,
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "credential_grant_to_agent",
+      role: "host",
+      maxUses: 1,
+      granteeAgentId,
+      credentialHandleId,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: granteeAgentId,
+    signature: webAuthnAssertionFixture(),
+  } as SignedApprovalToken;
+}
+
+function webAuthnAssertionFixture(): SignedApprovalToken["signature"] {
+  return {
+    credentialId: "Y3JlZGVudGlhbC0wMQ",
+    authenticatorData: "YXV0aGVudGljYXRvci1kYXRh",
+    clientDataJson: "Y2xpZW50LWRhdGE",
+    signature: "YXNzZXJ0aW9uLXNpZ25hdHVyZQ",
+    userHandle: "dXNlci0wMQ",
   };
 }

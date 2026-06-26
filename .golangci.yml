@@ -9,7 +9,6 @@ linters:
   default: none
   enable:
     - bodyclose
-    - depguard
     - errcheck
     - errorlint
     - govet
@@ -29,21 +28,6 @@ linters:
     govet:
       enable:
         - shadow
-    depguard:
-      rules:
-        wails_import_boundary:
-          list-mode: lax
-          files:
-            - $all
-            - "!**/desktop/oswails/*.go"
-            - "!**/desktop/oswails/**/*.go"
-          deny:
-            # Wails imports are confined to desktop/oswails; app data stays on
-            # loopback HTTP/SSE/WebSocket through internal/team/broker_web_proxy.go.
-            - pkg: github.com/wailsapp/wails/v2
-              desc: Wails imports are only allowed in desktop/oswails.
-            - pkg: github.com/wailsapp/wails/v3
-              desc: Wails imports are only allowed in desktop/oswails.
     staticcheck:
       # Disable the QF* quickfix suggestions (pure style hints) and the
       # ST1000/ST1003/ST1021 naming/comment rules (pedantic, massive scope).
@@ -66,6 +50,15 @@ linters:
           - bodyclose
           - errorlint
           - noctx
+      # staticcheck under Go 1.25.11 reports existing test nil-guard patterns
+      # after t.Fatal as SA5011. Keep production SA5011 enabled while avoiding
+      # a repo-wide test churn in unrelated PRs.
+      # TODO(#1026): Re-evaluate this _test.go SA5011 exclusion after the
+      # Go 1.25.11/staticcheck t.Fatal guard interaction is resolved.
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA5011"
       # govet's shadow check on `err` is famously noisy in idiomatic Go
       # (every nested `if err := ...; err != nil` shadows). Keep shadow on
       # for non-err identifiers (real bugs hide there) but mute the err case.

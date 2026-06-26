@@ -1,10 +1,12 @@
 package team
 
-// skill_scanner.go implements the LLM-gated wiki scanner that emits skill
-// proposals from team/**/*.md articles. Per the Eng Review Stage A reframe
-// (2026-04-28) this is NOT a heuristic — every candidate article is sent to
-// an LLM provider with the skill-creator.md system prompt and the LLM decides
-// whether the article is a reusable, agent-callable skill.
+// skill_scanner.go implements the LLM-gated wiki scanner that compiles
+// skills from team/**/*.md playbook articles — the ONLY skill-creation path
+// (core-loop R5). This is NOT a heuristic — every candidate article is sent
+// to an LLM provider with the skill-creator.md system prompt and the LLM
+// decides whether the article is a reusable, agent-callable skill. Accepted
+// skills are written through writeCompiledSkillLocked as ACTIVE and
+// auto-assigned to the office roster.
 
 import (
 	"context"
@@ -61,12 +63,22 @@ const agentsDirPrefix = "team/agents/"
 type llmProvider interface {
 	// AskIsSkill classifies an article. existingSkillsSummary is injected
 	// into the user prompt for deduplication (may be empty). enhanceSlug is
-	// non-empty when the LLM returns an "enhance" directive.
+	// non-empty when the LLM returns an "enhance" directive. Returning
+	// ErrLLMNotConfigured signals that no LLM auth is available; the scan
+	// loop bails out of the per-article walk and emits a single summary
+	// log line instead of logging once per article (#980).
 	AskIsSkill(ctx context.Context, articlePath, articleContent, existingSkillsSummary string) (isSkill bool, fm SkillFrontmatter, body, enhanceSlug string, err error)
 }
 
+// ErrLLMNotConfigured is the sentinel a provider returns from AskIsSkill when
+// the underlying LLM CLI is unavailable or unauthenticated. The scanner
+// converts a single occurrence into one summary log and stops the loop —
+// no point asking the same dead provider N times in a row. Tests in
+// skill_scanner_no_auth_test.go pin the behavior.
+var ErrLLMNotConfigured = errors.New("skill_scanner: no LLM configured")
+
 // SkillSpec is the canonical in-memory representation the scanner produces
-// before handing off to writeSkillProposalLocked. It bundles the parsed
+// before handing off to writeCompiledSkillLocked. It bundles the parsed
 // frontmatter, the body, and the source article path for provenance.
 type SkillSpec struct {
 	Frontmatter   SkillFrontmatter
@@ -127,7 +139,7 @@ func NewSkillScanner(b *Broker, provider llmProvider, budget int) *SkillScanner 
 const defaultSkillCompileBudget = 50
 
 // Scan walks the wiki under team/ (or scopePath if non-empty), asks the LLM
-// for each candidate, and writes proposals through writeSkillProposalLocked.
+// for each candidate, and writes proposals through writeCompiledSkillLocked.
 // scopePath is wiki-relative (e.g. "team/customers"). Empty scans the full
 // team subtree. dryRun=true performs the LLM classification but skips the
 // actual proposal write.
@@ -229,6 +241,26 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		llmCalls++
 
 		isSkill, fm, body, enhanceSlug, err := s.provider.AskIsSkill(ctx, c.relPath, c.content, existingSkillsSummary)
+		if errors.Is(err, ErrLLMNotConfigured) {
+			// On the very first call this is almost always an
+			// unauthed/missing LLM CLI — every subsequent article would
+			// just emit the same opaque error. Bail with one summary line
+			// so a freshly-installed unauthed broker doesn't fill the log
+			// with N copies of `exit status 1`. The next scan tick retries
+			// from scratch once the user signs in. Mid-pass occurrences
+			// (llmCalls > 1) might be transient, so we fall through to the
+			// per-article error path. #980.
+			if llmCalls == 1 {
+				remaining := len(candidates) - res.Scanned
+				slog.Warn("skill_scanner: no LLM configured; skipping scan",
+					"articles_remaining", remaining,
+					"hint", "run `claude login` (or your provider's sign-in) to enable",
+					"underlying", err.Error())
+				res.Errors = append(res.Errors, ScanError{Slug: "", Reason: "llm_not_configured"})
+				delete(updatedCache, c.relPath)
+				break
+			}
+		}
 		if err != nil {
 			res.Errors = append(res.Errors, ScanError{Slug: c.relPath, Reason: "llm: " + err.Error()})
 			// Leave the cache entry unset so we retry next pass.
@@ -250,14 +282,22 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		if enhanceSlug != "" {
 			s.broker.mu.Lock()
 			enhanced, enhErr := s.broker.enhanceSkillLocked(enhanceSlug, body, fm.Description, skillSlug(fm.Name))
+			var enhancedOwners []string
+			if enhErr == nil && enhanced != nil {
+				enhancedOwners = append([]string(nil), enhanced.OwnerAgents...)
+			}
 			s.broker.mu.Unlock()
 			if enhErr != nil {
-				slog.Warn("skill_scanner: enhance failed, falling through to proposal",
+				slog.Warn("skill_scanner: enhance failed, falling through to new-skill write",
 					"enhance_slug", enhanceSlug, "err", enhErr)
-				// Fall through to normal proposal path below.
+				// Fall through to the normal compiled-skill write below.
 			} else if enhanced != nil {
 				slog.Info("skill_scanner: enhanced existing skill",
 					"slug", enhanceSlug, "source", c.relPath)
+				// B3 policy compilation: a playbook's ## Rules / ## Policies
+				// bullets ride the same compile pass, assigned to the same
+				// agents as the (enhanced) skill.
+				s.broker.recordPlaybookPolicies(c.relPath, c.content, enhancedOwners)
 				res.Proposed++
 				continue
 			}
@@ -266,17 +306,21 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		// Stamp provenance + author identity onto the frontmatter before the
 		// write helper takes over.
 		fm.Metadata.Wuphf.SourceArticles = appendUnique(fm.Metadata.Wuphf.SourceArticles, c.relPath)
-		fm.Metadata.Wuphf.CreatedBy = "archivist"
+		fm.Metadata.Wuphf.CreatedBy = LibrarianSlug
 		spec := specToTeamSkill(fm, body, c.relPath)
-		spec.CreatedBy = "archivist"
-		// Source-article frontmatter can opt into skill creation, but it is not
-		// authoritative for lifecycle state. Every scanner write enters the
-		// approval workflow as a proposal.
-		spec.Status = "proposed"
+		spec.CreatedBy = LibrarianSlug
+		// Source-article frontmatter can opt into skill creation, but it is
+		// not authoritative for lifecycle state. Compiled skills go live
+		// immediately (core-loop R5 — no proposal/approval state).
+		spec.Status = "active"
 		spec.DisabledFromStatus = ""
 
 		s.broker.mu.Lock()
-		_, writeErr := s.broker.writeSkillProposalLocked(spec)
+		compiled, writeErr := s.broker.writeCompiledSkillLocked(spec)
+		var compiledOwners []string
+		if writeErr == nil && compiled != nil {
+			compiledOwners = append([]string(nil), compiled.OwnerAgents...)
+		}
 		s.broker.mu.Unlock()
 		if writeErr != nil {
 			// Existing skills come back nil-error, *teamSkill non-nil — counted
@@ -289,6 +333,12 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 			delete(updatedCache, c.relPath)
 			continue
 		}
+		// B3 policy compilation (core-loop step 7.3): when the compiled
+		// article is a playbook, its ## Rules / ## Policies bullets become
+		// atomic officePolicy records with the SAME agent assignment the
+		// compiled skill got. Dedup by normalized rule text absorbs
+		// re-compiles of the same playbook.
+		s.broker.recordPlaybookPolicies(c.relPath, c.content, compiledOwners)
 		res.Proposed++
 	}
 
@@ -436,7 +486,7 @@ func (s *SkillScanner) loadTombstone() (slugs, sources map[string]bool) {
 }
 
 // specToTeamSkill folds a SkillFrontmatter + body + source article into the
-// teamSkill shape that writeSkillProposalLocked expects. Only the fields the
+// teamSkill shape that writeCompiledSkillLocked expects. Only the fields the
 // frontmatter actually carries get set; the helper fills in defaults.
 //
 // sourceArticle threads the wiki-relative path of the article that drove the
@@ -457,14 +507,14 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 	}
 	status := strings.TrimSpace(wuphf.Status)
 	if status == "" {
-		status = "proposed"
+		status = "active"
 	}
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
 		Description:        fm.Description,
 		Content:            body,
-		CreatedBy:          stringOr(wuphf.CreatedBy, "archivist"),
+		CreatedBy:          stringOr(wuphf.CreatedBy, LibrarianSlug),
 		SourceArticle:      src,
 		Channel:            "general",
 		Tags:               append([]string(nil), wuphf.Tags...),
@@ -504,7 +554,7 @@ func stringOr(s, fallback string) string {
 }
 
 // isDuplicateSkillError reports whether the error returned by
-// writeSkillProposalLocked indicates a benign de-dup. Today the helper
+// writeCompiledSkillLocked indicates a benign de-dup. Today the helper
 // returns the existing skill with a nil error on dedup, so this is a
 // forward-compat check for any future error-shaped duplicate signal.
 func isDuplicateSkillError(err error) bool {
@@ -634,9 +684,21 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 			slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
 			return false, SkillFrontmatter{}, "", "", nil
 		}
-		slog.Warn("skill_scanner: LLM call failed, skipping article",
+		// Only wrap with ErrLLMNotConfigured when the underlying error is a
+		// concrete unauthenticated/unconfigured signal (matched by the same
+		// classifier the SystemErrorCard fork uses in agent_issue.go). A
+		// transient CLI/provider/network failure must NOT trigger the
+		// llmCalls==1 bailout in Scan — that would skip the rest of the
+		// pass even when auth is fine. CodeRabbit on PR #987.
+		//
+		// Both branches keep the per-article diagnostic at DEBUG so the
+		// detail is still accessible when debug logging is enabled. #980.
+		slog.Debug("skill_scanner: LLM call failed, skipping article",
 			"path", articlePath, "err", callErr)
-		return false, SkillFrontmatter{}, "", "", nil
+		if probe := classifyProviderAuthError(callErr.Error()); probe.IsAuthError {
+			return false, SkillFrontmatter{}, "", "", fmt.Errorf("%w: %w", ErrLLMNotConfigured, callErr)
+		}
+		return false, SkillFrontmatter{}, "", "", fmt.Errorf("skill_scanner: %w", callErr)
 	}
 	if callCtx.Err() != nil {
 		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
@@ -647,6 +709,17 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 		slog.Warn("skill_scanner: LLM JSON parse failed, treating as not-a-skill",
 			"path", articlePath, "err", result.Err)
 		return false, SkillFrontmatter{}, "", "", nil
+	}
+	// Depth/bloat gate (compiler quality layer): new LLM-classified skills
+	// must carry real, compact procedure. Enhance responses are bounded
+	// additions to an existing body and are exempt; so is the explicit
+	// human-authored frontmatter fast path above.
+	if result.IsSkill && result.Enhance == "" {
+		if gateErr := enforceSkillDepthGate(result.Body); gateErr != nil {
+			slog.Warn("skill_scanner: depth gate rejected LLM-classified skill",
+				"path", articlePath, "name", result.FM.Name, "err", gateErr)
+			return false, SkillFrontmatter{}, "", "", nil
+		}
 	}
 	return result.IsSkill, result.FM, result.Body, result.Enhance, nil
 }

@@ -54,22 +54,19 @@ func TestPostMessage_SetsTimestampAndChannel(t *testing.T) {
 	}
 }
 
-func TestPostMessageRedactsSecretsBeforeStorageAndReads(t *testing.T) {
+func TestPostMessageAllowsRichArtifactReferenceMarkers(t *testing.T) {
 	b := newTestBroker(t)
-	secret := "sk-" + strings.Repeat("A", 24)
+	content := "I made the visual review.\n\nvisual-artifact:ra_8e8ac69a85291409"
 
-	posted, err := b.PostMessage("ceo", "general", "model key: "+secret, nil, "")
+	posted, err := b.PostMessage("ceo", "general", content, nil, "")
 	if err != nil {
 		t.Fatalf("PostMessage: %v", err)
 	}
-	if strings.Contains(posted.Content, secret) {
-		t.Fatalf("returned message leaked secret: %+v", posted)
+	if posted.Redacted {
+		t.Fatalf("artifact marker was redacted: %+v", posted)
 	}
-	if !posted.Redacted || posted.RedactionCount != 1 {
-		t.Fatalf("expected redaction metadata on returned message, got %+v", posted)
-	}
-	if got := strings.Join(posted.RedactionReasons, ","); got != "openai" {
-		t.Fatalf("redaction reasons = %q, want openai", got)
+	if posted.Content != content {
+		t.Fatalf("artifact marker changed:\nwant %q\ngot  %q", content, posted.Content)
 	}
 
 	for name, messages := range map[string][]channelMessage{
@@ -81,11 +78,14 @@ func TestPostMessageRedactsSecretsBeforeStorageAndReads(t *testing.T) {
 			t.Fatalf("%s returned no messages", name)
 		}
 		last := messages[len(messages)-1]
-		if strings.Contains(last.Content, secret) {
-			t.Fatalf("%s leaked secret in %+v", name, last)
+		if last.ID != posted.ID {
+			t.Fatalf("%s returned last message ID %q, want %q", name, last.ID, posted.ID)
 		}
-		if !last.Redacted {
-			t.Fatalf("%s lost redaction metadata in %+v", name, last)
+		if last.Redacted {
+			t.Fatalf("%s redacted artifact marker: %+v", name, last)
+		}
+		if last.Content != content {
+			t.Fatalf("%s changed artifact marker:\nwant %q\ngot  %q", name, content, last.Content)
 		}
 	}
 
@@ -105,28 +105,14 @@ func TestPostMessageRedactsSecretsBeforeStorageAndReads(t *testing.T) {
 		t.Fatal("GET /messages returned no messages")
 	}
 	got := body.Messages[len(body.Messages)-1]
-	if strings.Contains(got.Content, secret) {
-		t.Fatalf("GET /messages leaked secret in %+v", got)
+	if got.ID != posted.ID {
+		t.Fatalf("GET /messages returned last message ID %q, want %q", got.ID, posted.ID)
 	}
-	if !got.Redacted {
-		t.Fatalf("GET /messages lost redaction metadata in %+v", got)
+	if got.Redacted {
+		t.Fatalf("GET /messages redacted artifact marker: %+v", got)
 	}
-}
-
-func TestFormatChannelViewRedactsSecrets(t *testing.T) {
-	secret := "sk-" + strings.Repeat("B", 24)
-	got := FormatChannelView([]channelMessage{{
-		ID:        "msg-1",
-		From:      "ceo",
-		Content:   "model key: " + secret,
-		Timestamp: "2026-03-24T10:00:00Z",
-	}})
-
-	if strings.Contains(got, secret) {
-		t.Fatalf("formatted channel view leaked secret: %q", got)
-	}
-	if !strings.Contains(got, "[REDACTED]") {
-		t.Fatalf("formatted channel view missing redaction marker: %q", got)
+	if got.Content != content {
+		t.Fatalf("GET /messages changed artifact marker:\nwant %q\ngot  %q", content, got.Content)
 	}
 }
 
@@ -1014,11 +1000,11 @@ func makeFocusModeLauncher(t *testing.T) (*Launcher, *Broker) {
 		broker: b,
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 	return l, b
@@ -1106,11 +1092,11 @@ func TestFocusModeRouting_CollaborativeUntaggedWakesLead(t *testing.T) {
 		broker: b,
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 

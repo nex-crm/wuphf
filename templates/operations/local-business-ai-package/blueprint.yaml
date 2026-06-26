@@ -1,5 +1,7 @@
 id: local-business-ai-package
 name: Local Business AI Package
+display_name: Local Business AI
+icon: "🏪"
 kind: local_service
 category: services
 outcome: "Intake, booking, and follow-up for local-business clients."
@@ -61,7 +63,6 @@ starter:
       emoji: "⚙️"
       name: CEO
       role: Owns priorities, approvals, and escalation decisions
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -69,7 +70,6 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns client goals into workstreams, milestones, and task plans
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -82,7 +82,6 @@ starter:
       name: Builder
       role: Implements the intake, booking, and reporting assets
       employee_blueprint: workflow-automation-builder
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -94,7 +93,6 @@ starter:
       emoji: "🤝"
       name: Client Success
       role: Owns follow-up, response loops, and account experience
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -106,7 +104,6 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:

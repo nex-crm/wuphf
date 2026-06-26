@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/onboarding"
 )
 
 // Notification debounce cooldowns. Prevents agent-to-agent feedback
@@ -35,15 +37,16 @@ type notifyDedupKey struct {
 }
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
-	// demo_seed messages exist purely to make #general feel staffed on first
-	// paint; they must never wake an agent or burn an LLM call. Filter at
-	// the central delivery point (not just notifyAgentsLoop) so other
-	// callers — primeVisibleAgents, replays, future routes — can't bypass
-	// it. Today these don't actually route demo_seed targets because the
-	// lead is the From and Tagged is empty, but a future @all-default
-	// change would silently turn the demo seed into an LLM-burning
-	// broadcast. One filter, one place.
-	if msg.Kind == "demo_seed" {
+	// Phase 2 onboarding is fully deterministic — the broker emits CEO
+	// cards from ceoDeterministicMessages and the user replies via the
+	// structured-card POST handlers. The CEO agent must NOT fire an LLM
+	// run in response, or the user sees a spurious "CEO is typing…"
+	// stream and the deterministic flow stalls behind a Claude turn that
+	// has nothing to add. (Spec: docs/specs/onboarding-into-office.md
+	// "zero LLM tokens in Phase 2".) Gate on (CEO DM channel + onboarding
+	// phase is deterministic) so other channels and the post-onboarding
+	// CEO DM keep their normal headless behaviour.
+	if isDeterministicPhase2CEODM(msg.Channel) {
 		return
 	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
@@ -150,13 +153,49 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 }
 
 func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeActionLog, task teamTask, content string) {
+	// Approval gate (Phase 4): refuse to dispatch execution work to agents
+	// for tasks that are not in an executable lifecycle state. Only Running
+	// and Approved tasks may trigger agent execution turns. Drafting, Intake,
+	// Review, and ChangesRequested tasks are blocked here — agents may still
+	// post comments via the comment endpoint, which does not go through this
+	// path. ErrIssueNotApproved is the sentinel; log and drop (no retry).
+	// task_followup bypasses the gate by design: it targets DELIVERED
+	// (terminal) tasks — the human posted after delivery and the owner must
+	// wake to answer or reopen (done-integrity fix family).
+	if action.Kind != taskFollowUpActionKind &&
+		task.LifecycleState != "" && !isExecutableTeamTaskStatus(task.LifecycleState) {
+		return
+	}
+	// Scoped interview gate (v3 fix family #2): while THIS agent waits on
+	// its own human interview, its current turn is parked in the
+	// /interview/answer poll — enqueueing a new turn would duplicate work
+	// once the answer lands. Suppress only this agent; every other agent
+	// keeps working (the old office-wide drop wedged the whole office
+	// behind one buried card, [19:23:59]).
+	if l.broker != nil && l.broker.AgentAwaitingInterviewAnswer(target.Slug) {
+		return
+	}
 	channel := normalizeChannelSlug(task.Channel)
 	if channel == "" {
 		channel = "general"
 	}
-	notification := l.buildTaskExecutionPacket(target.Slug, action, task, content)
+	notification, contextUsed := l.notifyCtx().BuildTaskExecutionPacketWithContext(target.Slug, action, task, content)
+	// Plan mode: a task in Planning gets a plan-only directive in front of the
+	// packet so the owner asks the human its open questions, writes a plan, and
+	// stops before executing or decomposing. The provider's native read-only
+	// mode (resolveTurnPosture) is the hard enforcement; this is the prompt half.
+	if task.LifecycleState == LifecycleStatePlanning {
+		notification = planModeDirective(task) + notification
+	}
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
-		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
+		prompt := headlessSandboxNote() + notification
+		l.enqueueHeadlessCodexTurnRecord(target.Slug, headlessCodexTurn{
+			Prompt:      prompt,
+			Channel:     channel,
+			TaskID:      task.ID,
+			ContextUsed: contextUsed,
+			EnqueuedAt:  time.Now(),
+		})
 		return
 	}
 	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
@@ -173,20 +212,22 @@ func (l *Launcher) activeHeadlessSlugs(except string) map[string]struct{} {
 	l.headless.mu.Lock()
 	defer l.headless.mu.Unlock()
 	out := map[string]struct{}{}
-	for workerSlug, queue := range l.headless.queues {
-		if workerSlug == except {
+	// An agent may now span several lanes; group by lane.slug so a slug counts
+	// as active when ANY of its lanes has queued or in-flight work.
+	for workerLane, queue := range l.headless.queues {
+		if workerLane.slug == except {
 			continue
 		}
 		if len(queue) > 0 {
-			out[workerSlug] = struct{}{}
+			out[workerLane.slug] = struct{}{}
 		}
 	}
-	for workerSlug, active := range l.headless.active {
-		if workerSlug == except {
+	for workerLane, active := range l.headless.active {
+		if workerLane.slug == except {
 			continue
 		}
 		if active != nil {
-			out[workerSlug] = struct{}{}
+			out[workerLane.slug] = struct{}{}
 		}
 	}
 	return out
@@ -225,11 +266,18 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 }
 
 func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessage) {
+	// Scoped interview gate — same contract as sendTaskUpdate: suppress
+	// new turns ONLY for the agent whose own interview is pending (its
+	// turn is parked in the answer poll); everyone else keeps working.
+	if l.broker != nil && l.broker.AgentAwaitingInterviewAnswer(target.Slug) {
+		return
+	}
 	channel := normalizeChannelSlug(msg.Channel)
 	if channel == "" {
 		channel = "general"
 	}
 	notification := ""
+	var contextUsed []string
 	humanPrefix := ""
 	fromHuman := isHumanMessageSender(msg.From)
 	if fromHuman {
@@ -247,23 +295,91 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 			humanPrefix, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	} else {
-		packet := l.buildMessageWorkPacket(msg, target.Slug)
+		var packet string
+		packet, contextUsed = l.notifyCtx().BuildMessageWorkPacketWithContext(msg, target.Slug)
 		notification = fmt.Sprintf(
 			"%s%s\n---\n[New from @%s]: %s\n%s This packet is your complete context — do NOT call team_poll or team_tasks. Just do the work and reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\". Once you have posted the needed update, STOP and wait for the next pushed notification.",
 			humanPrefix, packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	}
+	notification += l.slackChannelConventionNote(channel)
 
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
 		prompt := headlessSandboxNote() + notification
 		l.enqueueHeadlessCodexTurnRecord(target.Slug, headlessCodexTurn{
-			Prompt:     prompt,
-			Channel:    channel,
-			TaskID:     headlessCodexTaskID(prompt),
-			FromHuman:  fromHuman,
-			EnqueuedAt: time.Now(),
+			Prompt:      prompt,
+			Channel:     channel,
+			TaskID:      headlessCodexTaskID(prompt),
+			FromHuman:   fromHuman,
+			ContextUsed: contextUsed,
+			EnqueuedAt:  time.Now(),
 		})
 		return
 	}
 	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
+}
+
+// isDeterministicPhase2CEODM reports whether a message landed in the
+// CEO DM during an onboarding phase where the broker drives the
+// conversation via deterministic templates and no LLM should fire.
+//
+// In production the CEO DM lands at the canonical pair-sorted slug
+// ("ceo__human"), not the reserved CEOOnboardingDMSlug constant — that
+// constant is for the state record only. So we match on "DM whose
+// target agent is CEO" instead of a literal slug comparison.
+//
+// Phase 2 covers greet → bridge (everything before the user opts into
+// the first issue). draft/approve/kickoff and complete are NOT gated —
+// those are the LLM-backed phases where the CEO agent is supposed to
+// drive the chat.
+//
+// Errors loading the state file fall through to "not gated" so a
+// missing or corrupt onboarded.json never silences a real post-
+// onboarding CEO turn.
+func isDeterministicPhase2CEODM(channel string) bool {
+	ch := normalizeChannelSlug(channel)
+	if ch == "" {
+		return false
+	}
+	target := DMTargetAgent(ch)
+	if target != "ceo" && ch != onboarding.CEOOnboardingDMSlug {
+		return false
+	}
+	s, err := onboarding.Load()
+	if err != nil || s == nil {
+		return false
+	}
+	// Already onboarded → CEO LLM is fully active again.
+	if s.Onboarded() {
+		return false
+	}
+	switch s.Phase {
+	case onboarding.PhaseGreet,
+		onboarding.PhaseIdentity,
+		onboarding.PhaseWebsite,
+		onboarding.PhaseScan,
+		onboarding.PhaseBlueprint,
+		onboarding.PhaseTeam,
+		onboarding.PhaseSeed,
+		onboarding.PhaseBridge:
+		return true
+	}
+	return false
+}
+
+// slackChannelConventionNote returns the authoring conventions appended to
+// every notification for a Slack-bridged channel, or "" elsewhere. The rules
+// exist because the channel contains REAL people and external agents:
+// @-tagging is a wire-level ping there, and WUPHF presents as one
+// coordinating bot, not a cast of internal roles.
+func (l *Launcher) slackChannelConventionNote(channel string) string {
+	if l == nil || l.broker == nil || !l.broker.ChannelHasSurface(channel, "slack") {
+		return ""
+	}
+	return "\n---\nSLACK CHANNEL CONVENTIONS (this channel is bridged to a real Slack workspace with real people and external agents): " +
+		"(1) NEVER @-tag an agent or person unless you need them to act or respond — a tag pings them and they WILL respond; for FYI/status references use the plain name with no @. " +
+		"(2) To delegate to an external agent and get a response, START your message with @agent-slug. " +
+		"(3) You are part of ONE coordinating presence (the office bot). Never introduce yourself by an internal role name like CEO or planner; speak as the office. " +
+		"(4) If a message needs no action from you, post NOTHING. Never post acknowledgement-only replies (\"noted\", \"acknowledged\", \"no action needed\") — real people read this channel, and repeating the same status is spam. Summarize once when the situation changes, not once per incoming message. " +
+		"(5) Every task lives in its OWN Slack thread (the office opens one automatically, rooted on the task card). Do all of a task's work inside that thread — never start parallel top-level messages for the same task. To quote or reference another message, paste its Slack message link; Slack renders the link as a quoted reply."
 }

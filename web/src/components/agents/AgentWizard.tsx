@@ -1,12 +1,31 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: Modal backdrop uses pointer hit-testing while dialog controls retain keyboard handling.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Backdrop pointer dismissal is paired with a window Escape listener while the modal is open.
-import { useCallback, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { generateAgent, post } from "../../api/client";
+import {
+  generateAgent,
+  getConfig,
+  getLocalProvidersStatus,
+  type LLMRuntimeKind,
+  type LocalProviderStatus,
+  post,
+} from "../../api/client";
 import { useWindowEscape } from "../../hooks/useWindowEscape";
+import { track } from "../../lib/analytics";
+import {
+  CUSTOM_MODEL_VALUE,
+  INHERIT_MODEL_VALUE,
+  isCatalogModel,
+  modelOptionsForKind,
+} from "../../lib/modelCatalog";
 
-type Provider = "inherit" | "claude-code" | "codex" | "opencode";
+// "inherit" is the wizard-only sentinel that maps to an absent ProviderBinding
+// in the POST body (the broker then falls back to the install-wide default at
+// dispatch time). Gateway kinds (openclaw / hermes-agent) are deliberately
+// absent — agents bound to a gateway are imported through the Integrations
+// app, not created in this wizard.
+type ProviderChoice = "inherit" | LLMRuntimeKind;
 type WizardMode = "describe" | "manual";
 
 interface AgentFormData {
@@ -14,8 +33,10 @@ interface AgentFormData {
   slug: string;
   role: string;
   emoji: string;
-  provider: Provider;
+  provider: ProviderChoice;
+  model: string;
   expertise: string;
+  soul: string;
 }
 
 const INITIAL_FORM: AgentFormData = {
@@ -24,15 +45,22 @@ const INITIAL_FORM: AgentFormData = {
   role: "",
   emoji: "",
   provider: "inherit",
+  model: "",
   expertise: "",
+  soul: "",
 };
 
-const PROVIDERS: { value: Provider; label: string }[] = [
-  { value: "inherit", label: "Default runtime" },
-  { value: "codex", label: "Codex" },
-  { value: "claude-code", label: "Claude Code" },
-  { value: "opencode", label: "Opencode" },
-];
+// Human-readable labels for the runtime picker. Kinds the broker hasn't
+// registered are skipped at render time, so missing labels here aren't fatal —
+// they just fall back to the raw kind string.
+const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  "mlx-lm": "MLX-LM",
+  ollama: "Ollama",
+  exo: "Exo",
+};
 
 function slugify(name: string): string {
   return name
@@ -53,6 +81,91 @@ const AGENT_WIZARD_DIALOG_PROPS = {
   "aria-labelledby": "agent-wizard-title",
 } as const;
 
+// WizardModelPicker mirrors AgentProfilePanel's ModelPicker — curated catalog
+// dropdown plus a "Custom…" escape hatch for power users. The wizard's
+// "Inherit default" provider state disables the picker entirely; the field is
+// re-enabled when the user picks a specific runtime.
+function WizardModelPicker({
+  providerKind,
+  value,
+  disabled,
+  onChange,
+  localStatuses,
+}: {
+  providerKind: LLMRuntimeKind | "";
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+  localStatuses: LocalProviderStatus[];
+}) {
+  const options = modelOptionsForKind(providerKind, localStatuses);
+  const valueIsCatalog = isCatalogModel(providerKind, value, localStatuses);
+  const [customMode, setCustomMode] = useState(!valueIsCatalog && value !== "");
+  // Re-sync custom mode when the runtime kind switches under us.
+  // Without this, picking a different runtime after entering a custom
+  // model leaves the dropdown stuck in custom mode against the new
+  // catalog (or vice versa).
+  useEffect(() => {
+    const shouldBeCustom =
+      !isCatalogModel(providerKind, value, localStatuses) && value !== "";
+    setCustomMode(shouldBeCustom);
+  }, [providerKind, value, localStatuses]);
+  // useRef-driven focus into the custom input. Matches the
+  // AgentProfilePanel ModelPicker pattern: biome forbids the JSX
+  // autoFocus attribute but the imperative form is sanctioned and the
+  // immediate-focus UX is load-bearing after picking Custom….
+  const customInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (customMode) customInputRef.current?.focus();
+  }, [customMode]);
+  const selectValue =
+    customMode || !valueIsCatalog
+      ? CUSTOM_MODEL_VALUE
+      : value || INHERIT_MODEL_VALUE;
+  return (
+    <div style={{ display: "flex", gap: 6, width: "100%" }}>
+      <select
+        id="agent-model"
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === CUSTOM_MODEL_VALUE) {
+            setCustomMode(true);
+            return;
+          }
+          setCustomMode(false);
+          onChange(next);
+        }}
+        style={{ flex: customMode ? "0 0 160px" : 1 }}
+      >
+        {options.map((o) => (
+          <option key={o.value || "default"} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {customMode && (
+        <input
+          ref={customInputRef}
+          className="input"
+          type="text"
+          placeholder="e.g. claude-opus-4-7"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            flex: 1,
+          }}
+          aria-label="Custom model id"
+        />
+      )}
+    </div>
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   const [mode, setMode] = useState<WizardMode>("describe");
@@ -63,6 +176,32 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  // Pull the registered runtime list off the wire so the picker stays in sync
+  // with whatever providers the Go layer has registered. Falls back to a
+  // hardcoded core set on first paint / fetch failure so the wizard is
+  // usable even when /config is briefly unavailable.
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const localStatusQuery = useQuery({
+    queryKey: ["local-providers-status"],
+    queryFn: getLocalProvidersStatus,
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const localStatuses: LocalProviderStatus[] = localStatusQuery.data ?? [];
+  const llmKinds: LLMRuntimeKind[] = (configQuery.data?.llm_provider_kinds ?? [
+    "claude-code",
+    "codex",
+    "opencode",
+    "mlx-lm",
+    "ollama",
+    "exo",
+  ]) as LLMRuntimeKind[];
 
   async function handleGenerate() {
     const trimmed = prompt.trim();
@@ -75,13 +214,22 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     try {
       const tmpl = await generateAgent(trimmed);
       const generatedSlug = tmpl.slug || "";
+      // The CEO-side generator may suggest a runtime/model pair. Only
+      // honor it when the suggested provider is one we'd surface in the
+      // picker (i.e. a non-gateway registered kind) — gateway kinds must
+      // come in through the Integrations app, never through the wizard.
+      const suggestedProvider = tmpl.provider as LLMRuntimeKind | undefined;
+      const providerInList =
+        suggestedProvider && llmKinds.includes(suggestedProvider);
       setForm({
         name: tmpl.name || "",
         slug: generatedSlug,
         role: tmpl.role || "",
         emoji: tmpl.emoji || "",
-        provider: "inherit",
+        provider: providerInList ? suggestedProvider : "inherit",
+        model: tmpl.model || "",
         expertise: (tmpl.expertise || []).join(", "),
+        soul: tmpl.personality || "",
       });
       setSlugEdited(generatedSlug.length > 0);
       setMode("manual");
@@ -124,18 +272,32 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     setError(null);
 
     try {
+      // Encode provider as an explicit binding only when the user picked a
+      // specific runtime. "inherit" sends an absent provider field so the
+      // broker leaves Provider zero-valued; the dispatch resolver then
+      // falls back to the install-wide default at turn time.
+      const trimmedModel = form.model.trim();
+      const providerBody =
+        form.provider === "inherit"
+          ? undefined
+          : trimmedModel
+            ? { kind: form.provider, model: trimmedModel }
+            : { kind: form.provider };
       const body = {
         action: "create",
         slug: form.slug,
         name: form.name,
         role: form.role || undefined,
         emoji: form.emoji || undefined,
-        provider:
-          form.provider === "inherit" ? undefined : { kind: form.provider },
+        provider: providerBody,
         expertise: expertiseTags.length > 0 ? expertiseTags : undefined,
+        // The soul/personality seeds the agent's SOUL.md (its persona, voice,
+        // and boundaries) — the file the broker loads into the system prompt.
+        personality: form.soul.trim() || undefined,
       };
 
       await post("/office-members", body);
+      track("agent_created", { source: "wizard", from_blueprint: false });
       await queryClient.invalidateQueries({ queryKey: ["office-members"] });
 
       setForm(INITIAL_FORM);
@@ -313,6 +475,37 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               />
             </div>
 
+            {/* Soul / personality — seeds SOUL.md */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-soul">
+                Soul{" "}
+                <span
+                  style={{ fontWeight: 400, color: "var(--text-tertiary)" }}
+                >
+                  (personality, voice, boundaries — optional)
+                </span>
+              </label>
+              <textarea
+                id="agent-soul"
+                className="input"
+                placeholder="e.g. Relentless about pipeline, allergic to vanity metrics. Direct, never fluffy."
+                value={form.soul}
+                onChange={(e) => updateField("soul", e.target.value)}
+                rows={3}
+                style={{
+                  minHeight: 72,
+                  resize: "vertical",
+                  padding: "10px 12px",
+                  lineHeight: 1.5,
+                }}
+              />
+              <span className="op-hint">
+                Seeds this agent's SOUL.md — the persona loaded into its system
+                prompt. You can refine it (and the other instruction files)
+                anytime from the agent's profile.
+              </span>
+            </div>
+
             {/* Emoji */}
             <div className="agent-wizard-field">
               <label className="label" htmlFor="agent-emoji">
@@ -330,24 +523,63 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               />
             </div>
 
-            {/* Provider */}
+            {/* Provider + Model */}
             <div className="agent-wizard-field">
               <label className="label" htmlFor="agent-provider">
-                Provider
+                Runtime
               </label>
               <select
                 id="agent-provider"
                 value={form.provider}
                 onChange={(e) =>
-                  updateField("provider", e.target.value as Provider)
+                  updateField("provider", e.target.value as ProviderChoice)
                 }
               >
-                {PROVIDERS.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
+                <option value="inherit">
+                  Inherit default (
+                  {configQuery.data?.llm_provider ?? "claude-code"})
+                </option>
+                {llmKinds.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {PROVIDER_LABELS[kind] ?? kind}
                   </option>
                 ))}
               </select>
+              {form.provider === "inherit" ? (
+                <span className="op-hint">
+                  Inherits the install default. Pick a specific runtime to pin
+                  this agent — you can also change it later from the agent's
+                  profile.
+                </span>
+              ) : (
+                <span className="op-hint">
+                  This agent will run on{" "}
+                  {PROVIDER_LABELS[form.provider] ?? form.provider} on every
+                  turn. Change anytime from the agent's profile.
+                </span>
+              )}
+            </div>
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-model">
+                Model{" "}
+                <span
+                  style={{ fontWeight: 400, color: "var(--text-tertiary)" }}
+                >
+                  (optional)
+                </span>
+              </label>
+              <WizardModelPicker
+                providerKind={form.provider === "inherit" ? "" : form.provider}
+                value={form.model}
+                disabled={form.provider === "inherit"}
+                onChange={(next) => updateField("model", next)}
+                localStatuses={localStatuses}
+              />
+              <span className="op-hint">
+                Pick from common models for the chosen runtime, or use "Custom…"
+                to type any model id. Leave on "Use runtime default" to let the
+                runtime decide.
+              </span>
             </div>
 
             {/* Expertise */}

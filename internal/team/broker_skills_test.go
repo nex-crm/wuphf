@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,159 +94,6 @@ func TestFindSkillByWorkflowKey_PrefersNonArchived(t *testing.T) {
 	}
 	if got.ID != "new" {
 		t.Errorf("expected non-archived skill, got %+v", got)
-	}
-}
-
-func TestPostSkillProposeCreatesApprovalRequest(t *testing.T) {
-	tmpDir := t.TempDir()
-	b := NewBrokerAt(filepath.Join(tmpDir, "broker-state.json"))
-	body := bytes.NewBufferString(`{
-		"action":"propose",
-		"name":"deterministic-skill",
-		"title":"Deterministic Skill",
-		"description":"Created through the skill API.",
-		"content":"1. Do the deterministic thing",
-		"created_by":"ceo",
-		"channel":"general"
-	}`)
-	req := httptest.NewRequest(http.MethodPost, "/skills", body)
-	rec := httptest.NewRecorder()
-
-	b.handlePostSkill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(b.skills) != 1 {
-		t.Fatalf("expected proposed skill, got %+v", b.skills)
-	}
-	if b.skills[0].Status != "proposed" {
-		t.Fatalf("expected proposed status, got %q", b.skills[0].Status)
-	}
-	if len(b.requests) != 1 {
-		t.Fatalf("expected approval request, got %+v", b.requests)
-	}
-	if b.requests[0].Kind != "skill_proposal" || b.requests[0].ReplyTo != "deterministic-skill" {
-		t.Fatalf("unexpected skill proposal request: %+v", b.requests[0])
-	}
-}
-
-// Test 7: Answering "accept" via HTTP activates the skill.
-func TestSkillProposalAcceptCallbackActivatesSkill(t *testing.T) {
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("start broker: %v", err)
-	}
-	defer b.Stop()
-
-	// Seed a proposed skill and matching interview request.
-	b.mu.Lock()
-	b.skills = append(b.skills, teamSkill{
-		ID: "deploy-check", Name: "deploy-check", Title: "Deploy Check",
-		Status: "proposed", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
-	})
-	b.counter++
-	reqID := fmt.Sprintf("request-%d", b.counter)
-	b.requests = append(b.requests, humanInterview{
-		ID:        reqID,
-		Kind:      "skill_proposal",
-		Status:    "pending",
-		From:      "ceo",
-		Channel:   "general",
-		Title:     "Approve skill: Deploy Check",
-		Question:  "Activate?",
-		ReplyTo:   "deploy-check",
-		Blocking:  false,
-		CreatedAt: "2026-01-01T00:00:00Z",
-		UpdatedAt: "2026-01-01T00:00:00Z",
-		Options:   []interviewOption{{ID: "accept", Label: "Accept"}, {ID: "reject", Label: "Reject"}},
-	})
-	b.mu.Unlock()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	answerBody, _ := json.Marshal(map[string]any{
-		"id":          reqID,
-		"choice_id":   "accept",
-		"choice_text": "Accept",
-	})
-	req, _ := http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request answer: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, raw)
-	}
-
-	b.mu.Lock()
-	status := b.skills[0].Status
-	b.mu.Unlock()
-	if status != "active" {
-		t.Fatalf("expected skill status 'active' after accept, got %q", status)
-	}
-}
-
-// Test 8: Answering "reject" via HTTP archives the skill.
-func TestSkillProposalRejectCallbackArchivesSkill(t *testing.T) {
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("start broker: %v", err)
-	}
-	defer b.Stop()
-
-	b.mu.Lock()
-	b.skills = append(b.skills, teamSkill{
-		ID: "risky-skill", Name: "risky-skill", Title: "Risky Skill",
-		Status: "proposed", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
-	})
-	b.counter++
-	reqID := fmt.Sprintf("request-%d", b.counter)
-	b.requests = append(b.requests, humanInterview{
-		ID:        reqID,
-		Kind:      "skill_proposal",
-		Status:    "pending",
-		From:      "ceo",
-		Channel:   "general",
-		Title:     "Approve skill: Risky Skill",
-		Question:  "Activate?",
-		ReplyTo:   "risky-skill",
-		Blocking:  false,
-		CreatedAt: "2026-01-01T00:00:00Z",
-		UpdatedAt: "2026-01-01T00:00:00Z",
-		Options:   []interviewOption{{ID: "accept", Label: "Accept"}, {ID: "reject", Label: "Reject"}},
-	})
-	b.mu.Unlock()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	answerBody, _ := json.Marshal(map[string]any{
-		"id":          reqID,
-		"choice_id":   "reject",
-		"choice_text": "Reject",
-	})
-	req, _ := http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request answer: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, raw)
-	}
-
-	b.mu.Lock()
-	status := b.skills[0].Status
-	b.mu.Unlock()
-	if status != "archived" {
-		t.Fatalf("expected skill status 'archived' after reject, got %q", status)
 	}
 }
 
@@ -382,13 +228,16 @@ func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
 	if !strings.Contains(prompt, "SKILL & AGENT AWARENESS") {
 		t.Fatalf("expected SKILL & AGENT AWARENESS block in lead prompt")
 	}
-	if !strings.Contains(prompt, "team_skill_create(action=create)") {
-		t.Fatalf("expected team_skill_create guidance in lead prompt")
+	if strings.Contains(prompt, "team_skill_create") {
+		t.Fatalf("lead prompt must not mention team_skill_create — the tool was removed (skills come only from playbook compilation)")
+	}
+	if !strings.Contains(prompt, "compiled automatically from playbook articles") {
+		t.Fatalf("expected playbook-compilation guidance in lead prompt")
 	}
 }
 
-// Test 10: Skill proposal and interview persist and reload correctly.
-func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
+// Test 10: a created skill persists and reloads correctly (no interview).
+func TestSkillCreatePersistenceRoundTrip(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
@@ -399,10 +248,9 @@ func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
 	}
 	b.mu.Unlock()
 	body := bytes.NewBufferString(`{
-		"action":"propose",
 		"name":"persist-skill",
 		"title":"Persist Skill",
-		"description":"Persisted proposed skill",
+		"description":"Persisted skill",
 		"content":"1. Do the thing",
 		"created_by":"ceo",
 		"channel":"general"
@@ -423,8 +271,12 @@ func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
 	if len(skills) != 1 || skills[0].Name != "persist-skill" {
 		t.Fatalf("expected persisted skill 'persist-skill', got %d skills", len(skills))
 	}
-	if len(requests) != 1 || requests[0].Kind != "skill_proposal" {
-		t.Fatalf("expected persisted skill_proposal request, got %d requests", len(requests))
+	if skills[0].Status != "active" {
+		t.Fatalf("expected active status, got %q", skills[0].Status)
+	}
+	// No approval interview rides along anymore (core-loop R5).
+	if len(requests) != 0 {
+		t.Fatalf("expected no persisted requests, got %d", len(requests))
 	}
 }
 
@@ -509,38 +361,31 @@ func TestHandlePostSkill_WritesWikiFile(t *testing.T) {
 	}
 }
 
-// TestHandlePostSkill_ProposeWritesWikiFile pins the wiki write for the
-// proposal path too. Proposed skills also need an on-disk SKILL.md so the
-// approval interview can render the body.
-func TestHandlePostSkill_ProposeWritesWikiFile(t *testing.T) {
-	b, cleanup := brokerWithWiki(t)
-	defer cleanup()
-	b.mu.Lock()
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	for i := range b.channels {
-		if b.channels[i].Slug == "general" {
-			b.channels[i].Members = append(b.channels[i].Members, "ceo")
-		}
-	}
-	b.mu.Unlock()
-
+// TestHandlePostSkill_RejectsProposeAction pins the fail-closed guard: the
+// proposal flow was removed (core-loop R5), and a stale caller sending
+// action=propose must get 410 Gone — NOT a silently-activated skill.
+func TestHandlePostSkill_RejectsProposeAction(t *testing.T) {
+	b := newTestBroker(t)
 	body := bytes.NewBufferString(`{
 		"action":"propose",
-		"name":"propose-skill",
-		"title":"Propose Skill",
-		"description":"Skill awaiting approval.",
-		"content":"1. Do the deterministic thing.",
+		"name":"stale-proposal",
+		"title":"Stale Proposal",
+		"description":"Sent by a stale caller.",
+		"content":"1. Do the thing",
 		"created_by":"ceo",
 		"channel":"general"
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/skills", body)
 	rec := httptest.NewRecorder()
 	b.handlePostSkill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("handlePostSkill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusGone {
+		t.Fatalf("expected 410 Gone for action=propose, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	skillFilePath(t, b, "propose-skill")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.skills) != 0 {
+		t.Fatalf("expected no skill created, got %+v", b.skills)
+	}
 }
 
 // TestHandlePostSkill_RequiresDescription locks in the 400 returned when

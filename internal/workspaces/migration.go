@@ -9,13 +9,19 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
 const (
-	migrationLockName   = ".wuphf-migration.lock"
-	mainBrokerProbePort = 7890
-	migrationProbeTO    = 2 * time.Second
+	migrationLockName = ".wuphf-migration.lock"
+	// legacyBrokerPort is the historical default the pre-symmetric layout ran
+	// on. The migration still probes it (in addition to the launching binary's
+	// configured port) because the legacy ~/.wuphf tree this migration mutates
+	// has historically been owned by a broker on 7890; renaming the tree out
+	// from under that broker would corrupt its state.
+	legacyBrokerPort = brokeraddr.DefaultPort
+	migrationProbeTO = 2 * time.Second
 )
 
 // brokerRunningFn is a var so tests can inject a controlled probe result
@@ -69,14 +75,25 @@ func MigrateToSymmetric() error {
 		return err
 	}
 	if _, err := os.Stat(rp); err == nil {
+		_ = EnsureCacheBackupExclusions()
 		return nil // already migrated
 	}
 
-	// Guard: refuse to migrate if the old broker is running.
-	if brokerRunningFn(mainBrokerProbePort) {
-		return fmt.Errorf("workspaces: migrate: broker is running on port %d; "+
-			"stop WUPHF before upgrading, then restart with `npx wuphf`",
-			mainBrokerProbePort)
+	// Guard: refuse to migrate if a broker is actually running on either the
+	// launching binary's configured port or the legacy default 7890. The
+	// migration rewrites ~/.wuphf, so any live broker pointing at that tree
+	// must be stopped first. Probe order matters only for the error message —
+	// we report whichever port we actually found.
+	configuredPort := brokeraddr.ResolvePort()
+	probePorts := []int{configuredPort}
+	if configuredPort != legacyBrokerPort {
+		probePorts = append(probePorts, legacyBrokerPort)
+	}
+	for _, port := range probePorts {
+		if brokerRunningFn(port) {
+			return fmt.Errorf("workspaces: migrate: broker is running on port %d; "+
+				"stop WUPHF before upgrading, then re-run this command", port)
+		}
 	}
 
 	oldPath := filepath.Join(home, ".wuphf")
@@ -127,7 +144,11 @@ func MigrateToSymmetric() error {
 			},
 		},
 	}
-	return writeUnderLock(reg)
+	if err := writeUnderLock(reg); err != nil {
+		return err
+	}
+	_ = EnsureCacheBackupExclusions()
+	return nil
 }
 
 // isBrokerRunning probes port via HTTP HEAD with a short timeout.

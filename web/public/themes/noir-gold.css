@@ -113,11 +113,11 @@ html[data-theme="noir-gold"] {
   --blue-bg: var(--accent-bg);
 
   --font-sans:
-    "Source Serif 4", "IBM Plex Serif", Georgia, "Times New Roman", serif;
-  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
-  --font-logo: "Fraunces", Georgia, "Times New Roman", serif;
+    "Geist Sans", "-apple-system", "BlinkMacSystemFont", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", "Georgia", "Times New Roman", serif;
+  --font-logo: "Newsreader", "Georgia", "Times New Roman", serif;
   --font-mono:
-    "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    "Geist Mono", "SFMono-Regular", "Menlo", "Monaco", "Consolas", monospace;
 
   /* ── Sidebar tokens (no purple anywhere) ── */
   --nex-sidebar: #0a0a0b;
@@ -277,12 +277,12 @@ html[data-theme="noir-gold"] .btn-primary:hover {
   background: var(--gold-300);
   color: #000;
 }
-html[data-theme="noir-gold"] .btn-secondary {
+html[data-theme="noir-gold"] .btn-ghost {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border-strong);
 }
-html[data-theme="noir-gold"] .btn-secondary:hover {
+html[data-theme="noir-gold"] .btn-ghost:hover {
   border-color: var(--gold-500);
   color: var(--gold-100);
 }
@@ -632,14 +632,37 @@ html[data-theme="noir-gold"] .wiki-tab-badge {
 /* ─── Wiki surface — left nav menu buttons + wikilinks ───────────────
    --wk-wikilink resolves to --olive-500 which we already redirected to
    #3d2e0a (deep oxidized) — too dark on dark bg. Re-route the wiki
-   palette to gold tones so links and the active menu button read. */
-html[data-theme="noir-gold"] .wiki-root {
+   palette to gold tones so links and the active menu button read.
+
+   These are also declared at html[data-theme="noir-gold"] scope below so
+   the slash menu, mention menu, and link/image popovers — which portal to
+   document.body, outside .wiki-root — pick them up too. Keep the two blocks
+   in sync. --wk-amber-banner is the active/hover row surface; the old 0.05
+   tint was effectively invisible, so the keyboard-selected row read the
+   same as every other row. Bumped to 0.16 — visible against the noir
+   surface while still keeping the bright cream --wk-text legible. */
+html[data-theme="noir-gold"] .wiki-root,
+html[data-theme="noir-gold"] {
   --wk-wikilink: var(--gold-300);
   --wk-wikilink-broken: var(--red);
   --wk-amber: var(--gold-400);
-  --wk-amber-bg: rgba(201, 162, 39, 0.1);
-  --wk-amber-banner: rgba(201, 162, 39, 0.05);
+  --wk-amber-bg: rgba(201, 162, 39, 0.12);
+  --wk-amber-banner: rgba(201, 162, 39, 0.16);
   --wk-code-bg: var(--bg-warm);
+
+  /* Version-history diff washes. The noir ramp seeds these as dark-on-dark:
+       --wk-diff-add-bg=#1a2b21 + ink --green-dark #1c5b34 -> ~1.4:1 (fails)
+       --wk-diff-remove-bg=#1f0f10 + ink --red-dark #6e1018 -> ~1.x:1 (fails)
+     Re-map to low-alpha color washes with a bright readable ink over the noir
+     diff surface (--wk-code-bg = --bg-warm = #111113), mirroring the gold amber
+     re-tint above:
+       added   #5fcf8c on the composited ~#1a221d wash clears ~8.7:1
+       removed  #e8786f on the composited ~#241718 wash clears ~6.2:1
+     Both pass WCAG AA; the +/- prefix stays as the non-color cue. */
+  --wk-diff-add-bg: rgba(47, 170, 100, 0.16);
+  --wk-diff-add-ink: #5fcf8c;
+  --wk-diff-remove-bg: rgba(214, 68, 60, 0.16);
+  --wk-diff-remove-ink: #e8786f;
 }
 html[data-theme="noir-gold"] .wk-nav-sidebar h3 {
   color: var(--gold-300);
@@ -691,4 +714,71 @@ html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
 html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
   color: var(--gold-300);
   opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Noir-gold contrast fixes
+   Source CSS that hardcodes pastel light bgs with dark text fails
+   on deep noir. Override per-rule with gold-tinted equivalents.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── @mention pill + json syntax — original tan/orange already tracks
+       the gold ramp closely; tighten to gold tokens so the pill looks
+       designed-in rather than washed out. ── */
+html[data-theme="noir-gold"] {
+  --mention-bg: rgba(201, 162, 39, 0.14);
+  --mention-fg: var(--gold-200);
+  --syntax-number: var(--gold-300);
+  --syntax-bool: #f0a8c8;
+}
+
+/* ── Task status badges ── */
+html[data-theme="noir-gold"] .task-detail-status-badge.status-done {
+  background: rgba(47, 170, 100, 0.14);
+  color: var(--success-300);
+  border-color: rgba(47, 170, 100, 0.3);
+}
+html[data-theme="noir-gold"] .task-detail-status-badge.status-in_progress,
+html[data-theme="noir-gold"] .task-detail-status-badge.status-review {
+  background: var(--accent-bg);
+  color: var(--gold-200);
+  border-color: rgba(201, 162, 39, 0.3);
+}
+html[data-theme="noir-gold"] .task-detail-status-badge.status-blocked {
+  background: rgba(240, 177, 74, 0.14);
+  color: var(--warning-300);
+  border-color: rgba(240, 177, 74, 0.3);
+}
+
+/* ── Insight badges — accent stays gold; white text on bright gold
+       washes out. Switch the medium tier to dark text on gold. ── */
+html[data-theme="noir-gold"] .insight-badge-medium {
+  color: var(--gold-950);
+  background: var(--accent);
+}
+html[data-theme="noir-gold"] .insight-badge-low {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+/* ── Scrollbar thumb hover — base uses rgba(0,0,0,0.4) which disappears ── */
+html[data-theme="noir-gold"] .notebook-surface::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(245, 233, 200, 0.25);
+}
+
+/* ── Notebook status pills — re-tint for parchment surface ── */
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item .nb-status-draft {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-review {
+  color: var(--gold-300);
+}
+html[data-theme="noir-gold"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-changes {
+  color: var(--red);
 }

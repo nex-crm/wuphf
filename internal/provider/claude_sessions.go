@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -49,6 +50,27 @@ func ResetClaudeSessions() error {
 	claudeSessionStoreMu.Unlock()
 
 	return store.clearAll()
+}
+
+// ResetClaudeSessionFor clears the persisted Claude resume entry for a
+// single agent slug. Used after a per-agent provider switch so a slug that
+// just moved away from claude-code doesn't carry a stale Claude session id
+// into the new runtime — the next dispatch starts clean.
+//
+// Idempotent: clearing a slug with no recorded session is a no-op.
+func ResetClaudeSessionFor(agentSlug string) {
+	if strings.TrimSpace(agentSlug) == "" {
+		return
+	}
+	claudeSessionStoreMu.Lock()
+	store := claudeSessionStoreInstance
+	if store == nil {
+		store = claudeSessionStoreFactory()
+		claudeSessionStoreInstance = store
+	}
+	claudeSessionStoreMu.Unlock()
+
+	store.clear(agentSlug)
 }
 
 func newClaudeSessionStore() *claudeSessionStore {

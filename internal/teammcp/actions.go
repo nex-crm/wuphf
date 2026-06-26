@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/text/cases"
@@ -19,44 +18,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/team"
 )
-
-// readOnlyActionVerbs are unambiguous information-read verbs. Matched as
-// WHOLE TOKENS (splitting action_id on - _ . / space), never as substrings —
-// substring matching is too permissive (e.g. "get" matches inside "budget",
-// "find" inside "findone_and_update", "view" inside "review_delete"). The
-// list is intentionally narrower than the operator might expect: ambiguous
-// nouns like "status", "count", "view", "query", "find", "summary" appear in
-// both read and write action names ("update_status", "post_summary",
-// "findone_and_update") and are excluded so mutating actions can never be
-// misclassified.
-var readOnlyActionVerbs = map[string]struct{}{
-	"search":    {},
-	"list":      {},
-	"read":      {},
-	"get":       {},
-	"fetch":     {},
-	"browse":    {},
-	"describe":  {},
-	"show":      {},
-	"lookup":    {},
-	"summarize": {},
-}
-
-// mutatingActionVerbs are unambiguous state-changing verbs. If ANY of these
-// appears as a whole token in the action_id, the action is never classified
-// read-only — even if a read verb is also present. This guards against
-// composite action names like "GMAIL_LIST_AND_DELETE" or "FIND_AND_UPDATE":
-// a single read verb is not enough; a single mutating verb vetoes.
-var mutatingActionVerbs = map[string]struct{}{
-	"send": {}, "create": {}, "update": {}, "delete": {}, "post": {},
-	"put": {}, "patch": {}, "remove": {}, "insert": {}, "write": {},
-	"clear": {}, "reset": {}, "archive": {}, "star": {}, "unstar": {},
-	"mark": {}, "publish": {}, "add": {}, "move": {}, "invite": {},
-	"accept": {}, "reject": {}, "approve": {}, "cancel": {}, "refund": {},
-	"charge": {}, "pay": {}, "enable": {}, "disable": {}, "revoke": {},
-	"grant": {}, "set": {}, "draft": {}, "schedule": {}, "upload": {},
-	"replace": {}, "transfer": {}, "merge": {}, "split": {},
-}
 
 // actionApprovalTimeout is how long handleTeamActionExecute will wait for a
 // human decision on a pending approval request before giving up.
@@ -71,29 +32,36 @@ func actionIDSeparator(r rune) bool {
 }
 
 // actionIsReadOnly reports whether an action_id is safe to run without human
-// approval. A read-only action has at least one read verb AND no mutating
-// verb appearing as a whole token.
+// approval. It delegates to action.ActionIsReadOnly so the read/write verb
+// tables live in exactly one place — the gate and the broker resolver classify
+// identically, with no drift risk between two copies.
 func actionIsReadOnly(actionID string) bool {
-	id := strings.ToLower(strings.TrimSpace(actionID))
-	if id == "" {
-		return false
-	}
-	tokens := strings.FieldsFunc(id, actionIDSeparator)
-	hasRead := false
-	for _, tok := range tokens {
-		if _, ok := mutatingActionVerbs[tok]; ok {
-			return false
-		}
-		if _, ok := readOnlyActionVerbs[tok]; ok {
-			hasRead = true
-		}
-	}
-	return hasRead
+	return action.ActionIsReadOnly(actionID)
 }
 
+// approvalContext is the metadata requireTeamActionApproval surfaces to the
+// caller after a successful approval. The execute handler reads it to write
+// a matching ApprovalAuditEntry to the broker once the action runs.
+//
+// RequestID is empty when the gate was bypassed (dry-run, unsafe, read-only)
+// — the caller should treat an empty RequestID as "skip the audit write."
+type approvalContext struct {
+	RequestID   string
+	IssueID     string
+	RequestedAt string
+	AnsweredAt  string
+}
+
+// grantApprovalMarker is the synthetic approval RequestID used when a standing
+// grant pre-authorized an action (no human request was created). It is
+// non-empty so recordExecuteAudit still writes an executed-OK audit row — the
+// run stays visible even though the modal was skipped.
+const grantApprovalMarker = "grant"
+
 // requireTeamActionApproval gates mutating external-action calls behind a
-// human approval request. Returns nil when the call may proceed, an error
-// describing the rejection otherwise. The approval contract:
+// human approval request. Returns the approval context (request id + Issue
+// id + timestamps) and a nil error when the call may proceed; returns a
+// non-nil error describing the rejection otherwise. The approval contract:
 //
 //  1. DryRun calls never gate — they only build the request, not send it.
 //  2. WUPHF_UNSAFE=1 bypasses the gate. The --unsafe launch flag sets this.
@@ -104,17 +72,71 @@ func actionIsReadOnly(actionID string) bool {
 //     reject_with_steer, needs_more_info) returns an error. Timeout after
 //     actionApprovalTimeout returns an error.
 //
+// On non-approve terminal dispositions (reject/timeout/cancel) the function
+// writes an ApprovalAuditEntry to the broker before returning the error so
+// the inbox trail records the dead-end. The success path's audit write is
+// the caller's responsibility because only the caller knows the executed_at
+// timestamp and outcome chat message id.
+//
 // The point: a prompt-injected agent cannot send email, write to a CRM, or
 // post a Slack message without the human explicitly clicking approve.
-func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) error {
+func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs, preApproved bool, actionCard *actionCardPayload, connectionUnverified bool) (approvalContext, error) {
 	if args.DryRun {
-		return nil
+		return approvalContext{}, nil
 	}
 	if os.Getenv("WUPHF_UNSAFE") == "1" {
-		return nil
+		return approvalContext{}, nil
 	}
 	if actionIsReadOnly(args.ActionID) {
-		return nil
+		return approvalContext{}, nil
+	}
+
+	// Auto-resolve the Issue scoping this action. The product rule is
+	// "any work getting done has an Issue behind it." Rather than rejecting
+	// when the agent forgot to pass issue_id, the broker resolves the
+	// container automatically: pick the most recent open Issue in this
+	// channel, or auto-create a draft Issue from the action's intent.
+	// The resolved id rides on the approval request body so audit-trail
+	// work (Bug B Layer 2) can later correlate approval → Issue → outcome.
+	resolvedIssueID, resolvedState, err := resolveActionIssue(ctx, slug, channel, args)
+	if err != nil {
+		// Even when auto-resolve fails (broker unreachable, etc.) we do
+		// not block the approval — the human can still answer it. We
+		// just lose the Issue link for this one card. Logged so it's
+		// visible in the broker stderr.
+		fmt.Fprintf(os.Stderr, "teammcp: action issue auto-resolve failed for %s/%s: %v\n", args.Platform, args.ActionID, err)
+	} else {
+		args.IssueID = resolvedIssueID
+		// Hard gate: an Issue in `drafting` was explicitly PARKED by the
+		// human (backlog/park path) — nothing lands there by default.
+		// The agent must NOT proceed with external actions on parked
+		// work. Surface a clear error back to the agent so its next-step
+		// reasoning routes to "wait + ping the human" instead of
+		// retrying the action. The agent will see this error in its
+		// tool_result and is prompted (RULE ZERO) to back off.
+		if strings.EqualFold(strings.TrimSpace(resolvedState), "drafting") {
+			return approvalContext{}, fmt.Errorf(
+				"issue %s is parked (lifecycle_state=drafting); "+
+					"do NOT retry this action — only the human can start a parked Issue from the task page; wait until it is running",
+				resolvedIssueID,
+			)
+		}
+	}
+
+	// Standing-grant short-circuit. A human-issued grant covers this exact
+	// action, so the resolver returned `proceed` and the gate set preApproved.
+	// Skip the human prompt — but only AFTER the Issue/drafting gate above, so a
+	// grant for the integration can never bypass an Issue that is still awaiting
+	// human approval. The synthetic "grant" request id keeps recordExecuteAudit
+	// writing a trail (transparency: the human still sees the action ran).
+	if preApproved {
+		grantedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		return approvalContext{
+			RequestID:   grantApprovalMarker,
+			IssueID:     strings.TrimSpace(args.IssueID),
+			RequestedAt: grantedAt,
+			AnsweredAt:  grantedAt,
+		}, nil
 	}
 
 	spec := buildActionApprovalSpec(slug, channel, args)
@@ -127,10 +149,11 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 	// at 100+ stacked "Approve gmail action" cards for the same intent.
 	dedupeKey := actionApprovalDedupeKey(slug, args)
 
+	requestedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	var created struct {
 		ID string `json:"id"`
 	}
-	if err := brokerPostJSON(ctx, "/requests", map[string]any{
+	requestBody := map[string]any{
 		"kind":           "approval",
 		"channel":        channel,
 		"from":           slug,
@@ -142,11 +165,26 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		"blocking":       true,
 		"required":       true,
 		"dedupe_key":     dedupeKey,
-	}, &created); err != nil {
-		return fmt.Errorf("create approval request: %w", err)
+		// Carry the parent Issue id on the approval record so the audit
+		// trail can later link approval → Issue → resulting tool call
+		// (Bug B Layer 2). The broker ignores unknown fields today, so
+		// shipping this is safe and unblocks the follow-up slice.
+		"issue_id": strings.TrimSpace(args.IssueID),
+	}
+	// Structured action payload + connection-unverified signal (slice 4b /
+	// review LOW #5). Only attached when present so legacy consumers are
+	// unaffected.
+	if actionCard != nil {
+		requestBody["integration_action"] = actionCard
+	}
+	if connectionUnverified {
+		requestBody["connection_unverified"] = true
+	}
+	if err := brokerPostJSON(ctx, "/requests", requestBody, &created); err != nil {
+		return approvalContext{}, fmt.Errorf("create approval request: %w", err)
 	}
 	if strings.TrimSpace(created.ID) == "" {
-		return fmt.Errorf("approval request did not return an ID")
+		return approvalContext{}, fmt.Errorf("approval request did not return an ID")
 	}
 
 	timeout := time.After(actionApprovalTimeout)
@@ -162,31 +200,59 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		actionID = "unknown"
 	}
 
+	auditBase := team.ApprovalAuditEntry{
+		ApprovalRequestID: created.ID,
+		TaskID:            strings.TrimSpace(args.IssueID),
+		Platform:          platform,
+		ActionID:          actionID,
+		ConnectionKey:     strings.TrimSpace(args.ConnectionKey),
+		RequestedAt:       requestedAt,
+		Actor:             slug,
+		Channel:           channel,
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return approvalContext{}, ctx.Err()
 		case <-timeout:
-			return fmt.Errorf("timed out waiting for human approval of %s on %s", actionID, platform)
+			audit := auditBase
+			audit.Outcome = team.ApprovalOutcomeTimedOut
+			audit.OutcomeSummary = fmt.Sprintf("timed out waiting for human approval after %s", actionApprovalTimeout)
+			brokerPostApprovalAudit(ctx, audit)
+			return approvalContext{}, fmt.Errorf("timed out waiting for human approval of %s on %s", actionID, platform)
 		case <-ticker.C:
 			var result brokerInterviewAnswerResponse
 			path := "/interview/answer?id=" + url.QueryEscape(created.ID)
 			if err := brokerGetJSON(ctx, path, &result); err != nil {
-				return fmt.Errorf("poll approval: %w", err)
+				return approvalContext{}, fmt.Errorf("poll approval: %w", err)
 			}
 			switch strings.ToLower(strings.TrimSpace(result.Status)) {
 			case "canceled", "cancelled":
-				return fmt.Errorf("human approval canceled for %s on %s", actionID, platform)
+				audit := auditBase
+				audit.Outcome = team.ApprovalOutcomeCancelled
+				audit.OutcomeSummary = "human cancelled approval"
+				brokerPostApprovalAudit(ctx, audit)
+				return approvalContext{}, fmt.Errorf("human approval canceled for %s on %s", actionID, platform)
 			case "not_found":
-				return fmt.Errorf("human approval request not found for %s on %s", actionID, platform)
+				return approvalContext{}, fmt.Errorf("human approval request not found for %s on %s", actionID, platform)
 			}
 			if result.Answered == nil {
 				continue
 			}
+			answeredAt := strings.TrimSpace(result.Answered.AnsweredAt)
+			if answeredAt == "" {
+				answeredAt = time.Now().UTC().Format(time.RFC3339Nano)
+			}
 			choice := strings.ToLower(strings.TrimSpace(result.Answered.ChoiceID))
 			switch choice {
 			case "approve", "approve_with_note", "confirm_proceed":
-				return nil
+				return approvalContext{
+					RequestID:   created.ID,
+					IssueID:     strings.TrimSpace(args.IssueID),
+					RequestedAt: requestedAt,
+					AnsweredAt:  answeredAt,
+				}, nil
 			}
 			reason := strings.TrimSpace(result.Answered.CustomText)
 			if reason == "" {
@@ -195,7 +261,12 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 			if reason == "" {
 				reason = choice
 			}
-			return fmt.Errorf("human rejected %s on %s: %s", actionID, platform, reason)
+			audit := auditBase
+			audit.Outcome = team.ApprovalOutcomeRejected
+			audit.AnsweredAt = answeredAt
+			audit.OutcomeSummary = reason
+			brokerPostApprovalAudit(ctx, audit)
+			return approvalContext{}, fmt.Errorf("human rejected %s on %s: %s", actionID, platform, reason)
 		}
 	}
 }
@@ -238,7 +309,6 @@ type actionApprovalSpec struct {
 //	          • Subject: Welcome
 //	          • Body: Hi Alex, welcome to ...
 //	          Action: GMAIL_SEND_EMAIL via Gmail
-//	          Account: <connection_key>
 //	          Channel: #general
 //
 // The "What this will do" block is only included when at least one
@@ -267,7 +337,6 @@ func buildActionApprovalSpec(slug, channel string, args TeamActionExecuteArgs) a
 	// approval bypass that defeats the entire reason this gate exists.
 	safeActionID := sanitizeContextValue(actionID)
 	safeSummary := sanitizeContextValue(strings.TrimSpace(args.Summary))
-	safeConnection := sanitizeContextValue(strings.TrimSpace(args.ConnectionKey))
 
 	var b strings.Builder
 	if safeSummary != "" {
@@ -284,9 +353,9 @@ func buildActionApprovalSpec(slug, channel string, args TeamActionExecuteArgs) a
 	b.WriteString(safeActionID)
 	b.WriteString(" via ")
 	b.WriteString(platformLabel)
-	if safeConnection != "" {
+	if account := actionApprovalAccountLabel(args.ConnectionKey); account != "" {
 		b.WriteString("\nAccount: ")
-		b.WriteString(safeConnection)
+		b.WriteString(account)
 	}
 	if ch := strings.TrimSpace(channel); ch != "" {
 		b.WriteString("\nChannel: #")
@@ -335,6 +404,17 @@ func sanitizeContextValue(s string) string {
 func actionVerbLabel(platform, actionID string) string {
 	id := strings.ToLower(strings.TrimSpace(actionID))
 	if id == "" {
+		return "run an action"
+	}
+	// Defensive: if the actionID looks like an opaque internal identifier
+	// (contains `::`, long hash-like runs, base64-ish padding, etc.), the
+	// agent has passed a connection key or workflow handle instead of a
+	// proper action_id. Title-casing that string verbatim would surface
+	// gibberish like "conn mod def::gj3odoe fdw::ijlww5s" to the human and
+	// leave them no way to decide whether to approve. Fall back to a
+	// generic verb so the rest of the approval card (Why / What this will
+	// do / Action) is still useful.
+	if looksLikeOpaqueID(id) {
 		return "run an action"
 	}
 	tokens := strings.FieldsFunc(id, actionIDSeparator)
@@ -394,181 +474,6 @@ func platformDisplay(platform string) string {
 	return strings.Join(parts, " ")
 }
 
-// payloadFieldOrder is the priority list of payload keys we surface in
-// the approval card, top to bottom. Each entry maps a payload key (any
-// of the synonyms ship together) to the label the human sees. The first
-// match per label wins so synonyms like to/recipient/recipients do not
-// double up.
-var payloadFieldOrder = []struct {
-	Keys  []string
-	Label string
-}{
-	{[]string{"to", "recipient", "recipients", "recipient_email", "user_id"}, "To"},
-	{[]string{"cc"}, "CC"},
-	{[]string{"bcc"}, "BCC"},
-	{[]string{"from", "sender"}, "From"},
-	{[]string{"subject"}, "Subject"},
-	{[]string{"channel", "channel_id"}, "Channel"},
-	{[]string{"thread_ts", "thread_id"}, "Thread"},
-	{[]string{"text", "message", "body", "content", "html_body"}, "Body"},
-	{[]string{"title", "name"}, "Title"},
-	{[]string{"summary", "description"}, "Description"},
-	{[]string{"url", "link"}, "URL"},
-	{[]string{"event_id", "calendar_event_id"}, "Event"},
-	{[]string{"start_time", "start"}, "Starts"},
-	{[]string{"end_time", "end"}, "Ends"},
-	{[]string{"amount", "price"}, "Amount"},
-	{[]string{"currency"}, "Currency"},
-	{[]string{"query", "q"}, "Query"},
-}
-
-// payloadRedactedKeys are field names we never surface in the approval
-// card — the human does not need to see their own credentials to decide
-// whether to approve, and a leaky log is one OS clipboard away from a
-// support ticket.
-var payloadRedactedKeys = map[string]struct{}{
-	"password":      {},
-	"passwd":        {},
-	"secret":        {},
-	"api_key":       {},
-	"access_token":  {},
-	"refresh_token": {},
-	"token":         {},
-	"client_secret": {},
-	"private_key":   {},
-}
-
-// summarizeActionPayload renders a bulleted list of decision-relevant
-// payload fields from args.Data, args.PathVariables, and
-// args.QueryParameters. Long values are clipped, multi-line bodies are
-// flattened, and redacted keys are skipped entirely. Returns an empty
-// string when none of the recognized fields are present.
-func summarizeActionPayload(args TeamActionExecuteArgs) string {
-	type field struct {
-		Label string
-		Value string
-	}
-	var fields []field
-	seen := make(map[string]bool, len(payloadFieldOrder))
-
-	sources := []map[string]any{args.Data, args.PathVariables, args.QueryParameters}
-	for _, entry := range payloadFieldOrder {
-		if seen[entry.Label] {
-			continue
-		}
-		for _, key := range entry.Keys {
-			if _, redacted := payloadRedactedKeys[key]; redacted {
-				continue
-			}
-			value, ok := lookupPayloadValue(sources, key)
-			if !ok {
-				continue
-			}
-			rendered := formatPayloadValue(value)
-			if rendered == "" {
-				continue
-			}
-			fields = append(fields, field{Label: entry.Label, Value: rendered})
-			seen[entry.Label] = true
-			break
-		}
-	}
-
-	if len(fields) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, f := range fields {
-		b.WriteString("• ")
-		b.WriteString(f.Label)
-		b.WriteString(": ")
-		b.WriteString(f.Value)
-		b.WriteString("\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// lookupPayloadValue checks each source map for the given key and
-// returns the first hit. Comparison is case-insensitive on the key so
-// providers that ship "Subject" or "TO" still match.
-func lookupPayloadValue(sources []map[string]any, key string) (any, bool) {
-	lowered := strings.ToLower(key)
-	for _, src := range sources {
-		if src == nil {
-			continue
-		}
-		if v, ok := src[key]; ok {
-			return v, true
-		}
-		for k, v := range src {
-			if strings.ToLower(k) == lowered {
-				return v, true
-			}
-		}
-	}
-	return nil, false
-}
-
-// payloadValueClipLen is the soft cap on a single payload value we render
-// in the approval card, measured in RUNES (not bytes) so multi-byte
-// characters like CJK or emoji do not get sliced mid-codepoint into
-// invalid UTF-8. Email bodies routinely run thousands of bytes; the
-// human only needs the first sentence to recognize the message.
-const payloadValueClipLen = 240
-
-// formatPayloadValue renders any payload value as a single, clipped
-// string. Arrays become comma-separated lists; structured values fall
-// back to JSON. Internal whitespace is collapsed so multi-line bodies
-// do not break the bulleted list. Truncation is rune-aware: a CJK
-// character at position 240 will not produce a half-glyph and a tofu
-// box on the rendered card.
-func formatPayloadValue(v any) string {
-	raw := payloadValueString(v)
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	raw = strings.Join(strings.Fields(raw), " ")
-	if utf8.RuneCountInString(raw) > payloadValueClipLen {
-		runes := []rune(raw)
-		raw = string(runes[:payloadValueClipLen]) + "…"
-	}
-	return raw
-}
-
-func payloadValueString(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return t
-	case []string:
-		return strings.Join(t, ", ")
-	case []any:
-		parts := make([]string, 0, len(t))
-		for _, item := range t {
-			if s := payloadValueString(item); strings.TrimSpace(s) != "" {
-				parts = append(parts, strings.TrimSpace(s))
-			}
-		}
-		return strings.Join(parts, ", ")
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case float64:
-		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", t), "0"), ".")
-	case int, int64:
-		return fmt.Sprintf("%d", t)
-	}
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Sprintf("%v", v)
-	}
-	return string(raw)
-}
-
 var (
 	externalActionProvider action.Provider
 	titleCaser             = cases.Title(language.English)
@@ -608,6 +513,12 @@ type TeamActionExecuteArgs struct {
 	Channel         string         `json:"channel,omitempty" jsonschema:"Optional office channel for logging"`
 	MySlug          string         `json:"my_slug,omitempty" jsonschema:"Agent slug performing the action. Defaults to WUPHF_AGENT_SLUG."`
 	Summary         string         `json:"summary,omitempty" jsonschema:"Optional short office log summary"`
+	// IssueID is REQUIRED for any mutating (non-dry-run, non-read-only)
+	// action. The broker rejects mutating calls without an issue_id so the
+	// agent cannot do work that has no scoping artifact. The id must come
+	// from a prior team_task action=create call in this conversation. See
+	// the ISSUE JUDGMENT block in the system prompt.
+	IssueID string `json:"issue_id,omitempty" jsonschema:"REQUIRED for mutating actions. Pass the team_task/Issue id this action executes under. Get it from a prior team_task action=create call. Read-only and dry_run actions may omit it."`
 }
 
 type TeamActionWorkflowCreateArgs struct {
@@ -806,12 +717,72 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	}
 	channel := resolveConversationChannel(ctx, slug, args.Channel)
 
+	// Deterministic pre-flight connection gate. Before any human approval or
+	// provider call, classify a MUTATING action against the live connection
+	// state so it can never fire blind into a missing, expired, or unreachable
+	// integration. Read-only actions skip this gate: gating them would double
+	// the provider calls on the hot lookup path, and the hard guarantee only
+	// needs to cover side-effecting actions. DryRun and WUPHF_UNSAFE bypass —
+	// a dry run sends nothing, and unsafe is the operator escape hatch. If the
+	// resolver itself is unreachable we degrade to the human approval gate
+	// below rather than bricking every external action.
+	preApproved := false
+	var actionCard *actionCardPayload
+	connectionUnverified := false
+	if !args.DryRun && os.Getenv("WUPHF_UNSAFE") != "1" && !actionIsReadOnly(args.ActionID) {
+		decision, derr := resolveActionDecision(ctx, slug, channel, args)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "teammcp: action resolve failed for %s/%s: %v; falling back to approval-only gate\n", args.Platform, args.ActionID, derr)
+			// The connection state is unconfirmed — the approval card warns
+			// the human that we could not verify the integration (review LOW #5).
+			connectionUnverified = true
+		} else {
+			switch strings.ToLower(strings.TrimSpace(decision.Decision)) {
+			case "connect", "wait", "fail_safe", "fallback":
+				return toolError(fmt.Errorf("%s", actionResolveBlockMessage(decision, platformDisplay(args.Platform)))), nil, nil
+			case "proceed":
+				// `proceed` for a MUTATING action means a standing, human-issued
+				// grant covers this exact (agent, platform, action_id): skip the
+				// approval modal. The resolver is the sole authority for this —
+				// the grant store is human-minted broker state, so a
+				// prompt-injected agent cannot forge its way to `proceed`. The
+				// Issue/drafting gate inside requireTeamActionApproval still runs.
+				if decision.Account != nil && strings.TrimSpace(decision.Account.Key) != "" {
+					args.ConnectionKey = strings.TrimSpace(decision.Account.Key)
+				}
+				preApproved = true
+			case "approve":
+				// Use the connection the resolver actually verified, not the
+				// (often blank or stale) key the agent guessed. This is what
+				// closes the "fires into the wrong/missing connection" gap.
+				if decision.Account != nil && strings.TrimSpace(decision.Account.Key) != "" {
+					args.ConnectionKey = strings.TrimSpace(decision.Account.Key)
+				}
+				// Carry the structured payload (typed fields + masked envelope)
+				// onto the approval card so it renders the real request, not a
+				// reconstruction (slice 4b).
+				actionCard = buildActionCardPayload(args, decision)
+			default:
+				// Fail closed. The resolver answered (derr == nil) but with a
+				// decision this gate does not recognize — an empty body, a new
+				// verdict the broker added without updating the gate, or a
+				// tampered response. An unrecognized decision must NEVER become
+				// an implicit proceed; block and let the agent retry.
+				return toolError(fmt.Errorf(
+					"%s could not be resolved (unrecognized decision %q); not running the action — retry shortly",
+					platformDisplay(args.Platform), strings.TrimSpace(decision.Decision),
+				)), nil, nil
+			}
+		}
+	}
+
 	// Human-in-the-loop gate. Mutating external actions — sending email,
 	// posting to Slack, writing a CRM row, etc. — require explicit human
 	// approval unless --unsafe was passed or the action is a read-only
 	// lookup. A prompt-injected agent must not be able to trigger real
 	// side-effects silently.
-	if err := requireTeamActionApproval(ctx, slug, channel, args); err != nil {
+	approvalCtx, err := requireTeamActionApproval(ctx, slug, channel, args, preApproved, actionCard, connectionUnverified)
+	if err != nil {
 		return toolError(err), nil, nil
 	}
 
@@ -831,17 +802,77 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 		FormURLEncoded:  args.FormURLEncoded,
 		DryRun:          args.DryRun,
 	})
+	verb := actionVerbLabel(args.Platform, args.ActionID)
+	platformLabel := platformDisplay(args.Platform)
+	// `intent` is the agent's own one-liner from args.Summary — that's
+	// the same line the human just read on the approval card, so reusing
+	// it in the outcome means the human sees "I approved THIS and it
+	// ran" instead of a generic "Executed run an action via Gmail".
+	// When the agent left Summary blank, fall back to verb+platform so
+	// we still post something readable.
+	intent := strings.TrimSpace(args.Summary)
+	if intent == "" {
+		intent = fmt.Sprintf("%s via %s", verb, platformLabel)
+	}
+	executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_action_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", titleCaser.String(provider.Name()), args.ActionID, args.Platform)), args.ActionID)
+		failSummary := fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", titleCaser.String(provider.Name()), args.ActionID, args.Platform))
+		_ = brokerRecordActionWithMetadata(ctx, "external_action_failed", provider.Name(), channel, slug, failSummary, args.ActionID, actionLogMetadata(provider.Name(), args, "failed"))
+		// Failure ALWAYS posts (no dedupe, no read-only skip) — silent
+		// failures are the worst UX. Clean the error of CLI/JSON noise
+		// before showing it; the agent's followup human_message can
+		// carry the deep detail when it matters.
+		cleanedErr := sanitizeOutcomeError(err.Error())
+		outcomeMsgID := brokerPostActionOutcomeMessage(ctx, channel, slug, fmt.Sprintf(
+			"⚠️ %s — failed: %s",
+			intent,
+			cleanedErr,
+		))
+		recordExecuteAudit(ctx, approvalCtx, args, slug, channel, executedAt,
+			team.ApprovalOutcomeExecutedFailed,
+			fmt.Sprintf("%s — failed: %s", intent, cleanedErr),
+			outcomeMsgID)
 		return toolError(err), nil, nil
 	}
 	kind := "external_action_executed"
-	summary := fallbackSummary(args.Summary, fmt.Sprintf("Executed %s on %s via %s", args.ActionID, args.Platform, titleCaser.String(provider.Name())))
+	status := "executed"
 	if args.DryRun {
 		kind = "external_action_planned"
-		summary = fallbackSummary(args.Summary, fmt.Sprintf("Planned %s on %s via %s", args.ActionID, args.Platform, titleCaser.String(provider.Name())))
+		status = "planned"
 	}
-	_ = brokerRecordAction(ctx, kind, provider.Name(), channel, slug, summary, args.ActionID)
+	_ = brokerRecordActionWithMetadata(ctx, kind, provider.Name(), channel, slug, intent, args.ActionID, actionLogMetadata(provider.Name(), args, status))
+	// Decide whether to post to chat. Three rules:
+	//   1. Read-only actions (list/search/get/...) bypass the approval
+	//      gate and are agent-internal lookups; posting every one would
+	//      flood chat with noise the human doesn't need to see.
+	//   2. Recent duplicate of the same action — dedupe to avoid
+	//      "✅ Executed ... ✅ Executed ... ✅ Executed" cascades when
+	//      the agent retries a successful call.
+	//   3. Everything else — the human approved it; they MUST see the
+	//      confirmation.
+	var outcomeMsgID string
+	if !actionIsReadOnly(args.ActionID) && !recentlyPostedOutcome(slug, args.ActionID, channel) {
+		// Build the outcome message: intent + a result preview so the
+		// human sees what the approved action actually produced, not
+		// just that it ran. Without the preview, the human gets "✅
+		// List inbox threads" with no idea how many threads, which
+		// ones, or what came back — defeating the trust contract of
+		// "every approval feels useful". The preview is bounded so
+		// the chat doesn't drown in raw JSON for large payloads; the
+		// agent's followup human_message carries the interpretation.
+		preview := summarizeActionResult(result)
+		var body string
+		if args.DryRun {
+			body = fmt.Sprintf("📝 Planned: %s (dry-run, nothing sent)", intent)
+		} else if preview != "" {
+			body = fmt.Sprintf("✅ %s\n\n%s", intent, preview)
+		} else {
+			body = fmt.Sprintf("✅ %s", intent)
+		}
+		outcomeMsgID = brokerPostActionOutcomeMessage(ctx, channel, slug, body)
+	}
+	recordExecuteAudit(ctx, approvalCtx, args, slug, channel, executedAt,
+		team.ApprovalOutcomeExecutedOK, intent, outcomeMsgID)
 	return textResult(prettyObject(result)), nil, nil
 }
 
@@ -956,12 +987,16 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 		return toolError(err), nil, nil
 	}
 	job := map[string]any{
-		"slug":          schedulerSlug(provider.Name(), channel, args.Key),
-		"kind":          provider.Name() + "_workflow",
-		"label":         "Run " + humanizeWorkflowKey(args.Key),
-		"target_type":   "workflow",
-		"target_id":     strings.TrimSpace(args.Key),
-		"channel":       channel,
+		"slug":        schedulerSlug(provider.Name(), channel, args.Key),
+		"kind":        provider.Name() + "_workflow",
+		"label":       "Run " + humanizeWorkflowKey(args.Key),
+		"target_type": "workflow",
+		"target_id":   strings.TrimSpace(args.Key),
+		"channel":     channel,
+		// agent = the office agent that scheduled this workflow; it owns the
+		// routine in the UI. provider is the integration vendor (composio/one),
+		// which must never be surfaced as the owning agent.
+		"agent":         slug,
 		"provider":      provider.Name(),
 		"workflow_key":  strings.TrimSpace(args.Key),
 		"skill_name":    strings.TrimSpace(args.SkillName),
@@ -1138,6 +1173,31 @@ func brokerRecordAction(ctx context.Context, kind, source, channel, actor, summa
 		"summary":    strings.TrimSpace(summary),
 		"related_id": strings.TrimSpace(relatedID),
 	}, nil)
+}
+
+func brokerRecordActionWithMetadata(ctx context.Context, kind, source, channel, actor, summary, relatedID string, metadata map[string]string) error {
+	return brokerPostJSON(ctx, "/actions", map[string]any{
+		"kind":       strings.TrimSpace(kind),
+		"source":     strings.TrimSpace(source),
+		"channel":    resolveChannel(channel),
+		"actor":      strings.TrimSpace(actor),
+		"summary":    strings.TrimSpace(summary),
+		"related_id": strings.TrimSpace(relatedID),
+		"metadata":   metadata,
+	}, nil)
+}
+
+func actionLogMetadata(provider string, args TeamActionExecuteArgs, status string) map[string]string {
+	metadata := map[string]string{
+		"provider":  strings.TrimSpace(provider),
+		"platform":  strings.TrimSpace(args.Platform),
+		"action_id": strings.TrimSpace(args.ActionID),
+		"status":    strings.TrimSpace(status),
+	}
+	if connectionKey := strings.TrimSpace(args.ConnectionKey); connectionKey != "" {
+		metadata["connection_key"] = connectionKey
+	}
+	return metadata
 }
 
 type workflowSkillSpec struct {

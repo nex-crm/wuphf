@@ -182,15 +182,22 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 	action := strings.ToLower(strings.TrimSpace(args.Action))
 	switch action {
 	case "create":
+		actor := strings.TrimSpace(resolveSlugOptional(args.MySlug))
+		// Spinning up a NEW agent is a durable, persistent act, so it always
+		// requires explicit human approval. This blocks until the human
+		// decides; on reject/timeout the agent must reuse an existing
+		// specialist instead. (WUPHF_UNSAFE=1 bypasses, like the action gate.)
+		if err := requireTeamMemberApproval(ctx, actor, args); err != nil {
+			return toolError(err), nil, nil
+		}
 		body := map[string]any{
-			"action":          "create",
-			"slug":            slug,
-			"name":            strings.TrimSpace(args.Name),
-			"role":            strings.TrimSpace(args.Role),
-			"expertise":       args.Expertise,
-			"personality":     strings.TrimSpace(args.Personality),
-			"permission_mode": strings.TrimSpace(args.PermissionMode),
-			"created_by":      strings.TrimSpace(resolveSlugOptional(args.MySlug)),
+			"action":      "create",
+			"slug":        slug,
+			"name":        strings.TrimSpace(args.Name),
+			"role":        strings.TrimSpace(args.Role),
+			"expertise":   args.Expertise,
+			"personality": strings.TrimSpace(args.Personality),
+			"created_by":  actor,
 		}
 		if pkind := strings.TrimSpace(args.Provider); pkind != "" || strings.TrimSpace(args.Model) != "" {
 			p := map[string]any{"kind": pkind, "model": strings.TrimSpace(args.Model)}

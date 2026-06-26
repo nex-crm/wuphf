@@ -75,7 +75,7 @@
     { charId: 'ceo',     text: 'One command. One office.' },
     { charId: 'eng',     text: '$ go build -o wuphf && ./wuphf' },
     { charId: 'michael', text: "I'm not superstitious, but I am a little stitious." },
-    { charId: 'cmo',     text: 'Open source. MIT license.' },
+    { charId: 'cmo',     text: 'Source available. Fair-code license.' },
     { charId: 'dwight',  text: 'Bears. Beets. Battlestar Galactica.' },
     { charId: 'ceo',     text: 'Routing task to engineering. ETA: 3 minutes.' },
     { charId: 'pam',     text: 'CEO, PM, engineers — all visible, all working.' },

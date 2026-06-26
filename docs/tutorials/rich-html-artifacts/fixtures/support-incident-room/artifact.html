@@ -7,40 +7,214 @@
   <style>
     :root {
       color-scheme: light;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f5f7f9;
-      color: #17212f;
+      --paper: #f3ecdc;
+      --ink: #1f1912;
+      --muted: #766b5b;
+      --ms-cobalt-950: oklch(21% .034 264.665);
+      --ms-cobalt-700: oklch(48.8% .243 264.376);
+      --ms-cobalt-600: oklch(50.58% .2886 264.84);
+      --ms-cobalt-500: oklch(63.79% .1899 269.89);
+      --ms-cobalt-400: oklch(76.12% .1218 272.4);
+      --ms-cobalt-300: oklch(83.76% .0774 273.32);
+      --ms-cobalt-100: oklch(94.22% .0275 274.66);
+      --ms-cobalt-50: oklch(97.05% .0054 274.97);
+      --ms-cobalt-600-faint: oklch(50.58% .2886 264.84 / .08);
+      --draw: var(--ms-cobalt-600);
+      --line: #baad96;
+      --paper-deep: #e7dcc8;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--paper);
+      color: var(--ink);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; }
-    main { max-width: 1100px; margin: 0 auto; padding: 28px; }
-    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
-    p { margin: 0; color: #5b6575; line-height: 1.5; }
-    .status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
-    .metric { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; padding: 14px; }
-    .metric span { color: #647084; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-    .metric strong { display: block; margin-top: 6px; font-size: 22px; }
-    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
-    button { border: 1px solid #ccd5e0; background: #ffffff; color: #17212f; border-radius: 6px; min-height: 36px; padding: 8px 12px; font-weight: 700; cursor: pointer; }
-    button[aria-selected="true"], #copy { background: #245b4f; border-color: #245b4f; color: #ffffff; }
-    section { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; padding: 18px; }
-    h2 { margin: 0 0 14px; font-size: 18px; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(76, 58, 35, .055) 0 1px, transparent 1.2px),
+        radial-gradient(circle at 78% 64%, rgba(76, 58, 35, .04) 0 1px, transparent 1.2px),
+        linear-gradient(90deg, rgba(255, 252, 242, .42), transparent 45%, rgba(90, 70, 44, .04)),
+        var(--paper);
+      background-size: 23px 29px, 31px 37px, auto, auto;
+    }
+    main { max-width: 1200px; margin: 0 auto; padding: 42px 34px 70px; }
+    .mono, .fig, button, .metric span, .metric strong, textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0;
+    }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 28px;
+      align-items: start;
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 58px 0 0;
+      font-size: 34px;
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+    .dek {
+      max-width: 680px;
+      margin-top: 12px;
+      font-size: 17px;
+      line-height: 1.55;
+    }
+    .plate {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+      line-height: 1.35;
+    }
+    .brandline {
+      color: var(--draw);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .rule {
+      height: 10px;
+      border-top: 1px dotted var(--line);
+      border-bottom: 1px dotted var(--line);
+      margin-bottom: 26px;
+    }
+    .status {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+    .metric {
+      border-top: 1px solid var(--ink);
+      padding: 10px 0 0;
+    }
+    .metric span {
+      color: var(--muted);
+      display: block;
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+    .metric strong {
+      color: var(--draw);
+      font-size: 22px;
+    }
+    .workbench {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+    .tabs {
+      display: grid;
+      gap: 8px;
+      border-top: 1px solid var(--ink);
+      padding-top: 12px;
+    }
+    button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .34);
+      color: var(--ink);
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button[aria-selected="true"], #copy {
+      border-color: var(--draw);
+      color: var(--draw);
+      background: var(--ms-cobalt-100);
+    }
+    section {
+      border-top: 1px solid var(--ink);
+      padding-top: 15px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+    p { margin: 0; line-height: 1.52; }
     .panel { display: none; }
-    .panel.active { display: grid; gap: 14px; }
-    .timeline { display: grid; grid-template-columns: 96px 1fr; gap: 12px; }
-    .time { color: #647084; font-weight: 700; }
-    .event { border-left: 3px solid #245b4f; padding: 0 0 16px 14px; }
+    .panel.active { display: grid; gap: 16px; }
+    .impact {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .impact div {
+      border: 1px dotted var(--line);
+      background: rgba(255, 255, 255, .34);
+      min-height: 118px;
+      padding: 12px;
+    }
+    .impact strong { display: block; margin-bottom: 8px; }
+    .figure {
+      position: relative;
+      border: 1px dotted var(--line);
+      background:
+        linear-gradient(90deg, var(--ms-cobalt-600-faint) 1px, transparent 1px),
+        linear-gradient(var(--ms-cobalt-600-faint) 1px, transparent 1px),
+        var(--ms-cobalt-50);
+      background-size: 8px 8px;
+      padding: 18px;
+      min-height: 180px;
+    }
+    .fig {
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+    .equation {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      font-style: italic;
+      text-align: right;
+    }
+    svg { display: block; width: 100%; height: auto; }
+    .impact-strokes { fill: none; stroke: var(--ms-cobalt-600); stroke-width: 2; }
+    .impact-labels {
+      fill: var(--ms-cobalt-700);
+      font-family: ui-monospace, monospace;
+      font-size: 15px;
+    }
+    .timeline {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 12px;
+    }
+    .time {
+      color: var(--draw);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-weight: 800;
+    }
+    .event {
+      border-left: 1px solid var(--draw);
+      padding: 0 0 18px 14px;
+    }
     .event strong { display: block; margin-bottom: 4px; }
-    .impact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .impact div { background: #f8fafc; border: 1px solid #e4e9f0; border-radius: 7px; padding: 12px; }
-    textarea { width: 100%; min-height: 136px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font: inherit; line-height: 1.5; }
-    svg { width: 100%; height: auto; display: block; }
-    @media (max-width: 800px) {
-      main { padding: 18px; }
-      header, .status, .impact { display: grid; grid-template-columns: 1fr; }
+    textarea {
+      width: 100%;
+      min-height: 158px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .4);
+      color: var(--ink);
+      padding: 12px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+    @media (max-width: 820px) {
+      main { padding: 20px 16px 32px; }
+      header, .status, .workbench, .impact { grid-template-columns: 1fr; }
+      .plate { text-align: left; }
+      .tabs { display: flex; flex-wrap: wrap; }
       .timeline { grid-template-columns: 1fr; }
-      .event { border-left: 0; border-top: 3px solid #245b4f; padding: 10px 0 14px; }
+      .event { border-left: 0; border-top: 1px solid var(--draw); padding: 10px 0 14px; }
+      h1 { font-size: 34px; }
     }
   </style>
 </head>
@@ -48,10 +222,17 @@
   <main>
     <header>
       <div>
+        <div class="mono brandline">WUPHF ARTIFACT</div>
         <h1>Incident Command Room</h1>
-        <p>A single visual packet for impact, recovery timeline, owners, and the next customer-facing update.</p>
+        <p class="dek">A single visual packet for impact, recovery timeline, owners, and the next customer-facing update.</p>
+      </div>
+      <div class="plate mono">
+        A WUPHF manual artifact for incident review.<br>
+        Path: team/playbooks/support<br>
+        Trust: promoted
       </div>
     </header>
+    <div class="rule" aria-hidden="true"></div>
 
     <div class="status">
       <div class="metric"><span>State</span><strong>Mitigated</strong></div>
@@ -60,45 +241,58 @@
       <div class="metric"><span>Next update</span><strong>30m</strong></div>
     </div>
 
-    <div class="tabs" role="tablist" aria-label="Incident views">
-      <button id="tab-impact" type="button" role="tab" aria-selected="true" aria-controls="impact" data-view="impact">Customer impact</button>
-      <button id="tab-timeline" type="button" role="tab" aria-selected="false" aria-controls="timeline" data-view="timeline">Timeline</button>
-      <button id="tab-update" type="button" role="tab" aria-selected="false" aria-controls="update" data-view="update">Copy update</button>
+    <div class="workbench">
+      <div class="tabs" role="tablist" aria-label="Incident views">
+        <button id="tab-impact" type="button" role="tab" aria-selected="true" aria-controls="impact" data-view="impact">Customer impact</button>
+        <button id="tab-timeline" type="button" role="tab" aria-selected="false" aria-controls="timeline" data-view="timeline">Timeline</button>
+        <button id="tab-update" type="button" role="tab" aria-selected="false" aria-controls="update" data-view="update">Copy update</button>
+      </div>
+
+      <section>
+        <div id="impact" class="panel active" role="tabpanel" aria-labelledby="tab-impact">
+          <h2>Customer impact</h2>
+          <div class="impact">
+            <div><strong>Enterprise</strong><p>Seven accounts saw delayed sync status for 19 minutes.</p></div>
+            <div><strong>Growth</strong><p>Five accounts retried import jobs successfully after mitigation.</p></div>
+            <div><strong>Internal</strong><p>Support triage queue held two manual follow-ups.</p></div>
+          </div>
+          <div class="figure">
+            <div class="fig">FIG_004 [ IMPACT BY SEGMENT ]</div>
+            <svg viewBox="0 0 720 170" role="img" aria-label="Impact by segment">
+              <g class="impact-strokes">
+                <rect x="38" y="32" width="228" height="34"></rect>
+                <rect x="38" y="84" width="164" height="34"></rect>
+                <rect x="38" y="132" width="66" height="18"></rect>
+                <line x1="266" y1="49" x2="410" y2="49"></line>
+                <line x1="202" y1="101" x2="410" y2="101"></line>
+                <line x1="104" y1="141" x2="410" y2="141"></line>
+              </g>
+              <g class="impact-labels">
+                <text x="428" y="54">Enterprise: 7 affected</text>
+                <text x="428" y="106">Growth: 5 affected</text>
+                <text x="428" y="146">Internal: 2 follow-ups</text>
+              </g>
+            </svg>
+            <p class="equation">impact = affected accounts x elapsed sync delay</p>
+          </div>
+        </div>
+
+        <div id="timeline" class="panel" role="tabpanel" aria-labelledby="tab-timeline" hidden>
+          <h2>Timeline</h2>
+          <div class="timeline">
+            <div class="time">09:12</div><div class="event"><strong>Detection</strong><p>Support saw repeated import sync questions in the inbox.</p></div>
+            <div class="time">09:19</div><div class="event"><strong>Mitigation</strong><p>Engineering disabled the stale cache path and forced refresh.</p></div>
+            <div class="time">09:31</div><div class="event"><strong>Recovery</strong><p>Retry jobs completed and customer statuses normalized.</p></div>
+          </div>
+        </div>
+
+        <div id="update" class="panel" role="tabpanel" aria-labelledby="tab-update" hidden>
+          <h2>Copy update</h2>
+          <textarea id="message">We mitigated the sync delay at 09:19 PT and all retry jobs completed by 09:31 PT. We are reviewing cache invalidation coverage and will send a final postmortem after the owner review.</textarea>
+          <button id="copy" type="button">Copy update</button>
+        </div>
+      </section>
     </div>
-
-    <section>
-      <div id="impact" class="panel active" role="tabpanel" aria-labelledby="tab-impact">
-        <h2>Customer impact</h2>
-        <div class="impact">
-          <div><strong>Enterprise</strong><p>Seven accounts saw delayed sync status for 19 minutes.</p></div>
-          <div><strong>Growth</strong><p>Five accounts retried import jobs successfully after mitigation.</p></div>
-          <div><strong>Internal</strong><p>Support triage queue held two manual follow-ups.</p></div>
-        </div>
-        <svg viewBox="0 0 720 150" role="img" aria-label="Impact by segment">
-          <rect x="30" y="28" width="210" height="34" rx="4" fill="#245b4f"></rect>
-          <rect x="30" y="78" width="150" height="34" rx="4" fill="#3b82a0"></rect>
-          <rect x="30" y="122" width="60" height="18" rx="4" fill="#b87932"></rect>
-          <text x="256" y="51" fill="#17212f" font-size="16">Enterprise: 7 affected</text>
-          <text x="196" y="101" fill="#17212f" font-size="16">Growth: 5 affected</text>
-          <text x="104" y="137" fill="#17212f" font-size="14">Internal: 2 follow-ups</text>
-        </svg>
-      </div>
-
-      <div id="timeline" class="panel" role="tabpanel" aria-labelledby="tab-timeline" hidden>
-        <h2>Timeline</h2>
-        <div class="timeline">
-          <div class="time">09:12</div><div class="event"><strong>Detection</strong><p>Support saw repeated import sync questions in the inbox.</p></div>
-          <div class="time">09:19</div><div class="event"><strong>Mitigation</strong><p>Engineering disabled the stale cache path and forced refresh.</p></div>
-          <div class="time">09:31</div><div class="event"><strong>Recovery</strong><p>Retry jobs completed and customer statuses normalized.</p></div>
-        </div>
-      </div>
-
-      <div id="update" class="panel" role="tabpanel" aria-labelledby="tab-update" hidden>
-        <h2>Copy update</h2>
-        <textarea id="message">We mitigated the sync delay at 09:19 PT and all retry jobs completed by 09:31 PT. We are reviewing cache invalidation coverage and will send a final postmortem after the owner review.</textarea>
-        <button id="copy" type="button">Copy update</button>
-      </div>
-    </section>
   </main>
   <script>
     const tabs = Array.from(document.querySelectorAll("[data-view]"));

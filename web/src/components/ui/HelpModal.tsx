@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 
 import { useAppStore } from "../../stores/app";
 import { SLASH_COMMANDS } from "../messages/Autocomplete";
+import { requestShowOfficeTour } from "../onboarding/tour/useOfficeTour";
+import { Button } from "./Button";
 import { Kbd, KbdSequence, MOD_KEY } from "./Kbd";
 
 /**
@@ -176,6 +178,28 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
         </header>
 
         <div className="help-body">
+          <section className="help-section">
+            <h3 className="help-section-title">Office tour</h3>
+            <p className="help-note">
+              New to the office, or just want the lay of the land again? Take
+              the four-slide tour any time.
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                // Close Help first so the tour overlay is the only modal on
+                // screen, then dispatch the replay event the office Shell
+                // listens for via useOfficeTour.
+                onClose();
+                requestShowOfficeTour();
+              }}
+            >
+              Replay the office tour
+            </Button>
+          </section>
+
           <section className="help-section">
             <h3 className="help-section-title">Global</h3>
             <KeybindingList items={GLOBAL_KEYS} />

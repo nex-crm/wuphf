@@ -1,84 +1,101 @@
+import { useEffect, useState } from "react";
 import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
+import { useResizablePane } from "../../hooks/useResizablePane";
 import { router } from "../../lib/router";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
+import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
-import { ChannelList } from "../sidebar/ChannelList";
-import { InboxButton } from "../sidebar/InboxButton";
-import { RecentObjectsPanel } from "../sidebar/RecentObjectsPanel";
-import { SidebarColorPicker } from "../sidebar/SidebarColorPicker";
+import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
-import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
+import { PaneResizeHandle } from "./PaneResizeHandle";
 
-function SectionToggle({
-  label,
-  open,
-  onToggle,
-}: {
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="sidebar-section-title sidebar-section-toggle"
-      onClick={onToggle}
-      aria-expanded={open}
-    >
-      <span>{label}</span>
-      <svg
-        aria-hidden="true"
-        focusable="false"
-        style={{
-          width: 10,
-          height: 10,
-          transform: open ? "rotate(90deg)" : "rotate(0deg)",
-          transition: "transform 0.15s",
-        }}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m9 18 6-6-6-6" />
-      </svg>
-    </button>
-  );
+export const SIDEBAR_DEFAULT_WIDTH = 280;
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 420;
+export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
+const MOBILE_RAIL_QUERY = "(max-width: 768px)";
+
+function useMobileRail(): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(MOBILE_RAIL_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia(MOBILE_RAIL_QUERY);
+    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches);
+    setMatches(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  return matches;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function Sidebar() {
-  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
-  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
-  const sidebarChannelsOpen = useAppStore((s) => s.sidebarChannelsOpen);
-  const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
-  const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
-  const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
-  const sidebarBg = useAppStore((s) => s.sidebarBg);
+  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
+  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
   const currentApp = useCurrentApp();
+  const mobileRail = useMobileRail();
+  const [mobileExpanded, setMobileExpanded] = useState(false);
 
-  const asideStyle = sidebarBg ? { background: sidebarBg } : undefined;
+  useEffect(() => {
+    if (!mobileRail) setMobileExpanded(false);
+  }, [mobileRail]);
+
+  const effectiveCollapsed = mobileRail ? !mobileExpanded : sidebarCollapsed;
+  const collapseSidebar = mobileRail
+    ? () => setMobileExpanded(false)
+    : toggleSidebarCollapsed;
+
+  const resize = useResizablePane({
+    storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
+    defaultWidth: SIDEBAR_DEFAULT_WIDTH,
+    minWidth: SIDEBAR_MIN_WIDTH,
+    maxWidth: SIDEBAR_MAX_WIDTH,
+    edge: "right",
+  });
+
+  // Collapsed rail keeps its fixed CSS width; only the expanded sidebar
+  // honors the user's drag. We hand the dragged width to CSS as a custom
+  // property rather than `width:` directly so the mobile media queries
+  // (which clamp the sidebar to 240px / full overlay) can still win
+  // — inline `width` would beat them with normal cascade rules.
+  const asideStyle = (
+    effectiveCollapsed
+      ? null
+      : { "--sidebar-resize-width": `${resize.width}px` }
+  ) as React.CSSProperties | null;
 
   return (
     <aside
-      className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
-      style={asideStyle}
+      className={`sidebar${effectiveCollapsed ? " sidebar-collapsed" : ""}`}
+      style={asideStyle ?? undefined}
     >
-      {sidebarCollapsed ? (
-        <CollapsedSidebar />
+      {effectiveCollapsed ? (
+        <CollapsedSidebar
+          onExpand={mobileRail ? () => setMobileExpanded(true) : undefined}
+        />
       ) : (
         <>
           <div className="sidebar-header">
-            <span className="sidebar-logo">WUPHF</span>
+            <button
+              type="button"
+              className="sidebar-logo"
+              onClick={() => router.navigate({ to: "/" })}
+              title="Home"
+              aria-label="WUPHF — go to home"
+            >
+              WUPHF
+            </button>
             <TeamMemberBadge />
             <div className="sidebar-header-actions">
               <button
@@ -86,7 +103,7 @@ export function Sidebar() {
                 className="sidebar-icon-btn"
                 aria-label="Collapse sidebar"
                 title="Collapse sidebar"
-                onClick={toggleSidebarCollapsed}
+                onClick={collapseSidebar}
               >
                 <SidebarCollapse />
               </button>
@@ -107,60 +124,52 @@ export function Sidebar() {
             </div>
           </div>
 
-          <div className="sidebar-primary">
-            <InboxButton />
-          </div>
-
-          <div
-            className={`sidebar-section is-team${sidebarAgentsOpen ? "" : " is-collapsed"}`}
-          >
-            <SectionToggle
+          <div className="sidebar-scroll">
+            {/* The agent roster rail — CEO + specialists with avatars, live
+                activity pills, and the peek affordance. Clicking a row opens
+                that agent's subspace (/agents/$slug), so any agent is reachable
+                at any time. Collapsible + persisted via the app store, exactly
+                as before the Slack-style sidebar unify (#919). */}
+            <SidebarSection
               label="Agents"
+              variant="team"
               open={sidebarAgentsOpen}
               onToggle={toggleSidebarAgents}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarAgentsOpen ? " is-open" : ""}`}
-          >
-            <AgentList />
-          </div>
+              data-testid="sidebar-section-agents"
+            >
+              <AgentList />
+            </SidebarSection>
 
-          <div
-            className={`sidebar-section${sidebarChannelsOpen ? "" : " is-collapsed"}`}
-          >
-            <SectionToggle
-              label="Channels"
-              open={sidebarChannelsOpen}
-              onToggle={toggleSidebarChannels}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarChannelsOpen ? " is-open" : ""}`}
-          >
-            <ChannelList />
-          </div>
-
-          <div
-            className={`sidebar-section${sidebarAppsOpen ? "" : " is-collapsed"}`}
-          >
-            <SectionToggle
-              label="Tools"
-              open={sidebarAppsOpen}
-              onToggle={toggleSidebarApps}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarAppsOpen ? " is-open" : ""}`}
-          >
+            {/* The sidebar nav is three labeled groups — Work / Knowledge /
+                Config — rendered by AppList. Inbox lives in Work; there is no
+                separate flat task list, and "Tasks" in Work opens the task
+                surface. Channels are per task (reached via the task detail). */}
             <AppList />
-          </div>
 
-          <RecentObjectsPanel />
-          <WorkspaceSummary />
+            {/* Phase 2 onboarding preview overlay — shows staged channels/agents
+                forming as the user answers CEO questions. Hidden once onboarded. */}
+            <SidebarPreviewOverlay />
+          </div>
+          {/* WorkspaceSummary intentionally not rendered here — the stats
+              it shows (agents active, tasks open, tokens) are redundant
+              with the Tasks nav and the Usage footer. The component file is
+              preserved so it can be re-used inside a future Usage popover
+              or Settings surface. */}
           <UsagePanel />
-          <SidebarColorPicker />
         </>
+      )}
+      {!(effectiveCollapsed || mobileRail) && (
+        <PaneResizeHandle
+          edge="right"
+          ariaLabel="Resize sidebar"
+          onPointerDown={resize.onPointerDown}
+          isResizing={resize.isResizing}
+          onReset={resize.reset}
+          onStepResize={resize.stepResize}
+          valueNow={resize.width}
+          valueMin={SIDEBAR_MIN_WIDTH}
+          valueMax={SIDEBAR_MAX_WIDTH}
+        />
       )}
     </aside>
   );

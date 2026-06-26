@@ -111,12 +111,12 @@
   --blue: var(--cyan-500);
   --blue-bg: var(--cyan-100);
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-serif:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-logo:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    "Geist Sans", "-apple-system", "BlinkMacSystemFont", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", "Georgia", "Times New Roman", serif;
+  --font-logo: "Newsreader", "Georgia", "Times New Roman", serif;
+  --font-mono:
+    "Geist Mono", "SFMono-Regular", "Menlo", "Monaco", "Consolas", monospace;
+  --font-pixel: "Geist Pixel", "Geist Mono", monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -139,6 +139,33 @@
 
   /* Popover shadow — used by the Tier 2 hover peek card. */
   --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.12);
+  --shadow-overlay: 0 20px 60px rgba(0, 0, 0, 0.15);
+
+  /* Button geometry tokens — let themes restyle without redefining classes.
+     `--btn-radius` swaps pill (base) vs rectangle (nex). `--btn-font-weight`
+     bumps from 500 → 600 in branded themes. The shadow tokens carry the
+     brand-tinted drop that nex.css used to hardcode. */
+  --btn-radius: var(--radius-full);
+  --btn-font-weight: 500;
+  --btn-primary-shadow: 0 1px 3px rgba(159, 77, 191, 0.18);
+  --btn-danger-shadow: 0 1px 3px rgba(226, 52, 40, 0.18);
+
+  /* Input tokens — same pattern as buttons. Themes restyle by setting these,
+     not by redefining .input. Disabled bg is its own token so themes can
+     pick a contrasting shade independently of --bg-warm. */
+  --input-bg: var(--bg-card);
+  --input-bg-disabled: var(--bg-warm);
+  --input-border: var(--border);
+
+  /* ─── Phase 2 onboarding preview-state tokens ─── */
+  /* Visual language: dashed border + lavender bg = "this thing is staged,
+     not committed yet." Used by the sidebar preview overlay that shows
+     channels/agents forming as the user answers CEO questions.
+     Spec: docs/specs/onboarding-into-office.md "Design system / token bindings" */
+  --preview-row-bg: var(--accent-bg);
+  --preview-row-border: dashed 1px var(--accent-bg-strong);
+  --preview-row-text: var(--text-secondary);
 
   /* ─── Focus ring ─── */
   /* Single source-of-truth: all interactive elements use this token so
@@ -149,15 +176,47 @@
   --focus-ring-width: 2px;
 
   /* ─── Spacing scale ─── */
-  /* Consistent spacing prevents scattered hardcoded values. */
+  /* Consistent spacing prevents scattered hardcoded values.
+     Half-steps (1-5, 2-5, 3-5) are the off-grid sizes the codebase
+     reaches for most often — icon-button padding, dense rail gaps,
+     mid-density form fields. They live in the system rather than
+     bleeding into inline px. */
   --space-1: 4px;
+  --space-1-5: 6px;
   --space-2: 8px;
+  --space-2-5: 10px;
   --space-3: 12px;
+  --space-3-5: 14px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* ─── Border widths ─── */
+  --border-width-sm: 1px;
+  --border-width-md: 2px;
+
+  /* ─── Elevation (shadows) — single token surface for the whole app.
+     Replace inline `box-shadow: 0 8px 40px ...` etc. with these. */
+  --shadow-card-soft:
+    0 1px 3px rgba(59, 47, 47, 0.04), 0 8px 30px rgba(59, 47, 47, 0.04);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  /* ─── z-index scale — keep modal/overlay stacking explicit so adding
+     a new layer never overlaps the wrong thing. Higher = closer. */
+  --z-dropdown: 100;
+  --z-popover: 120;
+  --z-overlay: 150;
+  --z-modal: 160;
+  --z-modal-critical: 200;
+  --z-toast: 300;
 
   /* ─── Typography scale ─── */
+  /* `--text-2xs` is the small-caps eyebrow/section-header size — used in
+     agents.css, command.css, lifecycle.css for the all-caps tracking
+     labels. Anything below this is decorative-only territory. */
+  --text-2xs: 10px;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -173,7 +232,7 @@
 
   /* ─── Empty / loading state ─── */
   --empty-state-color: var(--text-tertiary);
-  --empty-state-size: 13px;
+  --empty-state-size: var(--text-base);
 }
 
 html {
@@ -211,7 +270,7 @@ body {
   font-size: var(--empty-state-size);
 }
 .empty-state--padded {
-  padding: 32px 20px;
+  padding: calc(var(--space-6) + var(--space-2)) var(--space-5);
 }
 
 /* ─── Animations ─── */
@@ -250,14 +309,44 @@ body {
     transform: rotate(360deg);
   }
 }
-@keyframes typing-bounce {
+/* ThinkingLoader — wave dots, traveling sheen, and shimmer text.
+   Used by the inline TypingIndicator bubble and the feed loading state. */
+@keyframes thinking-wave {
   0%,
-  80%,
+  60%,
   100% {
-    transform: scale(0);
+    transform: translateY(0) scale(1);
+    opacity: 0.35;
   }
-  40% {
-    transform: scale(1);
+  30% {
+    transform: translateY(-4px) scale(1.18);
+    opacity: 1;
+  }
+}
+@keyframes thinking-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes thinking-text-shimmer {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+@keyframes thinking-ellipsis-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
   }
 }
 .animate-fade {
@@ -269,19 +358,19 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-2);
   font-family: var(--font-sans);
-  font-weight: 500;
+  font-weight: var(--btn-font-weight);
   border: none;
   cursor: pointer;
   /* Scope to compositor-safe properties — `transform` for the lift and
      `background/color/filter` for state; avoids layout recalcs on hover. */
   transition:
-    background var(--duration-slow, 0.2s),
-    color var(--duration-slow, 0.2s),
-    filter var(--duration-slow, 0.2s),
-    transform var(--duration-slow, 0.2s),
-    box-shadow var(--duration-slow, 0.2s);
+    background var(--duration-slow),
+    color var(--duration-slow),
+    filter var(--duration-slow),
+    transform var(--duration-slow),
+    box-shadow var(--duration-slow);
   text-decoration: none;
   min-height: 44px;
 }
@@ -298,11 +387,11 @@ body {
 }
 .btn-primary {
   background: var(--accent);
-  color: white;
-  padding: 12px 24px;
-  border-radius: var(--radius-full);
-  font-size: 14px;
-  box-shadow: 0 1px 3px rgba(159, 77, 191, 0.18);
+  color: #ffffff;
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--btn-radius);
+  font-size: var(--text-md);
+  box-shadow: var(--btn-primary-shadow);
 }
 .btn-primary:has(.btn-label) {
   padding: 0;
@@ -311,47 +400,49 @@ body {
 .btn-primary:hover {
   background: var(--accent-warm);
 }
+.btn-ghost,
+/* DEPRECATED — .btn-secondary is an alias for .btn-ghost so existing call
+   sites (HealthCheckApp, SettingsApp, PoliciesApp, etc.) keep working.
+   New code should use .btn-ghost. Audit and migrate, then drop this selector. */
 .btn-secondary {
-  background: transparent;
-  color: var(--text-secondary);
-  padding: 10px 20px;
-  border-radius: var(--radius-full);
-  font-size: 14px;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border-dark);
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--btn-radius);
+  font-size: var(--text-md);
 }
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  border: none;
-  padding: 10px 20px;
-  border-radius: var(--radius-full);
-  font-size: 14px;
+.btn-ghost:hover,
+.btn-secondary:hover {
+  background: var(--bg-warm);
+  border-color: var(--border-strong);
 }
 .btn-danger {
-  background: var(--red, #e23428);
-  color: white;
-  padding: 10px 24px;
-  border-radius: var(--radius-full);
-  font-size: 14px;
-  box-shadow: 0 1px 3px rgba(226, 52, 40, 0.18);
+  background: var(--red);
+  color: #ffffff;
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--btn-radius);
+  font-size: var(--text-md);
+  box-shadow: var(--btn-danger-shadow);
 }
 .btn-danger:hover {
   filter: brightness(0.95);
 }
 .btn-lg {
-  padding: 16px 40px;
-  font-size: 16px;
+  padding: var(--space-4) calc(var(--space-6) + var(--space-4));
+  font-size: var(--text-xl);
 }
 .btn-text {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  padding: 6px 4px;
-  font-size: 13px;
+  padding: var(--space-1) var(--space-1);
+  font-size: var(--text-base);
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  border-radius: 4px;
-  transition: color 0.12s;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast);
 }
 .btn-text:hover:not(:disabled) {
   text-decoration: underline;
@@ -369,11 +460,11 @@ body {
   color: var(--text-secondary);
 }
 .btn-text--danger:hover:not(:disabled) {
-  color: var(--red, #c43e3e);
+  color: var(--red);
 }
 .btn-sm {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
   min-height: 32px;
 }
 
@@ -382,30 +473,157 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow:
-    0 1px 3px rgba(59, 47, 47, 0.04),
-    0 8px 30px rgba(59, 47, 47, 0.04);
+  box-shadow: var(--shadow-card-soft);
+}
+
+/* ─── Modal shell + backdrop — shared by every dialog (ConfirmDialog,
+   WipeModal, SidePanel, HelpModal, VersionModal, command palette).
+   Pair them: `<div class="modal-backdrop"><div class="modal-shell" /></div>`.
+   Backdrop owns the scrim + z-index; shell owns the card. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-shell {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  max-width: min(560px, calc(100vw - 40px));
+  width: 100%;
+}
+
+/* ─── Section header — the small caps + tracking label that sits above
+   sidebar groups, settings sections, panel rails. Replaces ~6 ad-hoc
+   `font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;`
+   declarations across agents.css / lifecycle.css. */
+.section-header {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  line-height: 1;
+}
+
+/* ─── Chip — passive inline label with rounded geometry. Differs from
+   `.badge` (smaller, square) in that it carries identity / ownership
+   (agent, skill, channel) rather than status. `.chip--interactive` adds
+   hover/focus chrome for clickable variants. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  background: var(--bg-warm);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.chip--accent {
+  background: var(--accent-bg);
+  color: var(--accent-warm);
+  border-color: var(--accent-bg-strong);
+}
+.chip--interactive {
+  cursor: pointer;
+  transition:
+    background var(--duration-base),
+    border-color var(--duration-base);
+}
+.chip--interactive:hover {
+  background: var(--bg-subtle);
+  border-color: var(--border-dark);
+}
+.chip--interactive:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ─── Icon button — square-ish hit area for icon-only controls.
+   Size variants mirror .btn-sm / default / .btn-lg in height. Already
+   used implicitly in 8+ places (.sidebar-icon-btn, .agent-panel-close);
+   this is the single source of truth. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-base),
+    color var(--duration-base);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-warm);
+  color: var(--text);
+}
+.icon-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn--sm {
+  width: 28px;
+  height: 28px;
+}
+.icon-btn--lg {
+  width: 44px;
+  height: 44px;
 }
 
 /* ─── Inputs ─── */
 .input {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   color: var(--text);
   border-radius: var(--radius-md);
   height: 44px;
-  font-size: 15px;
-  padding: 0 14px;
-  outline: none;
+  font-size: var(--text-lg);
+  padding: 0 var(--space-3);
   width: 100%;
   font-family: var(--font-sans);
-  transition: border-color 0.2s;
+  transition:
+    border-color var(--duration-slow),
+    box-shadow var(--duration-slow);
 }
-.input:focus {
+.input:hover:not(:disabled):not(:focus-visible) {
+  border-color: var(--border-dark);
+}
+.input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   border-color: var(--accent);
+}
+.input:disabled {
+  background: var(--input-bg-disabled);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
 }
 .input::placeholder {
   color: var(--text-tertiary);
+}
+.input.has-error {
+  border-color: var(--red);
+}
+.input.has-error:focus-visible {
+  outline-color: var(--red);
 }
 
 /* ─── Badges ─── */
@@ -413,9 +631,9 @@ body {
   display: inline-flex;
   align-items: center;
   height: 18px;
-  padding: 0 6px;
-  border-radius: 3px;
-  font-size: 11px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
   font-weight: 500;
   font-family: var(--font-sans);
   letter-spacing: 0;
@@ -440,6 +658,267 @@ body {
 .badge-orange {
   background: var(--warning-200);
   color: var(--warning-500);
+}
+.badge-red {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+/* ─── Routines (scheduled-work surface) ─── */
+/* Tokenised local rules for the Routines app. Keeps the surface coherent
+   across themes without each component owning its own border/hover state. */
+.routines-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+.routines-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.routines-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.routines-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.routines-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-left: var(--space-2);
+}
+.routines-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  padding: 2px;
+  gap: 2px;
+}
+.routines-view-tab {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.routines-view-tab[aria-selected="true"] {
+  background: var(--accent);
+  color: white;
+}
+.routines-view-tab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+.routines-view-tab:not([aria-selected="true"]):hover {
+  color: var(--text);
+}
+
+.routine-row {
+  display: grid;
+  grid-template-columns:
+    minmax(200px, 2.2fr) minmax(140px, 1fr) minmax(120px, 1fr)
+    minmax(100px, 0.8fr) minmax(150px, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--routine-color, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  cursor: pointer;
+  position: relative;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.routine-row:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.routine-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+.routine-row[data-enabled="false"] {
+  opacity: 0.65;
+}
+.routine-row-label {
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routine-row-slug {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routine-row-meta {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.routine-header-row {
+  display: grid;
+  grid-template-columns:
+    minmax(200px, 2.2fr) minmax(140px, 1fr) minmax(120px, 1fr)
+    minmax(100px, 0.8fr) minmax(150px, 1fr) auto;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-2) var(--space-4);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
+.routine-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.routine-month-weekday {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border-light);
+  background: var(--bg-subtle, var(--bg-card));
+}
+.routine-month-weekday:nth-child(7n) {
+  border-right: none;
+}
+.routine-day {
+  min-height: 104px;
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: background 120ms ease;
+}
+.routine-day:nth-child(7n + 7) {
+  border-right: none;
+}
+.routine-day[data-out-of-month="true"] {
+  opacity: 0.5;
+  background: var(--bg-subtle, transparent);
+}
+.routine-day[data-today="true"] {
+  background: var(--accent-bg);
+}
+.routine-day:hover {
+  background: var(--bg-warm);
+}
+.routine-day-number {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 2px 4px 0;
+}
+.routine-day[data-today="true"] .routine-day-number {
+  color: var(--accent);
+  font-weight: 700;
+}
+.routine-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--routine-color, var(--accent));
+  border-radius: 3px;
+  font-size: var(--text-2xs);
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  width: 100%;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease;
+  animation: routine-chip-in 180ms ease both;
+}
+.routine-chip:hover {
+  border-color: var(--border-strong);
+  transform: translateX(1px);
+}
+.routine-chip[data-enabled="false"] {
+  opacity: 0.55;
+}
+.routine-chip-time {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.routine-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes routine-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The detail surface used to be a fixed-position drawer; it was promoted
+   to a full-page route at /routines/$routineSlug so its CSS rules
+   (.routine-drawer, .routine-drawer-backdrop, the matching keyframes,
+   and their z-index hardcodes) were removed. Reduced-motion guard for
+   the surviving routine surfaces only. */
+@media (prefers-reduced-motion: reduce) {
+  .routine-row,
+  .routine-chip,
+  .routines-view-tab,
+  .routine-day {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* ─── Approval context (Variant B layout, shared between InterviewBar and HumanInterviewOverlay) ─── */
@@ -539,6 +1018,547 @@ body {
   .approval-footer-row {
     white-space: normal;
   }
+}
+
+/* ─── External-action approval card (deterministic-integrations slice 4) ───
+   The dedicated approval surface for a mutating integration action. Built on
+   the same tokens as .approval-* so it reads as one family, with a stronger
+   identity header (logo + verb) because this card is a trust decision: the
+   human is authorizing a real, external side-effect. Tokens only — verified
+   against Nex Light, Nex Dark, and Noir Gold. */
+.eac {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 2px 0 4px;
+}
+.eac-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.eac-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px var(--overlay-soft);
+}
+.eac-headings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.eac-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.eac-headline {
+  margin: 0;
+  font-size: var(--text-lg, 17px);
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--text);
+}
+.eac-action-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary, var(--text-secondary));
+  word-break: break-all;
+}
+.eac-why {
+  display: block;
+  margin: 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--accent, var(--border-dark, var(--border)));
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.eac-why-label {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: var(--text-2xs, 10px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  vertical-align: 1px;
+}
+.eac-unverified {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--warning-100, var(--overlay-soft));
+  border: 1px solid var(--warning-200, var(--border));
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--warning-500, var(--text));
+}
+.eac-unverified-dot {
+  flex: none;
+  margin-top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--warning-500, var(--amber-600));
+}
+.eac-payload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  border-radius: var(--radius-md);
+}
+.eac-payload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.eac-payload-title {
+  font-size: var(--text-2xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.eac-raw-toggle {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--duration-base, 120ms) ease,
+    border-color var(--duration-base, 120ms) ease;
+}
+.eac-raw-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-dark, var(--text-tertiary));
+}
+.eac-raw-toggle[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent, var(--text-tertiary));
+}
+.eac-fields {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.eac-field {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.eac-field-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.eac-field-value {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.eac-trunc {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-100, var(--bg-warm));
+  color: var(--warning-500);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+.eac-raw {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow: auto;
+}
+.eac-payload-empty {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+.eac-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.eac-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.eac-meta-label {
+  font-weight: 500;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.eac-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--success, var(--green));
+  box-shadow: 0 0 0 2px var(--green-bg, transparent);
+}
+.eac-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+.eac-actions .eac-reject:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
+}
+.eac-actions .eac-dismiss {
+  margin-left: auto;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+/* Connect card specifics */
+.eac-connect-sub {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.eac-connect-question {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.eac-connect-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.eac-connect-failed {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg, var(--overlay-soft));
+}
+.eac-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full, 999px);
+  border: 2px solid var(--border-dark, var(--border));
+  border-top-color: var(--accent, var(--text));
+  animation: eac-spin 0.7s linear infinite;
+}
+@keyframes eac-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .eac-spinner {
+    animation: none;
+  }
+}
+@media (max-width: 480px) {
+  .eac-field {
+    grid-template-columns: 64px 1fr;
+    gap: 8px;
+  }
+  .eac-actions .eac-dismiss {
+    margin-left: 0;
+  }
+}
+
+/* ─── Always-allowed actions (scoped-grant revoke list, slice 5b) ─── */
+.grants-panel-head {
+  margin-bottom: 12px;
+}
+.grants-panel-title {
+  margin: 0 0 2px;
+  font-size: var(--text-md, 15px);
+  font-weight: 600;
+  color: var(--text);
+}
+.grants-panel-sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.grant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.grant-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.grant-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--overlay-soft);
+}
+.grant-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.grant-scope {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+.grant-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.grant-agent {
+  font-weight: 500;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.grant-sep {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.grant-revoke {
+  flex: none;
+}
+.grant-revoke:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+/* ─── Composio first-run onboarding ─── */
+.composio-onb {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
+}
+.composio-onb-card {
+  width: 100%;
+  max-width: 540px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 30px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 8px 32px var(--overlay-soft);
+}
+.composio-onb-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent, var(--text-secondary));
+}
+.composio-onb-title {
+  margin: 0;
+  font-size: var(--text-xl, 22px);
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--text);
+}
+.composio-onb-lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.composio-onb-logos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+.composio-onb-logo {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--overlay-soft);
+  border: 1px solid var(--border);
+}
+.composio-onb-more {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.composio-onb-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.composio-onb-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.composio-onb-field {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.composio-onb-input {
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.composio-onb-reveal {
+  flex: none;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.composio-onb-reveal:hover {
+  color: var(--text);
+  border-color: var(--border-dark, var(--text-tertiary));
+}
+.composio-onb-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+.composio-onb-submit {
+  min-width: 160px;
+}
+.composio-onb-getkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent, var(--text-secondary));
+  text-decoration: none;
+}
+.composio-onb-getkey:hover {
+  text-decoration: underline;
+}
+.composio-onb-foot {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.composio-onb-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--bg-card-soft, var(--bg-card));
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: var(--radius-md);
+}
+.composio-onb-panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.composio-onb-panel-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.composio-onb-panel-note code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.composio-onb-wait {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.composio-onb-error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--red);
+}
+.composio-onb-fallback-toggle {
+  appearance: none;
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.composio-onb-fallback-toggle:hover {
+  color: var(--text);
 }
 .badge-muted {
   background: var(--bg-warm);

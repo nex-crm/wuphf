@@ -39,7 +39,6 @@ starter:
   lead_slug: planner
   agents:
     - slug: planner
-      name: Planner
       role: Turns directives into workstreams.
       checked: true
       type: specialist
@@ -51,8 +50,8 @@ starter:
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "requires employee_blueprint or permission_mode") {
-		t.Fatalf("expected employee blueprint or permission_mode binding error, got %v", err)
+	if !strings.Contains(err.Error(), "requires employee_blueprint or name") {
+		t.Fatalf("expected employee blueprint or name binding error, got %v", err)
 	}
 }
 

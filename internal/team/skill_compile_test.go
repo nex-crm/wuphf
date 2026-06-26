@@ -368,7 +368,11 @@ func TestStageACompilerSetsSourceArticle(t *testing.T) {
 	}
 }
 
-func TestStageACompilerClampsFrontmatterStatusToProposed(t *testing.T) {
+// The compiler clamps any frontmatter lifecycle spoofing: compiled skills
+// are always written as ACTIVE with no disabled_from_status carry-over,
+// regardless of what the source article's frontmatter claims (core-loop R5
+// removed the proposal state entirely).
+func TestStageACompilerClampsFrontmatterStatus(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "wiki")
 	backup := filepath.Join(t.TempDir(), "wiki.bak")
 	repo := NewRepoAt(root, backup)
@@ -403,10 +407,10 @@ func TestStageACompilerClampsFrontmatterStatusToProposed(t *testing.T) {
 	found := b.findSkillByNameLocked("status-spoof")
 	b.mu.Unlock()
 	if found == nil {
-		t.Fatal("proposed skill status-spoof not found in broker.skills")
+		t.Fatal("compiled skill status-spoof not found in broker.skills")
 	}
-	if found.Status != "proposed" {
-		t.Errorf("Status: got %q, want proposed", found.Status)
+	if found.Status != "active" {
+		t.Errorf("Status: got %q, want active", found.Status)
 	}
 	if found.DisabledFromStatus != "" {
 		t.Errorf("DisabledFromStatus: got %q, want empty", found.DisabledFromStatus)
@@ -416,35 +420,11 @@ func TestStageACompilerClampsFrontmatterStatusToProposed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
-	if !strings.Contains(string(skillBytes), "status: proposed") {
-		t.Fatalf("SKILL.md did not clamp status to proposed: %q", string(skillBytes))
+	if !strings.Contains(string(skillBytes), "status: active") {
+		t.Fatalf("SKILL.md did not clamp status to active: %q", string(skillBytes))
 	}
 	if strings.Contains(string(skillBytes), "disabled_from_status:") {
 		t.Fatalf("SKILL.md should not preserve spoofed disabled_from_status: %q", string(skillBytes))
-	}
-}
-
-// TestStageBSynthLeavesSourceArticleEmpty asserts that the Stage B synth
-// path — which is signal-derived rather than rooted in a specific wiki
-// page — does NOT set SourceArticle. Stage B's provenance lives in
-// metadata.wuphf.source_signals + the Signals body footer; coupling it to
-// a single source article would be incorrect.
-func TestStageBSynthLeavesSourceArticleEmpty(t *testing.T) {
-	fm := SkillFrontmatter{
-		Name:        "synth-skill",
-		Description: "A synthesized skill.",
-	}
-	cand := SkillCandidate{
-		Source:        SourceNotebookCluster,
-		SuggestedName: "synth-skill",
-		SignalCount:   2,
-		Excerpts: []SkillCandidateExcerpt{
-			{Path: "team/agents/eng/notebook/x.md", Snippet: "x", Author: "eng"},
-		},
-	}
-	spec := stageBCandToSpec(fm, "## Body\n", cand)
-	if spec.SourceArticle != "" {
-		t.Fatalf("Stage B spec.SourceArticle should be empty, got %q", spec.SourceArticle)
 	}
 }
 

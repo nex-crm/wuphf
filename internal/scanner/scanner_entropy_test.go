@@ -103,6 +103,52 @@ func TestDetectEntropyHitsAllowsLeadingSlashCredentials(t *testing.T) {
 	}
 }
 
+func TestDetectEntropyHitsIgnoresWUPHFRichArtifactReferences(t *testing.T) {
+	body := strings.Join([]string{
+		"visual-artifact:ra_8e8ac69a85291409",
+		"Open wiki/visual-artifacts/ra_8e8ac69a85291409.html",
+		"Related notebook/visual-artifacts/ra_0123456789abcdef.html",
+		"Bare public id ra_fedcba9876543210 is safe to show in chat.",
+	}, "\n")
+	if hits := detectEntropyHits(body); len(hits) != 0 {
+		t.Fatalf("expected no entropy hits for public rich artifact IDs, got %+v", hits)
+	}
+
+	res := redactSecretsDetailed(body)
+	if res.Matches() != 0 {
+		t.Fatalf("expected no redaction for rich artifact references, got %+v", res)
+	}
+	if strings.Contains(res.Content, "[REDACTED]") {
+		t.Fatalf("artifact reference was redacted: %q", res.Content)
+	}
+}
+
+func TestDetectEntropyHitsDoesNotExemptRichArtifactReferencesWithQuerySecrets(t *testing.T) {
+	r := rand.New(rand.NewSource(99))
+	buf := make([]byte, 72)
+	for i := range buf {
+		buf[i] = byte(r.Intn(256))
+	}
+	tok := base64.RawStdEncoding.EncodeToString(buf)
+	body := "Open wiki/visual-artifacts/ra_8e8ac69a85291409.html?token=" + tok
+
+	hits := detectEntropyHits(body)
+	if len(hits) == 0 {
+		t.Fatalf("expected entropy hit for rich artifact URL query tail")
+	}
+	if !strings.Contains(hits[0].Token, tok) {
+		t.Fatalf("expected hit token to contain query secret %q, got %q", tok, hits[0].Token)
+	}
+
+	res := redactSecretsDetailed(body)
+	if res.EntropyHits == 0 {
+		t.Fatalf("expected entropy redaction for query secret, got %+v", res)
+	}
+	if strings.Contains(res.Content, tok) {
+		t.Fatalf("query secret was not redacted: %q", res.Content)
+	}
+}
+
 func TestRedactSecretsEntropyTopsUpBeyondPatterns(t *testing.T) {
 	// A random-looking assignment that doesn't match any known pattern.
 	// Use a high-entropy token: base64 of 40 random bytes.

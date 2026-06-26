@@ -32,6 +32,70 @@ func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 	})
 }
 
+func TestIsAnalyticsEnabledDefaultsOnWhenUnset(t *testing.T) {
+	var c Config
+	if !c.IsAnalyticsTelemetryEnabled() {
+		t.Error("telemetry should default ON when unset")
+	}
+	if !c.IsAnalyticsSessionRecordingEnabled() {
+		t.Error("session recording should default ON when unset")
+	}
+}
+
+func TestIsAnalyticsRespectsExplicitOptOut(t *testing.T) {
+	no, yes := false, true
+	c := Config{AnalyticsTelemetryEnabled: &no, AnalyticsSessionRecordingEnabled: &yes}
+	if c.IsAnalyticsTelemetryEnabled() {
+		t.Error("telemetry explicit false should be honored")
+	}
+	if !c.IsAnalyticsSessionRecordingEnabled() {
+		t.Error("session recording explicit true should be honored")
+	}
+}
+
+func TestAnalyticsConsentRoundtrips(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		no := false
+		if err := Save(Config{AnalyticsTelemetryEnabled: &no}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		got, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.AnalyticsTelemetryEnabled == nil || *got.AnalyticsTelemetryEnabled {
+			t.Fatalf("telemetry opt-out did not round-trip: %+v", got.AnalyticsTelemetryEnabled)
+		}
+		// Recording was never set → nil → resolves ON.
+		if got.AnalyticsSessionRecordingEnabled != nil {
+			t.Errorf("expected recording unset, got %+v", got.AnalyticsSessionRecordingEnabled)
+		}
+		if !got.IsAnalyticsSessionRecordingEnabled() {
+			t.Error("unset recording should resolve ON")
+		}
+	})
+}
+
+func TestResolvePostHogKeyAndHostFromEnv(t *testing.T) {
+	t.Setenv("WUPHF_POSTHOG_KEY", "phc_test")
+	t.Setenv("POSTHOG_KEY", "ignored")
+	t.Setenv("WUPHF_POSTHOG_HOST", "https://eu.i.posthog.com")
+	if got := ResolvePostHogKey(); got != "phc_test" {
+		t.Errorf("key: WUPHF_POSTHOG_KEY should win, got %q", got)
+	}
+	if got := ResolvePostHogHost(); got != "https://eu.i.posthog.com" {
+		t.Errorf("host: got %q", got)
+	}
+}
+
+func TestResolvePostHogKeyFallsBackToBareEnv(t *testing.T) {
+	t.Setenv("WUPHF_POSTHOG_KEY", "")
+	t.Setenv("POSTHOG_KEY", "phc_bare")
+	if got := ResolvePostHogKey(); got != "phc_bare" {
+		t.Errorf("key fallback: got %q, want phc_bare", got)
+	}
+}
+
 func TestRoundtrip(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		in := Config{
@@ -236,6 +300,113 @@ func TestResolveComposioAPIKeyFallsBackToConfig(t *testing.T) {
 		if got := ResolveComposioAPIKey(); got != "cmp-key" {
 			t.Fatalf("expected composio key from config, got %q", got)
 		}
+	})
+}
+
+func TestIsComposioConfigured(t *testing.T) {
+	t.Run("project ak_ key", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioAPIKey: "ak_proj"})
+			if !IsComposioConfigured() {
+				t.Fatal("expected configured with a project key")
+			}
+		})
+	})
+	t.Run("user key + org", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioUserAPIKey: "uak_x", ComposioOrgID: "ok_1"})
+			if !IsComposioConfigured() {
+				t.Fatal("expected configured with the user-key pair")
+			}
+			if got := ResolveComposioUserAPIKey(); got != "uak_x" {
+				t.Fatalf("user key = %q", got)
+			}
+			if got := ResolveComposioOrgID(); got != "ok_1" {
+				t.Fatalf("org id = %q", got)
+			}
+		})
+	})
+	t.Run("user key without org is not enough", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{ComposioUserAPIKey: "uak_x"})
+			if IsComposioConfigured() {
+				t.Fatal("user key without org must not count as configured")
+			}
+		})
+	})
+	t.Run("nothing", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			_ = Save(Config{})
+			if IsComposioConfigured() {
+				t.Fatal("empty config must not be configured")
+			}
+		})
+	})
+}
+
+func TestResolveComposioUserID(t *testing.T) {
+	// Clear both env overrides so an env-contaminated runner can't leak into
+	// the config/default-fallback subtests.
+	clearEnv := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("WUPHF_COMPOSIO_USER_ID", "")
+		t.Setenv("COMPOSIO_USER_ID", "")
+	}
+	t.Run("prefers email", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{Email: "owner@example.com", WorkspaceSlug: "acme"})
+			if got := ResolveComposioUserID(); got != "owner@example.com" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("falls back to workspace slug", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{WorkspaceSlug: "acme"})
+			if got := ResolveComposioUserID(); got != "acme" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("falls back to workspace id", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{WorkspaceID: "ws_123"})
+			if got := ResolveComposioUserID(); got != "ws_123" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("never empty so a signed-in office can browse", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			_ = Save(Config{})
+			if got := ResolveComposioUserID(); got != "default" {
+				t.Fatalf("expected the default identity, got %q", got)
+			}
+		})
+	})
+	t.Run("WUPHF env override wins", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			t.Setenv("WUPHF_COMPOSIO_USER_ID", "u_env")
+			_ = Save(Config{Email: "owner@example.com"})
+			if got := ResolveComposioUserID(); got != "u_env" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	})
+	t.Run("COMPOSIO_USER_ID env override wins over config", func(t *testing.T) {
+		withTempConfig(t, func(_ string) {
+			clearEnv(t)
+			t.Setenv("COMPOSIO_USER_ID", "u_compat")
+			_ = Save(Config{Email: "owner@example.com"})
+			if got := ResolveComposioUserID(); got != "u_compat" {
+				t.Fatalf("got %q", got)
+			}
+		})
 	})
 }
 

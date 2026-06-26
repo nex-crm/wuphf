@@ -97,6 +97,9 @@ func humanRouteAllowed(r *http.Request) bool {
 		case path == "/messages",
 			path == "/channels" && !strings.EqualFold(r.URL.Query().Get("type"), "dm"),
 			path == "/office-members",
+			// Read-only derived counts for the shell badges; same data the
+			// other allowlisted list GETs already expose.
+			path == "/office/stats",
 			path == "/channel-members",
 			path == "/members",
 			path == "/tasks",
@@ -124,6 +127,9 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/wiki/audit",
 			path == "/wiki/visual",
 			path == "/wiki/sections",
+			path == "/wiki/categories",
+			path == "/wiki/diff",
+			path == "/agent-files/read",
 			path == "/notebook/visual-artifacts",
 			path == "/review/list",
 			path == "/entity/facts",
@@ -138,6 +144,15 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/skills/compile/stats":
 			return true
 		case strings.HasPrefix(path, "/review/"):
+			return true
+		case strings.HasPrefix(path, "/wiki/history/"):
+			// Slice 5: per-article version history is a human-readable view on
+			// the same footing as /wiki/audit and /wiki/article. The article
+			// path is the suffix; the handler validates it under team/.
+			return true
+		case strings.HasPrefix(path, "/wiki/categories/"):
+			// Category detail (GET /wiki/categories/{slug}); the category slug
+			// is the suffix. Same read-only footing as /wiki/categories.
 			return true
 		case isTaskDetailPath(path):
 			// Lane E: human sessions hit /tasks/{id} for the Decision
@@ -165,12 +180,50 @@ func humanRouteAllowed(r *http.Request) bool {
 			"/requests/answer",
 			"/interview/answer",
 			"/wiki/write-human",
+			// Structural wiki authoring routes (wiki file tree). The web UI's
+			// page create / move / rename run as a HUMAN session exactly like
+			// /wiki/write-human, so they must be allowed here or the tree's
+			// authoring actions 403. The destructive-confirm guard for these
+			// lives in the UI; routing-level access is granted on parity with
+			// write-human because they are human-authored wiki writes.
+			"/wiki/page/create",
+			"/wiki/page/move",
+			"/wiki/page/rename",
+			// POST /wiki/upload (wiki file tree asset upload) is a human wiki
+			// authoring write on the same footing as the page-ops routes above:
+			// the destination is confined to team/ and the executable-extension
+			// blocklist runs in the handler. Allowed here so the upload action
+			// does not 403 in a human session.
+			"/wiki/upload",
+			// POST /wiki/restore (Slice 5: append-only restore to a prior
+			// version) is a human wiki authoring write on the same footing as
+			// the page-ops routes above: it records a NEW commit authored by the
+			// requesting human and never rewrites history. The committing
+			// identity is resolved server-side. Allowed here so the restore
+			// action does not 403 in a human session.
+			"/wiki/restore",
+			// POST /agent-files/write — a human edit to an agent's instruction
+			// file. On the same footing as /wiki/write-human: HTTP-only, never
+			// exposed via MCP, identity resolved server-side. Allowed here so the
+			// agent-profile editor does not 403 in a human session.
+			"/agent-files/write",
+			// POST /agent-files/generate — human-triggered LLM authoring of a
+			// prose instruction file (returns a draft for review, never commits).
+			"/agent-files/generate",
 			"/notebook/visual-artifacts":
 			return true
 		}
 		if strings.HasPrefix(path, "/notebook/visual-artifacts/") {
 			return true
 		}
+	}
+
+	// DELETE /wiki/page (wiki file tree page delete) is a human wiki authoring
+	// action consistent with write-human; the destructive-confirm guard lives in
+	// the UI. Allowed at the routing layer on the same rationale as the POST
+	// structural routes above.
+	if method == http.MethodDelete && path == "/wiki/page" {
+		return true
 	}
 
 	return false

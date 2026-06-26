@@ -718,7 +718,7 @@ func (b *Broker) createIntakeTask(intent string) string {
 	now := time.Now().UTC().Format(time.RFC3339)
 	title := intakeTaskTitle(intent)
 	task := teamTask{
-		ID:            fmt.Sprintf("task-%d", b.counter),
+		ID:            b.allocateIssueIDLocked(),
 		Channel:       "general",
 		Title:         title,
 		Details:       intent,
@@ -806,6 +806,25 @@ func (b *Broker) persistIntakeSpecAndAdvance(taskID string, spec Spec) error {
 		// does not show a "ready" task without a recorded spec.
 		delete(b.intakeSpecs, taskID)
 		return fmt.Errorf("intake: transition intake -> ready: %w", err)
+	}
+
+	// R4: intake-created tasks arrive pre-defined. The validated Spec maps
+	// cleanly onto the structured Definition (problem → goal,
+	// acceptanceCriteria → success_criteria), so the execution packet for
+	// this task carries the contract without a separate define call. Set
+	// AFTER the lifecycle transition succeeds so a failed transition cannot
+	// leave a Definition derived from a rolled-back spec (review finding).
+	if t := b.taskByIDLocked(taskID); t != nil {
+		def := &TaskDefinition{
+			Goal:      spec.Problem,
+			DefinedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		for _, ac := range spec.AcceptanceCriteria {
+			if s := strings.TrimSpace(ac.Statement); s != "" {
+				def.SuccessCriteria = append(def.SuccessCriteria, s)
+			}
+		}
+		t.Definition = def
 	}
 	if err := b.saveLocked(); err != nil {
 		// Best-effort rollback of the in-memory map; the task itself has

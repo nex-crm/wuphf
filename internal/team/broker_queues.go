@@ -1,6 +1,9 @@
 package team
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Queue snapshots and the per-queue read-only accessors. These are the
 // office's cross-entity workflow surfaces — Actions / Signals /
@@ -24,11 +27,30 @@ func (b *Broker) Actions() []officeActionLog {
 }
 
 func sanitizeOfficeActionLog(action officeActionLog) officeActionLog {
-	action.Summary = redactSecretsInText(action.Summary)
 	if len(action.SignalIDs) > 0 {
 		action.SignalIDs = append([]string(nil), action.SignalIDs...)
 	}
+	action.Metadata = sanitizeActionMetadata(action.Metadata)
 	return action
+}
+
+func sanitizeActionMetadata(metadata map[string]string) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (b *Broker) Signals() []officeSignalRecord {

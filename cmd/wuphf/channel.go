@@ -154,15 +154,14 @@ type channelMemberDraftDoneMsg struct {
 }
 
 type channelMemberDraft struct {
-	Mode           string
-	OriginalSlug   string
-	Step           int
-	Slug           string
-	Name           string
-	Role           string
-	Expertise      string
-	Personality    string
-	PermissionMode string
+	Mode         string
+	OriginalSlug string
+	Step         int
+	Slug         string
+	Name         string
+	Role         string
+	Expertise    string
+	Personality  string
 }
 
 var brokerTokenPath = brokeraddr.DefaultTokenFile

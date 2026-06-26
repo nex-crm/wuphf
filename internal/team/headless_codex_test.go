@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -202,11 +203,21 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !strings.Contains(joinedArgs, `mcp_servers.nex.env_vars=["WUPHF_API_KEY", "NEX_API_KEY"]`) {
 		t.Fatalf("expected nex env var forwarding, got %#v", record.Args)
 	}
-	if got := argValue(record.Args, "-C"); !samePath(got, l.cwd) {
-		t.Fatalf("expected codex workspace root %q, got %q", l.cwd, got)
+	// V3-N5 isolation contract: a turn without a task worktree runs in the
+	// agent's scratch dir under the runtime home — NEVER the broker
+	// process launch cwd (l.cwd).
+	wantScratch := filepath.Join(tmpHome, ".wuphf", "agent-scratch", "ceo")
+	if got := argValue(record.Args, "-C"); !samePath(got, wantScratch) {
+		t.Fatalf("expected codex workspace root %q (agent scratch), got %q", wantScratch, got)
 	}
-	if !samePath(record.Dir, l.cwd) {
-		t.Fatalf("expected command dir %q, got %q", l.cwd, record.Dir)
+	if !samePath(record.Dir, wantScratch) {
+		t.Fatalf("expected command dir %q (agent scratch), got %q", wantScratch, record.Dir)
+	}
+	if samePath(record.Dir, l.cwd) {
+		t.Fatalf("command dir must never be the broker launch cwd %q", l.cwd)
+	}
+	if containsEnvPrefix(record.Env, "WUPHF_WORKTREE_PATH=") {
+		t.Fatalf("scratch-dir turn must not advertise WUPHF_WORKTREE_PATH, got %#v", record.Env)
 	}
 	if !containsEnv(record.Env, "WUPHF_AGENT_SLUG=ceo") {
 		t.Fatalf("expected agent env, got %#v", record.Env)
@@ -221,11 +232,11 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !containsEnv(record.Env, "WUPHF_HEADLESS_PROVIDER=codex") {
 		t.Fatalf("expected headless provider env, got %#v", record.Env)
 	}
-	if got := envValue(record.Env, "GOCACHE"); !samePath(got, filepath.Join(l.cwd, ".wuphf", "cache", "go-build", "ceo")) {
-		t.Fatalf("expected repo-local GOCACHE, got %#v", record.Env)
+	if got := envValue(record.Env, "GOCACHE"); !samePath(got, filepath.Join(wantScratch, ".wuphf", "cache", "go-build", "ceo")) {
+		t.Fatalf("expected scratch-local GOCACHE, got %#v", record.Env)
 	}
-	if got := envValue(record.Env, "GOTMPDIR"); !samePath(got, filepath.Join(l.cwd, ".wuphf", "cache", "go-tmp", "ceo")) {
-		t.Fatalf("expected repo-local GOTMPDIR, got %#v", record.Env)
+	if got := envValue(record.Env, "GOTMPDIR"); !samePath(got, filepath.Join(wantScratch, ".wuphf", "cache", "go-tmp", "ceo")) {
+		t.Fatalf("expected scratch-local GOTMPDIR, got %#v", record.Env)
 	}
 	if !containsEnvPrefix(record.Env, "WUPHF_BROKER_TOKEN=") {
 		t.Fatalf("expected broker token env, got %#v", record.Env)
@@ -256,6 +267,66 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	}
 	if got := l.broker.usage.Agents["ceo"].OutputTokens; got != 6 {
 		t.Fatalf("expected recorded output tokens 6, got %d", got)
+	}
+}
+
+// TestRunHeadlessCodexTurnMetricsNoDataRace pins the metricsMu fix: the
+// heartbeat tick goroutine reads the metrics struct (via
+// updateHeadlessProgress) while the stream callback writes
+// FirstEventMs/FirstTextMs/FirstToolMs and the post-Wait path writes TotalMs.
+// Run under `go test -race`, an unguarded shared metrics struct trips the
+// race detector. The helper streams slowly and the heartbeat interval is
+// shrunk so the heartbeat goroutine is guaranteed to read concurrently with
+// the callback writes.
+func TestRunHeadlessCodexTurnMetricsNoDataRace(t *testing.T) {
+	oldInterval := codexHeartbeatIntervalForTest
+	codexHeartbeatIntervalForTest = 5 * time.Millisecond
+	defer func() { codexHeartbeatIntervalForTest = oldInterval }()
+
+	oldLookPath := headlessCodexLookPath
+	oldExecutablePath := headlessCodexExecutablePath
+	oldCommandContext := headlessCodexCommandContext
+	headlessCodexLookPath = func(file string) (string, error) {
+		switch file {
+		case "codex":
+			return "/usr/bin/codex", nil
+		case "nex-mcp":
+			return "/usr/bin/nex-mcp", nil
+		default:
+			return "", exec.ErrNotFound
+		}
+	}
+	headlessCodexExecutablePath = func() (string, error) { return "/tmp/wuphf", nil }
+	headlessCodexCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmdArgs := []string{"-test.run=TestHeadlessCodexHelperProcess", "--"}
+		cmdArgs = append(cmdArgs, args...)
+		return exec.CommandContext(ctx, os.Args[0], cmdArgs...)
+	}
+	defer func() {
+		headlessCodexLookPath = oldLookPath
+		headlessCodexExecutablePath = oldExecutablePath
+		headlessCodexCommandContext = oldCommandContext
+	}()
+
+	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
+	t.Setenv("HEADLESS_CODEX_RECORD_FILE", filepath.Join(t.TempDir(), "record.jsonl"))
+	// Slow the helper so a turn spans several heartbeat intervals — forces the
+	// heartbeat goroutine to read metrics while the callback is still writing.
+	t.Setenv("HEADLESS_CODEX_HELPER_DELAY_MS", "15")
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-secret-key")
+
+	l := &Launcher{
+		pack:     agent.GetPack("founding-team"),
+		cwd:      t.TempDir(),
+		broker:   newTestBroker(t),
+		headless: headlessWorkerPool{ctx: t.Context()},
+	}
+
+	if err := l.runHeadlessCodexTurn(t.Context(), "ceo", "You have new work in #launch."); err != nil {
+		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 }
 
@@ -781,6 +852,35 @@ func TestHeadlessCodexHelperProcess(t *testing.T) {
 	if !containsArg(codexArgs, "--json") {
 		t.Fatalf("missing --json arg: %#v", codexArgs)
 	}
+	// Optional slow mode: when HEADLESS_CODEX_HELPER_DELAY_MS is set, emit a
+	// stream of events with a delay between each so a parent test that shrinks
+	// codexHeartbeatIntervalForTest can drive the heartbeat goroutine
+	// concurrently with the stream callback. Off by default, so the existing
+	// fast-path tests above keep their exact two-line output and assertions.
+	if delayRaw := strings.TrimSpace(os.Getenv("HEADLESS_CODEX_HELPER_DELAY_MS")); delayRaw != "" {
+		delayMs, _ := strconv.Atoi(delayRaw)
+		delay := time.Duration(delayMs) * time.Millisecond
+		lines := []string{
+			"{\"type\":\"item.started\",\"item\":{\"id\":\"r1\",\"type\":\"reasoning\"}}\n",
+			"{\"type\":\"item.completed\",\"item\":{\"id\":\"t1\",\"type\":\"function_call\",\"name\":\"team_broadcast\",\"arguments\":\"{}\"}}\n",
+			"{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex office reply\"}}\n",
+			"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":123,\"cached_input_tokens\":45,\"output_tokens\":6}}\n",
+		}
+		// Pace emissions with a ticker (not time.Sleep — the repo's
+		// no-sleep-in-tests guard bans that) so the parent's heartbeat
+		// goroutine overlaps the stream callback and -race can observe any
+		// unguarded metrics access. This runs in the helper subprocess, so
+		// the cadence models a real CLI streaming over time, not test-state
+		// synchronization.
+		ticker := time.NewTicker(delay)
+		defer ticker.Stop()
+		for _, line := range lines {
+			_, _ = os.Stdout.WriteString(line)
+			_ = os.Stdout.Sync()
+			<-ticker.C
+		}
+		os.Exit(0)
+	}
 	_, _ = os.Stdout.WriteString("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex office reply\"}}\n")
 	_, _ = os.Stdout.WriteString("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":123,\"cached_input_tokens\":45,\"output_tokens\":6}}\n")
 	os.Exit(0)
@@ -875,9 +975,9 @@ func newHeadlessLauncherForTest(t *testing.T) *Launcher {
 	l := &Launcher{
 		headless: headlessWorkerPool{
 			ctx:     t.Context(),
-			workers: make(map[string]bool),
-			active:  make(map[string]*headlessCodexActiveTurn),
-			queues:  make(map[string][]headlessCodexTurn),
+			workers: make(map[headlessLane]bool),
+			active:  make(map[headlessLane]*headlessCodexActiveTurn),
+			queues:  make(map[headlessLane][]headlessCodexTurn),
 		},
 		pack: &agent.PackDefinition{LeadSlug: "ceo"}, // deterministic lead; avoids reading global broker state
 	}
@@ -909,7 +1009,7 @@ func TestFinishHeadlessTurnWakesLeadWhenAllSpecialistsDone(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 
 	// Simulate "fe" finishing with no other specialists active.
-	l.finishHeadlessTurn("fe")
+	l.finishHeadlessTurn(headlessLane{slug: "fe"})
 
 	got := waitForString(t, woken)
 	if got != "fe" {
@@ -925,9 +1025,9 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenOtherSpecialistsActive(t *testing.
 
 	l := newHeadlessLauncherForTest(t)
 	// "be" is still active while "fe" finishes.
-	l.headless.active["be"] = &headlessCodexActiveTurn{}
+	l.headless.active[headlessLane{slug: "be"}] = &headlessCodexActiveTurn{}
 
-	l.finishHeadlessTurn("fe")
+	l.finishHeadlessTurn(headlessLane{slug: "fe"})
 
 	select {
 	case got := <-woken:
@@ -945,7 +1045,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadFinishes(t *testing.T) {
 
 	l := newHeadlessLauncherForTest(t)
 	// CEO finishes — should not self-wake.
-	l.finishHeadlessTurn("ceo")
+	l.finishHeadlessTurn(headlessLane{slug: "ceo"})
 
 	select {
 	case got := <-woken:
@@ -963,9 +1063,9 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 
 	l := newHeadlessLauncherForTest(t)
 	// CEO already has a pending turn.
-	l.headless.queues["ceo"] = []headlessCodexTurn{{Prompt: "pending work"}}
+	l.headless.queues[headlessLane{slug: "ceo"}] = []headlessCodexTurn{{Prompt: "pending work"}}
 
-	l.finishHeadlessTurn("fe")
+	l.finishHeadlessTurn(headlessLane{slug: "fe"})
 
 	select {
 	case got := <-woken:
@@ -978,7 +1078,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateLeadTaskWhileActive(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headless.active["ceo"] = &headlessCodexActiveTurn{
+	l.headless.active[headlessLane{slug: "ceo"}] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #task-3",
 			TaskID: "task-3",
@@ -992,7 +1092,7 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateLeadTaskWhileActive(t *test
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headless.queues["ceo"]); got != 0 {
+	if got := len(l.headless.queues[headlessLane{slug: "ceo"}]); got != 0 {
 		t.Fatalf("expected no queued duplicate lead turn for same task, got %d", got)
 	}
 }
@@ -1025,8 +1125,12 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.broker = b
-	l.headless.workers["ceo"] = true
-	l.headless.active["ceo"] = &headlessCodexActiveTurn{
+	// The lead now runs office tasks on their own per-task lane (CEO
+	// multitasking), so the in-flight turn for this task lives on taskLane,
+	// not the default slug lane.
+	leadLane := taskLane("ceo", task.ID)
+	l.headless.workers[leadLane] = true
+	l.headless.active[leadLane] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #" + task.ID,
 			TaskID: task.ID,
@@ -1043,7 +1147,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headless.queues["ceo"]); got != 1 {
+	if got := len(l.headless.queues[leadLane]); got != 1 {
 		t.Fatalf("expected urgent lead wake to queue behind same task, got %d", got)
 	}
 	if !cancelled {
@@ -1054,7 +1158,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headless.active["eng"] = &headlessCodexActiveTurn{
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #task-11",
 			TaskID: "task-11",
@@ -1068,7 +1172,7 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *tes
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headless.queues["eng"]); got != 0 {
+	if got := len(l.headless.queues[headlessLane{slug: "eng"}]); got != 0 {
 		t.Fatalf("expected no queued duplicate agent turn for same task, got %d", got)
 	}
 }
@@ -1076,8 +1180,8 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *tes
 func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headless.workers["eng"] = true
-	l.headless.queues["eng"] = []headlessCodexTurn{{
+	l.headless.workers[headlessLane{slug: "eng"}] = true
+	l.headless.queues[headlessLane{slug: "eng"}] = []headlessCodexTurn{{
 		Prompt:     "older prompt about #task-11",
 		Channel:    "youtube-factory",
 		TaskID:     "task-11",
@@ -1091,7 +1195,7 @@ func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T
 		EnqueuedAt: time.Now(),
 	})
 
-	queue := l.headless.queues["eng"]
+	queue := l.headless.queues[headlessLane{slug: "eng"}]
 	if got := len(queue); got != 1 {
 		t.Fatalf("expected single queued agent turn for same task, got %d", got)
 	}
@@ -1103,8 +1207,8 @@ func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T
 func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headless.workers["eng"] = true
-	l.headless.active["eng"] = &headlessCodexActiveTurn{
+	l.headless.workers[headlessLane{slug: "eng"}] = true
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt:   "first prompt about #task-11",
 			TaskID:   "task-11",
@@ -1121,7 +1225,7 @@ func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testi
 		EnqueuedAt: time.Now(),
 	})
 
-	queue := l.headless.queues["eng"]
+	queue := l.headless.queues[headlessLane{slug: "eng"}]
 	if got := len(queue); got != 1 {
 		t.Fatalf("expected single queued retry turn for same task, got %d", got)
 	}
@@ -1136,11 +1240,11 @@ func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testi
 func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueCap(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headless.workers["ceo"] = true
+	l.headless.workers[headlessLane{slug: "ceo"}] = true
 	// Lead queue is already at the cap (1 pending) with an agent-originated
 	// turn. Without the human bypass, a follow-up human chat would be dropped
 	// with "queue-drop: lead queue at cap" — the exact symptom reported.
-	l.headless.queues["ceo"] = []headlessCodexTurn{{
+	l.headless.queues[headlessLane{slug: "ceo"}] = []headlessCodexTurn{{
 		Prompt:     "agent-originated catchup",
 		EnqueuedAt: time.Now(),
 	}}
@@ -1151,7 +1255,7 @@ func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueCap(t *testing.T) {
 		EnqueuedAt: time.Now(),
 	})
 
-	queue := l.headless.queues["ceo"]
+	queue := l.headless.queues[headlessLane{slug: "ceo"}]
 	if got := len(queue); got != 1 {
 		t.Fatalf("expected human turn to replace pending lead turn (cap=1), got %d", got)
 	}
@@ -1169,11 +1273,11 @@ func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueHold(t *testing.T) 
 	// A specialist is still active. An agent-originated lead turn would be
 	// deferred via deferredLead; a human chat must skip the hold and queue
 	// immediately so the lead absorbs the message right away.
-	l.headless.active["eng"] = &headlessCodexActiveTurn{
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{
 		Turn:      headlessCodexTurn{Prompt: "specialist still working"},
 		StartedAt: time.Now(),
 	}
-	l.headless.workers["ceo"] = true
+	l.headless.workers[headlessLane{slug: "ceo"}] = true
 
 	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
 		Prompt:     "are you still on this?",
@@ -1184,7 +1288,7 @@ func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueHold(t *testing.T) 
 	if l.headless.deferredLead != nil {
 		t.Error("human turn must not be parked on deferredLead")
 	}
-	queue := l.headless.queues["ceo"]
+	queue := l.headless.queues[headlessLane{slug: "ceo"}]
 	if got := len(queue); got != 1 {
 		t.Fatalf("expected human turn to enqueue past the lead hold, got %d", got)
 	}
@@ -1196,13 +1300,13 @@ func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueHold(t *testing.T) 
 func TestEnqueueHeadlessCodexTurnRecordHumanPreemptsActiveTurn(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headless.workers["eng"] = true
+	l.headless.workers[headlessLane{slug: "eng"}] = true
 
 	cancelled := false
 	// An active turn that is well below the staleness/min-age floors —
 	// without the human bypass, it would never be cancelled by a follow-up
 	// enqueue.
-	l.headless.active["eng"] = &headlessCodexActiveTurn{
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{
 		Turn:      headlessCodexTurn{Prompt: "agent-originated work in progress"},
 		StartedAt: time.Now(),
 		Cancel:    func() { cancelled = true },
@@ -1217,7 +1321,7 @@ func TestEnqueueHeadlessCodexTurnRecordHumanPreemptsActiveTurn(t *testing.T) {
 	if !cancelled {
 		t.Fatal("expected human-priority turn to preempt the active turn regardless of staleness")
 	}
-	queue := l.headless.queues["eng"]
+	queue := l.headless.queues[headlessLane{slug: "eng"}]
 	if got := len(queue); got != 1 || queue[0].Prompt != "stop, what about the X bug?" {
 		t.Fatalf("expected human turn to be queued for the worker to pick up, got %#v", queue)
 	}
@@ -1253,13 +1357,16 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 	}
 
 	b.mu.Lock()
+	taskChannel := normalizeChannelSlug(task.Channel)
 	for i := range b.tasks {
 		if b.tasks[i].ID != task.ID {
 			continue
 		}
 		b.tasks[i].status = "done"
 		b.tasks[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		b.appendActionLocked("task_updated", "office", "general", "gtm", truncateSummary(b.tasks[i].Title+" ["+b.tasks[i].status+"]", 140), task.ID)
+		// Use the task's actual channel (may be a per-task channel) for the
+		// action log so the notification content reflects the real location.
+		b.appendActionLocked("task_updated", "office", taskChannel, "gtm", truncateSummary(b.tasks[i].Title+" ["+b.tasks[i].status+"]", 140), task.ID)
 		break
 	}
 	b.mu.Unlock()
@@ -1272,7 +1379,10 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 	l.wakeLeadAfterSpecialist("gtm")
 
 	got := waitForString(t, notifications)
-	if !strings.Contains(got, "[Task updated #"+task.ID+" on #general]") {
+	// "Lock the faceless YouTube niche" is a business objective and gets a
+	// per-task channel; the notification uses the task's real channel slug.
+	expectedNotifHeader := "[Task updated #" + task.ID + " on #" + taskChannel + "]"
+	if !strings.Contains(got, expectedNotifHeader) {
 		t.Fatalf("expected CEO notification for completed task handoff, got %q", got)
 	}
 	if !strings.Contains(got, "status done") {
@@ -1398,7 +1508,6 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headless.workers["eng"] = true
 
 	turn := headlessCodexTurn{
 		Prompt:   "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
@@ -1406,12 +1515,17 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 		TaskID:   task.ID,
 		Attempts: 0,
 	}
+	// The worktree task routes to its own lane; pre-mark that lane busy so the
+	// retry enqueue doesn't spawn a real draining worker (keeps the inspection
+	// below race-free and lane-correct).
+	lane := l.laneForTurn("eng", turn)
+	l.headless.workers[lane] = true
 	l.recoverTimedOutHeadlessTurn("eng", turn, time.Now().UTC().Add(-2*time.Second), headlessCodexLocalWorktreeTurnTimeout)
 
-	if len(l.headless.queues["eng"]) != 1 {
-		t.Fatalf("expected one queued retry, got %+v", l.headless.queues["eng"])
+	if len(l.headless.queues[lane]) != 1 {
+		t.Fatalf("expected one queued retry, got %+v", l.headless.queues[lane])
 	}
-	retry := l.headless.queues["eng"][0]
+	retry := l.headless.queues[lane][0]
 	if retry.Attempts != 1 {
 		t.Fatalf("expected retry attempt 1, got %+v", retry)
 	}
@@ -1452,7 +1566,6 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headless.workers["eng"] = true
 
 	turn := headlessCodexTurn{
 		Prompt:   "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
@@ -1460,12 +1573,14 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 		TaskID:   task.ID,
 		Attempts: 0,
 	}
+	lane := l.laneForTurn("eng", turn)
+	l.headless.workers[lane] = true
 	l.recoverFailedHeadlessTurn("eng", turn, time.Now().UTC().Add(-2*time.Second), "Selected model is at capacity. Please try a different model.")
 
-	if len(l.headless.queues["eng"]) != 1 {
-		t.Fatalf("expected one queued retry, got %+v", l.headless.queues["eng"])
+	if len(l.headless.queues[lane]) != 1 {
+		t.Fatalf("expected one queued retry, got %+v", l.headless.queues[lane])
 	}
-	retry := l.headless.queues["eng"][0]
+	retry := l.headless.queues[lane][0]
 	if retry.Attempts != 1 {
 		t.Fatalf("expected retry attempt 1, got %+v", retry)
 	}
@@ -1518,17 +1633,19 @@ func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStill
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headless.workers["eng"] = true
 
-	l.recoverTimedOutHeadlessTurn("eng", headlessCodexTurn{
+	turn := headlessCodexTurn{
 		Prompt:   "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
 		Channel:  "general",
 		TaskID:   task.ID,
 		Attempts: 0,
-	}, startedAt, headlessCodexLocalWorktreeTurnTimeout)
+	}
+	lane := l.laneForTurn("eng", turn)
+	l.headless.workers[lane] = true
+	l.recoverTimedOutHeadlessTurn("eng", turn, startedAt, headlessCodexLocalWorktreeTurnTimeout)
 
-	if len(l.headless.queues["eng"]) != 1 {
-		t.Fatalf("expected one queued retry, got %+v", l.headless.queues["eng"])
+	if len(l.headless.queues[lane]) != 1 {
+		t.Fatalf("expected one queued retry, got %+v", l.headless.queues[lane])
 	}
 
 	var updated teamTask
@@ -1582,8 +1699,8 @@ func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T
 		Attempts: 0,
 	}, time.Now().UTC().Add(-2*time.Second), headlessCodexLocalWorktreeTurnTimeout)
 
-	if len(l.headless.queues["eng"]) != 0 {
-		t.Fatalf("expected no retry queue for review-ready task, got %+v", l.headless.queues["eng"])
+	if len(l.headless.queues[headlessLane{slug: "eng"}]) != 0 {
+		t.Fatalf("expected no retry queue for review-ready task, got %+v", l.headless.queues[headlessLane{slug: "eng"}])
 	}
 
 	var updated teamTask
@@ -1642,13 +1759,13 @@ func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *te
 	}
 	var healTask teamTask
 	for _, candidate := range b.AllTasks() {
-		if candidate.Title == "Self-heal @eng on "+task.ID {
+		if candidate.ParentIssueID == task.ID && isSelfHealingTask(&candidate) {
 			healTask = candidate
 			break
 		}
 	}
 	if healTask.ID == "" {
-		t.Fatalf("expected self-healing task after timeout recovery, got %+v", b.AllTasks())
+		t.Fatalf("expected self-healing sub-issue after timeout recovery, got %+v", b.AllTasks())
 	}
 }
 
@@ -1696,13 +1813,13 @@ func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *test
 	}
 	var healTask teamTask
 	for _, candidate := range b.AllTasks() {
-		if candidate.Title == "Self-heal @eng on "+task.ID {
+		if candidate.ParentIssueID == task.ID && isSelfHealingTask(&candidate) {
 			healTask = candidate
 			break
 		}
 	}
 	if healTask.ID == "" {
-		t.Fatalf("expected self-healing task after error recovery, got %+v", b.AllTasks())
+		t.Fatalf("expected self-healing sub-issue after error recovery, got %+v", b.AllTasks())
 	}
 }
 
@@ -1726,18 +1843,22 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
-	l.recoverFailedHeadlessTurn("operator", headlessCodexTurn{
+	turn := headlessCodexTurn{
 		Prompt:   "Send #task-" + strings.TrimPrefix(task.ID, "task-"),
 		Channel:  "general",
 		TaskID:   task.ID,
 		Attempts: 0,
-	}, time.Now().UTC().Add(-2*time.Second), "channel_not_found")
+	}
+	// The retry routes to this task's own lane; pre-mark it busy so the enqueue
+	// doesn't spawn a real draining worker, then inspect that lane.
+	lane := l.laneForTurn("operator", turn)
+	l.headless.workers[lane] = true
+	l.recoverFailedHeadlessTurn("operator", turn, time.Now().UTC().Add(-2*time.Second), "channel_not_found")
 
-	// Snapshot the queue under the launcher's headlessMu — the spawned worker
-	// goroutine drains headlessQueues under that mutex, so an unguarded read
-	// from the test races with the drain (caught by `go test -race`).
+	// Snapshot the queue under the launcher's headlessMu — defensive even though
+	// the pre-marked worker prevents a spawn.
 	l.headless.mu.Lock()
-	queue := append([]headlessCodexTurn(nil), l.headless.queues["operator"]...)
+	queue := append([]headlessCodexTurn(nil), l.headless.queues[lane]...)
 	l.headless.mu.Unlock()
 	if len(queue) != 1 {
 		t.Fatalf("expected one retry queued for external action, got %+v", queue)
@@ -1938,7 +2059,9 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 			break
 		}
 	}
-	if err := b.RecordAction("external_workflow_executed", "notion", "general", "builder", "Created client workspace page in Notion", "workflow-notion-client-page", nil, ""); err != nil {
+	// Record the external action in the task's actual channel (which may be a
+	// per-task channel for business-objective tasks like this one).
+	if err := b.RecordAction("external_workflow_executed", "notion", task.Channel, "builder", "Created client workspace page in Notion", "workflow-notion-client-page", nil, ""); err != nil {
 		t.Fatalf("record action: %v", err)
 	}
 
@@ -1977,7 +2100,9 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence
 			break
 		}
 	}
-	if err := b.RecordAction("external_action_executed", "one", "general", "reviewer", "Verified client workspace page in Notion", "notion-client-page", nil, ""); err != nil {
+	// Record the external action in the task's actual channel (which may be a
+	// per-task channel for business-objective tasks like this one).
+	if err := b.RecordAction("external_action_executed", "one", task.Channel, "reviewer", "Verified client workspace page in Notion", "notion-client-page", nil, ""); err != nil {
 		t.Fatalf("record action: %v", err)
 	}
 
@@ -2023,13 +2148,13 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headless.queues["builder"] = []headlessCodexTurn{{TaskID: task.ID}}
+	l.headless.queues[headlessLane{slug: "builder"}] = []headlessCodexTurn{{TaskID: task.ID}}
 
-	_, _, _, _, ok := l.beginHeadlessCodexTurn("builder")
+	_, _, _, _, ok := l.beginHeadlessCodexTurn(headlessLane{slug: "builder"})
 	if !ok {
 		t.Fatal("expected queued builder turn to begin")
 	}
-	active := l.headless.active["builder"]
+	active := l.headless.active[headlessLane{slug: "builder"}]
 	if active == nil {
 		t.Fatal("expected active builder turn")
 	}
@@ -2077,8 +2202,8 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headless.workers["eng"] = true
-	l.headless.queues["eng"] = []headlessCodexTurn{{
+	l.headless.workers[headlessLane{slug: "eng"}] = true
+	l.headless.queues[headlessLane{slug: "eng"}] = []headlessCodexTurn{{
 		Prompt:     "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
 		Channel:    "general",
 		TaskID:     task.ID,
@@ -2090,7 +2215,7 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 	// are wired correctly; t.Cleanup (registered by newHeadlessLauncherForTest)
 	// drains it via stopHeadlessWorkers, which is the equivalent of the
 	// previous explicit `<-done` wait.
-	l.spawnHeadlessWorker("eng")
+	l.spawnHeadlessWorker(headlessLane{slug: "eng"})
 
 	first := waitForString(t, processed)
 	second := waitForString(t, processed)
@@ -2124,10 +2249,10 @@ func TestHeadlessCodexTurnTimeoutForLocalWorktreeTask(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
-	if got := l.headlessCodexTurnTimeoutForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
+	if got := l.headlessCodexTurnTimeoutForTurn("eng", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
 		t.Fatalf("expected local worktree timeout %s, got %s", headlessCodexLocalWorktreeTurnTimeout, got)
 	}
-	if got := l.headlessCodexStaleCancelAfterForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
+	if got := l.headlessCodexStaleCancelAfterForTurn("eng", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
 		t.Fatalf("expected local worktree stale cancel threshold %s, got %s", headlessCodexLocalWorktreeTurnTimeout, got)
 	}
 }
@@ -2151,11 +2276,61 @@ func TestHeadlessCodexTurnTimeoutForOfficeLaunchTask(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
-	if got := l.headlessCodexTurnTimeoutForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
+	if got := l.headlessCodexTurnTimeoutForTurn("gtm", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
 		t.Fatalf("expected office launch timeout %s, got %s", headlessCodexOfficeLaunchTurnTimeout, got)
 	}
-	if got := l.headlessCodexStaleCancelAfterForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
+	if got := l.headlessCodexStaleCancelAfterForTurn("gtm", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
 		t.Fatalf("expected office launch stale cancel threshold %s, got %s", headlessCodexOfficeLaunchTurnTimeout, got)
+	}
+}
+
+// TestHeadlessCodexTurnTimeoutForOfficeOrchestrationTask is the regression test
+// for the prod incident where CEO/office orchestration turns were force-killed
+// at the 4m default timeout. A non-launch office task (the CEO running an email
+// digest, decomposing a request, spawning a specialist) must get the generous
+// office budget for BOTH the hard timeout and the stale-cancel threshold, not
+// the tight 4m default that left tasks falsely "Blocked on review merge".
+func TestHeadlessCodexTurnTimeoutForOfficeOrchestrationTask(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := newTestBroker(t)
+	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Build a daily digest from my emails",
+		Owner:         "ceo",
+		CreatedBy:     "ceo",
+		TaskType:      "research",
+		ExecutionMode: "office",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
+	}
+
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+
+	if got := l.headlessCodexTurnTimeoutForTurn("ceo", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeTurnTimeout {
+		t.Fatalf("expected office orchestration timeout %s, got %s", headlessCodexOfficeTurnTimeout, got)
+	}
+	if got := l.headlessCodexTurnTimeoutForTurn("ceo", headlessCodexTurn{TaskID: task.ID}); got == headlessCodexTurnTimeout {
+		t.Fatalf("office orchestration turn must not fall back to the tight default %s", headlessCodexTurnTimeout)
+	}
+	// The hard timeout is widened, but the stale-cancel threshold for a
+	// routine office turn must STAY at the short default — an urgent same-task
+	// wake (a specialist handoff) still needs to preempt a stale lead turn and
+	// restart it with fresh context. That preemption re-enqueues the work; it
+	// never blocks the task, so it is not what caused the prod symptoms.
+	if got := l.headlessCodexStaleCancelAfterForTurn("ceo", headlessCodexTurn{TaskID: task.ID}); got != headlessCodexStaleCancelAfter {
+		t.Fatalf("expected routine office stale cancel threshold to stay %s, got %s", headlessCodexStaleCancelAfter, got)
+	}
+
+	// Message-driven turns carry a channel-derived TaskID that does NOT match
+	// the real task ID, so resolution must fall back to the owner's active
+	// task via the slug. Without slug threading this turn would silently drop
+	// to the tight 4m default — the exact prod gap that left office tasks
+	// "Blocked on review merge". TaskID is left empty to force the fallback.
+	if got := l.headlessCodexTurnTimeoutForTurn("ceo", headlessCodexTurn{Channel: task.Channel}); got != headlessCodexOfficeTurnTimeout {
+		t.Fatalf("expected office budget via slug fallback %s, got %s", headlessCodexOfficeTurnTimeout, got)
 	}
 }
 
@@ -2167,14 +2342,14 @@ func TestEnqueueHeadlessCodexTurnDefersLeadUntilSpecialistFinishes(t *testing.T)
 	})
 
 	l := newHeadlessLauncherForTest(t)
-	l.headless.active["eng"] = &headlessCodexActiveTurn{}
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{}
 
 	l.enqueueHeadlessCodexTurn("ceo", "task-5 blocked after timeout")
 	if l.headless.deferredLead == nil {
 		t.Fatal("expected lead work to be deferred while specialist is active")
 	}
 
-	l.finishHeadlessTurn("eng")
+	l.finishHeadlessTurn(headlessLane{slug: "eng"})
 
 	if got := waitForString(t, processed); got != "task-5 blocked after timeout" {
 		t.Fatalf("expected deferred lead notification to replay after specialist finished, got %q", got)
@@ -2220,7 +2395,7 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headless.active["eng"] = &headlessCodexActiveTurn{}
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{}
 
 	action := officeActionLog{
 		Kind:      "task_updated",
@@ -2231,7 +2406,18 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 	content := l.taskNotificationContent(action, task)
 	packet := l.buildTaskExecutionPacket("ceo", action, task, content)
 
-	l.enqueueHeadlessCodexTurn("ceo", packet)
+	// Enqueue via the record form so TaskID is set explicitly. The 2-arg
+	// enqueueHeadlessCodexTurn re-derives TaskID from the prompt using
+	// headlessCodexTaskID, which only recognises legacy "#task-" /
+	// "#blank-slate-" prefixes — not the current Linear-style IDs
+	// (e.g. "#OFFICE-3") that buildTaskExecutionPacket now emits. Without
+	// a TaskID the lead-wake heuristic can't look up review_ready and the
+	// bypass never fires.
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
+		Prompt:  packet,
+		Channel: "general",
+		TaskID:  task.ID,
+	})
 
 	if l.headless.deferredLead != nil {
 		t.Fatal("expected review-ready task notification to bypass lead deferral")

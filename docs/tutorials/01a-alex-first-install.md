@@ -27,22 +27,38 @@ npx wuphf
 - The CLI process keeps running (no `Ctrl+C` required to keep the
   office alive).
 
-### 2. First look
+### 2. Pick a runtime
 
-In the browser:
+The browser opens at `http://localhost:7891` with a single screen: three
+runtime cards (Claude Code, Codex, Opencode).
 
 #### Verify
 
-- The shell shows a left sidebar with channels under a default office,
-  a primary **Inbox** entry, and a small **Access & Health** entry.
-- `#general` is selected by default.
-- Four agent rows are visible in the participants column on the right:
-  CEO, ENG, DSG, CMO.
+- The screen shows exactly three runtime cards.
+- Each card shows a detected version or "Not installed".
+- A "I'll add one later" skip affordance is at the bottom.
+
+Pick the detected runtime (or skip if none are installed).
+
+### 3. Office opens — CEO greets
+
+After picking, the office shell appears with a CEO DM open. CEO sends
+the first form-fill card immediately.
+
+#### Verify
+
+- The office shell is visible with a sidebar.
+- The CEO DM is open (`dm:ceo:onboarding`).
+- A card asking for office name (or first question) is visible.
 - No login screen. No "create your team" wizard.
 
-### 3. Drop a goal into `#general`
+Fill in the form fields. After all fields are committed, the broker
+seeds the office and CEO presents the bridge: start an issue or look
+around first.
 
-In the message composer:
+### 4. Drop a goal into `#general`
+
+Navigate to `#general` after the bridge step and type in the composer:
 
 ```
 Ship the onboarding flow by Friday.
@@ -57,7 +73,7 @@ Ship the onboarding flow by Friday.
 
 ## What success looks like
 
-Five minutes after running `npx wuphf`, Alex sees CEO mention `@ENG`
-and `@DSG` by name with a decomposed plan that names a dependency.
-That single moment is the activation — every other step is supporting
-infrastructure.
+Within five minutes of running `npx wuphf`, Alex picks a runtime, fills
+in the office name and blueprint through the CEO DM, and sees CEO mention
+`@ENG` and `@DSG` with a decomposed plan. The pre-pick screen to first
+agent reply is the activation arc.

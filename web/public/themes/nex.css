@@ -102,11 +102,11 @@ html[data-theme="nex"] {
 
   /* ── Typography ── */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-serif: Georgia, "Times New Roman", serif;
-  --font-logo:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    "Geist Sans", "-apple-system", "BlinkMacSystemFont", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", "Georgia", "Times New Roman", serif;
+  --font-logo: "Newsreader", "Georgia", "Times New Roman", serif;
+  --font-mono:
+    "Geist Mono", "SFMono-Regular", "Menlo", "Monaco", "Consolas", monospace;
 
   /* ── Radii ── */
   --radius-sm: 4px;
@@ -163,9 +163,27 @@ html[data-theme^="nex"] ::selection {
 html[data-theme^="nex"] .sidebar {
   background: var(--nex-sidebar);
   border-right: 1px solid rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  /* Layout (display/flex/overflow) lives in layout.css — the .sidebar
+     is a fixed-height flex column with header + .sidebar-scroll + usage
+     as its three rows; only .sidebar-scroll scrolls. */
+  /* Remap muted text tokens to white-on-purple overlays. Gray reads dirty
+     against the brand surface; opacity-driven white stays in-key. */
+  --text: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.86);
+  --text-tertiary: rgba(255, 255, 255, 0.58);
+  --text-disabled: rgba(255, 255, 255, 0.4);
+}
+/* Modal/wizard overlays portal-ish into the sidebar DOM and inherit the
+   white-on-purple text vars — which makes their content invisible on
+   the modal's white card. Reset to the global light-theme palette inside
+   any dialog/overlay anchored under the sidebar. */
+html[data-theme^="nex"] .sidebar [role="dialog"],
+html[data-theme^="nex"] .sidebar .agent-wizard-overlay,
+html[data-theme^="nex"] .sidebar .channel-wizard-overlay {
+  --text: var(--neutral-900);
+  --text-secondary: var(--neutral-500);
+  --text-tertiary: var(--neutral-400);
+  --text-disabled: var(--neutral-300);
 }
 html[data-theme^="nex"] .sidebar .sidebar-logo {
   color: #ffffff;
@@ -196,15 +214,19 @@ html[data-theme^="nex"] .sidebar .sidebar-header {
 html[data-theme^="nex"] .sidebar .sidebar-scroll-wrap.is-agents {
   border-bottom-color: rgba(255, 255, 255, 0.08);
 }
-html[data-theme^="nex"] .sidebar .sidebar-section + .sidebar-section,
-html[data-theme^="nex"] .sidebar .sidebar-agents + .sidebar-section,
-html[data-theme^="nex"] .sidebar .sidebar-channels + .sidebar-section,
-html[data-theme^="nex"] .sidebar .sidebar-apps + .sidebar-section {
+html[data-theme^="nex"] .sidebar .sidebar-section + .sidebar-section {
   border-top-color: rgba(255, 255, 255, 0.08);
 }
 html[data-theme^="nex"] .sidebar .sidebar-agent-task,
 html[data-theme^="nex"] .sidebar .sidebar-agent-activity {
   color: rgba(255, 255, 255, 0.45);
+}
+html[data-theme^="nex"] .sidebar .usage-toggle,
+html[data-theme^="nex"] .sidebar .sidebar-section-title-bar {
+  /* Match the sidebar's themed background so sticky chrome (section
+     title bars and the Usage footer) reads as pinned chrome, not a
+     white card showing through scrolling content. */
+  background: var(--nex-sidebar);
 }
 html[data-theme^="nex"] .sidebar .usage-toggle {
   color: rgba(255, 255, 255, 0.78);
@@ -319,7 +341,7 @@ html[data-theme^="nex"] .sidebar-hint {
   font-size: 11px;
 }
 
-/* ── Section titles ── (padding defined in layout.css) */
+/* ── Section titles ── (layout/sizing owned by layout.css) */
 html[data-theme^="nex"] .sidebar-section-title {
   color: var(--text-tertiary);
   font-family: var(--font-sans);
@@ -328,11 +350,7 @@ html[data-theme^="nex"] .sidebar-section-title {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
   user-select: none;
-  margin-bottom: 2px;
 }
 html[data-theme^="nex"] .sidebar .sidebar-section-title:hover {
   color: #ffffff;
@@ -531,19 +549,8 @@ html[data-theme^="nex"] #theme-switcher {
   font-size: 12px;
 }
 
-/* ── Sidebar collapse chevron ── */
-html[data-theme^="nex"] .sidebar-section-chevron {
-  font-size: 10px;
-  transition: transform 0.15s ease;
-  color: inherit;
-  display: inline-block;
-  width: 12px;
-  text-align: center;
-  flex-shrink: 0;
-}
-html[data-theme^="nex"] .sidebar-section-chevron.collapsed {
-  transform: rotate(0deg);
-}
+/* Sidebar chevron sizing/rotation is owned by layout.css now that the
+   marker is an SVG (data-open=true|false). No theme override needed. */
 
 /* ── Unread channel ── */
 html[data-theme^="nex"] .sidebar-item.unread {
@@ -958,29 +965,12 @@ html[data-theme^="nex"] .agent-panel-skill {
 /* ═══════════════════════════════════════
    BUTTONS
    ═══════════════════════════════════════ */
-html[data-theme^="nex"] .btn {
-  font-family: var(--font-sans);
-}
-html[data-theme^="nex"] .btn-primary {
-  background: var(--accent);
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  box-shadow: none;
-  color: #ffffff;
-}
-html[data-theme^="nex"] .btn-primary:hover {
-  background: var(--accent-warm);
-}
-html[data-theme^="nex"] .btn-ghost {
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  color: var(--text);
-  font-weight: 600;
-}
-html[data-theme^="nex"] .btn-ghost:hover {
-  background: var(--bg-warm);
-  border-color: var(--border-dark);
+/* Theme restyles atoms via tokens — class behavior stays in global.css. */
+html[data-theme^="nex"] {
+  --btn-radius: var(--radius-md);
+  --btn-font-weight: 600;
+  --btn-primary-shadow: none;
+  --input-border: var(--border-dark);
 }
 
 /* ═══════════════════════════════════════
@@ -1030,17 +1020,7 @@ html[data-theme^="nex"] .card {
   background: var(--bg);
   border-color: var(--border);
 }
-html[data-theme^="nex"] .input {
-  border-radius: var(--radius-md);
-  font-family: var(--font-sans);
-  background: var(--bg);
-  border-color: var(--border-dark);
-  color: var(--text);
-}
-html[data-theme^="nex"] .input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(6, 157, 228, 0.25);
-}
+/* Input restyles via tokens — geometry and state behavior stay in global.css. */
 html[data-theme^="nex"] .label {
   font-family: var(--font-sans);
   font-weight: 600;

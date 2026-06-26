@@ -29,17 +29,22 @@ test.describe("wuphf web mention chips", () => {
     test.setTimeout(45_000);
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
-    await waitForShellReady(page);
-
-    // Pull a known slug from the seeded sidebar — same idea as chat.spec.ts.
-    const firstAgent = page.locator("button[data-agent-slug]").first();
+    // Pull a known slug from the Agents tool (agents moved there from the
+    // sidebar) — same idea as chat.spec.ts. No waitForShellReady on /#/agents:
+    // that waits for the channel composer, which this surface lacks.
+    await page.goto("/#/agents");
+    const firstAgent = page
+      .locator(".agents-tool-card[data-agent-slug]")
+      .first();
     await expect(firstAgent).toBeVisible({ timeout: 10_000 });
     const agentSlug = await firstAgent.getAttribute("data-agent-slug");
     expect(
       agentSlug,
-      "sidebar must expose at least one agent slug",
+      "Agents tool must expose at least one agent slug",
     ).toBeTruthy();
+
+    await page.goto("/#/channels/general");
+    await waitForShellReady(page);
 
     const tail = `mention chip test ${Date.now()}`;
     const payload = `@${agentSlug} ${tail}`;
@@ -82,7 +87,7 @@ test.describe("wuphf web mention chips", () => {
     // mention styles) and UX (chip styling on garbage input).
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     const tail = `unknown mention ${Date.now()}`;

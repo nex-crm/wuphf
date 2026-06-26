@@ -82,7 +82,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-thread-title {
-  font-size: 17px;
+  font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0 0 4px;
@@ -90,7 +90,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-thread-subtitle {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   margin: 0;
   line-height: 1.4;
@@ -98,7 +98,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-thread-subtitle .kbd {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   background: var(--bg-row-active);
@@ -182,7 +182,7 @@ html[data-theme="noir-gold"] {
 .inbox-thread-avatar--lg {
   width: 44px;
   height: 44px;
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
 .inbox-thread-main {
@@ -211,7 +211,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-thread-elapsed {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   white-space: nowrap;
   flex-shrink: 0;
@@ -328,7 +328,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-thread-empty {
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: var(--text-base);
   text-align: center;
   padding: 40px 0;
 }
@@ -355,12 +355,12 @@ html[data-theme="noir-gold"] {
 
 .inbox-thread-message-time {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 
 .inbox-thread-message-body {
-  font-size: 14px;
+  font-size: var(--text-md);
   color: var(--text);
   line-height: 1.5;
   white-space: pre-wrap;
@@ -431,7 +431,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-action-card-time {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   margin-left: auto;
 }
@@ -463,7 +463,7 @@ html[data-theme="noir-gold"] {
 .inbox-action-card-pill {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -475,7 +475,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-action-card-question {
-  font-size: 14px;
+  font-size: var(--text-md);
   color: var(--text);
   line-height: 1.5;
   margin: 8px 0 12px;
@@ -500,7 +500,7 @@ html[data-theme="noir-gold"] {
   display: grid;
   grid-template-columns: 100px 1fr;
   gap: 4px 12px;
-  font-size: 13px;
+  font-size: var(--text-base);
   margin: 4px 0 14px;
 }
 
@@ -600,7 +600,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-title {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -619,9 +619,9 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-row {
   display: grid;
-  grid-template-columns: 3px 1fr;
-  gap: 14px;
-  padding: 12px 16px 12px 0;
+  grid-template-columns: 12px 3px 1fr;
+  gap: 6px 14px;
+  padding: 12px 16px 12px 4px;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--border);
@@ -632,6 +632,39 @@ html[data-theme="noir-gold"] {
   width: 100%;
   color: inherit;
   transition: background var(--duration-base);
+}
+
+.inbox-mail-row-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan-500);
+  align-self: center;
+  justify-self: center;
+  visibility: hidden;
+}
+
+.inbox-mail-row-unread-dot[data-visible="true"] {
+  visibility: visible;
+}
+
+.inbox-mail-row[data-unread="true"] .inbox-mail-row-from,
+.inbox-mail-row[data-unread="true"] .inbox-mail-row-subject {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/*
+ * The selected-row subject rule below this block sets font-weight: 500,
+ * which would dim a row that is BOTH selected and unread. Re-assert the
+ * unread boldness at higher specificity so a freshly selected unread
+ * row still reads as unread until the cursor write lands and the next
+ * inbox refresh drops the flag.
+ */
+.inbox-mail-row[data-selected="true"][data-unread="true"] .inbox-mail-row-from,
+.inbox-mail-row[data-selected="true"][data-unread="true"]
+  .inbox-mail-row-subject {
+  font-weight: 700;
 }
 
 .inbox-mail-row:hover {
@@ -684,14 +717,14 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-row-time {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .inbox-mail-row-subject {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -704,7 +737,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-row-snippet {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -817,7 +850,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-detail-pane--task .packet-right > h3:first-child {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-tertiary);
@@ -909,7 +942,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-detail-body--embed .nb-review-drawer > h2 {
-  font-size: 17px;
+  font-size: var(--text-xl);
   font-weight: 700;
   margin: 0 0 6px;
   color: var(--text);
@@ -919,7 +952,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-detail-body--embed .nb-review-drawer-path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   margin-bottom: 18px;
 }
@@ -931,7 +964,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-detail-body--embed .nb-review h3 {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -940,7 +973,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-detail-body--embed .nb-review-empty {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   margin: 0 0 16px;
   padding: 12px 14px;
@@ -961,7 +994,7 @@ html[data-theme="noir-gold"] {
   align-items: center;
   padding: 8px 16px;
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   border: 1px solid var(--border);
   cursor: pointer;
@@ -994,7 +1027,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-detail-subject {
-  font-size: 20px;
+  font-size: var(--text-2xl);
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0 0 10px;
@@ -1076,14 +1109,14 @@ html[data-theme="noir-gold"] {
   grid-template-columns: 130px 1fr;
   gap: 8px 16px;
   margin: 0 0 22px;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .inbox-mail-detail-fields dt {
   color: var(--text-tertiary);
   font-weight: 600;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.05em;
   padding-top: 2px;
 }
@@ -1095,7 +1128,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-detail-fields dd code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-row-active);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -1103,7 +1136,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-state-explainer {
-  font-size: 14px;
+  font-size: var(--text-md);
   color: var(--text);
   margin: 0 0 20px;
   padding: 14px 16px;
@@ -1151,7 +1184,7 @@ html[data-theme="noir-gold"] {
   gap: 10px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--text-base);
   border-left: 3px solid var(--text-tertiary);
   background: var(--bg-card);
 }
@@ -1174,7 +1207,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-section-title {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1187,7 +1220,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-section-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--text-tertiary);
   letter-spacing: 0.02em;
@@ -1195,7 +1228,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-section-empty {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-tertiary);
   padding: 16px 0;
   font-style: italic;
@@ -1229,7 +1262,7 @@ html[data-theme="noir-gold"] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .inbox-mail-subsection li {
@@ -1390,7 +1423,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-mail-grade-reviewer {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text);
 }
@@ -1465,7 +1498,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-blockedon code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--warning-200);
   color: var(--warning-500);
   padding: 2px 8px;
@@ -1480,14 +1513,14 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-empty--inline h2 {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0 0 4px;
   color: var(--text);
 }
 
 .inbox-empty--inline p {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   margin: 0;
   line-height: 1.5;
@@ -1515,14 +1548,14 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-detail-empty h2 {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0 0 6px;
   color: var(--text-secondary);
 }
 
 .inbox-detail-empty p {
-  font-size: 13px;
+  font-size: var(--text-base);
   margin: 0;
   line-height: 1.5;
 }
@@ -1531,7 +1564,7 @@ html[data-theme="noir-gold"] {
   padding: 40px;
   text-align: center;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .inbox-detail-body {
@@ -1559,7 +1592,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-detail-question {
-  font-size: 15px;
+  font-size: var(--text-lg);
   color: var(--text);
   margin: 0 0 24px;
   line-height: 1.55;
@@ -1570,7 +1603,7 @@ html[data-theme="noir-gold"] {
   grid-template-columns: 120px 1fr;
   gap: 8px 16px;
   margin: 0 0 24px;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .inbox-detail-meta dt {
@@ -1588,7 +1621,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-detail-meta dd code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-row-active);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -1607,7 +1640,7 @@ html[data-theme="noir-gold"] {
   gap: 6px;
   padding: 8px 14px;
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
   text-decoration: none;
   border: 1px solid var(--border);
@@ -1724,7 +1757,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-subtitle {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-md);
   margin-bottom: 24px;
 }
 
@@ -1757,7 +1790,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-filter--chip .num {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-tertiary);
   background: var(--bg-row-active);
@@ -1801,7 +1834,7 @@ html[data-theme="noir-gold"] {
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-base);
   border-bottom: 2px solid transparent;
   background: transparent;
   border-left: none;
@@ -1888,7 +1921,7 @@ html[data-theme="noir-gold"] {
 .inbox-row-kind-pill {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1922,7 +1955,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-row-blocking {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--warning-500);
   background: var(--warning-200);
   padding: 1px 6px;
@@ -1955,7 +1988,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-row-assign {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1964,11 +1997,18 @@ html[data-theme="noir-gold"] {
 
 .inbox-row-assign code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-row-active);
   color: var(--text);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
+}
+
+.inbox-row-breadcrumb {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .lifecycle-state-pill {
@@ -1985,10 +2025,234 @@ html[data-theme="noir-gold"] {
 }
 
 .lifecycle-state-pill .dot {
-  width: 6px;
-  height: 6px;
+  /* Slightly larger than the legacy 6px so the dot reads as a status
+     indicator, not a decorative bullet. Background color is set inline
+     via React (DOT_COLOR map) so it tracks the activity bucket rather
+     than the pill's text color. */
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: currentcolor;
+  background: currentcolor; /* fallback if inline style ever drops */
+  flex-shrink: 0;
+}
+
+/* When the activity bucket is "running" the dot pulses to signal the
+   owner is actively working. Pairs with .issue-activity-dot--blink in
+   the body stream below; same pulse curve, same duration. */
+.lifecycle-state-pill .dot--blink {
+  animation: issue-activity-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle-state-pill .dot--blink {
+    animation: none;
+  }
+}
+
+/* ─── VerificationBadge — machine-checkable definition of done (U1.2) ───
+   Sits next to the lifecycle pill in the issue header. Four states:
+   verified (success), failing (danger), pending (neutral), unverified
+   (muted outline — honest default, deliberately quiet). */
+.verification-badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.verification-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+button.verification-badge {
+  cursor: pointer;
+}
+
+.verification-badge-glyph {
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.verification-badge--verified {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.verification-badge--failing {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.verification-badge--pending {
+  background: var(--neutral-100);
+  color: var(--neutral-600);
+}
+
+.verification-badge--unverified {
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+/* Expandable proof panel: check kind, spec, output tail, timestamp. */
+.verification-badge-detail {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 260px;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+
+.verification-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.verification-detail-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.verification-detail-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.verification-detail-empty {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* Definition-of-done line atop the Spec rail section. */
+.task-verification-dod {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.task-verification-dod-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.task-verification-dod-spec {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* Structured task definition (R4 intake contract) inside the rail's
+   Details section: Goal / Deliverables (+format chips) / Success criteria
+   checklist / Access needed. */
+.task-definition {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.task-definition-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-definition-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.task-definition-goal {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.task-definition-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-definition-deliverable {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.task-definition-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.task-definition-criterion {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.task-definition-check {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.task-definition-access {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .severity-summary {
@@ -2116,7 +2380,7 @@ html[data-theme="noir-gold"] {
 }
 
 .inbox-empty h2 {
-  font-size: 17px;
+  font-size: var(--text-xl);
   font-weight: 600;
   margin-bottom: 4px;
   color: var(--text);
@@ -2125,7 +2389,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-empty p {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-md);
   margin-bottom: 16px;
 }
 
@@ -2139,7 +2403,7 @@ html[data-theme="noir-gold"] {
   border-radius: var(--radius-full);
   text-decoration: none;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-base);
   border: none;
   cursor: pointer;
   font-family: inherit;
@@ -2159,7 +2423,7 @@ html[data-theme="noir-gold"] {
   color: var(--error-500);
   border-radius: var(--radius-md);
   margin-bottom: 16px;
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 
@@ -2174,7 +2438,7 @@ html[data-theme="noir-gold"] {
   color: inherit;
   padding: 4px 12px;
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   font-family: inherit;
   min-height: 32px;
@@ -2197,7 +2461,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-partial p {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-md);
   margin-bottom: 12px;
 }
 
@@ -2207,7 +2471,7 @@ html[data-theme="noir-gold"] {
   color: var(--text);
   padding: 8px 14px;
   border-radius: var(--radius-full);
-  font-size: 13px;
+  font-size: var(--text-base);
   cursor: pointer;
   font-family: inherit;
   min-height: 36px;
@@ -2233,6 +2497,7 @@ html[data-theme="noir-gold"] {
   padding: 3px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
   color: var(--text-secondary);
   display: inline-block;
 }
@@ -2251,13 +2516,13 @@ html[data-theme="noir-gold"] {
   background: var(--bg);
   border-right: 1px solid var(--border);
   padding: 24px 16px;
-  font-size: 13px;
+  font-size: var(--text-base);
   overflow-y: auto;
 }
 
 .packet-left .crumb {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 6px;
@@ -2273,7 +2538,7 @@ html[data-theme="noir-gold"] {
 }
 
 .packet-left h2 {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -2294,7 +2559,7 @@ html[data-theme="noir-gold"] {
   padding: 7px 10px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
-  font-size: 13px;
+  font-size: var(--text-base);
   min-height: 36px;
 }
 
@@ -2362,7 +2627,7 @@ html[data-theme="noir-gold"] {
 
 .packet-assignment p {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 
@@ -2371,7 +2636,7 @@ html[data-theme="noir-gold"] {
 }
 
 .packet-section h3 {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--text);
   margin-bottom: 10px;
@@ -2414,7 +2679,7 @@ html[data-theme="noir-gold"] {
 
 .packet-section p {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.55;
   margin-bottom: 8px;
 }
@@ -2441,7 +2706,7 @@ html[data-theme="noir-gold"] {
   padding: 9px 12px;
   background: var(--bg-card);
   border-radius: var(--radius-md);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .packet-ac-check {
@@ -2453,7 +2718,7 @@ html[data-theme="noir-gold"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .packet-ac-item.done .packet-ac-check {
@@ -2485,7 +2750,7 @@ html[data-theme="noir-gold"] {
 }
 
 .packet-report h4 {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2602,7 +2867,7 @@ html[data-theme="noir-gold"] {
 .packet-grade .sev-pill {
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 4px 8px;
@@ -2623,14 +2888,14 @@ html[data-theme="noir-gold"] {
 
 .packet-grade .body .reason {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 
 .packet-grade .body .file {
   font-family: var(--font-mono);
   font-weight: 500;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   margin-top: 5px;
 }
@@ -2638,7 +2903,7 @@ html[data-theme="noir-gold"] {
 .packet-grade .reviewer {
   font-family: var(--font-sans);
   font-weight: 500;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--text-tertiary);
   text-align: right;
@@ -2661,7 +2926,7 @@ html[data-theme="noir-gold"] {
 }
 
 .packet-right h3 {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -2691,7 +2956,7 @@ html[data-theme="noir-gold"] {
 .packet-comment {
   width: 100%;
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-card);
@@ -2756,7 +3021,7 @@ html[data-theme="noir-gold"] {
 
 .packet-feedback-time {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 
@@ -2876,7 +3141,7 @@ html[data-theme="noir-gold"] {
   border-radius: var(--radius-md);
   padding: 14px 14px;
   margin-bottom: 12px;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .packet-aside-card .label {
@@ -2896,7 +3161,7 @@ html[data-theme="noir-gold"] {
 
 .packet-aside-card .value code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-row-active);
   padding: 2px 5px;
   border-radius: var(--radius-sm);
@@ -2907,7 +3172,7 @@ html[data-theme="noir-gold"] {
 .packet-banner {
   padding: 11px 14px;
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--text-base);
   margin-bottom: 18px;
   display: flex;
   gap: 10px;
@@ -2997,8 +3262,2387 @@ html[data-theme="noir-gold"] {
   color: inherit;
   padding: 6px 14px;
   border-radius: var(--radius-full);
-  font-size: 13px;
+  font-size: var(--text-base);
   cursor: pointer;
   font-family: inherit;
   min-height: 36px;
+}
+
+/* PR-style discussion thread inside the Decision Packet view. */
+.packet-discussion {
+  margin-top: 16px;
+}
+
+.packet-discussion-empty {
+  color: var(--text-tertiary);
+  font-size: var(--text-base);
+  font-style: italic;
+  margin: 4px 0 0;
+}
+
+/* Inline link to the task's own channel from the discussion empty state. */
+.packet-discussion-channel-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-style: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.packet-discussion-channel-link:hover {
+  text-decoration: none;
+}
+
+.packet-discussion-channel-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.packet-discussion-thread {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.packet-discussion-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: var(--bg-card);
+}
+
+.packet-discussion-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: var(--text-sm);
+}
+
+.packet-discussion-author {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.packet-discussion-time {
+  color: var(--text-tertiary);
+}
+
+.packet-discussion-body {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* ── Issue document ───────────────────────────────────────────────── */
+
+.issue-document-panel {
+  padding: 0;
+  gap: 0;
+  /* Whole-page scroll: the panel owns the scrollbar so header (sticky)
+   * + body + comments scroll as one. Previously overflow:hidden on the
+   * panel + overflow:auto on .issue-doc-body created a nested scroll
+   * region for comments — annoying when reading long threads. */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.issue-document {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.issue-doc-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 24px 16px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.issue-doc-header--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.issue-doc-header-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.issue-doc-title {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.issue-doc-button-row {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 0;
+}
+
+.issue-doc-body {
+  /* Linear-style: single column stack — description, sub-issues,
+   * comments — instead of the legacy two-column spec/timeline grid.
+   * No own overflow: the page-level scroll is on .issue-document-panel
+   * so the whole surface (header + body + comments) scrolls as one.
+   * Without this, long comment threads got trapped in a nested scroll
+   * region. */
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 20px 24px 24px;
+}
+
+/* ─── Issue description (replaces SpecBody) ─────────────────────────── */
+.issue-doc-description {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.issue-doc-description-body {
+  color: var(--text);
+  font-size: var(--text-base);
+  line-height: 1.55;
+}
+.issue-doc-description-body p:first-child {
+  margin-top: 0;
+}
+.issue-doc-description-body p:last-child {
+  margin-bottom: 0;
+}
+.issue-doc-description--empty .issue-doc-description-empty-line {
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ─── Sub-issues list ───────────────────────────────────────────────── */
+.issue-doc-sub-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+.issue-doc-sub-issues-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.issue-doc-sub-issues-heading {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.issue-doc-sub-issues-count {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+}
+.issue-doc-sub-issues-add {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.issue-doc-sub-issues-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.issue-doc-sub-issues-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+.issue-doc-sub-issues-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.issue-doc-sub-issue-row {
+  display: flex;
+}
+.issue-doc-sub-issue-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 80px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 120ms ease;
+}
+.issue-doc-sub-issue-link:hover {
+  background: var(
+    --bg-row-active,
+    color-mix(in srgb, var(--accent) 6%, transparent)
+  );
+}
+.issue-doc-sub-issue-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.issue-doc-sub-issue-title {
+  font-size: var(--text-base);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-doc-sub-issue-state {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+.issue-doc-sub-issue-owner {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-family: var(--font-mono);
+}
+.issue-doc-sub-issues-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 0;
+  border-top: 1px dashed var(--border-subtle);
+  margin-top: 4px;
+}
+.issue-doc-sub-issues-input {
+  appearance: none;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+.issue-doc-sub-issues-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg, rgba(91, 141, 239, 0.16));
+}
+.issue-doc-sub-issues-form-actions {
+  display: flex;
+  gap: 8px;
+}
+.issue-doc-sub-issues-submit,
+.issue-doc-sub-issues-cancel {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.issue-doc-sub-issues-submit {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary, white);
+}
+.issue-doc-sub-issues-submit:disabled,
+.issue-doc-sub-issues-cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.issue-doc-sub-issues-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+.issue-doc-sub-issues-owner-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.issue-doc-sub-issues-owner-select {
+  appearance: none;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  flex: 1;
+}
+
+/* ─── Owner pill + inline editor (Issue header) ─────────────────────── */
+.issue-doc-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+/* Ownerless ("auto") task awaiting CEO staffing — honest in-progress copy
+ * next to the owner pill so the page never reads as "parked on you". */
+.issue-doc-staffing-note {
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+.issue-doc-owner-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.issue-doc-owner-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.issue-doc-owner-pill-label {
+  color: var(--text-tertiary, var(--text-secondary));
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.issue-doc-owner-pill-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+.issue-doc-owner-pill-edit {
+  font-size: 10px;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.issue-doc-owner-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.issue-doc-owner-editor-label {
+  color: var(--text-tertiary, var(--text-secondary));
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.issue-doc-owner-editor-select {
+  appearance: none;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.issue-doc-owner-editor-cancel {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.issue-doc-owner-editor-error {
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+/* ─── Parent issue breadcrumb (sub-issue header) ────────────────────── */
+.issue-doc-parent-breadcrumb {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 999px);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.issue-doc-parent-breadcrumb:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.issue-doc-parent-breadcrumb-icon {
+  font-weight: 700;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.issue-doc-parent-breadcrumb-label {
+  color: var(--text-tertiary, var(--text-secondary));
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.issue-doc-parent-breadcrumb-id {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.issue-doc-parent-breadcrumb-title {
+  color: var(--text);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── State-aware Issue action toolbar (Slice 8 #46) ────────────────── */
+.issue-action-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.issue-action-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text);
+  white-space: nowrap;
+}
+.issue-action-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.issue-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.issue-action-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary, white);
+}
+.issue-action-button--primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.issue-action-button--danger {
+  border-color: color-mix(
+    in srgb,
+    var(--text-danger, #b42318) 60%,
+    var(--border-subtle)
+  );
+  color: var(--text-danger, #b42318);
+}
+.issue-action-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-danger, #b42318) 10%, transparent);
+}
+.issue-action-button--neutral {
+  /* default styling already covers neutral */
+}
+.issue-action-reason-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 100%;
+  margin-top: 4px;
+}
+.issue-action-reason-input {
+  appearance: none;
+  flex: 1;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.issue-action-reason-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg, rgba(91, 141, 239, 0.16));
+}
+.issue-action-error {
+  flex: 1 1 100%;
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+/* ─── Reopen button ─────────────────────────────────────────────────── */
+.issue-doc-reopen {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.issue-doc-reopen-button {
+  appearance: none;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 500;
+}
+.issue-doc-reopen-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.issue-doc-reopen-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.issue-doc-reopen-error {
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+.issue-doc-comments,
+.issue-doc-error-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.issue-comments-heading {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.issue-comment-body > *:first-child {
+  margin-top: 0;
+}
+
+.issue-comment-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.issue-comments-empty,
+.issue-comments-drafting-helper {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.issue-doc-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  align-self: stretch;
+  padding: 16px;
+  /* No own scroll — page-level scroll on .issue-document-panel owns it.
+   * Removing max-height + overflow lets the timeline grow naturally so
+   * the comment box at the bottom is reached by scrolling the page. */
+}
+
+.issue-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.issue-comments-list-item {
+  list-style: none;
+}
+
+/* Timeline empty state (#937) — stacked title + hint so the user knows
+   the timeline is where the CEO interview turns will land, not just a
+   passive "no comments yet" message. */
+.issue-comments-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-warm, var(--bg-card));
+}
+
+.issue-comments-empty-title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.issue-comments-empty-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.issue-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+/* [SUGGESTION] comments stand out so CEO can scan them. Amber border +
+ * subtle tint, "Suggestion" badge next to the author. */
+.issue-comment--suggestion {
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 60%,
+    var(--border-subtle)
+  );
+  background: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 5%,
+    var(--bg-primary)
+  );
+}
+.issue-comment-suggestion-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bg-primary, white);
+  background: var(--amber-600, #d97706);
+  border-radius: var(--radius-pill, 999px);
+}
+
+.issue-comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.issue-comment-avatar {
+  flex: 0 0 auto;
+}
+
+.issue-comment-author {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-comment-time {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.issue-comment-body {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.issue-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.issue-comment-form-label {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.issue-comment-input-wrap {
+  /* Autocomplete uses position: absolute against the closest positioned
+   * ancestor — wrap is what anchors the panel above the textarea. */
+  position: relative;
+}
+
+.issue-comment-input {
+  min-height: 92px;
+  width: 100%;
+  resize: vertical;
+  padding: 9px 10px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.issue-comment-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg, rgba(91, 141, 239, 0.16));
+}
+
+.issue-comment-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.issue-comment-error {
+  margin: 0;
+  color: var(--text-danger, #b42318);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.issue-comment-submit {
+  align-self: flex-end;
+  min-height: 32px;
+  padding: 6px 12px;
+  color: var(--bg-primary, #fff);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.issue-comment-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.issue-doc-retry-btn {
+  align-self: flex-start;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+
+.issue-doc-retry-btn:hover {
+  border-color: var(--border);
+  background: var(--bg-secondary);
+}
+
+.issue-approve-and-start {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.issue-approve-error {
+  max-width: 420px;
+  padding: 8px 10px;
+  color: var(--text-danger, #b42318);
+  font-size: var(--text-sm);
+  border: 1px solid var(--danger-border, rgba(180, 35, 24, 0.24));
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg, rgba(180, 35, 24, 0.08));
+}
+
+.issue-approve-btn {
+  min-height: 32px;
+}
+
+.issue-document--loading,
+.issue-document--error {
+  padding: 20px 24px;
+}
+
+.issue-doc-error-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 420px;
+  padding: 16px;
+}
+
+.issue-doc-error-card p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.issue-doc-skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary, rgba(0, 0, 0, 0.04)),
+    var(--bg-card, rgba(0, 0, 0, 0.08)),
+    var(--bg-secondary, rgba(0, 0, 0, 0.04))
+  );
+  background-size: 200% 100%;
+  animation: issues-skel 1.6s ease-in-out infinite;
+}
+
+.issue-doc-skeleton--pill {
+  width: 84px;
+  height: 22px;
+}
+
+.issue-doc-skeleton--title {
+  width: min(520px, 70%);
+  height: 24px;
+}
+
+.issue-doc-skeleton--block {
+  height: 18px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 980px) {
+  .issue-doc-body {
+    grid-template-columns: 1fr;
+  }
+
+  .issue-doc-comments {
+    max-height: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .issue-doc-header,
+  .issue-doc-body,
+  .issue-document--loading,
+  .issue-document--error {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .issue-doc-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .issue-doc-button-row,
+  .issue-approve-and-start {
+    align-items: stretch;
+  }
+}
+
+/* ── Issues list (kanban) ─────────────────────────────────────────── */
+
+.issues-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
+  gap: 12px;
+}
+
+.issues-list-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.issues-list-heading {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.issues-list-search {
+  flex: 1 1 220px;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-size: var(--text-base);
+  background: var(--bg-input, var(--bg-card));
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.issues-list-search:focus {
+  outline: none;
+  border-color: var(--accent, #5b8def);
+}
+
+.issues-new-btn {
+  padding: 6px 12px;
+  font-size: var(--text-base);
+  background: var(--accent, #5b8def);
+  color: var(--bg-primary, #fff);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.issues-new-btn:hover {
+  filter: brightness(1.08);
+}
+
+.issues-new-btn--header {
+  margin-left: auto;
+}
+
+.issues-kanban {
+  display: grid;
+  /* Seven user-facing stages. Each column holds a min width so the row
+     scrolls horizontally rather than crushing columns when the viewport
+     is narrow. */
+  grid-template-columns: repeat(7, minmax(160px, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+}
+
+.issues-kanban-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  gap: 6px;
+  min-height: 0;
+}
+
+.issues-kanban-column-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.issues-kanban-column-title {
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.issues-kanban-column-count {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.issues-kanban-column-hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.issues-kanban-column-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.issues-kanban-column-empty {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  margin: 4px 0 0;
+  text-align: center;
+}
+
+.issues-kanban-card {
+  background: var(--bg-card, var(--bg-primary, #fff));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: inherit;
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 8px;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+  width: 100%;
+}
+
+.issues-kanban-card:hover,
+.issues-kanban-card:focus-visible {
+  border-color: var(--accent, #5b8def);
+  outline: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.issues-kanban-card-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.issues-kanban-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.issues-kanban-card-owner,
+.issues-kanban-card-channel {
+  font-variant-numeric: tabular-nums;
+}
+
+.issues-kanban-card-schedule {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A parent card and its sub-tasks share one list item so they read as a unit.
+   The parent stays a full card; its children nest beneath it in the same lane,
+   indented behind a guide rail. */
+.issues-kanban-card-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Nested sub-task list under a parent card. The left rail + indent are the
+   visual tie that says "these belong to the card above". */
+.issues-kanban-subtasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 12px;
+  margin-left: 7px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+/* Compact, recessed variant for a sub-task card nested under its parent, so
+   the hierarchy reads at a glance without competing with the parent. */
+.issues-kanban-card--subtask {
+  padding: 7px 9px;
+  gap: 5px;
+  background: var(--bg-card-soft, var(--bg-card, var(--bg-primary, #fff)));
+}
+
+.issues-kanban-card--subtask .issues-kanban-card-title {
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+/* Type tag on a non-task attention card (a folded request / review) in the
+   Needs-human lane, so a question or review reads distinctly from a task. */
+.issues-kanban-card-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-row-active);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.issues-list--empty,
+.issues-list--error {
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  text-align: center;
+}
+
+.issues-empty-copy {
+  color: var(--text-tertiary);
+  font-size: var(--text-md);
+  margin: 0 0 12px;
+}
+
+.issues-list-error-card {
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.issues-list-retry-btn {
+  padding: 6px 12px;
+  font-size: var(--text-base);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.issues-list--loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px;
+}
+
+.issues-list-skeleton-row {
+  height: 14px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary, rgba(0, 0, 0, 0.04)),
+    var(--bg-card, rgba(0, 0, 0, 0.08)),
+    var(--bg-secondary, rgba(0, 0, 0, 0.04))
+  );
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: issues-skel 1.6s ease-in-out infinite;
+}
+
+@keyframes issues-skel {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .issues-list-skeleton-row,
+  .issue-doc-skeleton {
+    animation: none;
+  }
+}
+
+/* ── Issue draft form ─────────────────────────────────────────────── */
+
+.issue-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 640px;
+  margin: 24px auto;
+  padding: 24px;
+  background: var(--bg-card, var(--bg-primary, #fff));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.issue-new-form-heading {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.issue-new-form-hint {
+  font-size: var(--text-base);
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.issue-new-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.issue-new-form-field label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.issue-new-form-field input,
+.issue-new-form-field select,
+.issue-new-form-field textarea {
+  font: inherit;
+  font-size: var(--text-md);
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-input, var(--bg-primary, #fff));
+  color: var(--text-primary);
+}
+
+.issue-new-form-field textarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.issue-new-form-field input:focus,
+.issue-new-form-field select:focus,
+.issue-new-form-field textarea:focus {
+  outline: none;
+  border-color: var(--accent, #5b8def);
+}
+
+.issue-new-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.issue-new-form-error {
+  color: var(--text-danger, #c0392b);
+  font-size: var(--text-base);
+  margin: 0;
+}
+
+/* ── Inbox filter chips ───────────────────────────────────────────── */
+
+.inbox-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.inbox-filter-chip {
+  padding: 4px 10px;
+  font-size: var(--text-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-filter-chip:hover {
+  border-color: var(--accent, #5b8def);
+  color: var(--text-primary);
+}
+
+.inbox-filter-chip[aria-pressed="true"] {
+  background: var(--accent, #5b8def);
+  color: var(--bg-primary, #fff);
+  border-color: var(--accent, #5b8def);
+}
+
+.inbox-filter-chip-count {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* Approval-audit trail — rendered underneath an answered request in the
+   inbox detail pane. Reads as a small chronological list of who did what,
+   when. Matches the muted-section style of inbox-mail-section-empty. */
+.inbox-trail {
+  margin-top: var(--space-3, 0.75rem);
+  padding-top: var(--space-3, 0.75rem);
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+}
+
+.inbox-trail-header {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.inbox-trail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 0.25rem);
+}
+
+.inbox-trail-row {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2, 0.5rem);
+}
+
+.inbox-trail-actor {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.inbox-trail-outcome {
+  color: var(--text-secondary);
+}
+
+.inbox-trail-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   New Issue dialog (Linear-style)
+
+   Built on project tokens (--bg, --bg-card, --text, --border, --accent)
+   so it survives theme switching without the brittle shadcn HSL bridge.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-create-dialog {
+  background: var(--bg-card, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Top eyebrow — workspace breadcrumb */
+.issue-create-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg);
+}
+
+.issue-create-eyebrow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+}
+
+.issue-create-eyebrow-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.issue-create-eyebrow-sep {
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.6;
+}
+
+/* Body — title + description, no internal borders */
+.issue-create-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  background: var(--bg-card, var(--bg));
+}
+
+.issue-create-title-input {
+  width: 100%;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  margin: 0;
+  appearance: none;
+  font-family: inherit;
+}
+
+.issue-create-title-input::placeholder {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.issue-create-description {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+}
+
+.issue-create-description::placeholder {
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.75;
+}
+
+.issue-create-error {
+  padding: 0 20px 12px;
+  margin: 0;
+  color: var(--red-600, var(--destructive, #dc2626));
+  font-size: 13px;
+}
+
+/* Property chip row */
+.issue-create-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 12px;
+  background: var(--bg-card, var(--bg));
+}
+
+.issue-create-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.issue-create-chip:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+  border-color: var(--border);
+}
+
+.issue-create-chip[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.issue-create-chip--muted {
+  color: var(--text-secondary);
+}
+
+.issue-create-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+}
+
+.issue-create-chip-chevron {
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.7;
+}
+
+.issue-create-chip-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* Footer */
+.issue-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.issue-create-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.issue-create-more:hover {
+  color: var(--text);
+}
+
+.issue-create-more-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.issue-create-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.issue-create-cancel,
+.issue-create-submit {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1;
+}
+
+.issue-create-cancel {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+}
+
+.issue-create-cancel:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+  color: var(--text);
+}
+
+.issue-create-submit {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border: 1px solid var(--accent);
+}
+
+.issue-create-submit:hover:not(:disabled) {
+  background: var(--accent-hover, var(--accent));
+  filter: brightness(0.95);
+}
+
+.issue-create-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.issue-create-submit .kbd {
+  background: rgba(255, 255, 255, 0.18);
+  color: inherit;
+  border-color: transparent;
+}
+
+/* Dialog primitive close button — overrides the inline tailwind classes
+   in Dialog.tsx / Sheet.tsx for a cleaner, theme-aware affordance. */
+.dialog-close-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+  z-index: 1;
+}
+
+.dialog-close-button:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.06)));
+  color: var(--text);
+}
+
+.dialog-close-button:focus-visible {
+  outline: 2px solid var(--ring, var(--accent));
+  outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Issue activity stream + status dot
+
+   Four dot kinds map to four lifecycle buckets:
+     running     — green, blinking (agent actively working)
+     blocked     — red, solid     (technical block; no human input helps)
+     needs-input — orange, solid  (waiting on human review/decision)
+     idle        — grey, solid    (drafting, ready, terminal states)
+
+   Tokens are pulled from --green/--red/--orange/--text-secondary so the
+   colors retint cleanly across themes (nex, nex-dark, noir-gold).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-activity-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-tertiary, var(--text-secondary));
+  box-shadow: 0 0 0 0 transparent;
+}
+
+.issue-activity-dot--running {
+  background: var(--green-500, #16a34a);
+}
+
+.issue-activity-dot--blocked {
+  background: var(--red-500, var(--destructive, #dc2626));
+}
+
+.issue-activity-dot--needs-input {
+  background: var(--orange-500, #f97316);
+}
+
+.issue-activity-dot--idle {
+  background: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.55;
+}
+
+/* Blinking pulse — single-layer box-shadow halo, GPU-friendly. */
+.issue-activity-dot--blink {
+  animation: issue-activity-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes issue-activity-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(22, 163, 74, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .issue-activity-dot--blink {
+    animation: none;
+  }
+}
+
+/* Standalone .issue-activity-dot is now only used by the body
+   IssueActivityStream block. The header dot was merged into the
+   LifecycleStatePill — see .lifecycle-state-pill .dot above. */
+
+/* Activity stream block in the body */
+.issue-activity-stream {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card, var(--bg));
+}
+
+.issue-activity-stream[data-state="running"] {
+  border-color: color-mix(
+    in srgb,
+    var(--green-500, #16a34a) 30%,
+    var(--border)
+  );
+}
+
+.issue-activity-stream[data-state="blocked"] {
+  border-color: color-mix(in srgb, var(--red-500, #dc2626) 30%, var(--border));
+}
+
+.issue-activity-stream[data-state="needs-input"] {
+  border-color: color-mix(
+    in srgb,
+    var(--orange-500, #f97316) 30%,
+    var(--border)
+  );
+}
+
+.issue-activity-stream .issue-activity-dot {
+  margin-top: 5px;
+}
+
+.issue-activity-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.issue-activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-activity-owner {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.issue-activity-summary {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.issue-activity-elapsed {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-activity-detail {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Issue detail tabs — Activity / Comments / Sub-Issues
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-doc-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 16px;
+  min-height: 0;
+}
+
+.issue-doc-tabs-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.issue-doc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* overlap the strip's bottom border */
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.issue-doc-tab:hover {
+  color: var(--text);
+}
+
+.issue-doc-tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.issue-doc-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.06)));
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.issue-doc-tab--active .issue-doc-tab-count {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+}
+
+.issue-doc-tabs-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Activity feed (under the Activity tab)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.issue-activity-feed-empty {
+  margin: 0;
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-card, var(--bg));
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.issue-activity-feed-empty--error {
+  color: var(--red-600, var(--destructive, #dc2626));
+  border-style: solid;
+  border-color: var(--red-600, var(--destructive, #dc2626));
+}
+
+.issue-activity-feed-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.issue-activity-feed-retry:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+}
+
+.issue-activity-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.issue-activity-feed-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  padding: 10px 4px 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.issue-activity-feed-row:last-child {
+  border-bottom: 0;
+}
+
+.issue-activity-feed-row--clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+
+.issue-activity-feed-row--clickable:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.03)));
+}
+
+.issue-activity-feed-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.05)));
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.issue-activity-feed-icon--lifecycle {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.issue-activity-feed-icon--comment {
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+}
+
+.issue-activity-feed-icon--request {
+  background: color-mix(in srgb, var(--orange-500, #f97316) 12%, transparent);
+  color: var(--orange-500, #f97316);
+}
+
+.issue-activity-feed-icon--sub_issue {
+  background: color-mix(in srgb, var(--green-500, #16a34a) 12%, transparent);
+  color: var(--green-500, #16a34a);
+}
+
+.issue-activity-feed-icon--turn {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-secondary);
+}
+
+/* B4 context transparency: the "context: learning:X, wiki:Y" list under a
+   turn event — the knowledge items the turn's work packet injected. */
+.issue-activity-feed-context {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  overflow-wrap: anywhere;
+}
+
+.issue-activity-feed-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.issue-activity-feed-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-activity-feed-actor {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.issue-activity-feed-actor--system {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+}
+
+.issue-activity-feed-verb {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.issue-activity-feed-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-activity-feed-lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.issue-activity-feed-state {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.issue-activity-feed-summary {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.issue-activity-feed-resolution {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 0;
+}
+
+.issue-activity-feed-resolution--answered {
+  color: var(--green-600, #15803d);
+}
+
+.issue-activity-feed-resolution--canceled {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.issue-activity-feed-resolution--open {
+  color: var(--orange-500, #f97316);
+}
+
+/* ── Chat-primary task detail (chat main column + right context rail) ──────
+   The task detail is chat-first: the conversation fills the main column at
+   full height (messages scroll internally, composer pins) and the secondary
+   context — participants, spec, activity, sub-tasks — lives in a right rail.
+   The whole surface fills the panel instead of page-scrolling, so the chat
+   gets the vertical space instead of a tall header + a tab panel. */
+.issue-document {
+  height: 100%;
+  min-height: 0;
+}
+.issue-doc-header--compact {
+  gap: 8px;
+  padding: 12px 20px;
+}
+.issue-doc-header--compact .issue-doc-title {
+  font-size: 1.0625rem;
+  line-height: 1.3;
+}
+.issue-doc-header--compact .issue-doc-meta-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* Owner picker sits left; lifecycle action toolbar pushed to the right so
+   the header stays two tight rows instead of four. */
+.issue-doc-header--compact .issue-doc-meta-row > :last-child {
+  margin-left: auto;
+}
+
+.issue-doc-body--split {
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+.issue-doc-chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.issue-doc-chat-header {
+  flex: 0 0 auto;
+  padding: 10px 20px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.issue-doc-chat .task-channel-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 20px 16px;
+}
+
+.task-context-rail {
+  flex: 0 0 320px;
+  width: 320px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-card);
+}
+.task-context-rail .issue-activity-stream {
+  margin-bottom: 8px;
+}
+.task-rail-section {
+  border-top: 1px solid var(--border);
+}
+.task-rail-section:first-of-type {
+  border-top: none;
+}
+.task-rail-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.task-rail-caret {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  width: 0.8em;
+}
+.task-rail-section-body {
+  padding: 0 4px 12px;
+}
+
+/* Stack the rail under the chat on narrow viewports. */
+@media (max-width: 900px) {
+  .issue-doc-body--split {
+    flex-direction: column;
+  }
+  .issue-doc-chat {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .task-context-rail {
+    flex: 0 0 auto;
+    width: auto;
+  }
+}
+
+/* Participants render directly (self-headed) above the collapsible rail
+   sections; give them a divider so they read as a distinct block. */
+.task-rail-participants {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Kanban: collapsible lanes + Linear-style uplift ──────────────────────
+   The board was a fixed 7-column grid that forced horizontal scroll and let
+   empty lanes hog space. Switch to flex so any lane can collapse to a thin
+   vertical strip (click its header), giving the active lanes the room. */
+.issues-kanban {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+.issues-kanban-column {
+  flex: 1 1 240px;
+  min-width: 240px;
+  max-width: 420px;
+  transition:
+    flex-basis 0.16s ease,
+    min-width 0.16s ease;
+}
+.issues-kanban-column.is-collapsed {
+  flex: 0 0 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: 8px 4px;
+  cursor: pointer;
+  align-items: center;
+}
+
+/* The column header is now the collapse toggle (a button). */
+.issues-kanban-column-header {
+  margin: 0;
+  padding: 0;
+}
+.issues-kanban-column-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 2px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.issues-kanban-column-caret {
+  flex: 0 0 auto;
+  width: 0.8em;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+.issues-kanban-column-toggle .issues-kanban-column-count {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.issues-kanban-column-toggle:hover .issues-kanban-column-caret {
+  color: var(--text);
+}
+
+/* Collapsed: a vertical strip — caret on top, title rotated, count below. */
+.issues-kanban-column.is-collapsed .issues-kanban-column-toggle {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: 100%;
+  padding: 4px 0;
+}
+.issues-kanban-column.is-collapsed .issues-kanban-column-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+}
+.issues-kanban-column.is-collapsed
+  .issues-kanban-column-toggle
+  .issues-kanban-column-count {
+  margin-left: 0;
+}
+
+/* Kanban card: live "what's happening" line for running tasks, so the board
+   tells you state + owner + current activity at a glance. */
+.issues-kanban-card-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.issues-kanban-card-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issues-kanban-card-owner--unassigned {
+  color: var(--text-secondary);
+  font-style: italic;
 }

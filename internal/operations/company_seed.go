@@ -4,21 +4,113 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"golang.org/x/net/html"
 )
+
+// gettingStartedFS embeds the authored team/getting-started/ wiki pages so the
+// binary ships them. They are materialized into a brand-new workspace wiki at
+// the office-seed boundary (both the blueprint and scratch paths) so the office
+// is never empty: every founder lands in an office whose wiki already explains
+// how the office works. See docs/specs/office-onboarding-uplift.md section 5.
+//
+//go:embed resources/getting-started/*.md
+var gettingStartedFS embed.FS
+
+// gettingStartedEmbedDir is the directory prefix inside gettingStartedFS that
+// holds the embedded markdown pages.
+const gettingStartedEmbedDir = "resources/getting-started"
+
+// GettingStartedRelDir is the wiki-relative directory the getting-started pages
+// are materialized into. Exported so callers and tests can reference the exact
+// destination without re-deriving the path.
+const GettingStartedRelDir = "team/getting-started"
+
+// SeedGettingStarted materializes the embedded resources/getting-started/*.md
+// pages into wikiRoot/team/getting-started/. It mirrors the team/about/ seed
+// flow in SeedCompanyContext: each page is written skip-if-exists via
+// atomicWrite (temp-dir-then-rename) so a page authored by a prior seed is
+// never clobbered and a partial write is never visible. Returns the list of
+// wiki-relative paths newly written this call (empty when everything already
+// existed).
+//
+// Files are written in deterministic (sorted) filename order so the seed is
+// reproducible and the post-seed index/all.md ordering is stable.
+//
+// wikiRoot must be a non-empty path; callers gate this exactly like the
+// team/about/ seed (only run when a real wiki root is known).
+func SeedGettingStarted(wikiRoot string) ([]string, error) {
+	if strings.TrimSpace(wikiRoot) == "" {
+		return nil, fmt.Errorf("operations: SeedGettingStarted: empty wikiRoot")
+	}
+	// Clean the root at the public boundary so a caller-supplied path with
+	// embedded ".." segments cannot escape the intended wiki tree. The page
+	// names come from embed.FS (*.md literals) so they cannot traverse; this
+	// guards only the wikiRoot parameter.
+	wikiRoot = filepath.Clean(wikiRoot)
+
+	entries, err := fs.ReadDir(gettingStartedFS, gettingStartedEmbedDir)
+	if err != nil {
+		return nil, fmt.Errorf("operations: read embedded getting-started: %w", err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(strings.ToLower(name), ".md") {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	if err := os.MkdirAll(filepath.Join(wikiRoot, "team", "getting-started"), 0o755); err != nil {
+		return nil, fmt.Errorf("operations: mkdir team/getting-started: %w", err)
+	}
+
+	var written []string
+	for _, name := range names {
+		relPath := "team/getting-started/" + name
+		finalPath := filepath.Join(wikiRoot, "team", "getting-started", name)
+		// Skip-if-exists: never overwrite a page a prior seed (or a human, or
+		// an agent enriching the section) already wrote. Mirrors the
+		// skip-if-exists guard on team/about/{README,company,owner}.md.
+		if _, statErr := os.Stat(finalPath); statErr == nil {
+			continue
+		} else if !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("operations: stat %s: %w", relPath, statErr)
+		}
+
+		data, readErr := gettingStartedFS.ReadFile(gettingStartedEmbedDir + "/" + name)
+		if readErr != nil {
+			return nil, fmt.Errorf("operations: read embedded %s: %w", name, readErr)
+		}
+		if err := atomicWrite(wikiRoot, relPath, data); err != nil {
+			return nil, err
+		}
+		written = append(written, relPath)
+	}
+
+	return written, nil
+}
 
 // safeUTF8Truncate returns s truncated to at most maxBytes bytes without
 // splitting a multi-byte UTF-8 sequence. If s fits, it is returned as-is.
@@ -43,10 +135,16 @@ type Completer interface {
 type CompanySeedInput struct {
 	WebsiteURL string
 	FilePaths  []string
-	OwnerName  string
-	OwnerRole  string
-	Completer  Completer
-	WikiRoot   string
+	// CompanyName is the user-supplied company name from onboarding
+	// (FormAnswers.CompanyName / config.CompanyName). Used to personalise
+	// the placeholder company.md so the seeded team/about/README links never
+	// dangle on day one even before the LLM extraction (which can fail or
+	// be skipped) has populated a real CompanyProfile. May be empty.
+	CompanyName string
+	OwnerName   string
+	OwnerRole   string
+	Completer   Completer
+	WikiRoot    string
 }
 
 // CompanySeedResult summarizes what SeedCompanyContext did.
@@ -129,6 +227,25 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	readmePath := filepath.Join(input.WikiRoot, "team", "about", "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
 		if err := atomicWrite(input.WikiRoot, "team/about/README.md", []byte(aboutReadmeContent)); err != nil {
+			return nil, err
+		}
+	}
+
+	// 4a. Seed placeholder company.md and owner.md so the links the README
+	// just promised always resolve. Both files are written skip-if-exists so
+	// a real article populated by a prior seed (or by steps 5 and 7 below in
+	// this run) is never overwritten. See issue #946.
+	companyPath := filepath.Join(input.WikiRoot, "team", "about", "company.md")
+	if _, err := os.Stat(companyPath); os.IsNotExist(err) {
+		if err := atomicWrite(input.WikiRoot, "team/about/company.md",
+			[]byte(buildCompanyPlaceholderMD(input.CompanyName))); err != nil {
+			return nil, err
+		}
+	}
+	ownerPath := filepath.Join(input.WikiRoot, "team", "about", "owner.md")
+	if _, err := os.Stat(ownerPath); os.IsNotExist(err) {
+		if err := atomicWrite(input.WikiRoot, "team/about/owner.md",
+			[]byte(buildOwnerPlaceholderMD(input.OwnerName, input.OwnerRole))); err != nil {
 			return nil, err
 		}
 	}
@@ -421,6 +538,44 @@ func buildCompanyMD(profile CompanyProfile) string {
 	return sb.String()
 }
 
+// buildCompanyPlaceholderMD renders the initial company.md body written when
+// the team/about/ section is first seeded, so the link from README.md always
+// resolves even before LLM extraction has populated a real CompanyProfile.
+// It is overwritten by buildCompanyMD as soon as a real profile is available.
+//
+// The TODO comment is intentional — it tells the next human or agent reader
+// that this file is a stub waiting to be filled in. See issue #946.
+func buildCompanyPlaceholderMD(name string) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "This company"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", displayName))
+	sb.WriteString("<!-- TODO: replace this placeholder with a short description of what the company does, who it serves, and what the current focus is. The CEO-onboarding scan or any agent with `wiki.write` permission can rewrite this file. -->\n\n")
+	sb.WriteString("This article will hold a short description of what the company does, who it serves, and what the current focus is. It is a placeholder so the link from `README.md` resolves on day one; the scan or any agent can rewrite it with the real profile.\n")
+	return sb.String()
+}
+
+// buildOwnerPlaceholderMD renders the initial owner.md body written when the
+// team/about/ section is first seeded. Mirrors buildCompanyPlaceholderMD: it
+// exists so the link from README.md never dangles, and is overwritten by
+// buildOwnerMD once a real name or role is collected.
+func buildOwnerPlaceholderMD(name, role string) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "Workspace owner"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", displayName))
+	if r := strings.TrimSpace(role); r != "" {
+		sb.WriteString(fmt.Sprintf("**Role:** %s\n\n", r))
+	}
+	sb.WriteString("<!-- TODO: replace this placeholder with a short profile of the person running this workspace — name, role, and how agents should escalate to them. -->\n\n")
+	sb.WriteString("This article will hold a short profile of the person running this workspace and how agents should escalate to them. It is a placeholder so the link from `README.md` resolves on day one.\n")
+	return sb.String()
+}
+
 // buildOwnerMD renders a markdown article for the workspace owner.
 func buildOwnerMD(name, role string) string {
 	var sb strings.Builder
@@ -447,3 +602,44 @@ const aboutReadmeContent = `# About This Team
 - [company.md](company.md) — what this company does
 - [owner.md](owner.md) — who is running this workspace
 `
+
+// AboutReadmeContent returns the canonical README body for the team/about/
+// wiki section. Exported so the scratch-path seeder (which does not run the
+// website-scan pipeline) can drop the same shared skeleton README that
+// SeedCompanyContext writes on the with-website path.
+func AboutReadmeContent() string { return aboutReadmeContent }
+
+// AboutScratchCompanyMD returns a placeholder team/about/company.md body for
+// the skip-website scratch path. It seeds whatever onboarding captured
+// (company name + short description) so the wiki has a usable starting
+// article; agents enriching this article later can replace the body in place.
+func AboutScratchCompanyMD(companyName, description string) string {
+	name := strings.TrimSpace(companyName)
+	if name == "" {
+		name = "Company"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", name))
+	if d := strings.TrimSpace(description); d != "" {
+		sb.WriteString(fmt.Sprintf("%s\n\n", d))
+	}
+	sb.WriteString("_No website was scanned during onboarding. Fill in details about the company here, or ask an agent to research and enrich this article._\n")
+	return sb.String()
+}
+
+// AboutScratchOwnerMD returns a placeholder team/about/owner.md body for the
+// skip-website scratch path. Mirrors the buildOwnerMD shape used by the
+// website-scan path so the two surfaces stay structurally identical.
+func AboutScratchOwnerMD(ownerName, ownerRole string) string {
+	name := strings.TrimSpace(ownerName)
+	if name == "" {
+		name = "Owner"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", name))
+	if r := strings.TrimSpace(ownerRole); r != "" {
+		sb.WriteString(fmt.Sprintf("**Role:** %s\n\n", r))
+	}
+	sb.WriteString("_Add details about who is running this workspace here._\n")
+	return sb.String()
+}

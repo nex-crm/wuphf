@@ -29,10 +29,6 @@ export interface BreadcrumbItem {
  */
 export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
   switch (route.kind) {
-    case "dm": {
-      const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
-      return [breadcrumbItem(res, `@${route.agentSlug}`)];
-    }
     case "task-board": {
       return [{ label: "Tasks", href: "#/tasks" }];
     }
@@ -87,6 +83,9 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
     case "reviews": {
       return [{ label: "Reviews", href: "#/reviews" }];
     }
+    case "article": {
+      return [{ label: "Article", href: `#/articles/${route.articleId}` }];
+    }
     case "app": {
       if (route.appId === "settings" || isSettingsSection(route.appId)) {
         const section = route.appId === "settings" ? "workspace" : route.appId;
@@ -127,6 +126,45 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       ];
     }
     case "channel":
+      return [];
+    // Tasks surface breadcrumbs
+    case "task-new":
+      return [
+        { label: "Tasks", href: "#/tasks" },
+        { label: "New task", href: "#/tasks/new" },
+      ];
+    case "agents":
+      return [{ label: "Agents", href: "#/agents" }];
+    case "agent-detail": {
+      const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
+      return [
+        { label: "Agents", href: "#/agents" },
+        breadcrumbItem(res, `@${route.agentSlug}`),
+      ];
+    }
+    case "skill-detail":
+      return [
+        { label: "Skills", href: "#/apps/skills" },
+        {
+          label: route.skillName,
+          href: `#/skills/${encodeURIComponent(route.skillName)}`,
+        },
+      ];
+    case "routine-detail":
+      return [
+        { label: "Scheduled Tasks", href: "#/apps/routines" },
+        {
+          label: route.routineSlug,
+          href: `#/routines/${encodeURIComponent(route.routineSlug)}`,
+        },
+      ];
+    case "routine-new":
+      return [
+        { label: "Scheduled Tasks", href: "#/apps/routines" },
+        { label: "New scheduled task", href: "#/routines/new" },
+      ];
+    case "home":
+      return [];
     case "unknown":
       return [];
     default: {
@@ -147,15 +185,13 @@ function breadcrumbItem(
 /** Map an app id to a friendly label without importing SIDEBAR_APPS. */
 function appLabel(appId: string): string {
   const LABELS: Record<string, string> = {
-    console: "Console",
     tasks: "Tasks",
     requests: "Requests",
     graph: "Graph",
     policies: "Policies",
-    calendar: "Calendar",
+    routines: "Routines",
     skills: "Skills",
     activity: "Activity",
-    receipts: "Receipts",
     "health-check": "Access & Health",
   };
   return (

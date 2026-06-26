@@ -131,3 +131,44 @@ jobs:
             exit 1
           fi
           echo "All four surfaces agree at v$git_version. ✓"
+
+      - name: Verify desktop installer aliases are downloadable
+        # The /download.html page resolves its macOS/Windows buttons to the
+        # newest release that actually carries these version-less aliases.
+        # They're appended to each v* release by desktop-release.yml, whose
+        # build can fail on its own (runner disk space, a flaky CDN). When the
+        # LATEST release's desktop build fails, `releases/latest/download/<alias>`
+        # 404s — the original incident. The page now self-heals by falling back
+        # to an older release that still has the alias, so the only true outage
+        # is when NO recent release carries it at all: fail loud there. When
+        # merely the latest release is missing it, warn (don't fail) — the page
+        # still works, but a desktop build needs a re-run.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          aliases="WUPHF-mac.dmg WUPHF-windows-setup.exe"
+
+          # Asset names across recent published (non-draft) releases, and on the
+          # specific release users land on via releases/latest.
+          all_assets=$(gh api 'repos/${{ github.repository }}/releases?per_page=30' \
+            --jq '[.[] | select(.draft | not) | .assets[].name] | unique | .[]')
+          latest_assets=$(gh api repos/${{ github.repository }}/releases/latest \
+            --jq '.assets[].name')
+          latest_tag=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name)
+
+          fail=0
+          for a in $aliases; do
+            if ! grep -qx "$a" <<<"$all_assets"; then
+              echo "::error::no published release carries '$a' — /download.html has nothing to link to"
+              echo "::error::check: gh run list --workflow=desktop-release.yml --limit=5"
+              fail=1
+            elif ! grep -qx "$a" <<<"$latest_assets"; then
+              echo "::warning::latest release ($latest_tag) is missing '$a' — its desktop build failed; /download.html falls back to an older release"
+              echo "::warning::re-run: gh workflow run desktop-release.yml --ref $latest_tag -f version=${latest_tag#v}"
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Desktop installer aliases are downloadable. ✓"

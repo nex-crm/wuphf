@@ -64,7 +64,11 @@ const MaxBriefSize = 32 * 1024
 // synthesizer from the cross-entity graph log — never invent related-entity
 // bullets. If the LLM output contains a "## Related" section, it is stripped
 // before the authoritative one is appended.
-const SynthesisPromptSystem = `You maintain entity briefs in a team wiki. Given an existing brief and new facts, produce an updated markdown brief that incorporates the facts. Never invent facts. Preserve the canonical structure (sections, ordering). Mark contradictions explicitly with **Contradiction:** inline callouts rather than resolving them. Do not write a "## Related" section — that block is managed automatically from the cross-entity graph. Output ONLY the updated markdown, no explanation.`
+const SynthesisPromptSystem = `You maintain entity briefs in a team wiki. Given an existing brief and new facts, produce an updated markdown brief that incorporates the facts.
+
+Write like a short encyclopedia article, not a metadata dump. Open with one plain-language sentence that says what this person or company actually is and why they matter to the team — never "X is a company in the knowledge graph" and never a count of facts. Then weave the facts into readable prose grouped by topic. If only one thing is known, just state that one thing clearly in a sentence; do not pad it with empty sections or placeholders. As more facts arrive, expand the prose — the brief should get richer over time, never stay a stub.
+
+Hard rules: Never invent facts. Mark contradictions explicitly with **Contradiction:** inline callouts rather than resolving them. Do not restate fact counts, file paths, or internal IDs as if they were content. Do not write a "## Related" section — that block is managed automatically from the cross-entity graph. Output ONLY the updated markdown, no explanation.`
 
 // MaxRelatedEntries bounds the number of "## Related" bullets rendered in a
 // synthesized brief. Ten was the v1 ceiling in the roadmap — enough for a
@@ -369,7 +373,7 @@ func (s *EntitySynthesizer) runJob(ctx context.Context, job SynthesisJob) {
 func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) error {
 	relBrief := briefPath(job.Kind, job.Slug)
 	existingBrief, hadBrief := s.readBrief(relBrief)
-	_, _, lastFactCount := parseSynthesisFrontmatter(existingBrief)
+	_, lastSynthTS, lastFactCount := parseSynthesisFrontmatter(existingBrief)
 
 	facts, err := s.factLog.List(job.Kind, job.Slug)
 	if err != nil {
@@ -452,7 +456,20 @@ func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) er
 
 	now := time.Now().UTC()
 	factCount := len(facts)
-	newBody := applySynthesisFrontmatter(output, headSHA, now, factCount, existingBrief)
+
+	// Sentinel guard: when the brief has been edited from Obsidian since the
+	// last synthesis, preserve the user's body and land new synthesis content
+	// in a sentinel-wrapped "What we've learned" section instead of replacing
+	// the whole body. See WIKI-OBSIDIAN-COMPATIBILITY §6.3.
+	var rewritten string
+	if hadBrief && humanEditedSince(existingBrief, lastSynthTS) {
+		rewritten = applyLearnedSection(stripFrontmatter(existingBrief), output)
+	} else {
+		rewritten = output
+	}
+
+	newBody := applySynthesisFrontmatter(rewritten, headSHA, now, factCount, existingBrief)
+	newBody = applyTagsFrontmatter(newBody, deriveTagsFromBrief(existingBrief))
 
 	// Commit via the wiki queue under the archivist identity. We can't
 	// call CommitBootstrap because that's tree-wide + picks its own slug;
@@ -488,14 +505,7 @@ func (s *EntitySynthesizer) readBrief(relPath string) (string, bool) {
 
 // headSHA returns the current repo HEAD short SHA.
 func (s *EntitySynthesizer) headSHA(ctx context.Context) (string, error) {
-	repo := s.worker.Repo()
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	out, err := repo.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", err, out)
-	}
-	return strings.TrimSpace(out), nil
+	return wikiRepoHeadSHA(ctx, s.worker.Repo())
 }
 
 // briefPath resolves the canonical wiki path for an entity brief.

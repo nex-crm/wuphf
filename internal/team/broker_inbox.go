@@ -49,6 +49,12 @@ const (
 	InboxFilterBlocked          InboxFilter = "blocked"
 	InboxFilterApproved         InboxFilter = "approved"
 	InboxFilterAll              InboxFilter = "all"
+	// InboxFilterUnread narrows the unified inbox to items the caller
+	// has not yet acknowledged (item.updatedAt > cursor.lastSeenAt).
+	// Applied post-fetch in the /inbox/items handler because the
+	// cursor is per-actor, not per-bucket; the lifecycle bucket index
+	// has no notion of read state.
+	InboxFilterUnread InboxFilter = "unread"
 )
 
 // ErrInboxFilterUnknown is returned by Inbox when the caller passes a
@@ -96,6 +102,20 @@ type InboxRow struct {
 	SeveritySummary SeveritySummary `json:"severitySummary"`
 	ElapsedMs       int64           `json:"elapsedMs"`
 	ReviewerSummary ReviewerSummary `json:"reviewerSummary"`
+	// BlockedOn surfaces the task's typed-blocker list verbatim from
+	// teamTask.BlockedOn. Populated regardless of lifecycle state so the
+	// row can render dependency chips for any blocked-ish task; the
+	// frontend chooses when to show them.
+	BlockedOn []string `json:"blockedOn,omitempty"`
+	// Details is the free-text reason the broker last attached to the
+	// task. For blocked tasks this carries the actual "why" (agent
+	// timeout, agent error, manual block reason) so the inbox card does
+	// not have to guess. Truncated by the broker for inbox payload size.
+	Details string `json:"details,omitempty"`
+	// UpdatedAt is the RFC3339 timestamp of the task's last mutation.
+	// Used by the unread cursor on the client to mark rows whose latest
+	// change happened after the caller's LastSeenAt.
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 // InboxCounts is the cardinality summary that the inbox header renders.
@@ -111,6 +131,11 @@ type InboxCounts struct {
 	Running          int `json:"running"`
 	Blocked          int `json:"blocked"`
 	ApprovedToday    int `json:"approvedToday"`
+	// Unread is the number of items in the caller's unified inbox
+	// whose latest activity post-dates their InboxCursor.LastSeenAt.
+	// Computed by the /inbox/items handler from the auth-filtered item
+	// list — the lifecycle index has no per-actor read state.
+	Unread int `json:"unread"`
 }
 
 // InboxPayload is the full response to GET /tasks/inbox.
@@ -132,11 +157,20 @@ func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
 	case InboxFilterRunning:
 		return []LifecycleState{LifecycleStateRunning}, nil
 	case InboxFilterBlocked:
-		return []LifecycleState{LifecycleStateBlockedOnPRMerge}, nil
+		return []LifecycleState{LifecycleStateBlocked}, nil
 	case InboxFilterApproved:
 		return []LifecycleState{LifecycleStateApproved}, nil
 	case InboxFilterAll:
 		return CanonicalLifecycleStates(), nil
+	case InboxFilterUnread:
+		// Unread is a per-actor cursor-driven filter; the legacy
+		// task-only Inbox/inboxForActor path has no cursor context and
+		// would silently degrade to filter=all. The unified
+		// /inbox/items handler unwraps unread to all-states + a
+		// post-filter before calling here, so the only callers that
+		// can reach this branch are legacy entry points — return
+		// ErrInboxFilterUnknown for them.
+		return nil, ErrInboxFilterUnknown
 	default:
 		return nil, ErrInboxFilterUnknown
 	}
@@ -267,7 +301,7 @@ func (b *Broker) inboxCountsLocked(cutoff time.Time) InboxCounts {
 	counts := InboxCounts{
 		DecisionRequired: len(b.lifecycleIndex[LifecycleStateDecision]),
 		Running:          len(b.lifecycleIndex[LifecycleStateRunning]),
-		Blocked:          len(b.lifecycleIndex[LifecycleStateBlockedOnPRMerge]),
+		Blocked:          len(b.lifecycleIndex[LifecycleStateBlocked]),
 	}
 	for _, taskID := range b.lifecycleIndex[LifecycleStateApproved] {
 		task := b.findTaskByIDLocked(taskID)
@@ -295,6 +329,11 @@ func (b *Broker) buildInboxRowLocked(task *teamTask) InboxRow {
 		ReviewerSummary: ReviewerSummary{
 			Total: len(task.Reviewers),
 		},
+		UpdatedAt: task.UpdatedAt,
+		Details:   truncateSummary(strings.TrimSpace(task.Details), 280),
+	}
+	if len(task.BlockedOn) > 0 {
+		row.BlockedOn = append(row.BlockedOn, task.BlockedOn...)
 	}
 	if created := parseBrokerTimestamp(task.CreatedAt); !created.IsZero() {
 		row.ElapsedMs = time.Since(created).Milliseconds()

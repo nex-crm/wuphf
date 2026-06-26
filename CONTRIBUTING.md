@@ -82,6 +82,11 @@ If you're adding a feature on one surface, decide *and document* whether it shou
 - Conventional Commits enforced by commitlint. Allowed types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Free-form scopes (`fix(team):`, `feat(web):`).
 - Body lines ≤ 100 chars.
 - Always branch + draft PR. Never push to `main`.
+- Releases are opt-in. A merge to `main` cuts a release **only** when the
+  tip (squash) commit message contains the literal marker `[release]`. Put
+  it in the squash-commit message of a PR that should ship; routine merges
+  accumulate on `main` untagged. To release without the marker, run the
+  **Auto Release** workflow manually via `workflow_dispatch`.
 - PR description must include: net LOC delta, file-size allowlist diff (if applicable), bug-hunt findings (refactor PRs).
 - Run `bash scripts/test-go.sh`, `bash scripts/test-web.sh`, and
   `cd web && bun run build` before marking ready when the PR touches those

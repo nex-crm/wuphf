@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WUPHF</title>
+  <style>
+    html,body{margin:0;height:100%;background:#0b0b0d;color:#7a7a7a;
+      font-family:-apple-system,system-ui,sans-serif}
+    .c{display:flex;height:100%;align-items:center;justify-content:center;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="c">Opening your office…</div>
+  <script>
+    // The shell boots the in-process broker asynchronously. Poll the loopback
+    // origin and navigate once it answers, so we never hit a not-yet-bound port.
+    // Landing on the real http origin gives the SPA native SSE / WebSocket /
+    // WebAuthn (the wails:// scheme cannot carry a WebSocket on WKWebView).
+    // __WUPHF_TARGET__ is templated to the resolved office origin (an attached
+    // peer's URL, or the freshly-booted local URL) by the shell's asset-server
+    // middleware (desktop/oswails/bootstrap.go) at startup.
+    var url = "__WUPHF_TARGET__";
+    (function go(){
+      fetch(url, { mode: "no-cors" })
+        .then(function(){ window.location.replace(url); })
+        .catch(function(){ setTimeout(go, 300); });
+    })();
+  </script>
+</body>
+</html>

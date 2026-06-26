@@ -24,6 +24,77 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Classifies the PR diff so the heavy jobs below can skip a
+  # documentation-only change. Conservative by construction: any file
+  # that is not unambiguously docs flips non_docs=true and the full
+  # suite runs. Non-PR events (push to main, workflow_dispatch) also
+  # force non_docs=true — main always runs the full suite. The only
+  # inputs that skip the heavy jobs are PRs whose entire diff is
+  # markdown / docs / website payload. Cheap (~15s).
+  #
+  # Why a gate JOB and not `on: pull_request: paths-ignore:` — a
+  # path-filtered workflow never reports its required status checks, so
+  # a docs-only PR would sit blocked on permanently-pending
+  # lint/vet/build. A skipped JOB reports a `skipped` conclusion, which
+  # branch protection counts as satisfied. Do not "simplify" this into
+  # paths-ignore.
+  #
+  # `changes` is NOT itself a required check, so it must never be able
+  # to bypass one. Every gated job's `if:` therefore falls OPEN when
+  # this job does not succeed (`needs.changes.result != 'success'`):
+  # a failed/errored gate runs the full suite rather than skipping
+  # required jobs into a green merge. The only path that skips a
+  # required check is a deliberate `non_docs == 'false'` classification.
+  #
+  # The protocol job deliberately does NOT gate on this job — it protects
+  # wire invariants on every PR. shellcheck/npm-tests run
+  # unconditionally (cheap, and shellcheck must see any *.sh change).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      non_docs: ${{ steps.classify.outputs.non_docs }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || -z "${BASE_SHA}" ]]; then
+            echo "non_docs=true" >> "$GITHUB_OUTPUT"
+            echo "event=${GITHUB_EVENT_NAME}: running full suite."
+            exit 0
+          fi
+          files="$(git diff --name-only "${BASE_SHA}...HEAD" || true)"
+          if [[ -z "${files}" ]]; then
+            echo "non_docs=true" >> "$GITHUB_OUTPUT"
+            echo "empty/unavailable diff: running full suite."
+            exit 0
+          fi
+          non_docs=false
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            # Docs arm: ONLY non-buildable file types. Never add a code,
+            # config, or dependency pattern here — a match skips the
+            # whole heavy suite incl. required checks. `*.md`/`*.mdx`
+            # already cover markdown anywhere (incl. wiki under team/,
+            # index/), so directory globs here must not be widened to
+            # bare `team/*`/`index/*` — that would also match a stray
+            # `team/foo.go`. The `*)` default MUST stay non_docs=true;
+            # that fail-safe is the safety property of this classifier.
+            case "$f" in
+              *.md|*.mdx) ;;
+              docs/*|website/*) ;;
+              .github/ISSUE_TEMPLATE/*) ;;
+              *) non_docs=true; echo "non-doc change: $f" ;;
+            esac
+          done <<< "${files}"
+          echo "non_docs=${non_docs}" >> "$GITHUB_OUTPUT"
+          echo "classified diff: non_docs=${non_docs}"
+
   protocol:
     # @wuphf/protocol is the moat — branded types, receipt schema, IPC envelopes,
     # audit chain. The whole package is hand-rolled (no schema lib) precisely so
@@ -83,6 +154,21 @@ jobs:
         # COMPOSE — naming drift, missing exports, accidental API breaks
         # at the index.ts boundary. Cheap (<1s).
         run: bun run packages/protocol/scripts/demo.ts
+      - name: Frozen NFKC table drift check
+        # The moat normalises NFKC against frozen, version-pinned tables
+        # (src/nfkc-table.generated.ts + testdata/nfkc-table.json), derived
+        # from vendored UCD text. This step regenerates and fails if the
+        # committed tables drifted (a hand-edit, or a stale vendored file).
+        # `--require-runtime-match` makes the generator hard-fail unless this
+        # runner genuinely ships the pinned Unicode version — so its exhaustive
+        # frozenNfkc-vs-runtime proof actually runs here and cannot silently
+        # downgrade to a content-only check if the runner's ICU is bumped.
+        working-directory: packages/protocol
+        run: |
+          bun run scripts/generate-nfkc-table.ts --require-runtime-match
+          git -C "$GITHUB_WORKSPACE" diff --exit-code -- \
+            packages/protocol/src/nfkc-table.generated.ts \
+            packages/protocol/testdata/nfkc-table.json
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -98,200 +184,18 @@ jobs:
         working-directory: packages/protocol/testdata
         run: go run verifier-reference.go
 
-  broker:
-    # @wuphf/broker is the loopback HTTP/SSE/WebSocket boundary between
-    # the renderer and the broker process — DNS-rebinding guard, bearer
-    # auth, durable receipt store, cursor-paginated thread list. Local
-    # lefthook covers typecheck/test/invariants but a PR can still bypass
-    # them; this job is the CI floor. Path-gated to keep PRs that don't
-    # touch the broker fast. `packages/protocol` is in the gate because
-    # broker depends on it — a protocol type/wire change can break the
-    # broker compile while the broker tree looks "unchanged."
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version: "1.3.13"
-      - name: Detect broker changes
-        id: broker-changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
-            changed="$(git ls-files packages/broker packages/protocol package.json bun.lock)"
-          else
-            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/broker packages/protocol package.json bun.lock || true)"
-          fi
-
-          if [[ -n "${changed}" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Skip broker job when broker inputs are unchanged
-        if: ${{ steps.broker-changes.outputs.changed != 'true' }}
-        run: echo "No packages/broker, packages/protocol, root package.json, or bun.lock changes detected."
-      - name: Install workspace deps
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        run: bun install --frozen-lockfile
-      - name: Typecheck
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run typecheck
-      - name: Biome (lint + format check)
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run check
-      - name: Vitest
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run test
-      - name: Broker invariant checks
-        # No non-loopback bind constants, no electron imports, all
-        # @wuphf/protocol imports go through the package root, etc.
-        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
-        working-directory: packages/broker
-        run: bun run check:invariants
-
-  llm-router:
-    # @wuphf/llm-router is the cost chokepoint for provider calls. It
-    # depends on broker cost-ledger internals and the protocol cost receipt
-    # shapes, so path-gate those inputs together with the package itself.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version: "1.3.13"
-      - name: Detect llm-router changes
-        id: llm-router-changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
-            changed="$(git ls-files packages/llm-router packages/broker/src/cost-ledger packages/protocol/src/cost.ts packages/protocol/src/receipt-types.ts package.json bun.lock)"
-          else
-            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/llm-router packages/broker/src/cost-ledger packages/protocol/src/cost.ts packages/protocol/src/receipt-types.ts package.json bun.lock || true)"
-          fi
-
-          if [[ -n "${changed}" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Skip llm-router job when llm-router inputs are unchanged
-        if: ${{ steps.llm-router-changes.outputs.changed != 'true' }}
-        run: echo "No packages/llm-router, cost-ledger, cost protocol, root package.json, or bun.lock changes detected."
-      - name: Install workspace deps
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        run: bun install --frozen-lockfile
-      - name: Typecheck
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        working-directory: packages/llm-router
-        run: bun run typecheck
-      - name: Biome (lint + format check)
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        working-directory: packages/llm-router
-        run: bun run check
-      - name: Vitest
-        if: ${{ steps.llm-router-changes.outputs.changed == 'true' }}
-        working-directory: packages/llm-router
-        run: bun run test
-
-  desktop:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
-        with:
-          # desktop job needs bun 1.3+ for `bun audit --audit-level` to honor the
-          # threshold flag correctly (1.2.16 fails on moderate even when level=high).
-          # Rest of repo can bump in a follow-up.
-          bun-version: "1.3.13"
-      - name: Detect desktop changes
-        id: desktop-changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
-            changed="$(git ls-files apps/desktop package.json bun.lock)"
-          else
-            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- apps/desktop package.json bun.lock || true)"
-          fi
-
-          if [[ -n "${changed}" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Skip desktop job when desktop inputs are unchanged
-        if: ${{ steps.desktop-changes.outputs.changed != 'true' }}
-        run: echo "No apps/desktop, root package.json, or bun.lock changes detected."
-      - name: Install workspace deps
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        run: bun install --frozen-lockfile
-      - name: Typecheck
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run typecheck
-      - name: Lint
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run lint
-      - name: Test
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run test
-      - name: Coverage
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run test:coverage
-      - name: Vulnerability audit
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        # Scope to apps/desktop's dependency closure only. Auditing from the
-        # repo root pulls in every workspace (installer-stub's electron 33,
-        # electron-builder's transitive tar, etc.) which are tracked under
-        # apps/installer-stub's own gates and dependabot group, not desktop's.
-        working-directory: apps/desktop
-        run: bun audit --audit-level high
-      - name: IPC allowlist
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run check:ipc-allowlist
-      - name: Structural invariants
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run check:invariants
-      - name: Build
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run build
-      - name: Build-output externalization invariants
-        # Audits `out/{main,preload}/**.js` for two regressions a green
-        # build + green tests cannot catch:
-        # 1. workspace packages (`@wuphf/*`) leaking into the build as
-        #    runtime externals — their `exports` map to raw `./src/*.ts`,
-        #    which Node 22 strip-only TS would crash on at runtime
-        #    (e.g. parameter properties on `SqliteReceiptStore`'s private
-        #    constructor).
-        # 2. `better-sqlite3` getting inlined — its `bindings()` loader
-        #    needs the JS wrapper at its npm location to find the `.node`
-        #    sibling.
-        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
-        working-directory: apps/desktop
-        run: bun run check:build-externals
-
   web:
+    # Skipped on docs-only PRs (see the `changes` job). `web` produces the
+    # web-dist artifact consumed by the downstream Go build/test jobs.
+    # INVARIANT: every job that `needs: web` MUST also carry `web`'s
+    # `needs.changes` gate, so on a docs-only PR producer and consumers
+    # skip together. A `needs: web` job added without that gate would
+    # skip-cascade on docs-only PRs. (If `web` itself FAILS — e.g. a web
+    # typecheck break — consumers run and fail fast at download-artifact.
+    # That is intended: a broken web build must block the required
+    # `build` check, not skip it into a satisfied state.)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -344,6 +248,11 @@ jobs:
         run: exit 1
 
   lint:
+    # Skipped on docs-only PRs. `lint` is a required status check; a
+    # skipped required check satisfies branch protection, so docs-only
+    # PRs still merge.
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     # Single source of truth for govulncheck binary location. `go install`
     # writes to $GOBIN if set (else $GOPATH/bin), so pinning GOBIN here
@@ -368,18 +277,14 @@ jobs:
         # Skips generated files, tests, and documented fixture/vendor dirs.
         run: bash scripts/check-file-size.sh
       - name: Install ripgrep
-        # The Wails boundary check uses `rg --pcre2`. ripgrep is bundled in
-        # ubuntu-latest images today, but we install it explicitly so the
+        # A PCRE multiline grep check below uses `rg --pcre2`. ripgrep is bundled
+        # in ubuntu-latest images today, but we install it explicitly so the
         # check survives runner-image changes that drop preinstalled tools.
         run: |
           if ! command -v rg >/dev/null 2>&1; then
             sudo apt-get update
             sudo apt-get install -y ripgrep
           fi
-      - name: Wails import boundary self-test
-        run: bash scripts/check-wails-boundary-self-test.sh
-      - name: Wails import boundary
-        run: bash scripts/check-wails-boundary.sh
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -433,7 +338,7 @@ jobs:
       # would execute with CI privileges.
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # ratchet:golangci/golangci-lint-action@v9.2.0
         with:
-          version: v2.11.4
+          version: v2.12.2
           args: --timeout=5m
       - name: Cache govulncheck binary
         # The version below is pinned, so the compiled binary at
@@ -539,7 +444,9 @@ jobs:
   # the race detector. -timeout 15m is generous headroom over the ~3m
   # observed locally (race instrumentation 2-3x's wall-clock).
   go-test:
-    needs: web
+    # Skipped on docs-only PRs (see the `changes` job).
+    needs: [web, changes]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -628,7 +535,9 @@ jobs:
   # goreleaser's `goos:` happens to enumerate; if a future PR drops `windows`
   # from .goreleaser.yml, this is the gate that catches it independently.
   go-cross-build:
-    needs: web
+    # Skipped on docs-only PRs (see the `changes` job).
+    needs: [web, changes]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -660,6 +569,9 @@ jobs:
   # red x instead of being mixed into a test leg. golangci-lint runs vet
   # too but only what its govet linter enables.
   vet:
+    # Skipped on docs-only PRs (required check; skipped satisfies it).
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -670,7 +582,9 @@ jobs:
         run: go vet ./...
 
   build:
-    needs: web
+    # Skipped on docs-only PRs (required check; skipped satisfies it).
+    needs: [web, changes]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -688,6 +602,9 @@ jobs:
           ./wuphf --help-all > /dev/null
 
   vhs:
+    # Skipped on docs-only PRs (see the `changes` job).
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     env:
       VHS_VERSION: "v0.11.0"
@@ -769,7 +686,9 @@ jobs:
     # we kept shipping (React render crashes that only surface in a browser
     # — e.g. "No QueryClient set", Minified React error #31 on first agent
     # click) by booting wuphf, loading /, and walking the happy path.
-    needs: web
+    # Skipped on docs-only PRs (see the `changes` job).
+    needs: [web, changes]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -817,58 +736,12 @@ jobs:
           exit 0
           SH
           sudo chmod +x /usr/local/bin/claude
-      # The suite splits into two phases because App.tsx routes on
-      # onboardingComplete: fresh install → <Wizard>, seeded → <Shell>. One
-      # wuphf instance can only be in one state, so we boot twice.
-      #
-      # Phase 1: fresh install (wizard.spec.ts). No onboarded.json.
-      # Phase 2: seeded      (shell suite — smoke, chat, slash-commands, dm,
-      #                       mentions, interview). Write onboarded.json first.
-      # `</dev/null` on both boots prevents isPiped() from yanking wuphf into
-      # scanner mode.
-      - name: Start wuphf (fresh install) for wizard tests
-        # Run from /tmp — NOT the checkout root. `resolveTemplatesRepoRoot`
-        # walks up from cwd looking for templates/operations/, and would
-        # find it in the checkout, masking the "no repo on disk" path that
-        # `npx wuphf` / `curl | bash` users actually take. Running from
-        # /tmp forces the blueprint loader to go through the embedded FS
-        # wired in templates_embed.go, which is exactly the regression
-        # path the wizard.spec.ts blueprint-picker test guards.
-        run: |
-          rm -f "$HOME/.wuphf/onboarded.json"
-          wuphf_bin="$PWD/wuphf"
-          run_dir="$(mktemp -d)"
-          cd "$run_dir"
-          "$wuphf_bin" --no-open --broker-port 7890 --web-port 7891 --no-nex </dev/null > "$GITHUB_WORKSPACE/wuphf-wizard.log" 2>&1 &
-          echo $! > "$GITHUB_WORKSPACE/wuphf-wizard.pid"
-          # /onboarding/state is the authoritative readiness signal (the
-          # static index.html can 200 before the broker is fully wired).
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:7891/onboarding/state -o /dev/null; then
-              echo "wuphf ready (wizard) after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "wuphf failed to become ready (wizard)" >&2
-          cat "$GITHUB_WORKSPACE/wuphf-wizard.log" >&2
-          exit 1
-      - name: Run Playwright wizard smoke
-        working-directory: web/e2e
-        env:
-          WUPHF_E2E_BASE_URL: http://localhost:7891
-        run: bunx playwright test tests/wizard.spec.ts tests/wizard-error-states.spec.ts
-      - name: Stop wuphf (wizard phase)
-        if: always()
-        run: |
-          if [ -f wuphf-wizard.pid ]; then
-            kill "$(cat wuphf-wizard.pid)" 2>/dev/null || true
-          fi
-          # Wait for port 7891 to free up before Phase 2 tries to bind it.
-          for _ in $(seq 1 10); do
-            if ! (exec 3<>/dev/tcp/127.0.0.1/7891) 2>/dev/null; then break; fi
-            sleep 1
-          done
+      # The legacy two-phase split (Wizard then Shell) was removed in the
+      # onboarding-into-office redesign: the 9-step modal wizard is gone,
+      # replaced by a single pre-pick screen plus an in-Shell CEO DM. The
+      # PrePickScreen + in-office onboarding surfaces are covered by Vitest
+      # + RTL unit/integration tests in the npm-tests job; this e2e job
+      # now boots wuphf once in the seeded state for the shell suite.
       - name: Seed onboarding state + start wuphf for shell tests
         run: |
           mkdir -p "$HOME/.wuphf"
@@ -898,9 +771,10 @@ jobs:
             tests/route-matrix.spec.ts \
             tests/route-regressions.spec.ts \
             tests/sidebar-scroll.spec.ts \
+            tests/reviews-scroll.spec.ts \
+            tests/nex-connect.spec.ts \
             tests/chat.spec.ts \
             tests/slash-commands.spec.ts \
-            tests/dm.spec.ts \
             tests/mentions.spec.ts \
             tests/interview.spec.ts
       - name: Stop wuphf (shell phase)
@@ -923,13 +797,14 @@ jobs:
           name: wuphf-e2e-logs
           path: |
             wuphf.log
-            wuphf-wizard.log
           retention-days: 7
           if-no-files-found: ignore
 
   release-build:
     runs-on: ubuntu-latest
-    needs: web
+    # Skipped on docs-only PRs (see the `changes` job).
+    needs: [web, changes]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
@@ -1080,7 +955,9 @@ jobs:
   # bills at 2x Linux minutes; ~3 min wall clock = ~$0.008/PR. Worth it
   # because the regression vectors here are invisible to Linux/Mac CI.
   windows-smoke:
-    needs: web
+    # Skipped on docs-only PRs (see the `changes` job).
+    needs: [web, changes]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6

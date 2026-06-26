@@ -3,11 +3,33 @@
  * Mirrors every method from the legacy IIFE in index.legacy.html.
  */
 
+import type { InjectedAnalyticsConfig } from "../lib/analytics";
+import { trackOn } from "../lib/analytics";
+
 const apiBase = "/api";
 let brokerDirect = "http://localhost:7890";
 let useProxy = true;
 let token: string | null = null;
 const brokerHandshakeTimeoutMs = 8000;
+
+// The analytics config the broker injects via /api-token. Captured at boot so
+// RootRoute can configure PostHog without a second round trip. Null until
+// initApi runs (or when the broker omits the block, e.g. older servers).
+let injectedAnalytics: InjectedAnalyticsConfig | null = null;
+
+/** The PostHog runtime config the broker injected at boot, if any. */
+export function getInjectedAnalyticsConfig(): InjectedAnalyticsConfig | null {
+  return injectedAnalytics;
+}
+
+/** Coarse length bucket for a message body — never the content itself. */
+function lengthBucket(text: string): "empty" | "short" | "medium" | "long" {
+  const n = text.trim().length;
+  if (n === 0) return "empty";
+  if (n < 80) return "short";
+  if (n < 400) return "medium";
+  return "long";
+}
 
 // ── Init ──
 
@@ -19,6 +41,9 @@ export async function initApi(): Promise<void> {
     token = nextToken;
     if (brokerUrl) {
       brokerDirect = String(brokerUrl).replace(/\/+$/, "");
+    }
+    if (data && typeof data.analytics === "object" && data.analytics !== null) {
+      injectedAnalytics = data.analytics as InjectedAnalyticsConfig;
     }
     useProxy = true;
   } catch {
@@ -106,7 +131,7 @@ function baseURL(): string {
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (!useProxy && token) h.Authorization = `Bearer ${token}`;
+  if (token) h.Authorization = `Bearer ${token}`;
   return h;
 }
 
@@ -114,24 +139,137 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Default timeout for read (GET) requests. Without it, a wedged broker
+ * left every list surface on an eternal spinner (the Notebooks tab sat
+ * on "Loading bookshelf…" for 60s+ in the v3 eval) because plain
+ * `fetch` never gives up. 20s is generous for any healthy list
+ * endpoint while still letting surfaces flip to an honest
+ * "broker not responding — retry" state. Callers with a longer-running
+ * read can pass their own `timeoutMs`.
+ */
+export const GET_TIMEOUT_MS = 20_000;
+
+interface GetOptions {
+  signal?: AbortSignal;
+  /** Override the default GET_TIMEOUT_MS for slow endpoints. */
+  timeoutMs?: number;
+}
+
+/**
+ * Builds the signal for a GET: the caller's signal when provided,
+ * otherwise a timeout signal so no read can hang forever. Exported for
+ * the regression test pinning the no-eternal-spinner contract.
+ */
+export function getRequestSignal(options?: GetOptions): AbortSignal {
+  if (options?.signal) return options.signal;
+  return AbortSignal.timeout(options?.timeoutMs ?? GET_TIMEOUT_MS);
+}
+
+function describeGetError(err: unknown): Error | null {
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return new Error("Broker not responding — request timed out.");
+  }
+  return null;
+}
+
+/**
+ * Turn a broker error body into a human-readable message. The broker
+ * answers many failures with a JSON envelope (`{"error":"wiki backend
+ * is not active"}`); rendering that envelope verbatim leaked raw JSON
+ * into every surface that shows `err.message` (the wiki did exactly
+ * that during a broker wedge). When the body is JSON carrying a
+ * sentence-shaped `error`/`message` string, surface that string as
+ * plain text — sentence-cased with a trailing period. Code-shaped
+ * values (`store_busy`, no whitespace) are NOT prose; keep the raw
+ * body so programmatic consumers and error reports stay precise.
+ */
+export function humanizeApiErrorBody(bodyText: string): string | null {
+  if (!bodyText) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const rec = parsed as Readonly<Record<string, unknown>>;
+  // Envelopes that carry payload beyond the message (e.g. the wiki 409
+  // conflict shape with current_sha/current_content) are data, not prose —
+  // callers parse them out of the message text, so leave those intact.
+  if (Object.keys(rec).some((k) => k !== "error" && k !== "message")) {
+    return null;
+  }
+  const candidate = [rec.error, rec.message].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  if (!candidate) return null;
+  const text = candidate.trim();
+  // A code-like token (no whitespace) is not a sentence — leave it alone.
+  if (!/\s/.test(text)) return null;
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly bodyText: string;
+  readonly errorCode: string | null;
+  readonly retryAfter: string | null;
+
+  constructor(args: {
+    readonly status: number;
+    readonly statusText: string;
+    readonly bodyText: string;
+    readonly errorCode?: string | null;
+    readonly retryAfter?: string | null;
+  }) {
+    super(
+      humanizeApiErrorBody(args.bodyText) ??
+        (args.bodyText || `${args.status} ${args.statusText}`),
+    );
+    this.name = "ApiError";
+    this.status = args.status;
+    this.statusText = args.statusText;
+    this.bodyText = args.bodyText;
+    this.errorCode = args.errorCode ?? null;
+    this.retryAfter = args.retryAfter ?? null;
+  }
+}
+
 export async function get<T = unknown>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
+  options?: GetOptions,
 ): Promise<T> {
   let url = baseURL() + path;
   if (params) {
     const qs = Object.entries(params)
-      .filter(([, v]) => v !== null)
+      // Drop absent params. Both null AND undefined must be skipped — without
+      // the undefined check, String(undefined) serializes as the literal
+      // "undefined", which the broker then treats as a real filter value (e.g.
+      // ?provider=undefined silently blanked the integrations catalog).
+      .filter(([, v]) => v !== null && v !== undefined)
       .map(
         ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
       )
       .join("&");
     if (qs) url += `?${qs}`;
   }
-  const r = await fetch(url, { headers: authHeaders() });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: authHeaders(),
+      signal: getRequestSignal(options),
+    });
+  } catch (err) {
+    throw describeGetError(err) ?? err;
+  }
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -139,21 +277,33 @@ export async function get<T = unknown>(
 export async function getText(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
+  options?: GetOptions,
 ): Promise<string> {
   let url = baseURL() + path;
   if (params) {
     const qs = Object.entries(params)
-      .filter(([, v]) => v !== null)
+      // Drop absent params. Both null AND undefined must be skipped — without
+      // the undefined check, String(undefined) serializes as the literal
+      // "undefined", which the broker then treats as a real filter value (e.g.
+      // ?provider=undefined silently blanked the integrations catalog).
+      .filter(([, v]) => v !== null && v !== undefined)
       .map(
         ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
       )
       .join("&");
     if (qs) url += `?${qs}`;
   }
-  const r = await fetch(url, { headers: authHeaders() });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: authHeaders(),
+      signal: getRequestSignal(options),
+    });
+  } catch (err) {
+    throw describeGetError(err) ?? err;
+  }
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.text();
 }
@@ -170,8 +320,7 @@ export async function post<T = unknown>(
     signal: options.signal,
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -186,8 +335,7 @@ export async function put<T = unknown>(
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -207,8 +355,7 @@ export async function postWithTimeout<T = unknown>(
       signal: controller.signal,
     });
     if (!r.ok) {
-      const text = (await r.text().catch(() => "")).trim();
-      throw new Error(text || `${r.status} ${r.statusText}`);
+      throw await apiErrorFromResponse(r);
     }
     return r.json();
   } catch (err) {
@@ -231,8 +378,7 @@ export async function patch<T = unknown>(
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -247,10 +393,38 @@ export async function del<T = unknown>(
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
+}
+
+async function apiErrorFromResponse(response: Response): Promise<ApiError> {
+  const bodyText = (await response.text().catch(() => "")).trim();
+  return new ApiError({
+    status: response.status,
+    statusText: response.statusText,
+    bodyText,
+    errorCode: errorCodeFromBodyText(bodyText),
+    retryAfter: response.headers.get("Retry-After"),
+  });
+}
+
+function errorCodeFromBodyText(bodyText: string): string | null {
+  if (bodyText.length === 0) return null;
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+    const { error } = parsed as Readonly<Record<string, unknown>>;
+    return typeof error === "string" ? error : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── SSE ──
@@ -283,6 +457,22 @@ export interface Message {
   from: string;
   channel: string;
   content: string;
+  /**
+   * Server-assigned message kind. Empty/absent for plain chat. Known kinds:
+   *  - "agent_issue"        legacy agent-authored issue banner
+   *  - "system_auth_error"  system-authored provider-auth failure card (#933)
+   *  - "ceo_*"              onboarding cards (form_field, chip_row, etc.)
+   * The SPA's MessageBubble dispatches on this field to pick a renderer.
+   */
+  kind?: string;
+  /**
+   * Structured card payload for kinds that carry one. The broker marshals
+   * this from a Go json.RawMessage so consumers receive an inline JSON
+   * object (or array) — not a string. Consumers must treat every string
+   * field inside as plain text (defense in depth on top of the broker-side
+   * sanitizeContextValue).
+   */
+  payload?: unknown;
   redacted?: boolean;
   redaction_count?: number;
   redaction_reasons?: string[];
@@ -330,7 +520,11 @@ export function postMessage(
   };
   if (replyTo) body.reply_to = replyTo;
   if (tagged && tagged.length > 0) body.tagged = tagged;
-  return post<Message>("/messages", body);
+  return trackOn(post<Message>("/messages", body), "message_sent", {
+    is_reply: !!replyTo,
+    mention_count: tagged?.length ?? 0,
+    length_bucket: lengthBucket(content),
+  });
 }
 
 export function getThreadMessages(channel: string, threadId: string) {
@@ -376,8 +570,35 @@ export function fetchCommands() {
 // ── Members ──
 
 export interface ProviderBinding {
-  kind?: string;
+  // kind tags the runtime or gateway for this agent. Empty string means
+  // "inherit from global default". Use IsGatewayKind on a Kind to decide
+  // whether to render the runtime picker (LLM kinds) or a "Managed by
+  // <Gateway>" badge (gateway kinds) in the agent profile.
+  kind?: LLMProvider | "";
+  // model is the runtime-specific model identifier. Free-form on the wire —
+  // validated by each provider implementation, not at the schema layer.
+  // Common shapes: "claude-3-5-sonnet-latest", "gpt-4o", "llama3.1:8b".
   model?: string;
+  // openclaw is populated only when kind === "openclaw" — it carries the
+  // gateway-side session key + agent id. Set by the OpenClaw bridge bootstrap
+  // path, not by the per-agent runtime picker.
+  openclaw?: {
+    session_key?: string;
+    agent_id?: string;
+  };
+}
+
+// Helper for UI code: returns true when binding.kind is a gateway-controlled
+// tag. Per-agent runtime pickers and the AgentWizard should swap their UI to
+// a read-only "Managed by <Gateway>" pill when this returns true.
+export function isGatewayBinding(
+  binding: ProviderBinding | string | undefined,
+): boolean {
+  if (!binding) return false;
+  const kind = typeof binding === "string" ? binding : binding.kind;
+  return (
+    kind === "openclaw" || kind === "openclaw-http" || kind === "hermes-agent"
+  );
 }
 
 export interface OfficeMember {
@@ -476,24 +697,36 @@ export function getChannels() {
 }
 
 export function createChannel(slug: string, name: string, description: string) {
-  return post("/channels", {
-    action: "create",
-    slug,
-    name: name || slug,
-    description,
-    created_by: "you",
-  });
+  return trackOn(
+    post("/channels", {
+      action: "create",
+      slug,
+      name: name || slug,
+      description,
+      created_by: "you",
+    }),
+    "channel_created",
+    { kind: "channel" },
+  );
 }
 
 export function generateChannel(prompt: string) {
-  return postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000);
+  return trackOn(
+    postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000),
+    "channel_created",
+    { kind: "generated" },
+  );
 }
 
 export function createDM(agentSlug: string) {
-  return post<DMChannelResponse>("/channels/dm", {
-    members: ["human", agentSlug],
-    type: "direct",
-  });
+  return trackOn(
+    post<DMChannelResponse>("/channels/dm", {
+      members: ["human", agentSlug],
+      type: "direct",
+    }),
+    "channel_created",
+    { kind: "dm" },
+  );
 }
 
 // ── Requests ──
@@ -513,10 +746,6 @@ export interface SkillSimilarRef {
 }
 
 export interface InterviewMetadata {
-  /** Set on enhance_skill_proposal interviews (PR 7 task #15). */
-  enhances_slug?: string;
-  /** Set on ambiguous-band skill_proposal interviews (PR 7 task #15). */
-  similar_to_existing?: SkillSimilarRef;
   [key: string]: unknown;
 }
 
@@ -540,13 +769,49 @@ export interface AgentRequest {
   updated_at?: string;
   /** Echoes the entity slug the request is about (e.g. a skill name). */
   reply_to?: string;
-  /** Structured metadata. Used by the enhance-existing UX (PR 7 task #14). */
+  /** Structured metadata attached by the broker (kind-specific). */
   metadata?: InterviewMetadata;
-  /** Full candidate spec on enhance_skill_proposal interviews. */
-  enhance_candidate?: Skill;
   redacted?: boolean;
   redaction_count?: number;
   redaction_reasons?: string[];
+  /** Issue/task id this request belongs to, when the owner agent
+   * filed the request from inside an owned Issue. The Inbox card
+   * renders a breadcrumb when set so the human sees the parent
+   * Issue at a glance. */
+  issue_id?: string;
+  /** Integration platform slug + logo for integration-scoped cards
+   * (connect, fallback, and external-action approvals). Drives the
+   * toolkit logo + OAuth target. Empty for non-integration requests. */
+  platform?: string;
+  logo_url?: string;
+  /** Structured external-action payload (slice 4b): typed fields + the
+   * masked raw HTTP envelope the approval card renders behind its raw
+   * toggle. Absent for legacy approvals (the card falls back to the
+   * parsed context string). */
+  action?: ActionApprovalPayload;
+  /** Set when the action gate could not reach the resolver and degraded
+   * to approval-only, so the connection state is unconfirmed. The card
+   * surfaces a warning (review LOW #5). */
+  connection_unverified?: boolean;
+}
+
+/** The masked HTTP request an external action would send. Secrets are
+ * already redacted server-side; this is display-only. */
+export interface ActionEnvelope {
+  method?: string;
+  url?: string;
+  headers?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+}
+
+export interface ActionApprovalPayload {
+  platform?: string;
+  action_id?: string;
+  verb?: string;
+  name?: string;
+  logo_url?: string;
+  account?: { name?: string; key?: string };
+  raw_envelope?: ActionEnvelope;
 }
 
 export function getRequests(channel: string) {
@@ -573,11 +838,68 @@ export function answerRequest(
 ) {
   const body: Record<string, string> = { id, choice_id: choiceId };
   if (customText) body.custom_text = customText;
-  return post("/requests/answer", body);
+  return trackOn(post("/requests/answer", body), "interview_answered", {
+    has_custom_text: !!customText,
+  });
 }
 
 export function cancelRequest(id: string) {
   return post("/requests", { action: "cancel", id });
+}
+
+export interface ActionGrant {
+  id: string;
+  agent_slug: string;
+  platform: string;
+  action_scope: string;
+  channel?: string;
+  issue_id?: string;
+  granted_by: string;
+  granted_at: string;
+  expires_at?: string;
+  revoked_at?: string;
+}
+
+export interface CreateActionGrantInput {
+  agentSlug: string;
+  platform: string;
+  /** A concrete action_id — never a wildcard. The broker rejects "*". */
+  actionScope: string;
+  channel?: string;
+  issueId?: string;
+}
+
+// Mints a scoped grant so the resolver auto-approves exactly this
+// (agent, platform, action_id) without re-prompting. Backs the approval
+// modal's "Approve & always allow" button (deterministic-integrations slice 5b).
+export function createActionGrant(input: CreateActionGrantInput) {
+  return trackOn(
+    post<{ grant: ActionGrant }>("/integrations/grants", {
+      action: "grant",
+      agent_slug: input.agentSlug,
+      platform: input.platform,
+      action_scope: input.actionScope,
+      channel: input.channel,
+      issue_id: input.issueId,
+    }),
+    "integration_action",
+    { action: "grant", platform: input.platform },
+  );
+}
+
+export function getActionGrants() {
+  return get<{ grants: ActionGrant[] }>("/integrations/grants");
+}
+
+export function revokeActionGrant(id: string) {
+  return trackOn(
+    post<{ grant: ActionGrant }>("/integrations/grants", {
+      action: "revoke",
+      id,
+    }),
+    "integration_action",
+    { action: "revoke" },
+  );
 }
 
 // ── Signals / Decisions / Watchdogs / Actions ──
@@ -616,333 +938,32 @@ export function deletePolicy(id: string) {
   return del("/policies", { id });
 }
 
-// ── Scheduler ──
-
-export interface SchedulerJob {
-  id?: string;
-  slug?: string;
-  name?: string;
-  label?: string;
-  kind?: string;
-  cron?: string;
-  next_run?: string;
-  last_run?: string;
-  due_at?: string;
-  status?: string;
-  /** Interval-driven cadence in minutes (system crons + interval workflows). */
-  interval_minutes?: number;
-  /** Cron expression for cron-driven workflow jobs. */
-  schedule_expr?: string;
-  /** Provider that owns this job (e.g. "system", "agent", "workflow"). */
-  provider?: string;
-  /** Target type ("workflow" | "skill" | …) when surfaced by the runtime. */
-  target_type?: string;
-  target_id?: string;
-  // PR 8 Lane G/H — cron registry surface fields.
-  /** Whether the cron is currently enabled. */
-  enabled?: boolean;
-  /** Human override for the cadence in minutes. 0/missing = use default. */
-  interval_override?: number;
-  /** "ok" | "failed" — chip on the row. */
-  last_run_status?: string;
-  /** True for crons that self-register at broker startup. */
-  system_managed?: boolean;
-}
-
-export function getScheduler(opts?: { dueOnly?: boolean }) {
-  const params: Record<string, string> = {};
-  if (opts?.dueOnly) params.due_only = "true";
-  return get<{ jobs: SchedulerJob[] }>("/scheduler", params);
-}
-
-export interface PatchSchedulerJobBody {
-  enabled?: boolean;
-  /** Minutes; 0 clears the override. Must be >= the cron's MinFloor. */
-  interval_override?: number;
-}
-
-export interface PatchSchedulerJobResponse {
-  job: SchedulerJob;
-}
-
-/**
- * Update the enabled flag and / or interval_override for a scheduler job.
- * Backed by PATCH /scheduler/{slug} (PR 8 Lane G).
- */
-export function patchSchedulerJob(
-  slug: string,
-  body: PatchSchedulerJobBody,
-): Promise<PatchSchedulerJobResponse> {
-  return patch<PatchSchedulerJobResponse>(
-    `/scheduler/${encodeURIComponent(slug)}`,
-    body,
-  );
-}
-
-/**
- * Wire shape for one entry from GET /scheduler/system-specs.
- * Mirrors systemCronSpecJSON in internal/team/broker_scheduler.go.
- */
-export interface SystemCronSpec {
-  slug: string;
-  min_floor_minutes: number;
-  default_interval_minutes: number;
-  description: string;
-}
-
-/**
- * Fetch the system-cron spec registry from the broker so the UI can
- * derive per-slug MinFloor values at runtime instead of maintaining a
- * hardcoded mirror constant.
- */
-export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
-  const res = await get<{ specs: SystemCronSpec[] }>("/scheduler/system-specs");
-  return res.specs ?? [];
-}
-
-/**
- * Force-trigger a scheduler job once, immediately. Does not affect the
- * recurring schedule or next_run. Backed by POST /scheduler/{slug}/run (PR 9).
- */
-export async function runSchedulerJob(
-  slug: string,
-): Promise<{ triggered: boolean; slug: string; at: string }> {
-  return post<{ triggered: boolean; slug: string; at: string }>(
-    `/scheduler/${encodeURIComponent(slug)}/run`,
-  );
-}
-
-// ── Skills ──
-
-export type SkillStatus = "active" | "proposed" | "archived" | "disabled";
-
-export interface SkillMetadata {
-  wuphf?: {
-    source_articles?: string[];
-  };
-}
-
-export type OwnerAgents = string[];
-
-export interface Skill {
-  name: string;
-  title?: string;
-  description?: string;
-  source?: string;
-  content?: string;
-  trigger?: string;
-  parameters?: unknown;
-  status?: SkillStatus;
-  created_by?: string;
-  created_at?: string;
-  updated_at?: string;
-  /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
-  owner_agents?: OwnerAgents;
-  /** Set on ambiguous-band proposals by the similarity gate (PR 7 task #15). */
-  similar_to_existing?: SkillSimilarRef;
-  metadata?: SkillMetadata;
-}
-
-export type SkillsListScope = "active" | "all";
-
-export function getSkills() {
-  return get<{ skills: Skill[] }>("/skills");
-}
-
-/**
- * Fetch the skill catalog. With scope="all" the legacy /skills endpoint
- * accepts include_archived + include_disabled flags (PR 7 task #18) so the
- * Skills app can render every section (Pending / Active / Disabled /
- * Archived) from a single query — keeping body content intact for the
- * SidePanel preview and the enhance-existing patchSkill flow.
- *
- * scope="active" returns the legacy default (active + proposed + disabled,
- * archived hidden) for callers that don't need the archived bucket.
- */
-export function getSkillsList(scope: SkillsListScope = "all") {
-  const params: Record<string, string> = {};
-  if (scope === "all") {
-    params.include_archived = "true";
-    params.include_disabled = "true";
-  }
-  return get<{ skills: Skill[] }>("/skills", params);
-}
-
-export interface DisableSkillResponse {
-  skill?: Skill;
-}
-
-export function disableSkill(name: string): Promise<DisableSkillResponse> {
-  return post<DisableSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/disable`,
-    {},
-  );
-}
-
-export interface EnableSkillResponse {
-  skill?: Skill;
-}
-
-export function enableSkill(name: string): Promise<EnableSkillResponse> {
-  return post<EnableSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/enable`,
-    {},
-  );
-}
-
-export interface RestoreArchivedSkillResponse {
-  skill?: Skill;
-}
-
-export function restoreArchivedSkill(
-  name: string,
-): Promise<RestoreArchivedSkillResponse> {
-  return post<RestoreArchivedSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/restore`,
-    {},
-  );
-}
-
-export interface ArchiveSkillResponse {
-  ok?: boolean;
-  skill?: Skill;
-}
-
-export function archiveSkill(name: string): Promise<ArchiveSkillResponse> {
-  return post<ArchiveSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/archive`,
-    {},
-  );
-}
-
-export interface InvokeSkillResult {
-  channel?: string;
-  skill?: Skill;
-  task_id?: string;
-}
-
-export function invokeSkill(
-  name: string,
-  params?: Record<string, unknown>,
-): Promise<InvokeSkillResult> {
-  return post<InvokeSkillResult>(
-    `/skills/${encodeURIComponent(name)}/invoke`,
-    params ?? {},
-  );
-}
-
-// ── Skill compile (PR 1a wiki-skill-compile) ──
-
-export interface CompileError {
-  slug: string;
-  reason: string;
-}
-
-export interface CompileResult {
-  scanned: number;
-  matched: number;
-  proposed: number;
-  deduped: number;
-  rejected_by_guard: number;
-  errors: CompileError[];
-  duration_ms: number;
-  trigger: string;
-}
-
-export interface CompileQueued {
-  queued: true;
-}
-
-export interface CompileSkipped {
-  skipped: string;
-}
-
-export type CompileResponse = CompileResult | CompileQueued | CompileSkipped;
-
-export function compileSkills(opts?: {
-  dry_run?: boolean;
-  scope_path?: string;
-}) {
-  return post<CompileResponse>("/skills/compile", opts ?? {});
-}
-
-export interface SkillCompileStats {
-  last_run_at?: string;
-  total_runs?: number;
-  total_proposed?: number;
-  total_deduped?: number;
-  total_rejected_by_guard?: number;
-  [key: string]: unknown;
-}
-
-export function getSkillCompileStats() {
-  return get<SkillCompileStats>("/skills/compile/stats");
-}
-
-export interface ApproveSkillResponse {
-  skill?: Skill;
-}
-
-export function approveSkill(name: string): Promise<ApproveSkillResponse> {
-  return post<ApproveSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/approve`,
-    {},
-  );
-}
-
-export interface RejectSkillResponse {
-  ok: boolean;
-  undo_token: string;
-  skill_name: string;
-  expires_in: number;
-}
-
-export function rejectSkill(
-  name: string,
-  reason?: string,
-): Promise<RejectSkillResponse> {
-  return post<RejectSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/reject`,
-    reason ? { reason } : {},
-  );
-}
-
-export interface UndoRejectSkillResponse {
-  skill?: Skill;
-}
-
-export function undoRejectSkill(
-  undoToken: string,
-): Promise<UndoRejectSkillResponse> {
-  return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
-    undo_token: undoToken,
-  });
-}
-
-export interface PatchSkillRequest {
-  old_string: string;
-  new_string: string;
-  replace_all?: boolean;
-}
-
-export interface PatchSkillResponse {
-  skill?: Skill;
-}
-
-/**
- * Edit-tool style find/replace patch against a skill's body.
- * Used by the enhance-existing flow (PR 7 task #14) to fold a candidate
- * proposal into an existing skill without losing provenance.
- */
-export function patchSkill(
-  name: string,
-  body: PatchSkillRequest,
-): Promise<PatchSkillResponse> {
-  return post<PatchSkillResponse>(
-    `/skills/${encodeURIComponent(name)}/patch`,
-    body,
-  );
-}
+// ── Scheduler / Routines ──
+// Moved to ./scheduler.ts; re-exported here for back-compat with existing
+// imports from "./api/client" or "../api/client".
+export type {
+  CreateSchedulerJobBody,
+  PatchSchedulerJobBody,
+  PatchSchedulerJobResponse,
+  SchedulerActivity,
+  SchedulerJob,
+  SchedulerRevision,
+  SchedulerRun,
+  SystemCronSpec,
+} from "./scheduler";
+export {
+  createSchedulerJob,
+  getScheduler,
+  getSchedulerActivity,
+  getSchedulerRevisions,
+  getSchedulerRuns,
+  getSystemCronSpecs,
+  patchSchedulerJob,
+  restoreSchedulerRevision,
+  runSchedulerJob,
+} from "./scheduler";
+// ── Skills (moved to ./skills to respect the file-size budget) ──
+export * from "./skills";
 
 // ── Memory ──
 
@@ -956,15 +977,30 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 // ── Config (Settings) ──
 
-export type LLMProvider =
+// LLMRuntimeKind names a directly-dispatchable LLM runtime — the kinds that
+// belong in any runtime picker (Settings default-runtime, AgentProfilePanel
+// Runtime section, AgentWizard provider field). Mirrors the non-gateway
+// subset returned by provider.LLMProviderKinds in the Go layer.
+export type LLMRuntimeKind =
   | "claude-code"
   | "ollama"
   | "codex"
   | "opencode"
   | "mlx-lm"
-  | "exo"
-  | "hermes-agent"
-  | "openclaw-http";
+  | "exo";
+
+// GatewayKind names a runtime that is reached through an integration gateway
+// rather than dispatched directly. Gateway-bound agents are imported via the
+// Integrations app (OpenClaw / Hermes) and never appear in runtime pickers;
+// they receive a "Managed by <Gateway>" badge on the agent profile.
+export type GatewayKind = "openclaw" | "openclaw-http" | "hermes-agent";
+
+// LLMProvider is the union of both — used wherever a value carries either an
+// LLM runtime or a gateway tag (per-agent ProviderBinding.Kind on the wire,
+// ConfigSnapshot.llm_provider for backward compatibility). New UI code should
+// prefer LLMRuntimeKind / GatewayKind and only widen to LLMProvider at the
+// raw-wire boundary.
+export type LLMProvider = LLMRuntimeKind | GatewayKind;
 export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
 
@@ -1000,6 +1036,15 @@ export interface ConfigSnapshot {
   llm_provider?: LLMProvider;
   llm_provider_configured?: boolean;
   llm_provider_priority?: string[];
+  // llm_provider_kinds is the non-gateway subset of registered runtimes —
+  // the safe list to render in any runtime picker. Read this off the wire
+  // instead of hardcoding the union so a future provider registered on the
+  // Go side appears in the UI without a frontend change.
+  llm_provider_kinds?: LLMRuntimeKind[];
+  // gateway_kinds is the inverse — the registered gateway runtimes. The
+  // Integrations app enumerates these to know which gateway cards (OpenClaw,
+  // Hermes) are compiled in and connectable.
+  gateway_kinds?: GatewayKind[];
   provider_endpoints?: Record<string, ProviderEndpoint>;
   memory_backend?: MemoryBackend;
   action_provider?: ActionProvider;
@@ -1035,11 +1080,18 @@ export interface ConfigSnapshot {
   telegram_token_set?: boolean;
   openclaw_token_set?: boolean;
   openclaw_gateway_url?: string;
+  // Product-analytics consent (PostHog). Both default true. `analytics_configured`
+  // reports whether the broker injects a key; the frontend ORs it with its own
+  // build-time key to decide whether the toggles are meaningful to show.
+  analytics_telemetry_enabled?: boolean;
+  analytics_session_recording_enabled?: boolean;
+  analytics_configured?: boolean;
   config_path?: string;
 }
 
 export type ConfigUpdate = Partial<{
-  llm_provider: LLMProvider;
+  llm_provider: LLMProvider | "";
+  llm_provider_priority: LLMRuntimeKind[];
   provider_endpoints: Record<string, ProviderEndpoint>;
   memory_backend: MemoryBackend;
   action_provider: ActionProvider;
@@ -1070,6 +1122,9 @@ export type ConfigUpdate = Partial<{
   telegram_bot_token: string;
   openclaw_token: string;
   openclaw_gateway_url: string;
+  // Product-analytics consent toggles.
+  analytics_telemetry_enabled: boolean;
+  analytics_session_recording_enabled: boolean;
 }>;
 
 export function getConfig() {

@@ -957,10 +957,73 @@ func memoryWorkflowTimestamp(timestamp string, task *teamTask) string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
+// cloneTeamTaskForRollback returns a deep copy of the task: every slice and
+// pointer field is re-allocated so the clone shares no mutable memory with
+// the original. Two consumers rely on the depth:
+//   - mutation-snapshot rollback (restoring a clone must not alias state a
+//     failed mutation already touched), and
+//   - read snapshots handed out of the lock (ListTasks copies tasks under
+//     b.mu and the HTTP handler serializes the copies AFTER releasing it —
+//     in-place mutations like Ledger appends must not race the encoder;
+//     F1.b, ten-out-of-ten Wave F).
 func cloneTeamTaskForRollback(task teamTask) teamTask {
 	cloned := task
 	if task.DependsOn != nil {
 		cloned.DependsOn = append([]string(nil), task.DependsOn...)
+	}
+	if task.BlockedOn != nil {
+		cloned.BlockedOn = append([]string(nil), task.BlockedOn...)
+	}
+	if task.Reviewers != nil {
+		cloned.Reviewers = append([]string(nil), task.Reviewers...)
+	}
+	if task.Tags != nil {
+		cloned.Tags = append([]string(nil), task.Tags...)
+	}
+	if task.Ledger != nil {
+		cloned.Ledger = make([]TaskLedgerEntry, len(task.Ledger))
+		for i, e := range task.Ledger {
+			if e.Actions != nil {
+				e.Actions = append([]string(nil), e.Actions...)
+			}
+			if e.ContextUsed != nil {
+				e.ContextUsed = append([]string(nil), e.ContextUsed...)
+			}
+			cloned.Ledger[i] = e
+		}
+	}
+	if task.Verification != nil {
+		v := *task.Verification
+		cloned.Verification = &v
+	}
+	if task.VerificationResult != nil {
+		vr := *task.VerificationResult
+		cloned.VerificationResult = &vr
+	}
+	if task.Definition != nil {
+		def := *task.Definition
+		if def.Deliverables != nil {
+			def.Deliverables = append([]TaskDeliverable(nil), def.Deliverables...)
+		}
+		if def.SuccessCriteria != nil {
+			def.SuccessCriteria = append([]string(nil), def.SuccessCriteria...)
+		}
+		if def.AccessNeeded != nil {
+			def.AccessNeeded = append([]string(nil), def.AccessNeeded...)
+		}
+		cloned.Definition = &def
+	}
+	if task.ChangesRequested != nil {
+		obj := *task.ChangesRequested
+		cloned.ChangesRequested = &obj
+	}
+	if task.HumanObjection != nil {
+		obj := *task.HumanObjection
+		cloned.HumanObjection = &obj
+	}
+	if task.HumanNotePending != nil {
+		note := *task.HumanNotePending
+		cloned.HumanNotePending = &note
 	}
 	cloned.MemoryWorkflow = cloneMemoryWorkflow(task.MemoryWorkflow)
 	return cloned

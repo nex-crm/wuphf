@@ -25,7 +25,7 @@ import "strings"
 const defaultMaxMessages = 500
 
 func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
-	msg = sanitizeChannelMessageSecrets(msg)
+	// redaction removed (core-loop R1)
 	// Tag the message with the sender's current in-flight task so
 	// the agent-context builder can suppress pre-review chatter from
 	// downstream consumers. Already-stamped messages (system posts
@@ -41,6 +41,16 @@ func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 		// back to channel-only when ReplyTo is unset.
 		if taskID := b.activeOwnerTaskIDLocked(msg.From, msg.Channel, msg.ReplyTo); taskID != "" {
 			msg.SourceTaskID = taskID
+			// Chain the agent's task message into the task's thread so the
+			// thread-scoped context (ThreadMessageIDs walks ReplyTo) actually
+			// contains the agent's own work — otherwise a task turn would see
+			// only the bare root card and miss its collaborators' replies.
+			// Only fills an empty ReplyTo; an explicit in-thread reply wins.
+			if strings.TrimSpace(msg.ReplyTo) == "" {
+				if t := b.findTaskByIDLocked(taskID); t != nil && strings.TrimSpace(t.ThreadID) != "" {
+					msg.ReplyTo = strings.TrimSpace(t.ThreadID)
+				}
+			}
 		}
 	}
 	b.messages = append(b.messages, msg)
@@ -64,7 +74,7 @@ func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 
 // activeOwnerTaskIDLocked returns the task ID for the most recently-
 // updated task owned by `slug` that's in a pre-merge lifecycle state
-// (running, review, decision, blocked_on_pr_merge, changes_requested)
+// (running, review, decision, blocked, changes_requested)
 // AND is scoped to the message context (channel + optional thread).
 //
 // Scoping rules:
@@ -132,7 +142,7 @@ func lifecycleStateIsPreMerge(s LifecycleState) bool {
 	case LifecycleStateRunning,
 		LifecycleStateReview,
 		LifecycleStateDecision,
-		LifecycleStateBlockedOnPRMerge,
+		LifecycleStateBlocked,
 		LifecycleStateChangesRequested:
 		return true
 	}
@@ -159,8 +169,6 @@ func (b *Broker) publishActionLocked(action officeActionLog) {
 }
 
 func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
-	activity.Activity = redactSecretsInText(activity.Activity)
-	activity.Detail = redactSecretsInText(activity.Detail)
 	for _, ch := range b.activitySubscribers {
 		select {
 		case ch <- activity:

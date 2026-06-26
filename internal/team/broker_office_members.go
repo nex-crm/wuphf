@@ -43,16 +43,15 @@ type officeMemberListEntry struct {
 }
 
 type officeMemberMutationBody struct {
-	Action         string                    `json:"action"`
-	Slug           string                    `json:"slug"`
-	Name           string                    `json:"name"`
-	Role           string                    `json:"role"`
-	Expertise      []string                  `json:"expertise"`
-	Personality    string                    `json:"personality"`
-	PermissionMode string                    `json:"permission_mode"`
-	AllowedTools   []string                  `json:"allowed_tools"`
-	CreatedBy      string                    `json:"created_by"`
-	Provider       *provider.ProviderBinding `json:"provider,omitempty"`
+	Action       string                    `json:"action"`
+	Slug         string                    `json:"slug"`
+	Name         string                    `json:"name"`
+	Role         string                    `json:"role"`
+	Expertise    []string                  `json:"expertise"`
+	Personality  string                    `json:"personality"`
+	AllowedTools []string                  `json:"allowed_tools"`
+	CreatedBy    string                    `json:"created_by"`
+	Provider     *provider.ProviderBinding `json:"provider,omitempty"`
 }
 
 type officeMemberMutationResult struct {
@@ -155,6 +154,10 @@ func cloneOfficeMemberForRead(member officeMember) officeMember {
 		openclaw := *member.Provider.Openclaw
 		clone.Provider.Openclaw = &openclaw
 	}
+	if member.Provider.Slack != nil {
+		slack := *member.Provider.Slack
+		clone.Provider.Slack = &slack
+	}
 	return clone
 }
 
@@ -229,15 +232,14 @@ func (b *Broker) createOfficeMember(r *http.Request, slug string, body officeMem
 		}
 	}
 	member := officeMember{
-		Slug:           slug,
-		Name:           strings.TrimSpace(body.Name),
-		Role:           strings.TrimSpace(body.Role),
-		Expertise:      normalizeStringList(body.Expertise),
-		Personality:    strings.TrimSpace(body.Personality),
-		PermissionMode: strings.TrimSpace(body.PermissionMode),
-		AllowedTools:   normalizeStringList(body.AllowedTools),
-		CreatedBy:      strings.TrimSpace(body.CreatedBy),
-		CreatedAt:      now,
+		Slug:         slug,
+		Name:         strings.TrimSpace(body.Name),
+		Role:         strings.TrimSpace(body.Role),
+		Expertise:    normalizeStringList(body.Expertise),
+		Personality:  strings.TrimSpace(body.Personality),
+		AllowedTools: normalizeStringList(body.AllowedTools),
+		CreatedBy:    strings.TrimSpace(body.CreatedBy),
+		CreatedAt:    now,
 	}
 	if body.Provider != nil {
 		member.Provider = *body.Provider
@@ -478,9 +480,6 @@ func (b *Broker) updateOfficeMember(r *http.Request, slug string, body officeMem
 	if body.Personality != "" {
 		member.Personality = strings.TrimSpace(body.Personality)
 	}
-	if body.PermissionMode != "" {
-		member.PermissionMode = strings.TrimSpace(body.PermissionMode)
-	}
 	if body.AllowedTools != nil {
 		member.AllowedTools = normalizeStringList(body.AllowedTools)
 	}
@@ -495,6 +494,21 @@ func (b *Broker) updateOfficeMember(r *http.Request, slug string, body officeMem
 	}
 	responseMember := *member
 	b.mu.Unlock()
+	// Provider-switch hand-off: when the user reroutes an existing agent to a
+	// new runtime, the old runtime's per-agent state must not leak into the
+	// new one. The Claude session store keeps a resume id keyed by slug —
+	// reading that on the next turn would attempt to resume a dead
+	// conversation on a runtime that no longer owns it. Clear it
+	// unconditionally on a provider change (idempotent if the slug has no
+	// stored session) so the next dispatch starts clean.
+	//
+	// OpenClaw transitions are handled separately above (attach/detach the
+	// gateway subscription). Pane teardown for switches off claude-code is
+	// the launcher's job — it sees the same member_updated event we publish
+	// below and reconciles via reconcileMemberRuntime in launcher_reconfigure.
+	if providerChanged && oldBinding.Kind != newBinding.Kind {
+		provider.ResetClaudeSessionFor(slug)
+	}
 	// Match the create/remove paths so SSE subscribers learn about updated
 	// member metadata (provider switch, name changes, channel reassignment)
 	// instead of waiting for a full reload.

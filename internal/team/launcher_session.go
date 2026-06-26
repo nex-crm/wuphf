@@ -71,6 +71,10 @@ func (l *Launcher) Kill() error {
 	// still alive to release any open handles (harmless, but principle of
 	// least surprise).
 	l.cleanupAgentTempFiles()
+	// Clear the office.json attach sidecar on every shutdown path (both the
+	// headless-web and pane runtimes) so a clean exit never leaves a front-end
+	// pointing at a dead URL. (office.pid clearing stays runtime-specific below.)
+	_ = clearOfficeInfo()
 	if !l.targeter().UsesPaneRuntime() {
 		if err := killPersistedOfficeProcess(); err != nil {
 			return err

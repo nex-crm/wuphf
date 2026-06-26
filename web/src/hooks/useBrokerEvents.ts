@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { initApi, sseURL } from "../api/client";
+import { initApi } from "../api/client";
+import { openSharedEventStream } from "../api/eventStream";
 import { GOVERNOR_QUERY_KEY } from "../api/governor";
 import {
   type AgentActivitySnapshot,
@@ -10,6 +11,11 @@ import {
 } from "../stores/app";
 
 const RECONNECT_GRACE_MS = 5000;
+
+// Usage refreshes are bound to agent activity (a turn settling is what
+// moves the meter) but throttled so a chatty activity stream doesn't
+// turn into a /usage request per event.
+const USAGE_INVALIDATE_THROTTLE_MS = 10_000;
 
 function activeBrokerChannel(): string | null {
   // SSE handler runs outside the React tree. Parse window.location.hash
@@ -78,10 +84,8 @@ export function useBrokerEvents(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
 
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES) return;
-
-    const source = new ES(sseURL("/events"));
+    const source = openSharedEventStream();
+    if (!source) return;
     let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
     function clearGrace(): void {
@@ -99,7 +103,7 @@ export function useBrokerEvents(enabled: boolean) {
         // auto-reconnected silently inside the 5s window without firing
         // an onopen we noticed. This avoids flagging a transient blip
         // as a sustained disconnect.
-        if (source.readyState !== source.OPEN) {
+        if (source?.readyState !== source?.OPEN) {
           setIsReconnecting(true);
         }
       }, RECONNECT_GRACE_MS);
@@ -132,7 +136,19 @@ export function useBrokerEvents(enabled: boolean) {
       void queryClient.invalidateQueries({ queryKey: ["thread-messages"] });
       void queryClient.invalidateQueries({ queryKey: ["office-members"] });
       void queryClient.invalidateQueries({ queryKey: ["channel-members"] });
+      // Refresh onboarding state on every message: the deterministic CEO
+      // wizard (broker_onboarding_phase2.advancePhase + advanceAfterScan)
+      // mutates s.PendingSuggestion in lockstep with the CEO DM message it
+      // appends, but those mutations have no dedicated SSE event yet. Without
+      // this nudge the chat surface can sit on a stale pending suggestion for
+      // up to the 3s poll interval — most visibly after a scan failure, where
+      // the read-only scan chip would otherwise stay pinned in the composer
+      // slot while the broker has already moved on to PhaseBlueprint. The
+      // query has no observers outside onboarding, so the invalidate is a
+      // no-op on the regular shell surfaces. Closes nex-crm/wuphf#936.
+      void queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
     });
+    let lastUsageInvalidateAt = 0;
     source.addEventListener("activity", (event) => {
       // CRITICAL REGRESSION: cache invalidation MUST keep firing — other
       // surfaces (workspace presence, member list) depend on it. The new
@@ -140,6 +156,14 @@ export function useBrokerEvents(enabled: boolean) {
       // can never block the invalidation path.
       void queryClient.invalidateQueries({ queryKey: ["office-members"] });
       void queryClient.invalidateQueries({ queryKey: ["channel-members"] });
+      // Usage pill truth (C2): agent activity is when spend moves, so
+      // nudge the shared ["usage"] query — throttled — instead of
+      // letting the collapsed pill wait out its poll interval.
+      const now = Date.now();
+      if (now - lastUsageInvalidateAt >= USAGE_INVALIDATE_THROTTLE_MS) {
+        lastUsageInvalidateAt = now;
+        void queryClient.invalidateQueries({ queryKey: ["usage"] });
+      }
       try {
         const snapshot = parseActivitySnapshot(event);
         if (snapshot) {

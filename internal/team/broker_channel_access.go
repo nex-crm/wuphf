@@ -25,11 +25,12 @@ import "time"
 // channel-create handler guards against this by rejecting create requests
 // whose slug matches this set; keep the two lists in sync.
 var reservedChannelSlugs = map[string]bool{
-	"system": true,
-	"nex":    true,
-	"you":    true,
-	"human":  true,
-	"ceo":    true,
+	"system":      true,
+	"nex":         true,
+	"you":         true,
+	"human":       true,
+	"ceo":         true,
+	LibrarianSlug: true,
 }
 
 func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
@@ -48,6 +49,13 @@ func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 		return true
 	}
 	if slug == "ceo" {
+		return true
+	}
+	// The Librarian is an org-wide role (wiki curation/review): like the CEO it
+	// can read/post any channel for context. This does NOT widen its
+	// notifications — those still flow only to channels where it is an enabled
+	// member (or is explicitly @-tagged); see notificationTargetsForMessage.
+	if slug == LibrarianSlug {
 		return true
 	}
 	return b.channelHasMemberLocked(channel, slug)

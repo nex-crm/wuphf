@@ -7,16 +7,21 @@ import (
 )
 
 func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string) {
+	b.appendActionWithMetadataLocked(kind, source, channel, actor, summary, relatedID, signalIDs, decisionID, nil)
+}
+
+func (b *Broker) appendActionWithMetadataLocked(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string, metadata map[string]string) {
 	record := officeActionLog{
 		ID:         fmt.Sprintf("action-%d", len(b.actions)+1),
 		Kind:       strings.TrimSpace(kind),
 		Source:     strings.TrimSpace(source),
 		Channel:    normalizeChannelSlug(channel),
 		Actor:      strings.TrimSpace(actor),
-		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
+		Summary:    strings.TrimSpace(summary),
 		RelatedID:  strings.TrimSpace(relatedID),
 		SignalIDs:  append([]string(nil), signalIDs...),
 		DecisionID: strings.TrimSpace(decisionID),
+		Metadata:   sanitizeActionMetadata(metadata),
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
 	b.actions = append(b.actions, record)
@@ -89,8 +94,8 @@ func (b *Broker) RecordSignals(signals []officeSignal) ([]officeSignalRecord, er
 			Source:        strings.TrimSpace(signal.Source),
 			SourceRef:     strings.TrimSpace(signal.ID),
 			Kind:          strings.TrimSpace(signal.Kind),
-			Title:         redactSecretsInText(strings.TrimSpace(signal.Title)),
-			Content:       redactSecretsInText(strings.TrimSpace(signal.Content)),
+			Title:         strings.TrimSpace(signal.Title),
+			Content:       strings.TrimSpace(signal.Content),
 			Channel:       channel,
 			Owner:         strings.TrimSpace(signal.Owner),
 			Confidence:    strings.TrimSpace(signal.Confidence),
@@ -124,8 +129,8 @@ func (b *Broker) RecordDecision(kind, channel, summary, reason, owner string, si
 		ID:            fmt.Sprintf("decision-%d", len(b.decisions)+1),
 		Kind:          strings.TrimSpace(kind),
 		Channel:       channel,
-		Summary:       redactSecretsInText(strings.TrimSpace(summary)),
-		Reason:        redactSecretsInText(strings.TrimSpace(reason)),
+		Summary:       strings.TrimSpace(summary),
+		Reason:        strings.TrimSpace(reason),
 		Owner:         strings.TrimSpace(owner),
 		SignalIDs:     append([]string(nil), signalIDs...),
 		RequiresHuman: requiresHuman,
@@ -149,6 +154,13 @@ func (b *Broker) RecordAction(kind, source, channel, actor, summary, relatedID s
 	return b.saveLocked()
 }
 
+func (b *Broker) RecordActionWithMetadata(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string, metadata map[string]string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.appendActionWithMetadataLocked(kind, source, channel, actor, summary, relatedID, signalIDs, decisionID, metadata)
+	return b.saveLocked()
+}
+
 func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner, summary string) (watchdogAlert, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -162,7 +174,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		alert := &b.watchdogs[i]
 		if alert.Kind == strings.TrimSpace(kind) && alert.Channel == channel && alert.TargetType == strings.TrimSpace(targetType) && alert.TargetID == strings.TrimSpace(targetID) && strings.TrimSpace(alert.Status) != "resolved" {
 			alert.Owner = strings.TrimSpace(owner)
-			alert.Summary = redactSecretsInText(strings.TrimSpace(summary))
+			alert.Summary = strings.TrimSpace(summary)
 			alert.UpdatedAt = now
 			if err := b.saveLocked(); err != nil {
 				return watchdogAlert{}, false, err
@@ -179,7 +191,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		TargetID:   strings.TrimSpace(targetID),
 		Owner:      strings.TrimSpace(owner),
 		Status:     "active",
-		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
+		Summary:    strings.TrimSpace(summary),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}

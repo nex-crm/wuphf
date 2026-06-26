@@ -236,7 +236,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, msg)
 	}
 	b.messages = filtered
-	b.pruneAgentIssuesByChannelAndAgentLocked(channel, agent)
+	b.pruneIncidentsByChannelAndAgentLocked(channel, agent)
 	if err := b.saveLocked(); err != nil {
 		// Roll forward: snapshot save failed, but the in-memory mutation
 		// already applied. Surface the error rather than reporting success.
@@ -291,9 +291,7 @@ func (b *Broker) handleSignals(w http.ResponseWriter, r *http.Request) {
 	signals := make([]officeSignalRecord, len(b.signals))
 	copy(signals, b.signals)
 	b.mu.Unlock()
-	for i, sig := range signals {
-		signals[i] = sanitizeOfficeSignalRecord(sig)
-	}
+	copy(signals, signals)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"signals": signals})
 }
@@ -307,9 +305,7 @@ func (b *Broker) handleDecisions(w http.ResponseWriter, r *http.Request) {
 	decisions := make([]officeDecisionRecord, len(b.decisions))
 	copy(decisions, b.decisions)
 	b.mu.Unlock()
-	for i, dec := range decisions {
-		decisions[i] = sanitizeOfficeDecisionRecord(dec)
-	}
+	copy(decisions, decisions)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"decisions": decisions})
 }
@@ -341,14 +337,15 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 	case http.MethodPost:
 		var body struct {
-			Kind       string   `json:"kind"`
-			Source     string   `json:"source"`
-			Channel    string   `json:"channel"`
-			Actor      string   `json:"actor"`
-			Summary    string   `json:"summary"`
-			RelatedID  string   `json:"related_id"`
-			SignalIDs  []string `json:"signal_ids"`
-			DecisionID string   `json:"decision_id"`
+			Kind       string            `json:"kind"`
+			Source     string            `json:"source"`
+			Channel    string            `json:"channel"`
+			Actor      string            `json:"actor"`
+			Summary    string            `json:"summary"`
+			RelatedID  string            `json:"related_id"`
+			SignalIDs  []string          `json:"signal_ids"`
+			DecisionID string            `json:"decision_id"`
+			Metadata   map[string]string `json:"metadata"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -361,7 +358,7 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
 			body.Actor = humanMessageSender(actor.Slug)
 		}
-		if err := b.RecordAction(
+		if err := b.RecordActionWithMetadata(
 			body.Kind,
 			body.Source,
 			body.Channel,
@@ -370,6 +367,7 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 			body.RelatedID,
 			body.SignalIDs,
 			body.DecisionID,
+			body.Metadata,
 		); err != nil {
 			http.Error(w, "failed to persist action", http.StatusInternalServerError)
 			return

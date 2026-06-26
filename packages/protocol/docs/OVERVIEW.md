@@ -27,6 +27,7 @@ flowchart LR
     lsn[event-lsn]
     frozen[frozen-args]
     sanitized[sanitized-string]
+    nfkc[nfkc: frozen normaliser + tables]
   end
   subgraph C["codecs and validators"]
     literals[receipt-literals]
@@ -35,11 +36,14 @@ flowchart LR
     shared[ipc-shared]
     rvalidator[receipt-validator]
     receipt[receipt]
+    signed[signed-approval-token]
+    approval[approval-request]
     audit[audit-event]
     thread[thread]
   end
   subgraph T["top-level envelopes"]
     ipc[ipc]
+    route[route-envelopes]
     index[index]
   end
   sha256 --> brand
@@ -47,6 +51,8 @@ flowchart LR
   frozen --> budgets
   frozen --> jcs
   frozen --> sha256
+  sanitized --> budgets
+  sanitized --> nfkc
   literals --> types
   shared --> types
   rvalidator --> budgets
@@ -66,6 +72,14 @@ flowchart LR
   receipt --> rvalidator
   receipt --> sanitized
   receipt --> sha256
+  signed --> budgets
+  signed --> jcs
+  signed --> receipt
+  signed --> utils
+  approval --> jcs
+  approval --> receipt
+  approval --> signed
+  approval --> utils
   thread --> budgets
   thread --> jcs
   thread --> receipt
@@ -73,6 +87,7 @@ flowchart LR
   thread --> sha256
   audit --> budgets
   audit --> jcs
+  audit --> approval
   audit --> lsn
   audit --> receipt
   audit --> thread
@@ -85,20 +100,33 @@ flowchart LR
   ipc --> literals
   ipc --> utils
   ipc --> sha256
+  route --> approval
+  route --> budgets
+  route --> jcs
+  route --> lsn
+  route --> receipt
+  route --> signed
+  route --> thread
+  route --> utils
   index --> audit
   index --> budgets
   index --> jcs
   index --> frozen
   index --> ipc
+  index --> route
   index --> receipt
   index --> sanitized
+  index --> approval
+  index --> signed
   index --> thread
 ```
 
 Detailed docs: [moat primitives](modules/moat-primitives.md),
 [budgets](modules/budgets.md), [receipt](modules/receipt.md),
+[approval request](modules/approval-request.md),
 [audit-event](modules/audit-event.md), [ipc](modules/ipc.md), and
-[thread](modules/thread.md).
+[thread](modules/thread.md). Route HTTP body codecs are documented in
+[route-envelopes](modules/route-envelopes.md).
 
 ## 3. The moat composition
 
@@ -153,8 +181,8 @@ sequenceDiagram
    [audit-event](modules/audit-event.md).
 7. Unknown keys are rejected at every object boundary by shared key tuples in
    [receipt](modules/receipt.md), [ipc](modules/ipc.md), and checkpoint codecs.
-8. Public API is only `src/index.ts`; module docs describe implementation
-   surfaces, not subpath imports.
+8. Public API is `src/index.ts` plus the curated `src/browser.ts` subpath;
+   other module docs describe implementation surfaces, not subpath imports.
 
 ## 5. Wire contract surface
 
@@ -171,9 +199,18 @@ sequenceDiagram
   `ThreadExternalRefs`; spec content hashes are re-derived as
   `sha256(canonical(content))`; status folds use audit order, not wall-clock
   time.
-- Approval token signed envelope: `{ claims, algorithm: "ed25519",
-  signerKeyId, signature }`; signatures cover `canonicalJSON(claims)`. Changing
-  claim keys, date rules, or token lifetime changes what brokers sign.
+- ApprovalRequest JSON shape: snake_case codecs for pending/decided approval
+  projections; claim/scope/token values compose `SignedApprovalToken`
+  primitives, and status/decision coupling is re-derived at decode.
+- Route envelopes: versioned camelCase HTTP request/response bodies for
+  `/api/v1/threads` and `/api/v1/approvals`, wrapping existing `Thread`,
+  `ApprovalRequest`, and command primitives. Serializers emit protocol-owned
+  JSON including OCC mutation metadata `{ threadId, headLsn, revisionId,
+  contentHash }`; decoders reject unknown keys and over-budget route strings.
+- Approval token signed envelope: `SignedApprovalToken` binds a discriminated
+  `claim`, role-bearing `scope`, caller-supplied epoch-ms validity window,
+  `issuedTo`, and structured WebAuthn `signature`. Changing claim keys, scope
+  fields, timestamp rules, or token lifetime changes what brokers verify.
 - IPC bootstrap and request/response envelopes: v0 bootstrap translates
   `broker_url` to `brokerUrl`, and the value must pass the `BrokerUrl` bare
   loopback-origin matrix in [ipc](modules/ipc.md#31-brokerurl-bootstrap-matrix).
@@ -220,7 +257,7 @@ graph TB
 8. `ExternalWrite` is discriminated: [receipt](modules/receipt.md).
 9. No `any`, ignores, or `ts-ignore`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md).
 10. Bounded operations are required: [budgets](modules/budgets.md).
-11. Public API changes only through `index.ts`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md), [thread](modules/thread.md).
+11. Public API changes through `index.ts` (default entry) and `browser.ts` (renderer-safe subpath): [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md), [thread](modules/thread.md).
 12. Runtime TS surface is camelCase: [ipc](modules/ipc.md), [receipt](modules/receipt.md).
 13. Dates mark time only: [receipt](modules/receipt.md), [audit-event](modules/audit-event.md).
 14. Coverage ratchets upward: every module's tests, especially [receipt](modules/receipt.md) and [audit-event](modules/audit-event.md), must keep the gate green.
@@ -247,6 +284,10 @@ graph TB
 - Thread protocol shape: add brands, budgets, snake_case codecs, validators,
   receipt V1/V2 coverage, thread audit-event vectors, stream invalidation
   kinds, demo scenarios, and module docs in one slice.
+- Approval request protocol shape: add the `ApprovalRequestId` brand,
+  snake_case artifact codec, full-content `approval_requested` /
+  `approval_decided` audit payloads, invalidation-only stream kinds, demo
+  scenarios, testdata vectors, Go verifier coverage, and module docs together.
 - `ProviderKind`: add one tuple value, keep the brand closed, update exhaustive
   switches, validator/codec tests, and docs.
 - IPC envelope: add type, codec/validator, unknown-key tuple, demo case,

@@ -15,7 +15,10 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
 
+import { wikiFileUrl } from "../api/wiki";
+import { CalloutBlockquote } from "../components/wiki/Callout";
 import ImageEmbed from "../components/wiki/ImageEmbed";
+import { calloutRemarkPlugin } from "../components/wiki/parseCallout";
 import { wikiLinkRemarkPlugin } from "./wikilink";
 
 export interface WikiMarkdownOptions {
@@ -30,18 +33,158 @@ export interface WikiMarkdownOptions {
    * When omitted, links render as ordinary anchors.
    */
   onNavigate?: (slug: string) => void;
+  /**
+   * Wiki path of the article being rendered (e.g. `team/about/README.md`).
+   * When provided, plain markdown links to `.md` files (e.g.
+   * `[Company](company.md)`) are resolved relative to the article's
+   * directory and rewritten to point at the hash-router wiki route
+   * instead of leaking to the document base URL.
+   */
+  articlePath?: string;
+  /**
+   * When provided, every H2 in the read view gets Wikipedia's small
+   * `[ edit ]` affordance to its right; clicking it opens the editor.
+   * The editor's live preview omits this (you are already editing).
+   */
+  onEditSection?: () => void;
 }
 
-/** Remark plugins — remark-gfm + wikilinks. */
+/**
+ * Scroll to an in-page anchor (footnote ref/backref, heading slug) inside
+ * the article column. The app uses hash routing (`#/wiki/...`), so letting
+ * the browser follow `href="#user-content-fn-1"` would clobber the route —
+ * we intercept and scroll instead, with a brief Wikipedia-style highlight
+ * flash on the jump target.
+ */
+export function scrollToInPageAnchor(hash: string): void {
+  const id = decodeURIComponent(hash.replace(/^#/, ""));
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ block: "start", behavior: "smooth" });
+  el.classList.add("wk-jump-flash");
+  globalThis.setTimeout(() => el.classList.remove("wk-jump-flash"), 1600);
+}
+
+/**
+ * True for an in-page fragment href (`#summary`, `#user-content-fn-1`)
+ * as opposed to a hash-router route (`#/wiki/...`).
+ */
+function isInPageAnchor(href: string): boolean {
+  return href.startsWith("#") && !href.startsWith("#/");
+}
+
+/**
+ * Resolve a markdown link href against the article's path and return the
+ * destination wiki slug when the href is a relative `.md` link that should
+ * route through the wiki SPA. Returns null for absolute URLs, anchors,
+ * hash routes, non-`.md` targets, or paths that escape the wiki root.
+ */
+const NON_WIKI_HREF_RE = /^([a-z][a-z0-9+.-]*:|[#/])/i;
+
+function joinWikiSegments(
+  baseSegments: string[],
+  relative: string,
+): string[] | null {
+  const out = [...baseSegments];
+  for (const raw of relative.split("/")) {
+    if (raw === "" || raw === ".") continue;
+    if (raw === "..") {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(raw);
+  }
+  return out;
+}
+
+export function resolveRelativeWikiPath(
+  href: string,
+  articlePath: string,
+): string | null {
+  if (!(href && articlePath)) return null;
+  if (NON_WIKI_HREF_RE.test(href)) return null;
+
+  // Fragments and query strings are dropped: the hash-router cannot nest a
+  // second `#section` inside the wiki route, and articles do not expose a
+  // query surface today. If section-anchors inside the wiki become a real
+  // demand, route them through onNavigate instead of the href.
+  const [pathOnly] = href.split(/[?#]/);
+  if (!pathOnly.endsWith(".md")) return null;
+
+  const lastSlash = articlePath.lastIndexOf("/");
+  const baseDir = lastSlash >= 0 ? articlePath.slice(0, lastSlash) : "";
+  const segments = joinWikiSegments(
+    baseDir ? baseDir.split("/") : [],
+    pathOnly,
+  );
+  if (!segments || segments.length === 0) return null;
+  return segments.join("/");
+}
+
+/** Remark plugins — remark-gfm + wikilinks + Obsidian callouts. */
 export function buildRemarkPlugins(
   resolver: (slug: string) => boolean,
 ): PluggableList {
-  return [remarkGfm, wikiLinkRemarkPlugin(resolver)];
+  return [remarkGfm, wikiLinkRemarkPlugin(resolver), calloutRemarkPlugin()];
 }
 
-/** Rehype plugins — slug + autolink headings for TOC anchors. */
+/** Minimal hast node shape — enough to walk + rewrite without @types/hast. */
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
+}
+
+/**
+ * Rehype transform: hoist images out of image-only paragraphs.
+ *
+ * Markdown wraps a standalone `![alt](src)` in a `<p>`. Our image renderer
+ * ({@link ImageEmbed}, editorial mode) emits a block-level `<figure>`. A
+ * `<figure>` inside a `<p>` is invalid HTML — the browser auto-closes the `<p>`,
+ * which diverges from React's virtual tree and throws a hydration error on
+ * every article that embeds an image (e.g. a profile page with a portrait).
+ * Unwrapping at the hast layer — replacing such a `<p>` with its image
+ * children — keeps the rendered tree valid. Whitespace-only text siblings are
+ * dropped so `![a](x) ![b](y)` on its own line still unwraps cleanly.
+ */
+function rehypeUnwrapImages() {
+  const isWhitespace = (n: HastNode): boolean =>
+    n.type === "text" && (n.value ?? "").trim() === "";
+  const isImage = (n: HastNode): boolean =>
+    n.type === "element" && n.tagName === "img";
+  const isImageOnlyParagraph = (n: HastNode): boolean => {
+    if (n.type !== "element" || n.tagName !== "p" || !n.children) return false;
+    const meaningful = n.children.filter((c) => !isWhitespace(c));
+    return meaningful.length > 0 && meaningful.every(isImage);
+  };
+  const walk = (node: HastNode): void => {
+    if (!node.children) return;
+    const next: HastNode[] = [];
+    for (const child of node.children) {
+      if (isImageOnlyParagraph(child)) {
+        for (const inner of child.children ?? []) {
+          if (!isWhitespace(inner)) next.push(inner);
+        }
+      } else {
+        next.push(child);
+        walk(child);
+      }
+    }
+    node.children = next;
+  };
+  return (tree: HastNode): void => walk(tree);
+}
+
+/** Rehype plugins — unwrap image paragraphs, then slug + autolink headings. */
 export function buildRehypePlugins(): PluggableList {
-  return [rehypeSlug, [rehypeAutolinkHeadings, { behavior: "wrap" }]];
+  return [
+    rehypeUnwrapImages,
+    rehypeSlug,
+    [rehypeAutolinkHeadings, { behavior: "wrap" }],
+  ];
 }
 
 type AnchorProps = ComponentProps<"a">;
@@ -55,11 +198,50 @@ type ImageProps = ComponentProps<"img">;
 export function buildMarkdownComponents(
   options: WikiMarkdownOptions,
 ): Partial<Components> {
-  const { onNavigate } = options;
+  const { onNavigate, articlePath, onEditSection } = options;
+  const headingWithEdit = onEditSection
+    ? ({ children, ...rest }: ComponentProps<"h2">): ReactElement => (
+        <h2 {...rest}>
+          {children}
+          <span className="wk-section-edit">
+            [{" "}
+            <button
+              type="button"
+              className="wk-section-edit-btn"
+              onClick={onEditSection}
+              aria-label="Edit this section"
+            >
+              edit
+            </button>{" "}
+            ]
+          </span>
+        </h2>
+      )
+    : undefined;
   return {
+    blockquote: CalloutBlockquote,
+    ...(headingWithEdit ? { h2: headingWithEdit } : {}),
     a: (props: AnchorProps): ReactElement => {
       const record = props as Record<string, unknown>;
       const isWikilink = record["data-wikilink"] === "true";
+      // In-page fragments (footnote refs/backrefs, heading self-links from
+      // rehype-autolink-headings) must not clobber the hash route.
+      if (
+        !isWikilink &&
+        typeof props.href === "string" &&
+        isInPageAnchor(props.href)
+      ) {
+        const { href } = props;
+        return (
+          <a
+            {...props}
+            onClick={(e) => {
+              e.preventDefault();
+              scrollToInPageAnchor(href);
+            }}
+          />
+        );
+      }
       if (isWikilink && onNavigate) {
         const slug = record["data-slug"] as string | undefined;
         return (
@@ -74,16 +256,51 @@ export function buildMarkdownComponents(
           />
         );
       }
+      if (!isWikilink && articlePath && typeof props.href === "string") {
+        const resolved = resolveRelativeWikiPath(props.href, articlePath);
+        if (resolved) {
+          const encoded = resolved.split("/").map(encodeURIComponent).join("/");
+          const nextProps = { ...props, href: `#/wiki/${encoded}` };
+          return (
+            <a
+              {...nextProps}
+              onClick={(e) => {
+                if (onNavigate) {
+                  e.preventDefault();
+                  onNavigate(resolved);
+                }
+              }}
+            />
+          );
+        }
+      }
       return <a {...props} />;
     },
     img: ({ src, alt, width, height }: ImageProps): ReactElement | null => {
       if (!src) return null;
+      // Resolve a relative image (`./assets/x.png`, `../img/x.png`, `x.png`)
+      // against the article's directory and route it through the wiki file
+      // API. Absolute/remote/data URLs (caught by NON_WIKI_HREF_RE) pass
+      // through untouched. Without this, a relative asset src resolves against
+      // the SPA base URL (`/assets/x.png`) and 404s.
+      let resolvedSrc = String(src);
+      if (articlePath && !NON_WIKI_HREF_RE.test(resolvedSrc)) {
+        const lastSlash = articlePath.lastIndexOf("/");
+        const baseDir = lastSlash >= 0 ? articlePath.slice(0, lastSlash) : "";
+        const segments = joinWikiSegments(
+          baseDir ? baseDir.split("/") : [],
+          resolvedSrc.split(/[?#]/)[0],
+        );
+        if (segments && segments.length > 0) {
+          resolvedSrc = wikiFileUrl(segments.join("/"));
+        }
+      }
       const w =
         typeof width === "string" ? parseInt(width, 10) || undefined : width;
       const h =
         typeof height === "string" ? parseInt(height, 10) || undefined : height;
       return (
-        <ImageEmbed src={String(src)} alt={alt ?? ""} width={w} height={h} />
+        <ImageEmbed src={resolvedSrc} alt={alt ?? ""} width={w} height={h} />
       );
     },
   };

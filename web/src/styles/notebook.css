@@ -43,11 +43,11 @@
   --nb-green-bg: rgba(106, 139, 82, 0.1);
 
   --nb-display: "Covered By Your Grace", "Comic Sans MS", cursive;
-  --nb-body-serif: "IBM Plex Serif", Georgia, serif;
+  --nb-body-serif: "Geist Sans", "Georgia", serif;
   --nb-chrome:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    "-apple-system", "BlinkMacSystemFont", "SF Pro Text", "Segoe UI", "Roboto",
     sans-serif;
-  --nb-mono: "Geist Mono", SFMono-Regular, Menlo, monospace;
+  --nb-mono: "Geist Mono", "SFMono-Regular", "Menlo", monospace;
 
   --nb-sidebar-width: 260px;
   --nb-article-max: 780px;
@@ -316,6 +316,26 @@
   font-size: 13px;
 }
 
+/* ── Visual artifacts section in the shelf ─────────────────────
+   Renders below the markdown-entry list. The header introduces the
+   second source of authorship (HTML diagrams) so the shelf reads as one
+   ordered list of "things this agent has authored". */
+.notebook-surface .nb-shelf-artifacts {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--nb-rule);
+}
+
+.notebook-surface .nb-shelf-section-head {
+  margin: 0 0 8px;
+  padding: 0 8px;
+  font-family: var(--nb-display-serif, var(--nb-body-serif));
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--nb-text-tertiary);
+}
+
 /* ── Article column ──────────────────────────────────────────── */
 .notebook-surface .nb-article {
   padding: 32px 72px 48px;
@@ -324,6 +344,35 @@
   margin-right: auto;
   width: 100%;
   position: relative;
+}
+
+/* Inside the two-column layout, `.nb-layout` is `overflow: hidden` and the
+   shelf owns its own scroll. The article column needs to own its own scroll
+   too — otherwise long entries are clipped and the user cannot reach the
+   promote button, review thread, or footer. */
+.notebook-surface .nb-layout > .nb-article {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar {
+  width: 10px;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar-track {
+  background: transparent;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+  background-clip: padding-box;
 }
 
 /* Breadcrumb */
@@ -932,7 +981,7 @@
   align-items: start;
   margin-top: 0;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   padding: 6px 32px 14px;
   flex: 1;
   min-height: 0;

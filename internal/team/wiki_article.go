@@ -80,6 +80,11 @@ type ArticleMeta struct {
 	// this entity. Computed at serve time from the EntitySynthesizer coalescing
 	// set — never persisted. Only true when Ghost is also true.
 	SynthesisQueued bool `json:"synthesis_queued,omitempty"`
+	// AttachedArtifacts is the set of visual artifacts promoted into this
+	// article's wiki path. The UI uses this to render inline embeds without
+	// a second round-trip. Always present (possibly empty) so frontend code
+	// can rely on the field shape.
+	AttachedArtifacts []RichArtifact `json:"attached_artifacts"`
 }
 
 // Backlink represents another article that wikilinks to this article.
@@ -98,6 +103,11 @@ type CatalogEntry struct {
 	AuthorSlug   string `json:"author_slug"`
 	LastEditedTs string `json:"last_edited_ts"`
 	Group        string `json:"group"`
+	// Categories are the article's many-to-many category slugs from its
+	// `categories:` frontmatter (markdown-authoritative). Always present
+	// (possibly empty) so the UI can rely on the field. The folder `Group`
+	// stays as a fallback nav key during the category migration.
+	Categories []string `json:"categories"`
 	// Read tracking — always present; zero when no reads have been recorded.
 	LastRead       *time.Time `json:"last_read,omitempty"`
 	HumanReadCount int        `json:"human_read_count"`
@@ -128,11 +138,15 @@ type CatalogEntry struct {
 // Pass includeArchived=true to include them (for admin/recovery views).
 //
 // Shape matches web/src/api/wiki.ts WikiCatalogEntry.
-func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog, includeArchived bool) ([]CatalogEntry, error) {
+// walkCatalogArticles walks team/ applying the catalog's accept rules
+// (skip team/inbox + team/skills, dot-prefixed files, non-.md files,
+// and — unless includeArchived — archived tombstones) and invokes fn
+// for every accepted article. Shared by BuildCatalog and CountArticles
+// so the "what counts as an article" filter cannot drift between the
+// catalog listing and the derived-stats count.
+func (r *Repo) walkCatalogArticles(includeArchived bool, fn func(rel string, content []byte, archived bool)) error {
 	teamDir := r.TeamDir()
-	var entries []CatalogEntry
-
-	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
+	return filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Missing or unreadable entries shouldn't blow up the whole
 			// catalog: skip and keep walking. Anything else (disk corruption,
@@ -153,7 +167,9 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			rel, relErr := filepath.Rel(r.Root(), path)
 			if relErr == nil {
 				slash := filepath.ToSlash(rel)
-				if slash == "team/inbox" || slash == "team/skills" {
+				// team/.categories/ holds category-definition pages (the
+				// subcategory tree), not articles — keep them out of the catalog.
+				if slash == "team/inbox" || slash == "team/skills" || slash == "team/.categories" {
 					return filepath.SkipDir
 				}
 			}
@@ -191,15 +207,43 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			return nil
 		}
 
+		fn(rel, content, isArchived)
+		return nil
+	})
+}
+
+// CountArticles returns the number of curated wiki articles using the
+// exact filter rules /wiki/catalog applies (non-archived team/*.md,
+// inbox + skills + dotfiles excluded). Used by GET /office/stats so the
+// wiki home "N articles" count and the catalog list can never disagree.
+func (r *Repo) CountArticles() (int, error) {
+	count := 0
+	err := r.walkCatalogArticles(false, func(string, []byte, bool) {
+		count++
+	})
+	if err != nil {
+		return 0, fmt.Errorf("wiki: count articles: %w", err)
+	}
+	return count, nil
+}
+
+func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog, includeArchived bool) ([]CatalogEntry, error) {
+	var entries []CatalogEntry
+
+	walkErr := r.walkCatalogArticles(includeArchived, func(rel string, content []byte, isArchived bool) {
+		cats := parseCategoriesFrontmatter(string(content))
+		if cats == nil {
+			cats = []string{}
+		}
 		entry := CatalogEntry{
-			Path:      rel,
-			Archived:  isArchived,
-			Title:     extractTitle(content, rel),
-			Group:     groupFromPath(rel),
-			WordCount: countWords(content),
+			Path:       rel,
+			Archived:   isArchived,
+			Title:      extractTitle(content, rel),
+			Group:      groupFromPath(rel),
+			Categories: cats,
+			WordCount:  countWords(content),
 		}
 		entries = append(entries, entry)
-		return nil
 	})
 	if walkErr != nil {
 		return nil, fmt.Errorf("wiki: walk team/: %w", walkErr)
@@ -342,14 +386,22 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog
 	}
 
 	meta := ArticleMeta{
-		Path:         relPath,
-		Content:      string(content),
-		Title:        extractTitle(content, relPath),
-		WordCount:    countWords(content),
-		Contributors: []string{},
-		Backlinks:    []Backlink{},
-		Categories:   []string{},
-		Ghost:        parseGhostFrontmatter(string(content)),
+		Path:              relPath,
+		Content:           string(content),
+		Title:             extractTitle(content, relPath),
+		WordCount:         countWords(content),
+		Contributors:      []string{},
+		Backlinks:         []Backlink{},
+		Categories:        []string{},
+		Ghost:             parseGhostFrontmatter(string(content)),
+		AttachedArtifacts: []RichArtifact{},
+	}
+	// Categories are markdown-authoritative (the article's own `categories:`
+	// frontmatter); the index is a derived mirror. Parse them straight from the
+	// content so the article view is self-contained. Keep the [] default when
+	// the article declares none.
+	if cats := parseCategoriesFrontmatter(string(content)); len(cats) > 0 {
+		meta.Categories = cats
 	}
 
 	// Revision history and last-edit info (via git log).
@@ -457,20 +509,26 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 	// leave author_slug empty rather than abort. Surface the underlying
 	// error at warn level — silent swallow used to mask corrupt-repo and
 	// `git log` failures so backlinks rendered with no author + no signal.
-	commitBounds, err := r.commitBoundsByPath(ctx)
+	//
+	// Scope the lookup to just the hit paths. The old path walked the entire
+	// repo history (commitBoundsByPath → AuditLog over every commit) on every
+	// article open, which made wiki article loads block past the client's
+	// patience window on busy wikis. Backlink attribution only needs the latest
+	// author of the handful of articles that actually link here.
+	hitPaths := make([]string, len(hits))
+	for i, h := range hits {
+		hitPaths[i] = h.relPath
+	}
+	authorByPath, err := r.latestCommitAuthorsByPath(ctx, hitPaths)
 	if err != nil {
-		log.Printf("wiki backlinks: commitBoundsByPath failed, author_slug fields will be empty: %v", err)
+		log.Printf("wiki backlinks: latest-author lookup failed, author_slug fields will be empty: %v", err)
 	}
 	backs := make([]Backlink, 0, len(hits))
 	for _, h := range hits {
-		author := ""
-		if bounds, ok := commitBounds[h.relPath]; ok && bounds.Has {
-			author = bounds.Latest.Author
-		}
 		backs = append(backs, Backlink{
 			Path:       h.relPath,
 			Title:      h.title,
-			AuthorSlug: author,
+			AuthorSlug: authorByPath[h.relPath],
 		})
 	}
 	return backs, nil

@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   type AgentRequest,
+  get,
   getAllRequests,
+  getConfig,
   getLocalProvidersStatus,
   getOfficeMembers,
   getScheduler,
@@ -13,10 +15,22 @@ import {
   type SchedulerJob,
   type Skill,
 } from "../../api/client";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import type { OfficeStats } from "../../api/platform";
+import {
+  getOfficeTasks,
+  type Task,
+  taskToLifecycleState,
+} from "../../api/tasks";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { formatRelativeTime } from "../../lib/format";
-import { isAgentActive, normalizeStatus, taskMeta } from "../../lib/officeStatus";
+import { isAgentActive, normalizeStatus } from "../../lib/officeStatus";
 import { router } from "../../lib/router";
+import {
+  configuredConnectedRuntimeProviders,
+  type RuntimeProviderOption,
+} from "../../lib/runtimeProviders";
+import { stageForState } from "../../lib/types/lifecycle";
+import type { PrereqResult } from "../onboarding/runtimes";
 import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
 import { AgentPulsePanel } from "./shared/AgentPulsePanel";
 
@@ -45,9 +59,11 @@ interface OverviewData {
   recentArtifacts: Task[];
   activeAgents: OfficeMember[];
   pendingRequests: AgentRequest[];
-  proposedSkills: Skill[];
+  recentSkills: Skill[];
   upcomingJobs: SchedulerJob[];
-  unhealthyProviders: LocalProviderStatus[];
+  connectedProviders: RuntimeProviderOption[];
+  /** Shared /office/stats payload — tile counts read this, not the row lists. */
+  stats: OfficeStats | undefined;
   taskIsLoading: boolean;
   membersIsLoading: boolean;
   requestsIsLoading: boolean;
@@ -75,7 +91,7 @@ function goToSkills(): void {
 }
 
 function goToCalendar(): void {
-  void router.navigate({ to: "/apps/$appId", params: { appId: "calendar" } });
+  void router.navigate({ to: "/apps/$appId", params: { appId: "routines" } });
 }
 
 function goToSettings(): void {
@@ -90,10 +106,6 @@ function goToHealthCheck(): void {
 }
 
 // ── Data helpers ───────────────────────────────────────────────────
-
-function providerIsUnhealthy(p: LocalProviderStatus): boolean {
-  return p.probed && !p.reachable;
-}
 
 function taskBadgeClass(status: string): string {
   return status === "done" ? "badge badge-green" : "badge badge-accent";
@@ -138,6 +150,24 @@ function useOverviewData(): OverviewData {
     refetchInterval: 30_000,
   });
 
+  const config = useQuery({
+    queryKey: ["overview-config"],
+    queryFn: getConfig,
+    refetchInterval: 30_000,
+  });
+
+  const prereqs = useQuery({
+    queryKey: ["overview-runtime-prereqs"],
+    queryFn: () =>
+      get<{ prereqs?: PrereqResult[] } | PrereqResult[]>("/onboarding/prereqs"),
+    refetchInterval: 30_000,
+  });
+
+  // Tile counts come from the shared derived-stats source so the
+  // dashboard headline numbers always agree with the board, header
+  // strip, and inbox badge.
+  const stats = useOfficeStats();
+
   const allTasks: Task[] = tasks.data?.tasks ?? [];
   const allMembers: OfficeMember[] = members.data?.members ?? [];
   const allRequests: AgentRequest[] = requests.data?.requests ?? [];
@@ -146,14 +176,20 @@ function useOverviewData(): OverviewData {
   const allProviders: LocalProviderStatus[] = Array.isArray(providers.data)
     ? providers.data
     : [];
+  const prereqList = Array.isArray(prereqs.data)
+    ? prereqs.data
+    : (prereqs.data?.prereqs ?? []);
 
-  const activeTasks = allTasks.filter((t) => {
-    const s = normalizeStatus(t.status);
-    return s === "in_progress" || s === "review";
-  });
+  // Bucket with the same projection the board uses (stageForState ∘
+  // taskToLifecycleState) — the old normalizeStatus(t.status) filter was
+  // one of the count-drift sources ("dashboard says in progress, task
+  // page says waiting on approval").
+  const activeTasks = allTasks.filter(
+    (t) => stageForState(taskToLifecycleState(t)) === "in_progress",
+  );
 
   const blockedTasks = allTasks.filter(
-    (t) => normalizeStatus(t.status) === "blocked",
+    (t) => stageForState(taskToLifecycleState(t)) === "blocked",
   );
 
   const activeAgents = allMembers.filter(isAgentActive);
@@ -162,8 +198,17 @@ function useOverviewData(): OverviewData {
     (r) => !r.status || r.status === "open" || r.status === "pending",
   );
 
-  const proposedSkills = allSkills.filter((s) => s.status === "proposed");
-  const unhealthyProviders = allProviders.filter(providerIsUnhealthy);
+  const recentSkills = allSkills
+    .filter((s) => s.status === "active")
+    .sort((a, b) =>
+      String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+    );
+  const connectedProviders = config.data
+    ? configuredConnectedRuntimeProviders(config.data, {
+        prereqs: prereqList,
+        localStatuses: allProviders,
+      })
+    : [];
 
   const upcomingJobs = allJobs
     .filter((j) => j.next_run || j.due_at)
@@ -187,15 +232,17 @@ function useOverviewData(): OverviewData {
     recentArtifacts,
     activeAgents,
     pendingRequests,
-    proposedSkills,
+    recentSkills,
     upcomingJobs,
-    unhealthyProviders,
+    connectedProviders,
+    stats: stats.data,
     taskIsLoading: tasks.isLoading,
     membersIsLoading: members.isLoading,
     requestsIsLoading: requests.isLoading,
     skillsIsLoading: skills.isLoading,
     schedulerIsLoading: scheduler.isLoading,
-    providersIsFetched: providers.isFetched,
+    providersIsFetched:
+      providers.isFetched && config.isFetched && prereqs.isFetched,
   };
 }
 
@@ -204,13 +251,19 @@ function useOverviewData(): OverviewData {
 interface ActiveRunsSectionProps {
   tasks: Task[];
   isLoading: boolean;
+  /** Shared-stats headline count; falls back to the row list length. */
+  count?: number;
 }
 
-function ActiveRunsSection({ tasks, isLoading }: ActiveRunsSectionProps) {
+function ActiveRunsSection({
+  tasks,
+  isLoading,
+  count,
+}: ActiveRunsSectionProps) {
   return (
     <OverviewSection
       title="Active runs"
-      count={tasks.length}
+      count={count ?? tasks.length}
       id="active-runs"
       action={
         tasks.length > 0 ? (
@@ -235,13 +288,19 @@ function ActiveRunsSection({ tasks, isLoading }: ActiveRunsSectionProps) {
 interface BlockedTasksSectionProps {
   tasks: Task[];
   isLoading: boolean;
+  /** Shared-stats headline count; falls back to the row list length. */
+  count?: number;
 }
 
-function BlockedTasksSection({ tasks, isLoading }: BlockedTasksSectionProps) {
+function BlockedTasksSection({
+  tasks,
+  isLoading,
+  count,
+}: BlockedTasksSectionProps) {
   return (
     <OverviewSection
       title="Blocked tasks"
-      count={tasks.length}
+      count={count ?? tasks.length}
       id="blocked-tasks"
       action={
         tasks.length > 0 ? (
@@ -267,16 +326,19 @@ function BlockedTasksSection({ tasks, isLoading }: BlockedTasksSectionProps) {
 interface AgentsWorkingSectionProps {
   agents: OfficeMember[];
   isLoading: boolean;
+  /** Shared-stats headline count; falls back to the row list length. */
+  count?: number;
 }
 
 function AgentsWorkingSection({
   agents,
   isLoading,
+  count,
 }: AgentsWorkingSectionProps) {
   return (
     <OverviewSection
       title="Agents working now"
-      count={agents.length}
+      count={count ?? agents.length}
       id="agents-working"
     >
       {isLoading ? (
@@ -343,23 +405,23 @@ function PendingReviewsSection({
   );
 }
 
-interface WikiProposalsSectionProps {
+interface CompiledSkillsSectionProps {
   skills: Skill[];
   isLoading: boolean;
 }
 
-function WikiProposalsSection({
+function CompiledSkillsSection({
   skills,
   isLoading,
-}: WikiProposalsSectionProps) {
+}: CompiledSkillsSectionProps) {
   return (
     <OverviewSection
-      title="Wiki proposals"
+      title="Compiled skills"
       count={skills.length}
-      id="wiki-proposals"
+      id="compiled-skills"
       action={
         skills.length > 0 ? (
-          <SectionLink onClick={goToSkills}>Review</SectionLink>
+          <SectionLink onClick={goToSkills}>View all</SectionLink>
         ) : null
       }
     >
@@ -367,7 +429,8 @@ function WikiProposalsSection({
         <SkeletonRows count={2} />
       ) : skills.length === 0 ? (
         <EmptyState action={{ label: "Go to skills", onClick: goToSkills }}>
-          No skill proposals awaiting review.
+          No compiled skills yet. Skills are compiled from playbook articles in
+          the wiki.
         </EmptyState>
       ) : (
         skills.slice(0, 4).map((s) => {
@@ -383,8 +446,8 @@ function WikiProposalsSection({
               label={s.title || s.name}
               body={s.description?.slice(0, 100)}
               meta={meta || undefined}
-              badge="proposed"
-              badgeClass="badge badge-yellow"
+              badge="active"
+              badgeClass="badge badge-green"
               onClick={goToSkills}
             />
           );
@@ -402,20 +465,20 @@ interface ScheduledJobsSectionProps {
 function ScheduledJobsSection({ jobs, isLoading }: ScheduledJobsSectionProps) {
   return (
     <OverviewSection
-      title="Next scheduled jobs"
+      title="Next scheduled routines"
       count={jobs.length}
       id="scheduled-jobs"
       action={
         jobs.length > 0 ? (
-          <SectionLink onClick={goToCalendar}>View calendar</SectionLink>
+          <SectionLink onClick={goToCalendar}>View routines</SectionLink>
         ) : null
       }
     >
       {isLoading ? (
         <SkeletonRows count={3} />
       ) : jobs.length === 0 ? (
-        <EmptyState action={{ label: "Go to calendar", onClick: goToCalendar }}>
-          No upcoming scheduled jobs.
+        <EmptyState action={{ label: "Go to routines", onClick: goToCalendar }}>
+          No upcoming scheduled routines.
         </EmptyState>
       ) : (
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Scheduled-jobs map callback derives nextRun, badge, and fallback key from multiple optional fields; inline for readability, baselined pending extraction.
@@ -540,9 +603,8 @@ export function OfficeOverviewApp() {
         </div>
       </div>
 
-      {/* Provider warnings — always at top so they are impossible to miss */}
-      {data.providersIsFetched && data.unhealthyProviders.length > 0 ? (
-        <ProviderWarningsSection providers={data.unhealthyProviders} />
+      {data.providersIsFetched && data.connectedProviders.length > 0 ? (
+        <ConnectedProvidersSection providers={data.connectedProviders} />
       ) : null}
 
       {/* Section grid */}
@@ -557,21 +619,24 @@ export function OfficeOverviewApp() {
         <ActiveRunsSection
           tasks={data.activeTasks}
           isLoading={data.taskIsLoading}
+          count={data.stats?.tasks.active}
         />
         <BlockedTasksSection
           tasks={data.blockedTasks}
           isLoading={data.taskIsLoading}
+          count={data.stats?.tasks.blocked}
         />
         <AgentsWorkingSection
           agents={data.activeAgents}
           isLoading={data.membersIsLoading}
+          count={data.stats?.agents_active}
         />
         <PendingReviewsSection
           requests={data.pendingRequests}
           isLoading={data.requestsIsLoading}
         />
-        <WikiProposalsSection
-          skills={data.proposedSkills}
+        <CompiledSkillsSection
+          skills={data.recentSkills}
           isLoading={data.skillsIsLoading}
         />
         <ScheduledJobsSection
@@ -587,20 +652,22 @@ export function OfficeOverviewApp() {
   );
 }
 
-// ── Provider warnings section ──────────────────────────────────────
+// ── Connected providers section ────────────────────────────────────
 
-interface ProviderWarningsSectionProps {
-  providers: LocalProviderStatus[];
+interface ConnectedProvidersSectionProps {
+  providers: RuntimeProviderOption[];
 }
 
-function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
+function ConnectedProvidersSection({
+  providers,
+}: ConnectedProvidersSectionProps) {
   return (
     <section
-      id="provider-warnings"
-      aria-label="Provider warnings"
+      id="connected-providers"
+      aria-label="Connected providers"
       style={{
-        background: "var(--warning-100, #fbf5dc)",
-        border: "1px solid var(--warning-300, #ffb647)",
+        background: "var(--green-bg)",
+        border: "1px solid var(--border)",
         borderRadius: 8,
         padding: "12px 16px",
       }}
@@ -617,11 +684,11 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
           style={{
             fontSize: 13,
             fontWeight: 600,
-            color: "var(--warning-500, #994200)",
+            color: "var(--text)",
           }}
         >
           {providers.length} provider{providers.length !== 1 ? "s" : ""}{" "}
-          unreachable
+          connected
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <SectionLink onClick={goToSettings}>Settings</SectionLink>
@@ -630,10 +697,10 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
       </div>
       {providers.map((p) => (
         <div
-          key={p.kind}
+          key={p.id}
           style={{
             fontSize: 13,
-            color: "var(--warning-500, #994200)",
+            color: "var(--text)",
             marginBottom: 4,
             display: "flex",
             alignItems: "center",
@@ -645,21 +712,15 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: "var(--warning-400, #ce6b09)",
+              background: "var(--green)",
               flexShrink: 0,
             }}
           />
-          <strong>{p.kind}</strong>
-          {p.binary_installed && !p.reachable
-            ? " — installed but not running"
-            : " — not reachable"}
-          {p.endpoint ? (
-            <span
-              style={{ color: "var(--warning-400, #ce6b09)", fontSize: 11 }}
-            >
-              ({p.endpoint})
-            </span>
-          ) : null}
+          <strong>{p.label}</strong>
+          {" — ready"}
+          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+            ({p.desc})
+          </span>
         </div>
       ))}
       <div
@@ -669,8 +730,8 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
           color: "var(--warning-400, #ce6b09)",
         }}
       >
-        Agents assigned to these providers will stall. Open Settings or Provider
-        Doctor to fix the connection.
+        Task creation and runtime switching only show configured providers that
+        pass connection checks.
       </div>
     </section>
   );

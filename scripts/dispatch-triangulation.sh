@@ -87,23 +87,11 @@ lens_preamble() {
     distsys)
       printf '%s\n' "Cross-process invariants? Idempotency? Race windows? Recovery semantics on partial failure?"
       ;;
-    electron)
-      cat <<'ELECTRON_PREAMBLE'
-You're an Electron app shipping engineer. Audit through these lenses:
-electron-builder, electron-updater, codesign, notarytool, Authenticode,
-hardened runtime, Gatekeeper.
-
-Does the signing chain stay intact? Does anything break notarization,
-stapling, or auto-update integrity? Are env vars and paths correct for
-app-builder-bin's expectations? Where does this drift from canonical
-electron-builder patterns?
-ELECTRON_PREAMBLE
-      ;;
     supply-chain)
       printf '%s\n' "What new transitive deps does this lockfile diff introduce? Are peer-dep contracts intact for every direct dep that has peers? Any removed-but-still-referenced packages? Verify against the registry with \`bun info <pkg>@<version> peerDependencies\` (the repo standardizes on bun tooling)."
       ;;
     build-parity)
-      printf '%s\n' "Does the build still produce equivalent output to main? Are externals preserved (electron, node:* built-ins)? Read the actual built bundles. Any silent inlining, chunking change, or default drift between this diff and main?"
+      printf '%s\n' "Does the build still produce equivalent output to main? Are externals preserved (node:* built-ins, workspace packages)? Read the actual built bundles. Any silent inlining, chunking change, or default drift between this diff and main?"
       ;;
     scope)
       printf '%s\n' "Is the diff narrowly the advertised change, or are there drive-by edits? Are unrelated files touched? Is each line minimal? Read the PR body and verify the diff matches it without overselling."
@@ -112,7 +100,7 @@ ELECTRON_PREAMBLE
       printf '%s\n' "Does this comply with CLAUDE.md, AGENTS.md, INSTRUCTIONS.md, and any package-level AGENTS.md? Any explicit \`any\`, ignore comments (\`@ts-ignore\`, \`biome-ignore\`), ASCII diagrams in PR body, secrets, or convention drift?"
       ;;
     ipc)
-      printf '%s\n' "Did the contextBridge allowlist change? Did any IPC surface gain new verbs? Is the sandbox preserved (\`sandbox: true\`, \`contextIsolation: true\`, \`nodeIntegration: false\`)? Did any 'app data over IPC' rule break? Read \`apps/desktop/src/preload\`, \`apps/desktop/src/main/ipc\`, and \`apps/desktop/src/shared/api-contract.ts\`."
+      printf '%s\n' "The desktop contextBridge boundary now lives in the nex-crm/nex-local repo; in THIS repo the equivalent trust boundary is the broker's loopback HTTP/SSE/WebSocket surface. Did it gain new routes? Is the bind still loopback-only? Is bearer auth enforced on \`/api/*\`? Does any app data leave without auth, or any non-loopback origin get trusted? Read \`internal/team\` and \`packages/protocol\`."
       ;;
     coverage)
       printf '%s\n' "Do the tests still cover what they should? Are versions consistent — does vitest resolve the same vite as the build? Any silently-weakened assertion (e.g., a cast that disables a real type check)? Run the actual test command and read its output."

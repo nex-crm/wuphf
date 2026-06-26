@@ -372,17 +372,17 @@ func TestHeadlessQueue_EmptyBeforePush(t *testing.T) {
 		},
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 
 	l.headless.mu.Lock()
-	ceoLen := len(l.headless.queues["ceo"])
-	engLen := len(l.headless.queues["eng"])
+	ceoLen := len(l.headless.queues[headlessLane{slug: "ceo"}])
+	engLen := len(l.headless.queues[headlessLane{slug: "eng"}])
 	l.headless.mu.Unlock()
 
 	if ceoLen != 0 || engLen != 0 {
@@ -411,11 +411,11 @@ func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 		},
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 	l.headless.ctx, l.headless.cancel = context.WithCancel(t.Context())
@@ -424,9 +424,9 @@ func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 	l.enqueueHeadlessCodexTurn("eng", "review the diff")
 
 	l.headless.mu.Lock()
-	engLen := len(l.headless.queues["eng"])
-	ceoLen := len(l.headless.queues["ceo"])
-	engWorkerStarted := l.headless.workers["eng"]
+	engLen := len(l.headless.queues[headlessLane{slug: "eng"}])
+	ceoLen := len(l.headless.queues[headlessLane{slug: "ceo"}])
+	engWorkerStarted := l.headless.workers[headlessLane{slug: "eng"}]
 	l.headless.mu.Unlock()
 
 	// The worker goroutine may have already consumed the turn from the queue —
@@ -456,11 +456,11 @@ func TestHeadlessQueue_NoTimerDrivenWakeup(t *testing.T) {
 		},
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 

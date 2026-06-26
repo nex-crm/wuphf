@@ -76,9 +76,9 @@ export function resolveObjectRoute(ref: ObjectRef): ObjectRouteResolution {
     case "agent": {
       if (!ref.slug) return missingIdFallback("slug", "agent");
       return {
-        href: `#/dm/${encodeURIComponent(ref.slug)}`,
+        href: `#/agents/${encodeURIComponent(ref.slug)}`,
         label: `Agent: ${ref.slug}`,
-        appAction: { app: "dm", channel: ref.slug },
+        appAction: { app: "agents", channel: ref.slug },
       };
     }
     case "run": {
@@ -125,10 +125,13 @@ export function resolveObjectRoute(ref: ObjectRef): ObjectRouteResolution {
     }
     case "artifact": {
       if (!ref.id) return missingIdFallback("id", "artifact");
+      // Artifacts have no dedicated viewer; surface them through the
+      // activity (Dashboard) app so links stay valid — mirrors the `run`
+      // case above.
       return {
-        href: `#/apps/receipts?artifact=${encodeURIComponent(ref.id)}`,
+        href: `#/apps/activity?artifact=${encodeURIComponent(ref.id)}`,
         label: `Artifact: ${ref.id}`,
-        appAction: { app: "receipts" },
+        appAction: { app: "activity" },
       };
     }
     case "settings-section": {

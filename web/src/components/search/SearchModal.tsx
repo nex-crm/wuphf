@@ -202,20 +202,45 @@ export function SearchModal() {
     [runSearch],
   );
 
+  // Reset the modal's transient state whenever it closes. Keyed on
+  // `searchOpen` ALONE so it fires once per close — crucially NOT on
+  // `handleQueryChange`. That callback's identity changes on every render
+  // while the channels/members queries are still loading (their `= []`
+  // defaults hand back a fresh array each render → `runSearch` →
+  // `handleQueryChange` are rebuilt), and resetting state from an effect that
+  // depends on it would re-render → rebuild the callback → re-run the effect →
+  // "Maximum update depth exceeded" until the queries resolve. Splitting the
+  // reset out onto the stable `searchOpen` boolean breaks that loop.
   useEffect(() => {
-    if (searchOpen) {
-      const t = setTimeout(() => inputRef.current?.focus(), 50);
-      if (composerSearchInitialQuery) {
-        handleQueryChange(composerSearchInitialQuery);
-        setComposerSearchInitialQuery("");
-      }
-      return () => clearTimeout(t);
+    if (searchOpen) return;
+    // Cancel any in-flight debounced search before clearing state, so a
+    // timer queued just before close cannot fire against the now-reset
+    // modal and resurrect stale results / the searching spinner.
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
     }
+    setSearching(false);
     setQuery("");
     setMessageHits([]);
     setWikiHits([]);
     setNotebookHits([]);
     setSelectedIdx(0);
+  }, [searchOpen]);
+
+  // Focus the input and seed any composer-provided query on open. This effect
+  // keeps `handleQueryChange` in its deps for correctness, but its body only
+  // runs while open and only calls setState when there is an initial query —
+  // so a churning callback identity re-runs it harmlessly (no state write,
+  // hence no render loop).
+  useEffect(() => {
+    if (!searchOpen) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 50);
+    if (composerSearchInitialQuery) {
+      handleQueryChange(composerSearchInitialQuery);
+      setComposerSearchInitialQuery("");
+    }
+    return () => clearTimeout(t);
   }, [
     searchOpen,
     composerSearchInitialQuery,
@@ -540,8 +565,9 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
     case "/skills":
       navigateToApp("skills");
       return;
+    case "/routines":
     case "/calendar":
-      navigateToApp("calendar");
+      navigateToApp("routines");
       return;
     case "/tasks":
       navigateToApp("tasks");

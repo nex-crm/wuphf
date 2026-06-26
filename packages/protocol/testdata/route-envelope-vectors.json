@@ -1,0 +1,692 @@
+{
+  "schemaVersion": 1,
+  "comment": "Route-envelope conformance vectors. Accepted vectors parse with strict known keys and serialize to expected.canonicalSerialization. Rejected vectors must fail with expectedError.",
+  "accepted": [
+    {
+      "name": "thread create request",
+      "codec": "threadCreateRequest",
+      "input": {
+        "schemaVersion": 1,
+        "title": "Approval request protocol",
+        "specContent": {
+          "body": "Implement route envelope codecs",
+          "checklist": [
+            "codecs",
+            "vectors",
+            "docs"
+          ]
+        },
+        "externalRefs": {
+          "source_urls": [
+            "https://example.test/wuphf/914"
+          ],
+          "entity_ids": [
+            "issue:914"
+          ]
+        },
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"externalRefs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"idempotencyKey\":\"route-envelope-01\",\"schemaVersion\":1,\"specContent\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"title\":\"Approval request protocol\"}"
+      }
+    },
+    {
+      "name": "thread spec edit request",
+      "codec": "threadSpecEditRequest",
+      "input": {
+        "schemaVersion": 1,
+        "baseRevisionId": "01BRZ3NDEKTSV4RRFFQ69G5FA0",
+        "baseContentHash": "a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3",
+        "content": {
+          "body": "Edited",
+          "checklist": [
+            "tests",
+            "vectors"
+          ]
+        },
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"baseContentHash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"baseRevisionId\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"content\":{\"body\":\"Edited\",\"checklist\":[\"tests\",\"vectors\"]},\"idempotencyKey\":\"route-envelope-01\",\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "thread status change request",
+      "codec": "threadStatusChangeRequest",
+      "input": {
+        "schemaVersion": 1,
+        "fromStatus": "open",
+        "toStatus": "in_progress",
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"fromStatus\":\"open\",\"idempotencyKey\":\"route-envelope-01\",\"schemaVersion\":1,\"toStatus\":\"in_progress\"}"
+      }
+    },
+    {
+      "name": "thread mutation response",
+      "codec": "threadMutationResponse",
+      "input": {
+        "schemaVersion": 1,
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "headLsn": "v1:42",
+        "revisionId": "01BRZ3NDEKTSV4RRFFQ69G5FA1",
+        "contentHash": "8afbc11916b959e07f7e8425348a2c0aaf7272a432218c410050b33d1b81026f"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"contentHash\":\"8afbc11916b959e07f7e8425348a2c0aaf7272a432218c410050b33d1b81026f\",\"headLsn\":\"v1:42\",\"revisionId\":\"01BRZ3NDEKTSV4RRFFQ69G5FA1\",\"schemaVersion\":1,\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}"
+      }
+    },
+    {
+      "name": "thread list response",
+      "codec": "threadListResponse",
+      "input": {
+        "schemaVersion": 1,
+        "threads": [
+          {
+            "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "title": "Approval request protocol",
+            "status": "open",
+            "spec": {
+              "revision_id": "01BRZ3NDEKTSV4RRFFQ69G5FA0",
+              "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+              "content": {
+                "body": "Implement route envelope codecs",
+                "checklist": [
+                  "codecs",
+                  "vectors",
+                  "docs"
+                ]
+              },
+              "content_hash": "a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3",
+              "authored_by": "fran@example.com",
+              "authored_at": "2026-05-08T18:00:00.000Z"
+            },
+            "external_refs": {
+              "source_urls": [
+                "https://example.test/wuphf/914"
+              ],
+              "entity_ids": [
+                "issue:914"
+              ]
+            },
+            "task_ids": [
+              "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+            ],
+            "created_by": "fran@example.com",
+            "created_at": "2026-05-08T18:00:00.000Z",
+            "updated_at": "2026-05-08T18:05:00.000Z",
+            "effectiveStatus": "needs_attention",
+            "attentionReason": "pending_approval",
+            "boardColumn": "needs_me",
+            "currentSeat": "human",
+            "pendingApprovalCount": 1
+          }
+        ],
+        "nextCursor": "bHNuOjQy"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"nextCursor\":\"bHNuOjQy\",\"schemaVersion\":1,\"threads\":[{\"attentionReason\":\"pending_approval\",\"boardColumn\":\"needs_me\",\"created_at\":\"2026-05-08T18:00:00.000Z\",\"created_by\":\"fran@example.com\",\"currentSeat\":\"human\",\"effectiveStatus\":\"needs_attention\",\"external_refs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"pendingApprovalCount\":1,\"spec\":{\"authored_at\":\"2026-05-08T18:00:00.000Z\",\"authored_by\":\"fran@example.com\",\"content\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"content_hash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"revision_id\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"status\":\"open\",\"task_ids\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAW\"],\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\",\"title\":\"Approval request protocol\",\"updated_at\":\"2026-05-08T18:05:00.000Z\"}]}"
+      }
+    },
+    {
+      "name": "thread get response",
+      "codec": "threadGetResponse",
+      "input": {
+        "schemaVersion": 1,
+        "thread": {
+          "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          "title": "Approval request protocol",
+          "status": "open",
+          "spec": {
+            "revision_id": "01BRZ3NDEKTSV4RRFFQ69G5FA0",
+            "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "content": {
+              "body": "Implement route envelope codecs",
+              "checklist": [
+                "codecs",
+                "vectors",
+                "docs"
+              ]
+            },
+            "content_hash": "a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3",
+            "authored_by": "fran@example.com",
+            "authored_at": "2026-05-08T18:00:00.000Z"
+          },
+          "external_refs": {
+            "source_urls": [
+              "https://example.test/wuphf/914"
+            ],
+            "entity_ids": [
+              "issue:914"
+            ]
+          },
+          "task_ids": [
+            "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+          ],
+          "created_by": "fran@example.com",
+          "created_at": "2026-05-08T18:00:00.000Z",
+          "updated_at": "2026-05-08T18:05:00.000Z",
+          "effectiveStatus": "needs_attention",
+          "attentionReason": "pending_approval",
+          "boardColumn": "needs_me",
+          "currentSeat": "human",
+          "pendingApprovalCount": 1
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"schemaVersion\":1,\"thread\":{\"attentionReason\":\"pending_approval\",\"boardColumn\":\"needs_me\",\"created_at\":\"2026-05-08T18:00:00.000Z\",\"created_by\":\"fran@example.com\",\"currentSeat\":\"human\",\"effectiveStatus\":\"needs_attention\",\"external_refs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"pendingApprovalCount\":1,\"spec\":{\"authored_at\":\"2026-05-08T18:00:00.000Z\",\"authored_by\":\"fran@example.com\",\"content\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"content_hash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"revision_id\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"status\":\"open\",\"task_ids\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAW\"],\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\",\"title\":\"Approval request protocol\",\"updated_at\":\"2026-05-08T18:05:00.000Z\"}}"
+      }
+    },
+    {
+      "name": "approval request create request",
+      "codec": "approvalRequestCreateRequest",
+      "input": {
+        "schemaVersion": 1,
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"idempotencyKey\":\"route-envelope-01\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}"
+      }
+    },
+    {
+      "name": "approval decision request",
+      "codec": "approvalDecisionRequest",
+      "input": {
+        "schemaVersion": 1,
+        "decision": "reject",
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"decision\":\"reject\",\"idempotencyKey\":\"route-envelope-01\",\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "approval request create response",
+      "codec": "approvalRequestCreateResponse",
+      "input": {
+        "schemaVersion": 1,
+        "approvalRequest": {
+          "request_id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+          "claim": {
+            "schemaVersion": 1,
+            "claimId": "claim_receipt_cosign_01",
+            "kind": "receipt_co_sign",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+            "riskClass": "high"
+          },
+          "scope": {
+            "mode": "single_use",
+            "claimId": "claim_receipt_cosign_01",
+            "claimKind": "receipt_co_sign",
+            "role": "approver",
+            "maxUses": 1,
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+          },
+          "risk_class": "high",
+          "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          "task_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          "receipt_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "requested_by": "fran@example.com",
+          "requested_at": "2026-05-08T18:00:00.000Z",
+          "status": "pending",
+          "schema_version": 1
+        },
+        "headLsn": "v1:42"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approvalRequest\":{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"receipt_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"request_id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"requested_at\":\"2026-05-08T18:00:00.000Z\",\"requested_by\":\"fran@example.com\",\"risk_class\":\"high\",\"schema_version\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"pending\",\"task_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"headLsn\":\"v1:42\",\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "approval decision response",
+      "codec": "approvalDecisionResponse",
+      "input": {
+        "schemaVersion": 1,
+        "approvalRequest": {
+          "request_id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+          "claim": {
+            "schemaVersion": 1,
+            "claimId": "claim_receipt_cosign_01",
+            "kind": "receipt_co_sign",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+            "riskClass": "high"
+          },
+          "scope": {
+            "mode": "single_use",
+            "claimId": "claim_receipt_cosign_01",
+            "claimKind": "receipt_co_sign",
+            "role": "approver",
+            "maxUses": 1,
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+          },
+          "risk_class": "high",
+          "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          "task_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          "receipt_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "requested_by": "fran@example.com",
+          "requested_at": "2026-05-08T18:00:00.000Z",
+          "status": "rejected",
+          "decision": {
+            "decision": "reject",
+            "decided_by": "approver@example.com",
+            "decided_at": "2026-05-08T18:05:00.000Z"
+          },
+          "schema_version": 1
+        },
+        "headLsn": "v1:43"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approvalRequest\":{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decision\":{\"decided_at\":\"2026-05-08T18:05:00.000Z\",\"decided_by\":\"approver@example.com\",\"decision\":\"reject\"},\"receipt_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"request_id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"requested_at\":\"2026-05-08T18:00:00.000Z\",\"requested_by\":\"fran@example.com\",\"risk_class\":\"high\",\"schema_version\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"rejected\",\"task_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"headLsn\":\"v1:43\",\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "approval view",
+      "codec": "approvalView",
+      "input": {
+        "schemaVersion": 1,
+        "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "requestedBy": "fran@example.com",
+        "requestedAt": "2026-05-08T18:00:00.000Z",
+        "status": "approved",
+        "decisionSummary": {
+          "decision": "approve",
+          "decidedBy": "approver@example.com",
+          "decidedAt": "2026-05-08T18:05:00.000Z"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}"
+      }
+    },
+    {
+      "name": "approval list response",
+      "codec": "approvalListResponse",
+      "input": {
+        "schemaVersion": 1,
+        "approvals": [
+          {
+            "schemaVersion": 1,
+            "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+            "claim": {
+              "schemaVersion": 1,
+              "claimId": "claim_receipt_cosign_01",
+              "kind": "receipt_co_sign",
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+              "riskClass": "high"
+            },
+            "scope": {
+              "mode": "single_use",
+              "claimId": "claim_receipt_cosign_01",
+              "claimKind": "receipt_co_sign",
+              "role": "approver",
+              "maxUses": 1,
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+            },
+            "riskClass": "high",
+            "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "requestedBy": "fran@example.com",
+            "requestedAt": "2026-05-08T18:00:00.000Z",
+            "status": "approved",
+            "decisionSummary": {
+              "decision": "approve",
+              "decidedBy": "approver@example.com",
+              "decidedAt": "2026-05-08T18:05:00.000Z"
+            }
+          },
+          {
+            "schemaVersion": 1,
+            "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+            "claim": {
+              "schemaVersion": 1,
+              "claimId": "claim_receipt_cosign_01",
+              "kind": "receipt_co_sign",
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+              "riskClass": "high"
+            },
+            "scope": {
+              "mode": "single_use",
+              "claimId": "claim_receipt_cosign_01",
+              "claimKind": "receipt_co_sign",
+              "role": "approver",
+              "maxUses": 1,
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+            },
+            "riskClass": "high",
+            "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "requestedBy": "fran@example.com",
+            "requestedAt": "2026-05-08T18:00:00.000Z",
+            "status": "pending"
+          }
+        ],
+        "nextCursor": "bHNuOjQz"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approvals\":[{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"pending\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}],\"nextCursor\":\"bHNuOjQz\",\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "approval get response",
+      "codec": "approvalGetResponse",
+      "input": {
+        "schemaVersion": 1,
+        "approval": {
+          "schemaVersion": 1,
+          "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+          "claim": {
+            "schemaVersion": 1,
+            "claimId": "claim_receipt_cosign_01",
+            "kind": "receipt_co_sign",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+            "riskClass": "high"
+          },
+          "scope": {
+            "mode": "single_use",
+            "claimId": "claim_receipt_cosign_01",
+            "claimKind": "receipt_co_sign",
+            "role": "approver",
+            "maxUses": 1,
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+          },
+          "riskClass": "high",
+          "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "requestedBy": "fran@example.com",
+          "requestedAt": "2026-05-08T18:00:00.000Z",
+          "status": "approved",
+          "decisionSummary": {
+            "decision": "approve",
+            "decidedBy": "approver@example.com",
+            "decidedAt": "2026-05-08T18:05:00.000Z"
+          }
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approval\":{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "thread pinned approvals response",
+      "codec": "threadPinnedApprovalsResponse",
+      "input": {
+        "schemaVersion": 1,
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "headLsn": "v1:44",
+        "approvals": [
+          {
+            "schemaVersion": 1,
+            "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+            "claim": {
+              "schemaVersion": 1,
+              "claimId": "claim_receipt_cosign_01",
+              "kind": "receipt_co_sign",
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+              "riskClass": "high"
+            },
+            "scope": {
+              "mode": "single_use",
+              "claimId": "claim_receipt_cosign_01",
+              "claimKind": "receipt_co_sign",
+              "role": "approver",
+              "maxUses": 1,
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+            },
+            "riskClass": "high",
+            "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "requestedBy": "fran@example.com",
+            "requestedAt": "2026-05-08T18:00:00.000Z",
+            "status": "pending"
+          }
+        ]
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approvals\":[{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"pending\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}],\"headLsn\":\"v1:44\",\"schemaVersion\":1,\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}"
+      }
+    },
+    {
+      "name": "thread replay check report",
+      "codec": "threadReplayCheckReport",
+      "input": {
+        "schemaVersion": 1,
+        "ok": true,
+        "highestLsn": "v1:42",
+        "eventsScanned": 0,
+        "discrepancies": []
+      },
+      "expected": {
+        "canonicalSerialization": "{\"discrepancies\":[],\"eventsScanned\":0,\"highestLsn\":\"v1:42\",\"ok\":true,\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "route error",
+      "codec": "routeError",
+      "input": {
+        "error": "store_busy",
+        "message": "The projection store is temporarily busy.",
+        "retryAfterMs": 1000
+      },
+      "expected": {
+        "canonicalSerialization": "{\"error\":\"store_busy\",\"message\":\"The projection store is temporarily busy.\",\"retryAfterMs\":1000}"
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "name": "thread create request unknown key",
+      "codec": "threadCreateRequest",
+      "input": {
+        "schemaVersion": 1,
+        "title": "Approval request protocol",
+        "specContent": {
+          "body": "Implement route envelope codecs",
+          "checklist": [
+            "codecs",
+            "vectors",
+            "docs"
+          ]
+        },
+        "externalRefs": {
+          "source_urls": [
+            "https://example.test/wuphf/914"
+          ],
+          "entity_ids": [
+            "issue:914"
+          ]
+        },
+        "idempotencyKey": "route-envelope-01",
+        "shadow": true
+      },
+      "expectedError": "threadCreateRequest/shadow"
+    },
+    {
+      "name": "thread spec edit future schema",
+      "codec": "threadSpecEditRequest",
+      "input": {
+        "schemaVersion": 2,
+        "baseRevisionId": "01BRZ3NDEKTSV4RRFFQ69G5FA0",
+        "baseContentHash": "a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3",
+        "content": {
+          "body": "Edited",
+          "checklist": [
+            "tests",
+            "vectors"
+          ]
+        },
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expectedError": "unsupported schemaVersion"
+    },
+    {
+      "name": "approval decision approve missing token",
+      "codec": "approvalDecisionRequest",
+      "input": {
+        "schemaVersion": 1,
+        "decision": "approve",
+        "idempotencyKey": "route-envelope-01"
+      },
+      "expectedError": "token: is required"
+    },
+    {
+      "name": "approval view decision summary rejects token",
+      "codec": "approvalView",
+      "input": {
+        "schemaVersion": 1,
+        "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "requestedBy": "fran@example.com",
+        "requestedAt": "2026-05-08T18:00:00.000Z",
+        "status": "approved",
+        "decisionSummary": {
+          "decision": "approve",
+          "decidedBy": "approver@example.com",
+          "decidedAt": "2026-05-08T18:05:00.000Z",
+          "token": {}
+        }
+      },
+      "expectedError": "decisionSummary/token"
+    },
+    {
+      "name": "approval view approved missing decision summary",
+      "codec": "approvalView",
+      "input": {
+        "schemaVersion": 1,
+        "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "requestedBy": "fran@example.com",
+        "requestedAt": "2026-05-08T18:00:00.000Z",
+        "status": "approved"
+      },
+      "expectedError": "decisionSummary"
+    },
+    {
+      "name": "route error message exceeds budget",
+      "codec": "routeError",
+      "input": {
+        "error": "store_busy",
+        "message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "expectedError": "RouteError.message bytes"
+    }
+  ]
+}

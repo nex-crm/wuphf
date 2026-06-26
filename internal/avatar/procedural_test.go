@@ -99,7 +99,7 @@ func TestKnownSlugsUseHandDesignedSprites(t *testing.T) {
 }
 
 func TestOperationSlugsUseGeneratedOfficeSprites(t *testing.T) {
-	for _, slug := range []string{"planner", "builder", "growth", "reviewer", "operator"} {
+	for _, slug := range []string{"planner", "builder", "growth", "jim", "halpert", "reviewer", "operator"} {
 		if _, ok := knownOfficeSpriteForSlug(slug); !ok {
 			t.Fatalf("expected %q to resolve to generated office avatar sprite", slug)
 		}

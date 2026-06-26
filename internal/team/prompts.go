@@ -9,6 +9,7 @@ package team
 // launcher feeds to tmux split-window for an interactive claude pane.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +48,33 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			// back the broker's order as-is. Sorting both here and
 			// inside Build is redundant.
 			return l.broker.ListPolicies()
+		},
+		skills: func() []SkillSummary {
+			if l == nil || l.broker == nil {
+				return nil
+			}
+			// Same pattern as policies above: builder re-sorts by
+			// slug for byte-stability, so this callback hands back
+			// the broker's order as-is.
+			return l.broker.ListActiveSkillSummaries()
+		},
+		activeIssues: func() []IssueSummary {
+			if l == nil || l.broker == nil {
+				return nil
+			}
+			return l.broker.ListActiveIssueSummariesForPrompt()
+		},
+		agentInstruction: func(slug, name string) string {
+			if l == nil || l.broker == nil {
+				return ""
+			}
+			return l.broker.ReadAgentInstruction(slug, name)
+		},
+		officeUser: func() string {
+			if l == nil || l.broker == nil {
+				return ""
+			}
+			return l.broker.ReadOfficeUserFile()
 		},
 		nameFor: l.targeter().NameFor,
 		learnings: func(slug string) []LearningSearchResult {
@@ -122,9 +150,48 @@ func (l *Launcher) cleanupAgentTempFiles() {
 	}
 }
 
-// resolvePermissionFlags returns the Claude Code permission flags for an agent.
-// All agents run in bypass mode by default — the team is autonomous.
-func (l *Launcher) resolvePermissionFlags(slug string) string {
+// turnPosture is the read/write posture of a single agent turn.
+type turnPosture int
+
+const (
+	// postureExecute lets the turn change the repo and take actions — full
+	// autonomy. This is every office/conversational turn and every turn for a
+	// Running/Approved task.
+	postureExecute turnPosture = iota
+	// posturePlan runs the turn read-only: the owner explores and produces a
+	// plan but must not change the repo or take external actions until a human
+	// approves the plan. Mapped onto each provider's native plan mode.
+	posturePlan
+)
+
+// resolveTurnPosture decides whether THIS turn runs read-only (plan) or
+// read-write (execute). A turn is plan-posture only when its task is in the
+// structured-planning phase (LifecycleStatePlanning); everything else stays
+// execute-posture. The task is resolved per-turn via turnTaskForCtx so that,
+// under parallel instances, an agent's planning turn and a concurrent
+// office/execution turn get independent postures. A background context falls
+// back to the agent's active task (correct for the single-task interactive
+// pane).
+func (l *Launcher) resolveTurnPosture(ctx context.Context, slug string) turnPosture {
+	if l == nil {
+		return postureExecute
+	}
+	if task := l.turnTaskForCtx(ctx, slug); task != nil && isPlanningLifecycleState(task.LifecycleState) {
+		return posturePlan
+	}
+	return postureExecute
+}
+
+// resolvePermissionFlags returns the Claude Code permission flags for an agent's
+// current turn. Execute-posture turns run in bypass mode — the team is
+// autonomous. Plan-posture turns (the task is in LifecycleStatePlanning) run in
+// Claude's NATIVE plan mode: read-only exploration where the model presents a
+// plan via ExitPlanMode and no mutating tool runs. --dangerously-skip-permissions
+// is deliberately omitted in plan posture — it would defeat the read-only gate.
+func (l *Launcher) resolvePermissionFlags(ctx context.Context, slug string) string {
+	if l.resolveTurnPosture(ctx, slug) == posturePlan {
+		return "--permission-mode plan"
+	}
 	return "--permission-mode bypassPermissions --dangerously-skip-permissions"
 }
 
@@ -170,7 +237,10 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 	}
 
 	name := l.targeter().NameFor(slug)
-	permFlags := l.resolvePermissionFlags(slug)
+	// The interactive pane runs one task at a time and has no per-turn ctx, so a
+	// background context resolves posture from the agent's active task (a
+	// Planning task → native plan mode; anything else → bypass).
+	permFlags := l.resolvePermissionFlags(context.Background(), slug)
 
 	brokerToken := ""
 	if l.broker != nil {
@@ -193,7 +263,10 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 		}
 	}
 
-	model := l.headlessClaudeModel(slug)
+	// The interactive pane builder has no per-turn context; a background
+	// context makes headlessClaudeModel fall back to the agent's active task,
+	// which is correct here because tmux panes run one task at a time.
+	model := l.headlessClaudeModel(context.Background(), slug)
 	brokerBaseURL := l.BrokerBaseURL()
 	otelLogsEndpoint := brokerBaseURL + "/v1/logs"
 	otelHeaders := "Authorization=Bearer " + brokerToken

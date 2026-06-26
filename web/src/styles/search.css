@@ -7,12 +7,12 @@
 .search-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
-  z-index: 150;
+  z-index: var(--z-overlay);
   animation: fadeIn 0.15s ease-out;
 }
 
@@ -20,7 +20,7 @@
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-modal);
   width: 90%;
   max-width: 600px;
   max-height: 80vh;
@@ -48,7 +48,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--text-lg);
   color: var(--text);
   outline: none;
   min-width: 0;
@@ -76,7 +76,7 @@
 .search-empty {
   padding: 32px 20px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-tertiary);
 }
 
@@ -112,26 +112,26 @@
 }
 
 .search-result-author {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text);
 }
 
 .search-result-channel {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--accent);
   font-family: var(--font-mono);
 }
 
 .search-result-time {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--text-tertiary);
   margin-left: auto;
   font-family: var(--font-mono);
 }
 
 .search-result-content {
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   line-height: 1.4;
   overflow: hidden;
@@ -163,13 +163,13 @@
   padding: 24px 16px;
   text-align: center;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .cmd-palette-group {
   padding: 4px 0 8px;
 }
 .cmd-palette-group-title {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -182,7 +182,7 @@
   gap: 12px;
   padding: 8px 16px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-base);
   transition: background 0.1s;
   width: 100%;
   border: none;
@@ -199,7 +199,7 @@
   width: 22px;
   flex-shrink: 0;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 .cmd-palette-item-text {
   flex: 1;
@@ -216,14 +216,14 @@
   white-space: nowrap;
 }
 .cmd-palette-item-desc {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .cmd-palette-item-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   flex-shrink: 0;
@@ -234,7 +234,7 @@
   gap: 14px;
   padding: 8px 16px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 .cmd-palette-footer .kbd {
@@ -248,11 +248,11 @@
 .channel-wizard-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: var(--z-modal-critical);
   animation: fadeIn 0.15s ease-out;
 }
 
@@ -260,7 +260,7 @@
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-modal);
   width: 100%;
   max-width: 480px;
   padding: 24px;
@@ -291,7 +291,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
@@ -329,14 +329,14 @@
 }
 
 .channel-wizard-field .label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .channel-wizard-field .input {
   height: 40px;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .channel-wizard-field .channel-wizard-textarea {
@@ -348,7 +348,7 @@
 }
 
 .channel-wizard-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-style: italic;
 }
@@ -361,7 +361,7 @@
 }
 
 .channel-wizard-error {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--red);
   padding: 8px 12px;
   background: var(--red-bg);
@@ -387,7 +387,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
   color: var(--red);
 }
@@ -402,7 +402,7 @@
   background: var(--red);
   color: white;
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: var(--text-sm);
   padding: 4px 12px;
 }
 .disconnect-banner-retry:hover {
@@ -450,7 +450,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
 }
 
@@ -512,7 +512,7 @@
 }
 .upgrade-banner-run code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text);
 }
 
@@ -545,11 +545,11 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .upgrade-banner-outcome code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -569,7 +569,7 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   white-space: pre-wrap;
 }
 
@@ -607,7 +607,7 @@
 }
 
 .upgrade-banner-changelog-status {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   padding: 4px 0;
 }
@@ -617,7 +617,7 @@
 }
 
 .upgrade-banner-changelog-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-secondary);
@@ -628,13 +628,13 @@
   list-style: disc;
   margin: 0;
   padding-left: 20px;
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 
 .upgrade-banner-scope {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   background: var(--bg-subtle);
   border-radius: 4px;
   padding: 0 6px;
@@ -643,7 +643,7 @@
 
 .upgrade-banner-pr {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--blue);
   text-decoration: none;
 }
@@ -656,7 +656,7 @@
    UpgradeBanner.tsx doesn't masquerade as a broken link. */
 .upgrade-banner-pr-text {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -684,7 +684,7 @@
     justify-content: space-between;
   }
   .upgrade-banner-run code {
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
 }
 
@@ -700,7 +700,7 @@
   justify-content: center;
   padding-top: 8vh;
   padding-bottom: 4vh;
-  z-index: 160;
+  z-index: var(--z-modal);
   animation: fadeIn 0.15s ease-out;
   overflow-y: auto;
 }
@@ -756,7 +756,7 @@
   color: var(--text-secondary);
   border-radius: 6px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: SFMono-Regular, Menlo, monospace;
   cursor: pointer;
   transition:
@@ -777,7 +777,7 @@
 
 .help-section-title {
   margin: 0 0 10px 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -797,7 +797,7 @@
   grid-template-columns: 1fr 1.3fr;
   align-items: center;
   gap: 16px;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text);
   padding: 4px 0;
 }
@@ -814,7 +814,7 @@
   align-items: center;
   justify-content: center;
   width: 20px;
-  font-size: 14px;
+  font-size: var(--text-md);
   flex-shrink: 0;
 }
 
@@ -841,7 +841,7 @@
 
 .help-kbd {
   font-family: SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 6px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -896,7 +896,7 @@
   align-items: center;
 }
 .version-modal-grid dt {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -907,14 +907,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text);
   flex-wrap: wrap;
 }
 
 .version-modal-version {
   font-family: SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text);
   background: var(--accent-bg);
   padding: 2px 8px;
@@ -944,7 +944,7 @@
 }
 
 .version-modal-status {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
@@ -998,7 +998,7 @@
 .version-modal-cmd {
   display: inline-block;
   font-family: SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1013,7 +1013,7 @@
   border: none;
   padding: 0;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;

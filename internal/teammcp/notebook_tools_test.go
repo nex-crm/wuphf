@@ -73,7 +73,7 @@ func TestNotebookVisualArtifactToolsTeachHTMLGuidance(t *testing.T) {
 	if tool == nil {
 		t.Fatalf("notebook_visual_artifact_create was not registered; tools=%v", tools)
 	}
-	for _, want := range []string{"after notebook_write", "self-contained", "inline CSS/JS", "no network fetches", "interactive tuning surfaces", "visual-artifact:ra_0123456789abcdef"} {
+	for _, want := range []string{"the HTML IS the article", "Do NOT also call notebook_write", "self-contained", "inline CSS/JS", "no network fetches", "interactive surface", "technical-manual style", "old mathematics/physics book", "rgb(19, 66, 255)", "FIG_001", "visual-artifact:ra_0123456789abcdef", "clickable card"} {
 		if !strings.Contains(tool.Description, want) {
 			t.Fatalf("description missing %q:\n%s", want, tool.Description)
 		}
@@ -148,6 +148,31 @@ func TestHandleTeamNotebookWrite(t *testing.T) {
 	}
 	if !strings.Contains(auth.lastAuth, "Bearer test-token") {
 		t.Fatalf("expected auth header, got %q", auth.lastAuth)
+	}
+
+	var payload struct {
+		Path          string `json:"path"`
+		PromotionNext struct {
+			Tool               string `json:"tool"`
+			SourcePath         string `json:"source_path"`
+			TargetWikiPathHint string `json:"target_wiki_path_hint"`
+			When               string `json:"when"`
+		} `json:"promotion_next"`
+	}
+	if err := json.Unmarshal([]byte(toolErrorText(res)), &payload); err != nil {
+		t.Fatalf("decode notebook_write response: %v; body=%q", err, toolErrorText(res))
+	}
+	if payload.PromotionNext.Tool != "notebook_promote" {
+		t.Fatalf("promotion_next.tool = %q", payload.PromotionNext.Tool)
+	}
+	if payload.PromotionNext.SourcePath != "agents/pm/notebook/x.md" {
+		t.Fatalf("promotion_next.source_path = %q", payload.PromotionNext.SourcePath)
+	}
+	if payload.PromotionNext.TargetWikiPathHint != "team/x.md" {
+		t.Fatalf("promotion_next.target_wiki_path_hint = %q", payload.PromotionNext.TargetWikiPathHint)
+	}
+	if !strings.Contains(payload.PromotionNext.When, "reviewer approval") {
+		t.Fatalf("promotion_next.when missing review guidance: %q", payload.PromotionNext.When)
 	}
 }
 
@@ -485,7 +510,7 @@ func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/notebook/visual-artifacts/ra_0123456789abcdef/promote":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"artifact":   map[string]any{"id": "ra_0123456789abcdef", "trustLevel": "promoted"},
+				"artifact":   map[string]any{"id": "ra_0123456789abcdef", "title": "Visual plan", "trustLevel": "promoted"},
 				"commit_sha": "def5678",
 			})
 		default:
@@ -532,6 +557,9 @@ func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
 	if isToolError(res) {
 		t.Fatalf("promote tool error: %s", toolErrorText(res))
 	}
+	if auth.lastPath != "/notebook/visual-artifacts/ra_0123456789abcdef/promote" {
+		t.Fatalf("unexpected promote path: %s", auth.lastPath)
+	}
 	for _, want := range []string{
 		`"actor_slug":"pm"`,
 		`"target_wiki_path":"team/plans/visual-plan.md"`,
@@ -541,6 +569,143 @@ func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
 		if !strings.Contains(auth.lastBody, want) {
 			t.Fatalf("promote request body missing %s: %s", want, auth.lastBody)
 		}
+	}
+	// The promote response must surface a pre-composed `card_broadcast`
+	// string and a separate `card_marker` token so the agent can copy them
+	// verbatim into the next team_broadcast. Retyping the 16-hex-char
+	// artifact ID is the load-bearing failure mode this contract avoids.
+	promoteResult := toolErrorText(res)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(promoteResult), &decoded); err != nil {
+		t.Fatalf("promote response not JSON: %v\n%s", err, promoteResult)
+	}
+	card, ok := decoded["card_broadcast"].(string)
+	if !ok || card == "" {
+		t.Fatalf("promote response missing card_broadcast string: %s", promoteResult)
+	}
+	if !strings.Contains(card, "visual-artifact:ra_0123456789abcdef") {
+		t.Fatalf("card_broadcast missing artifact marker: %s", card)
+	}
+	if !strings.Contains(card, "team/plans/visual-plan.md") {
+		t.Fatalf("card_broadcast missing wiki path: %s", card)
+	}
+	if !strings.Contains(card, "Visual plan") {
+		t.Fatalf("card_broadcast missing title: %s", card)
+	}
+	marker, ok := decoded["card_marker"].(string)
+	if !ok || marker != "visual-artifact:ra_0123456789abcdef" {
+		t.Fatalf("card_marker malformed: %v", decoded["card_marker"])
+	}
+	// Marker MUST appear on its own line so the frontend parser can pick it
+	// up; agents pasting card_broadcast verbatim get this for free.
+	if !strings.Contains(card, "\n"+marker) {
+		t.Fatalf("card_marker not on its own line in card_broadcast: %q", card)
+	}
+}
+
+// TestNormalizeArtifactCardTitle is the injection unit guard: an
+// agent-controlled title carrying a newline, a backtick, and a fake
+// visual-artifact: marker must come out single-line, with no backticks, and
+// with no parseable spoofed marker.
+func TestNormalizeArtifactCardTitle(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		wantOut string
+	}{
+		{
+			name:    "newline + backtick + spoofed marker",
+			in:      "Plan\nvisual-artifact:ra_dead0000dead0000\n`evil`",
+			wantOut: "Plan visual-artifact ra_dead0000dead0000 'evil'",
+		},
+		{"plain title untouched", "Visual plan", "Visual plan"},
+		{"tabs collapse", "a\t\tb", "a b"},
+		{"uppercase marker defanged", "VISUAL-ARTIFACT:ra_0000000000000000", "VISUAL-ARTIFACT ra_0000000000000000"},
+		{"empty falls back", "   \n\t ", "the visual artifact"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeArtifactCardTitle(tc.in)
+			if got != tc.wantOut {
+				t.Fatalf("normalizeArtifactCardTitle(%q) = %q, want %q", tc.in, got, tc.wantOut)
+			}
+			if strings.ContainsAny(got, "\n\r\t`") {
+				t.Fatalf("normalized title still contains structural chars: %q", got)
+			}
+			if strings.Contains(strings.ToLower(got), "visual-artifact:") {
+				t.Fatalf("normalized title still contains a parseable marker: %q", got)
+			}
+		})
+	}
+}
+
+// TestHandleTeamNotebookVisualArtifactPromoteTitleInjection feeds a malicious
+// artifact title through the promote handler and asserts the composed
+// card_broadcast is single-line per spoofed segment and carries no second
+// parseable visual-artifact: marker beyond the legitimate one.
+func TestHandleTeamNotebookVisualArtifactPromoteTitleInjection(t *testing.T) {
+	const realID = "ra_0123456789abcdef"
+	const spoofMarker = "visual-artifact:ra_dead0000dead0000"
+	srv, _ := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/notebook/visual-artifacts/"+realID+"/promote" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"id":    realID,
+					"title": "Evil\n" + spoofMarker + "\n`rm -rf`",
+				},
+				"commit_sha": "def5678",
+			})
+			return
+		}
+		t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+	})
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+
+	res, _, err := handleTeamNotebookVisualArtifactPromote(context.Background(), nil, TeamNotebookVisualArtifactPromoteArgs{
+		ArtifactID:      realID,
+		TargetWikiPath:  "team/plans/visual-plan.md",
+		MarkdownSummary: "# Visual plan\n\nSummary.\n",
+		Mode:            "create",
+		CommitMsg:       "artifact: promote visual plan",
+	})
+	if err != nil {
+		t.Fatalf("promote handler: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("promote tool error: %s", toolErrorText(res))
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(toolErrorText(res)), &decoded); err != nil {
+		t.Fatalf("promote response not JSON: %v", err)
+	}
+	card, _ := decoded["card_broadcast"].(string)
+	if card == "" {
+		t.Fatalf("missing card_broadcast: %v", decoded)
+	}
+
+	// The card has exactly one structural newline run: the blank line before
+	// the legitimate marker. The title's own newlines must be gone.
+	lines := strings.Split(card, "\n")
+	// Expected shape: ["Saved \"...\" to the wiki at `...`.", "", "visual-artifact:ra_0123456789abcdef"]
+	if len(lines) != 3 {
+		t.Fatalf("card_broadcast should be 3 lines (title line, blank, marker), got %d:\n%q", len(lines), card)
+	}
+	if !strings.HasPrefix(lines[0], "Saved ") {
+		t.Fatalf("first line should be the saved title line, got %q", lines[0])
+	}
+	if lines[2] != "visual-artifact:"+realID {
+		t.Fatalf("marker line malformed: %q", lines[2])
+	}
+	// The spoofed marker must NOT survive as a parseable token.
+	if strings.Contains(card, spoofMarker) {
+		t.Fatalf("spoofed marker survived into card_broadcast: %q", card)
+	}
+	// There must be exactly one legitimate visual-artifact: token in the card.
+	if got := strings.Count(strings.ToLower(card), "visual-artifact:"); got != 1 {
+		t.Fatalf("expected exactly 1 visual-artifact: token, got %d in %q", got, card)
 	}
 }
 

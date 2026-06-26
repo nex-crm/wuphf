@@ -2,6 +2,7 @@ package team
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -133,15 +134,18 @@ func TestAckTaskRejectsInvalidOwnerAndMissingTask(t *testing.T) {
 func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	b := newTestBroker(t)
 	b.channels = []teamChannel{
-		{Slug: "general", Name: "general", Members: []string{"pm"}},
+		{Slug: "general", Name: "general", Members: []string{"ceo"}},
 	}
 
+	// Issues can only be created by @ceo or the human. @ceo is also a
+	// trusted sender, so it keeps access to the per-task channel that is
+	// now minted on create — which is what authorizes the later "complete".
 	created, err := b.MutateTask(TaskPostRequest{
 		Action:    "create",
 		Channel:   "general",
 		Title:     "Write the plan",
 		Owner:     "alice",
-		CreatedBy: "pm",
+		CreatedBy: "ceo",
 	})
 	if err != nil {
 		t.Fatalf("MutateTask create: %v", err)
@@ -149,18 +153,67 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if created.Task.ID == "" {
 		t.Fatal("expected task id")
 	}
+	// An owner-set top-level issue lands in Planning (structured planning);
+	// Planning's derived status is in_progress (the owner is actively planning).
 	if created.Task.Status() != "in_progress" {
 		t.Fatalf("created status: want in_progress, got %q", created.Task.Status())
 	}
-	if len(b.tasks) != 1 || b.tasks[0].ID != created.Task.ID {
+	if created.Task.LifecycleState != LifecycleStatePlanning {
+		t.Fatalf("created lifecycle: want planning, got %q", created.Task.LifecycleState)
+	}
+	var foundCreated *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == created.Task.ID {
+			foundCreated = &b.tasks[i]
+			break
+		}
+	}
+	if foundCreated == nil {
 		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)
+	}
+
+	// Parked tasks are the ONE drafting state left. Park the lane the
+	// deliberate way (lifecycle chokepoint, same as /task-plan park=true),
+	// then pin the parked-task gate: an agent "complete" on a parked task
+	// must be refused with a structured conflict, and the human's start
+	// (approve) un-parks it into running.
+	if err := b.TransitionLifecycle(created.Task.ID, LifecycleStateDrafting, "parked by composer"); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	_, parkedErr := b.MutateTask(TaskPostRequest{
+		Action:    "complete",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		CreatedBy: "ceo",
+	})
+	var parkedMutationErr *TaskMutationError
+	if !errors.As(parkedErr, &parkedMutationErr) || parkedMutationErr.Kind != TaskMutationConflict {
+		t.Fatalf("complete on parked task: want conflict, got %v", parkedErr)
+	}
+	if !strings.Contains(parkedMutationErr.Message, "parked") {
+		t.Fatalf("parked refusal must say parked, got %q", parkedMutationErr.Message)
+	}
+
+	// The human's approve STARTS the parked task (drafting→running) — the
+	// one remaining start affordance.
+	started, err := b.MutateTask(TaskPostRequest{
+		Action:    "approve",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		CreatedBy: "human",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask start parked: %v", err)
+	}
+	if started.Task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("approve on parked: want running, got %q", started.Task.LifecycleState)
 	}
 
 	updated, err := b.MutateTask(TaskPostRequest{
 		Action:    "complete",
 		ID:        created.Task.ID,
 		Channel:   "general",
-		CreatedBy: "pm",
+		CreatedBy: "ceo",
 	})
 	if err != nil {
 		t.Fatalf("MutateTask complete: %v", err)
@@ -171,8 +224,50 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if updated.Task.CompletedAt == "" {
 		t.Fatal("expected completion timestamp")
 	}
-	if b.tasks[0].Status() != "done" {
-		t.Fatalf("expected broker state to be updated, got %+v", b.tasks[0])
+	var foundUpdated *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == created.Task.ID {
+			foundUpdated = &b.tasks[i]
+			break
+		}
+	}
+	if foundUpdated == nil || foundUpdated.Status() != "done" {
+		t.Fatalf("expected broker state to be updated, got %+v", b.tasks)
+	}
+}
+
+// Ownerless creates land READY (not parked, not running) and promote to
+// running on assignment — "tasks created without an owner go Ready and
+// dispatch on assignment".
+func TestMutateTaskOwnerlessCreateLandsReadyAndRunsOnAssign(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"ceo"}},
+	}
+	created, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Staff me later",
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create: %v", err)
+	}
+	if created.Task.LifecycleState != LifecycleStateReady {
+		t.Fatalf("ownerless create: want ready, got %q", created.Task.LifecycleState)
+	}
+	assigned, err := b.MutateTask(TaskPostRequest{
+		Action:    "assign",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		Owner:     "alice",
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask assign: %v", err)
+	}
+	if assigned.Task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("assign on ready: want running, got %q", assigned.Task.LifecycleState)
 	}
 }
 

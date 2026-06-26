@@ -53,9 +53,9 @@ func TestSaveAndLoadManifestRoundTrips(t *testing.T) {
 			{Slug: "deals", Name: "deals", Members: []string{"ceo", "ops"}},
 		},
 		BlueprintRefs: []BlueprintRef{
-			{Kind: "operation", ID: " multi-agent-workflow-consulting ", Source: " template "},
+			{Kind: "operation", ID: " niche-crm ", Source: " template "},
 			{Kind: "employee", ID: " workflow automation builder ", Source: "template"},
-			{Kind: "operation", ID: "multi-agent-workflow-consulting", Source: "template"},
+			{Kind: "operation", ID: "niche-crm", Source: "template"},
 		},
 	}
 	if err := SaveManifest(manifest); err != nil {
@@ -81,7 +81,7 @@ func TestSaveAndLoadManifestRoundTrips(t *testing.T) {
 	if got, want := loaded.BlueprintRefs[0].Kind, "operation"; got != want {
 		t.Fatalf("unexpected ref kind: got %q want %q", got, want)
 	}
-	if got, want := loaded.BlueprintRefs[0].ID, "multi-agent-workflow-consulting"; got != want {
+	if got, want := loaded.BlueprintRefs[0].ID, "niche-crm"; got != want {
 		t.Fatalf("unexpected ref id: got %q want %q", got, want)
 	}
 	if got, want := loaded.BlueprintRefs[1].Kind, "employee"; got != want {

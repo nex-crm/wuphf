@@ -39,11 +39,11 @@ type teamSkillCompileResponse struct {
 }
 
 // registerSkillCompileTools registers the team_skill_compile tool. Called
-// alongside registerSkillAuthoringTools.
+// alongside registerSkillTools.
 func registerSkillCompileTools(server *mcp.Server) {
 	mcp.AddTool(server, officeWriteTool(
 		"team_skill_compile",
-		"Trigger a Stage A wiki→skill compile pass. The broker walks team/**/*.md, asks the LLM to classify each article, and writes a skill proposal for any reusable workflow it finds. Use sparingly: the cron already runs every 30m. dry_run=true shows what would be proposed without writing.",
+		"Trigger a wiki→skill compile pass. The broker walks team/**/*.md, asks the LLM to classify each article, and compiles an active skill for any reusable workflow it finds. Use sparingly: the cron already runs every 30m. dry_run=true previews what would be compiled without writing.",
 	), handleTeamSkillCompile)
 }
 

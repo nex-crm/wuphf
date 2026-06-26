@@ -48,7 +48,6 @@ export function StatusBar() {
     }
   }, []);
   const { data: members = [] } = useOfficeMembers();
-  const dm = route.kind === "dm" ? { agentSlug: route.agentSlug } : null;
 
   const { data: health } = useQuery<HealthResponse>({
     queryKey: ["health"],
@@ -88,8 +87,6 @@ export function StatusBar() {
     switch (route.kind) {
       case "channel":
         return `# ${route.channelSlug}`;
-      case "dm":
-        return `@${route.agentSlug}`;
       case "app":
         return appTitle(route.appId);
       case "task-board":
@@ -105,10 +102,26 @@ export function StatusBar() {
         return "Notebooks";
       case "reviews":
         return "Reviews";
+      case "article":
+        return "Article";
       case "inbox":
         return "Decision Inbox";
       case "task-decision":
         return `Task ${route.taskId}`;
+      case "task-new":
+        return "New task";
+      case "agents":
+        return "Agents";
+      case "agent-detail":
+        return `@${route.agentSlug}`;
+      case "skill-detail":
+        return `skill · ${route.skillName}`;
+      case "routine-detail":
+        return `Routine ${route.routineSlug}`;
+      case "routine-new":
+        return "New scheduled task";
+      case "home":
+        return "Home";
       case "unknown":
         return "";
       default: {
@@ -119,7 +132,7 @@ export function StatusBar() {
       }
     }
   })();
-  const modeLabel = dm ? "1:1" : "office";
+  const modeLabel = "office";
   const provider = health?.provider;
   const providerModel = health?.provider_model?.trim();
 

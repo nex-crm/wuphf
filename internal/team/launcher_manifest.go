@@ -44,14 +44,13 @@ func resetManifestToPack(pack *agent.PackDefinition) error {
 	members := make([]company.MemberSpec, 0, len(pack.Agents))
 	for _, cfg := range pack.Agents {
 		members = append(members, company.MemberSpec{
-			Slug:           cfg.Slug,
-			Name:           cfg.Name,
-			Role:           cfg.Name,
-			Expertise:      append([]string(nil), cfg.Expertise...),
-			Personality:    cfg.Personality,
-			PermissionMode: cfg.PermissionMode,
-			AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-			System:         cfg.Slug == pack.LeadSlug || cfg.Slug == "ceo",
+			Slug:         cfg.Slug,
+			Name:         cfg.Name,
+			Role:         cfg.Name,
+			Expertise:    append([]string(nil), cfg.Expertise...),
+			Personality:  cfg.Personality,
+			AllowedTools: append([]string(nil), cfg.AllowedTools...),
+			System:       cfg.Slug == pack.LeadSlug || cfg.Slug == "ceo",
 		})
 	}
 	manifest := company.Manifest{
