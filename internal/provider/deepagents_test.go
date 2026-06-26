@@ -258,6 +258,74 @@ func TestNewDispatchClient_BaseURLResolution(t *testing.T) {
 
 // TestProjectionWireShape locks the JSON tags against runstate.to_projection so
 // a Python-side rename can't silently drift the Go decode.
+func TestDispatchClientCoordinate_DecodesPlan(t *testing.T) {
+	t.Parallel()
+	var gotPath string
+	var gotBody map[string]any
+	c := fakeOrchestrator(t, func(path string, body map[string]any) (int, any) {
+		gotPath, gotBody = path, body
+		return http.StatusOK, CoordinationPlan{
+			GoalID:  "G1",
+			Actions: map[string]string{"c1": CoordStart, "c2": CoordBlock},
+			Ready:   []string{"c1"},
+		}
+	})
+
+	plan, err := c.Coordinate(context.Background(), CoordinateRequest{
+		GoalID: "G1",
+		Children: []map[string]any{
+			{"task_id": "c1", "lifecycle_state": "ready"},
+			{"task_id": "c2", "lifecycle_state": "ready", "depends_on": []string{"c1"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Coordinate: %v", err)
+	}
+	if gotPath != "/coordinate" {
+		t.Fatalf("path = %q, want /coordinate", gotPath)
+	}
+	// schema_version is stamped when the caller leaves it zero.
+	if v, _ := gotBody["schema_version"].(float64); int(v) != OrchestratorSchemaVersion {
+		t.Fatalf("schema_version = %v, want %d", gotBody["schema_version"], OrchestratorSchemaVersion)
+	}
+	if plan.Actions["c1"] != CoordStart || plan.Actions["c2"] != CoordBlock {
+		t.Fatalf("actions decoded wrong: %v", plan.Actions)
+	}
+	if len(plan.Ready) != 1 || plan.Ready[0] != "c1" {
+		t.Fatalf("ready = %v, want [c1]", plan.Ready)
+	}
+	if plan.Cycle != nil {
+		t.Fatalf("cycle = %v, want nil", plan.Cycle)
+	}
+}
+
+func TestDispatchClientCoordinate_RequiresGoalID(t *testing.T) {
+	t.Parallel()
+	c := NewDispatchClient("http://127.0.0.1:0")
+	if _, err := c.Coordinate(context.Background(), CoordinateRequest{}); err == nil {
+		t.Fatal("expected error on empty goal_id")
+	}
+}
+
+func TestDispatchClientCoordinate_SurfacesCycle(t *testing.T) {
+	t.Parallel()
+	c := fakeOrchestrator(t, func(_ string, _ map[string]any) (int, any) {
+		return http.StatusOK, CoordinationPlan{
+			GoalID:  "G2",
+			Actions: map[string]string{"a": CoordBlock, "b": CoordBlock},
+			Ready:   []string{},
+			Cycle:   []string{"a", "b", "a"},
+		}
+	})
+	plan, err := c.Coordinate(context.Background(), CoordinateRequest{GoalID: "G2", Children: []map[string]any{}})
+	if err != nil {
+		t.Fatalf("Coordinate: %v", err)
+	}
+	if len(plan.Cycle) == 0 || plan.Cycle[0] != plan.Cycle[len(plan.Cycle)-1] {
+		t.Fatalf("cycle not surfaced: %v", plan.Cycle)
+	}
+}
+
 func TestProjectionWireShape(t *testing.T) {
 	t.Parallel()
 	const fromPython = `{"task_id":"t","lifecycle_state":"approved","pipeline_stage":"ship","review_state":"approved","status":"done","blocked":false}`

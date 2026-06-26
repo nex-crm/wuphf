@@ -85,3 +85,37 @@ def test_unknown_request_field_rejected():
         "bogus_new_field": "surprise",
     })
     assert resp.status_code == 422
+
+
+def test_coordinate_returns_action_plan_for_a_goals_children():
+    c = _client()
+    out = c.post("/coordinate", json={
+        "goal_id": "G1",
+        "children": [
+            {"task_id": "c1", "lifecycle_state": "ready"},
+            {"task_id": "c2", "lifecycle_state": "ready", "depends_on": ["c1"]},
+        ],
+    }).json()
+    assert out["goal_id"] == "G1"
+    assert out["actions"] == {"c1": "start", "c2": "block"}
+    assert out["ready"] == ["c1"]
+    assert out["cycle"] is None
+
+
+def test_coordinate_surfaces_a_dependency_cycle():
+    c = _client()
+    out = c.post("/coordinate", json={
+        "goal_id": "G2",
+        "children": [
+            {"task_id": "a", "lifecycle_state": "ready", "depends_on": ["b"]},
+            {"task_id": "b", "lifecycle_state": "ready", "depends_on": ["a"]},
+        ],
+    }).json()
+    assert out["ready"] == []
+    assert out["cycle"] and out["cycle"][0] == out["cycle"][-1]
+
+
+def test_coordinate_schema_version_mismatch_rejected():
+    c = _client()
+    resp = c.post("/coordinate", json={"schema_version": 999, "goal_id": "G3", "children": []})
+    assert resp.status_code == 400

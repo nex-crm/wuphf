@@ -119,6 +119,37 @@ type StepResult struct {
 	Interrupt  map[string]any `json:"interrupt,omitempty"`
 }
 
+// Coordination action values a CoordinationPlan assigns to each child. They
+// mirror the kernel's CoordAction enum (orchestrator/coordination.py).
+const (
+	CoordStart    = "start"    // pre-execution + deps satisfied: activate to running
+	CoordDispatch = "dispatch" // already executing: run a turn
+	CoordBlock    = "block"    // a dependency is unresolved: leave blocked
+	CoordIdle     = "idle"     // terminal: nothing to do
+	CoordAwait    = "await"    // review/decision: waiting on a human
+	CoordUnknown  = "unknown"  // unmappable lifecycle: operator triage, never act
+)
+
+// CoordinateRequest is POST /coordinate's body: a goal's CHILD records,
+// re-hydrated from the broker. Each child must carry task_id + lifecycle_state +
+// depends_on (the broker sends DependsOn ∪ BlockedOn so the kernel's release rule
+// matches the broker's unblock cascade).
+type CoordinateRequest struct {
+	SchemaVersion int              `json:"schema_version"`
+	GoalID        string           `json:"goal_id"`
+	Children      []map[string]any `json:"children"`
+}
+
+// CoordinationPlan is POST /coordinate's response: the per-child action the
+// broker applies this tick. Cycle, when non-nil, is a dependency-cycle path —
+// the broker must fail loud and dispatch nothing.
+type CoordinationPlan struct {
+	GoalID  string            `json:"goal_id"`
+	Actions map[string]string `json:"actions"`
+	Ready   []string          `json:"ready"`
+	Cycle   []string          `json:"cycle,omitempty"`
+}
+
 // ErrUnexpectedStatus is returned when the orchestrator answers with a status
 // outside the contract's {done, interrupted}. Sentinel so callers can branch.
 var ErrUnexpectedStatus = errors.New("deepagents: unexpected step status")
@@ -203,6 +234,28 @@ func (c *DispatchClient) Resume(ctx context.Context, req ResumeRequest) (*StepRe
 	return c.postStep(ctx, "/resume", req)
 }
 
+// Coordinate asks the orchestrator for a goal's per-child action plan (POST
+// /coordinate). Pure on the orchestrator side: it re-hydrates the child graph,
+// returns start/block/dispatch per child plus the ready batch, and surfaces a
+// dependency cycle in Cycle. SchemaVersion is stamped if the caller left it zero.
+func (c *DispatchClient) Coordinate(ctx context.Context, req CoordinateRequest) (*CoordinationPlan, error) {
+	if strings.TrimSpace(req.GoalID) == "" {
+		return nil, errors.New("deepagents: Coordinate requires a goal_id")
+	}
+	if req.SchemaVersion == 0 {
+		req.SchemaVersion = OrchestratorSchemaVersion
+	}
+	raw, err := c.postRaw(ctx, "/coordinate", req)
+	if err != nil {
+		return nil, err
+	}
+	var plan CoordinationPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return nil, fmt.Errorf("deepagents: decode /coordinate CoordinationPlan: %w", err)
+	}
+	return &plan, nil
+}
+
 // Health probes GET /health. Returns nil when the sidecar is live.
 func (c *DispatchClient) Health(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
@@ -221,10 +274,32 @@ func (c *DispatchClient) Health(ctx context.Context) error {
 	return nil
 }
 
-// postStep marshals body, POSTs it to path, and decodes a StepResult. It fails
-// loud on non-2xx (surfacing up to 8 KiB of the server's error body) and on a
-// status outside the contract.
+// postStep POSTs body to path and decodes a StepResult, failing loud on a status
+// outside the contract or an interrupted result with no payload.
 func (c *DispatchClient) postStep(ctx context.Context, path string, body any) (*StepResult, error) {
+	raw, err := c.postRaw(ctx, path, body)
+	if err != nil {
+		return nil, err
+	}
+	var result StepResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("deepagents: decode %s StepResult: %w", path, err)
+	}
+	switch result.Status {
+	case StepStatusDone, StepStatusInterrupted:
+	default:
+		return nil, fmt.Errorf("%w: %q from %s%s", ErrUnexpectedStatus, result.Status, c.baseURL, path)
+	}
+	if result.Status == StepStatusInterrupted && result.Interrupt == nil {
+		return nil, fmt.Errorf("deepagents: %s reported interrupted with no interrupt payload", path)
+	}
+	return &result, nil
+}
+
+// postRaw marshals body, POSTs it to path, and returns the (bounded) response
+// body. It fails loud on non-2xx, surfacing up to 8 KiB of the server's error
+// body. Shared by the StepResult and CoordinationPlan endpoints.
+func (c *DispatchClient) postRaw(ctx context.Context, path string, body any) ([]byte, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("deepagents: marshal %s request: %w", path, err)
@@ -253,18 +328,5 @@ func (c *DispatchClient) postStep(ctx context.Context, path string, body any) (*
 		}
 		return nil, fmt.Errorf("deepagents: HTTP %d from %s%s: %s", resp.StatusCode, c.baseURL, path, snippet)
 	}
-
-	var result StepResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("deepagents: decode %s StepResult: %w", path, err)
-	}
-	switch result.Status {
-	case StepStatusDone, StepStatusInterrupted:
-	default:
-		return nil, fmt.Errorf("%w: %q from %s%s", ErrUnexpectedStatus, result.Status, c.baseURL, path)
-	}
-	if result.Status == StepStatusInterrupted && result.Interrupt == nil {
-		return nil, fmt.Errorf("deepagents: %s reported interrupted with no interrupt payload", path)
-	}
-	return &result, nil
+	return raw, nil
 }

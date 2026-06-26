@@ -1,8 +1,9 @@
 """FastAPI service: the Go broker dispatches orchestration steps here.
 
-  POST /run     — re-hydrate from the record, run one step, return StepResult
-  POST /resume  — resolve a pending human gate, continue, return StepResult
-  GET  /health  — liveness
+  POST /run        — re-hydrate from the record, run one step, return StepResult
+  POST /resume     — resolve a pending human gate, continue, return StepResult
+  POST /coordinate — re-hydrate a goal's children, return the per-child action plan
+  GET  /health     — liveness
 
 The harness is injected via a factory so tests override it with FakeHarness and the
 process default builds a ClaudeAgentHarness when keys/SDK are present. The Go-side
@@ -16,11 +17,19 @@ from typing import Callable
 
 from fastapi import FastAPI, HTTPException
 
+from .coordination import TaskGraph, coordinate
 from .graph import build_graph, drive
 from .harness import FakeHarness, Harness, build_harness
 from .lifecycle import State
 from .runstate import from_broker_record, to_projection
-from .wire import SCHEMA_VERSION, DispatchRequest, ResumeRequest, StepResult
+from .wire import (
+    SCHEMA_VERSION,
+    CoordinateRequest,
+    CoordinationPlan,
+    DispatchRequest,
+    ResumeRequest,
+    StepResult,
+)
 
 
 def _check_schema_version(got: int) -> None:
@@ -78,6 +87,20 @@ def create_app(harness_factory: HarnessFactory = _default_harness_factory) -> Fa
             thread_id=req.task_id,
             projection=to_projection(result["state"]),
             interrupt=result.get("interrupt"),
+        )
+
+    @app.post("/coordinate", response_model=CoordinationPlan)
+    def coordinate_goal(req: CoordinateRequest) -> CoordinationPlan:
+        # Re-hydrate the goal's task graph from the child records and return the
+        # per-child action plan. Pure: no harness, no checkpointer — a dependency
+        # cycle comes back as `cycle` (every child BLOCKed) so the broker fails loud.
+        _check_schema_version(req.schema_version)
+        result = coordinate(TaskGraph.from_broker_records(req.children))
+        return CoordinationPlan(
+            goal_id=req.goal_id,
+            actions=result.actions,
+            ready=result.ready,
+            cycle=result.cycle,
         )
 
     @app.post("/resume", response_model=StepResult)

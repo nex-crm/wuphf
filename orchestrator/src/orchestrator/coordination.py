@@ -120,6 +120,34 @@ def ready_to_dispatch(graph: TaskGraph) -> list[str]:
     return sorted(t for t, a in plan(graph).items() if a in (CoordAction.START, CoordAction.DISPATCH))
 
 
+@dataclass(frozen=True)
+class CoordinationResult:
+    """The whole-goal decision the broker applies this tick: an action per child,
+    the ready-to-dispatch batch, and a cycle path if the decomposition deadlocked."""
+
+    actions: dict[str, str]       # task_id -> CoordAction value
+    ready: list[str]              # ready_to_dispatch batch (START + DISPATCH), sorted
+    cycle: list[str] | None       # a dependency cycle path, or None
+
+
+def coordinate(graph: TaskGraph) -> CoordinationResult:
+    """Re-hydrate decision for a goal's children. A dependency cycle is a
+    deadlocked decomposition: surface the path and dispatch NOTHING (every child
+    BLOCKs) so the broker fails loud rather than running an unrunnable plan."""
+    cycle = detect_cycle(graph)
+    if cycle is not None:
+        return CoordinationResult(
+            actions={tid: CoordAction.BLOCK.value for tid in graph.nodes},
+            ready=[],
+            cycle=cycle,
+        )
+    return CoordinationResult(
+        actions={tid: action.value for tid, action in plan(graph).items()},
+        ready=ready_to_dispatch(graph),
+        cycle=None,
+    )
+
+
 def detect_cycle(graph: TaskGraph) -> list[str] | None:
     """Return a dependency cycle as a path (…-> x -> … -> x) or None. Only
     intra-graph edges count. Callers must fail loud on a cycle — it's a deadlocked
