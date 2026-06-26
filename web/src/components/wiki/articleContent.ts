@@ -28,6 +28,77 @@ export interface PreparedArticle {
   generated: boolean;
   /** True when the body defines GFM footnotes (`[^n]: …`). */
   hasFootnotes: boolean;
+  /**
+   * True when the article is a deterministic compile output — detected via
+   * `compiled: true` in the leading YAML frontmatter. Drives the Wikipedia
+   * reader treatment (warm-paper measure, citation badges) in the read view.
+   */
+  compiled: boolean;
+}
+
+/**
+ * Parsed scalar frontmatter values (string-keyed). Only the leading `key:
+ * value` scalar lines are captured; nested/array YAML is ignored because the
+ * read view only needs the `compiled` flag today.
+ */
+export type Frontmatter = Record<string, string>;
+
+interface FrontmatterSplit {
+  /** Parsed scalar frontmatter, or null when there is no leading `---` block. */
+  frontmatter: Frontmatter | null;
+  /** The body with the leading frontmatter block removed. */
+  body: string;
+}
+
+/**
+ * Split a leading `---` … `---` YAML frontmatter block off the top of a
+ * markdown body. Returns the original body untouched when there is no
+ * well-formed fenced block (e.g. a malformed block with no closing fence, or
+ * a body that simply opens with a thematic-break `---`).
+ *
+ * Only top-level `key: value` scalar lines are parsed (enough for the
+ * `compiled` flag); array/nested YAML is skipped, never surfaced as a fake
+ * scalar.
+ */
+export function splitFrontmatter(content: string): FrontmatterSplit {
+  const lines = content.split("\n");
+  // Skip a leading blank line, then require an opening `---` fence.
+  let start = 0;
+  while (start < lines.length && lines[start].trim() === "") start += 1;
+  if (start >= lines.length || lines[start].trim() !== "---") {
+    return { frontmatter: null, body: content };
+  }
+  let close = -1;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") {
+      close = i;
+      break;
+    }
+  }
+  if (close < 0) return { frontmatter: null, body: content };
+
+  const fm: Frontmatter = {};
+  for (let i = start + 1; i < close; i++) {
+    const line = lines[i];
+    // Top-level scalar only: `key: value` with no leading indentation.
+    const match = line.match(/^([A-Za-z0-9_-]+):\s?(.*)$/);
+    if (!match) continue;
+    const value = match[2].trim();
+    // Skip array/block openers (`sources:` followed by `- …`) — we only need
+    // scalars, and an empty value here would mask the list that follows.
+    if (value === "") continue;
+    fm[match[1]] = value;
+  }
+  const body = lines
+    .slice(close + 1)
+    .join("\n")
+    .replace(/^\n+/, "");
+  return { frontmatter: fm, body };
+}
+
+/** True when a parsed frontmatter marks the article as compile output. */
+function isCompiledFrontmatter(fm: Frontmatter | null): boolean {
+  return fm?.compiled === "true";
 }
 
 /** Marker comments stamped by the deterministic article generators (B2/B3). */
@@ -42,10 +113,15 @@ const FOOTNOTE_DEF_RE = /^\[\^[^\]]+\]:/;
 const REFERENCES_HEADING_RE = /^##\s+References\s*$/;
 
 export function prepareArticleMarkdown(content: string): PreparedArticle {
-  const generated = GENERATED_MARKERS.some((m) => content.includes(m));
-  const hasFootnotes = /^\[\^[^\]]+\]:/m.test(content);
+  // Strip a leading YAML frontmatter block first so its `key: value` lines
+  // never leak into the rendered body (compiled articles always carry one).
+  const { frontmatter, body } = splitFrontmatter(content);
+  const compiled = isCompiledFrontmatter(frontmatter);
 
-  let lines = content.split("\n");
+  const generated = GENERATED_MARKERS.some((m) => body.includes(m));
+  const hasFootnotes = /^\[\^[^\]]+\]:/m.test(body);
+
+  let lines = body.split("\n");
   lines = stripLeadH1(lines);
 
   const summary = extractSummarySection(lines);
@@ -62,6 +138,7 @@ export function prepareArticleMarkdown(content: string): PreparedArticle {
     infobox: summary ? summary.rows : null,
     generated,
     hasFootnotes,
+    compiled,
   };
 }
 

@@ -1,8 +1,16 @@
-import { useMemo, useRef } from "react";
-import ReactMarkdown from "react-markdown";
+import {
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+  useMemo,
+  useRef,
+} from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import type { PluggableList } from "unified";
 
 import type { RichArtifactDetail } from "../../api/richArtifacts";
+import type { SourceKind } from "../../api/sources";
+import { citationRemarkPlugin, extractCitationIds } from "../../lib/citation";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import {
   extractRichArtifactIds,
@@ -19,7 +27,10 @@ import ArticleHoverPreviews, {
 } from "./ArticleHoverPreviews";
 import ArticleInfobox from "./ArticleInfobox";
 import { prepareArticleMarkdown } from "./articleContent";
+import CitationBadge, { CitationNumberContext } from "./CitationBadge";
 import Hatnote from "./Hatnote";
+import MermaidBlock from "./MermaidBlock";
+import "../../styles/wiki-reader.css";
 
 /**
  * The Wikipedia-parity article read view.
@@ -46,6 +57,8 @@ interface ArticleReadViewProps {
   onNavigate?: (slug: string) => void;
   /** Opens the editor; wires Wikipedia's per-section [ edit ] link. */
   onEditSection?: () => void;
+  /** Open the Sources view for a cited record (citation popover affordance). */
+  onViewSource?: (kind: SourceKind, id: string) => void;
   /** Promoted visual artifact (fetched by the article shell). */
   visualArtifact?: RichArtifactDetail | null;
   /** Inline `visual-artifact:<id>` embeds (fetched by the article shell). */
@@ -63,6 +76,7 @@ export default function ArticleReadView({
   resolver,
   onNavigate,
   onEditSection,
+  onViewSource,
   visualArtifact = null,
   inlineArtifacts = [],
   fetchPreview,
@@ -72,20 +86,34 @@ export default function ArticleReadView({
 
   const prepared = useMemo(() => prepareArticleMarkdown(content), [content]);
 
+  // The compile engine ends every cited claim with a `^[source-id]` marker.
+  // Number them Wikipedia-style by first appearance so each badge shows `[n]`.
+  const citationNumbers = useMemo(() => {
+    const map = new Map<string, number>();
+    const ids = extractCitationIds(prepared.markdown);
+    for (let i = 0; i < ids.length; i++) {
+      map.set(ids[i], i + 1);
+    }
+    return map;
+  }, [prepared.markdown]);
+
   const remarkPlugins: PluggableList = useMemo(
-    () => buildRemarkPlugins(resolver),
+    () => [...buildRemarkPlugins(resolver), citationRemarkPlugin()],
     [resolver],
   );
   const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), []);
   const markdownComponents = useMemo(
     () =>
-      buildMarkdownComponents({
-        resolver,
-        onNavigate,
-        articlePath,
-        onEditSection,
-      }),
-    [resolver, onNavigate, articlePath, onEditSection],
+      buildReadViewComponents(
+        {
+          resolver,
+          onNavigate,
+          articlePath,
+          onEditSection,
+        },
+        onViewSource,
+      ),
+    [resolver, onNavigate, articlePath, onEditSection, onViewSource],
   );
   // The GFM footnote section becomes the article's References section —
   // visible heading (mdast-to-hast hides it with sr-only by default).
@@ -112,54 +140,132 @@ export default function ArticleReadView({
     visualArtifact !== null && !referencedIds.has(visualArtifact.artifact.id);
 
   return (
-    <div
-      className="wk-article-body"
-      data-testid="wk-article-body"
-      ref={bodyRef}
-    >
-      {prepared.generated ? (
-        <Hatnote>
-          This article is auto-generated from team activity. See the commit
-          history for the full trail.
-        </Hatnote>
-      ) : null}
-      {prepared.infobox ? (
-        <ArticleInfobox
-          title={title}
-          rows={prepared.infobox}
-          resolver={resolver}
-          onNavigate={onNavigate}
-          articlePath={articlePath}
-        />
-      ) : null}
-      {showPromoted && visualArtifact ? (
-        <RichArtifactEmbed
-          title={visualArtifact.artifact.title}
-          html={visualArtifact.html}
-        />
-      ) : null}
-      {keyedByOccurrence(inlineArtifacts, (detail) => detail.artifact.id).map(
-        ({ key, value: detail }) => (
-          <RichArtifactEmbed
-            key={key}
-            title={detail.artifact.title}
-            html={detail.html}
-          />
-        ),
-      )}
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        remarkRehypeOptions={remarkRehypeOptions}
-        components={markdownComponents}
+    <CitationNumberContext.Provider value={citationNumbers}>
+      <div
+        className={
+          prepared.compiled ? "wk-article-body wiki-reader" : "wk-article-body"
+        }
+        data-testid="wk-article-body"
+        data-compiled={prepared.compiled ? "true" : undefined}
+        ref={bodyRef}
       >
-        {renderedContent}
-      </ReactMarkdown>
-      <ArticleHoverPreviews
-        containerRef={bodyRef}
-        fetchPreview={fetchPreview}
-        delayMs={previewDelayMs}
-      />
-    </div>
+        {prepared.generated ? (
+          <Hatnote>
+            This article is auto-generated from team activity. See the commit
+            history for the full trail.
+          </Hatnote>
+        ) : null}
+        {prepared.infobox ? (
+          <ArticleInfobox
+            title={title}
+            rows={prepared.infobox}
+            resolver={resolver}
+            onNavigate={onNavigate}
+            articlePath={articlePath}
+          />
+        ) : null}
+        {showPromoted && visualArtifact ? (
+          <RichArtifactEmbed
+            title={visualArtifact.artifact.title}
+            html={visualArtifact.html}
+          />
+        ) : null}
+        {keyedByOccurrence(inlineArtifacts, (detail) => detail.artifact.id).map(
+          ({ key, value: detail }) => (
+            <RichArtifactEmbed
+              key={key}
+              title={detail.artifact.title}
+              html={detail.html}
+            />
+          ),
+        )}
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          remarkRehypeOptions={remarkRehypeOptions}
+          components={markdownComponents}
+        >
+          {renderedContent}
+        </ReactMarkdown>
+        <ArticleHoverPreviews
+          containerRef={bodyRef}
+          fetchPreview={fetchPreview}
+          delayMs={previewDelayMs}
+        />
+      </div>
+    </CitationNumberContext.Provider>
   );
+}
+
+interface ReadViewComponentOptions {
+  resolver: (slug: string) => boolean;
+  onNavigate?: (slug: string) => void;
+  articlePath: string;
+  onEditSection?: () => void;
+}
+
+/**
+ * Compose the shared wiki markdown components, then layer two read-view-only
+ * overrides on top:
+ *  - `a`: intercept `data-citation` links and mount a {@link CitationBadge}
+ *    (everything else delegates to the shared anchor renderer).
+ *  - `pre`: intercept fenced ```mermaid blocks and render them as diagrams.
+ */
+function buildReadViewComponents(
+  options: ReadViewComponentOptions,
+  onViewSource?: (kind: SourceKind, id: string) => void,
+): Partial<Components> {
+  const base = buildMarkdownComponents(options);
+  const BaseAnchor = base.a;
+  return {
+    ...base,
+    a: (props): ReactElement => {
+      const record = props as Record<string, unknown>;
+      if (record["data-citation"] === "true") {
+        const sourceId = String(record["data-source-id"] ?? "");
+        return (
+          <CitationBadge sourceId={sourceId} onViewSource={onViewSource} />
+        );
+      }
+      if (typeof BaseAnchor === "function") {
+        const Anchor = BaseAnchor as (p: typeof props) => ReactElement;
+        return Anchor(props);
+      }
+      return <a {...props} />;
+    },
+    pre: (props): ReactElement => {
+      const mermaid = mermaidSourceFromPre(props.children);
+      if (mermaid !== null) return <MermaidBlock code={mermaid} />;
+      return <pre {...props} />;
+    },
+  };
+}
+
+/**
+ * Pull the raw source out of a ```mermaid fenced block. react-markdown renders
+ * a fenced block as `<pre><code class="language-mermaid">…</code></pre>`, so we
+ * inspect the single code child. Returns null for any other `<pre>` content
+ * (plain code blocks fall through to the default renderer).
+ */
+function mermaidSourceFromPre(children: ReactNode): string | null {
+  if (!isValidElement(children)) return null;
+  const codeProps = children.props as {
+    className?: string;
+    children?: ReactNode;
+  };
+  const className = codeProps.className ?? "";
+  if (!/(^|\s)language-mermaid(\s|$)/.test(className)) return null;
+  const raw = codeProps.children;
+  const text = typeof raw === "string" ? raw : extractText(raw);
+  return text.replace(/\n$/, "");
+}
+
+/** Flatten a code element's children down to its text content. */
+function extractText(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (isValidElement(node)) {
+    return extractText((node.props as { children?: ReactNode }).children);
+  }
+  return "";
 }

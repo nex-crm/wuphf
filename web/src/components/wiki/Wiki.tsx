@@ -13,6 +13,7 @@ import {
 import { useWikiPanels } from "../../hooks/useWikiPanels";
 import { track } from "../../lib/analytics";
 import EditLogFooter from "./EditLogFooter";
+import SourcesBrowser from "./SourcesBrowser";
 import { APP_NAV_PREFIX } from "./tree/WikiTree";
 import FileViewer, { isMarkdownPath } from "./viewers/FileViewer";
 import WebsiteViewer from "./WebsiteViewer";
@@ -25,8 +26,12 @@ import WikiSidebar from "./WikiSidebar";
 import {
   AUDIT_PATH,
   FILES_PATH,
+  isSourcesPath,
   LINT_PATH,
   parseCategoryPath,
+  parseSourcesPath,
+  SOURCES_PATH,
+  sourceRecordPath,
 } from "./wikiPaths";
 import "../../styles/wiki.css";
 import "../../styles/wiki-viewers.css";
@@ -38,7 +43,8 @@ type WikiView =
   | "file"
   | "app"
   | "home"
-  | "category";
+  | "category"
+  | "sources";
 
 /**
  * localStorage slot for the last article the user had open. Opening the wiki
@@ -265,6 +271,12 @@ export default function Wiki({
         />
         {view === "audit" ? (
           <WikiAudit onNavigate={(path) => onNavigate(path)} />
+        ) : view === "sources" ? (
+          <SourcesBrowser
+            selection={articlePath ? parseSourcesPath(articlePath) : null}
+            onSelect={(kind, id) => onNavigate(sourceRecordPath(kind, id))}
+            onBack={() => onNavigate(SOURCES_PATH)}
+          />
         ) : view === "lint" ? (
           <WikiLint onNavigate={(path) => onNavigate(path)} />
         ) : view === "app" && appPath ? (
@@ -344,6 +356,7 @@ function wikiViewFor(articlePath: string | null | undefined): WikiView {
   // The legacy "All files" surface is retired — the page tree is always
   // visible now. Old `_files` deep links land on the overview.
   if (articlePath === FILES_PATH) return "home";
+  if (isSourcesPath(articlePath)) return "sources";
   if (parseCategoryPath(articlePath) !== null) return "category";
   if (isAppPath(articlePath)) return "app";
   return isFilePath(articlePath) ? "file" : "article";

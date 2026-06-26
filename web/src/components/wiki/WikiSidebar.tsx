@@ -1,6 +1,11 @@
 import WikiTree from "./tree/WikiTree";
 import { CollapsedPanelRail, PanelCollapseButton } from "./WikiPanelChrome";
-import { AUDIT_PATH, LINT_PATH } from "./wikiPaths";
+import {
+  AUDIT_PATH,
+  isSourcesPath,
+  LINT_PATH,
+  SOURCES_PATH,
+} from "./wikiPaths";
 
 /**
  * The wiki's persistent left navigation: a page tree as THE way around
@@ -37,9 +42,19 @@ interface SidebarLink {
 
 const MENU_LINKS: SidebarLink[] = [
   { label: "Overview", path: "", testId: "wk-sidebar-home" },
+  { label: "Sources", path: SOURCES_PATH, testId: "wk-sidebar-sources" },
   { label: "Recent changes", path: AUDIT_PATH, testId: "wk-sidebar-audit" },
   { label: "Wiki health", path: LINT_PATH, testId: "wk-sidebar-lint" },
 ];
+
+/**
+ * Whether a menu link is the active surface. The Sources link stays lit on
+ * record detail (`_sources/<kind>/<id>`), not just the bare list.
+ */
+function isMenuLinkActive(linkPath: string, current: string): boolean {
+  if (linkPath === SOURCES_PATH) return isSourcesPath(current);
+  return current === linkPath;
+}
 
 export default function WikiSidebar({
   currentPath,
@@ -77,7 +92,7 @@ export default function WikiSidebar({
       ) : null}
       <nav aria-label="Wiki navigation" className="wk-sidebar-menu">
         {MENU_LINKS.map((link) => {
-          const isActive = current === link.path;
+          const isActive = isMenuLinkActive(link.path, current);
           return (
             <a
               key={link.testId}
