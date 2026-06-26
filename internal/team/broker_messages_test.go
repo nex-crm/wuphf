@@ -2,7 +2,6 @@ package team
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -117,55 +115,6 @@ func TestPostMessageAllowsRichArtifactReferenceMarkers(t *testing.T) {
 }
 
 // TestPostMessage_DoesNotAutoWriteNotebook is the regression guard for the
-// reverted PR-1 hook. PostMessage used to fan every roster-agent message
-// into a per-agent notebook entry; that turned shelves into noisy event
-// logs and even fed unrelated chatter into the wiki review queue. The hook
-// is gone: agent messages, human messages, and system messages must all
-// leave the writer untouched.
-func TestPostMessage_DoesNotAutoWriteNotebook(t *testing.T) {
-	b := newTestBroker(t)
-	b.mu.Lock()
-	b.members = append(b.members, officeMember{Slug: "ceo", Name: "CEO", Role: "lead"})
-	for i := range b.channels {
-		if b.channels[i].Slug == "general" {
-			b.channels[i].Members = append(b.channels[i].Members, "ceo", "human")
-		}
-	}
-	b.mu.Unlock()
-
-	stub := &fakeNotebookClient{}
-	writer := NewAutoNotebookWriter(stub, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	writer.Start(ctx)
-	t.Cleanup(func() { cancel(); writer.Stop(time.Second) })
-
-	b.mu.Lock()
-	b.autoNotebookWriter = writer
-	b.mu.Unlock()
-
-	if _, err := b.PostMessage("ceo", "general", "agent message", nil, ""); err != nil {
-		t.Fatalf("PostMessage agent: %v", err)
-	}
-	if _, err := b.PostMessage("human", "general", "human message", nil, ""); err != nil {
-		t.Fatalf("PostMessage human: %v", err)
-	}
-	b.PostSystemMessage("general", "system msg", "system")
-
-	// Give a brief window for any (incorrect) Handle goroutine work to land.
-	// 200ms is generous: the writer's queue is processed eagerly and the
-	// stub records synchronously inside NotebookWrite. If a hook ever
-	// fires from the broker again this assertion will catch it.
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer waitCancel()
-	_ = writer.WaitForCondition(waitCtx, func() bool { return len(stub.snapshot()) > 0 })
-	if calls := stub.snapshot(); len(calls) != 0 {
-		t.Fatalf("expected zero notebook writes from PostMessage; got %d: %+v", len(calls), calls)
-	}
-	if got := writer.Counters().Enqueued; got != 0 {
-		t.Fatalf("expected zero enqueued events; got %d", got)
-	}
-}
-
 // TestNormalizeMessageScope_KnownAndDefaults pins the normalizer
 // contract: "", "all", "channel", and any unknown value collapse to ""
 // (channel-wide). "agent", "inbox", "outbox" pass through (lower-cased,

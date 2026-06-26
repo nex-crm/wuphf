@@ -132,7 +132,6 @@ const SkillsApp = lazy(() =>
     default: m.SkillsApp,
   })),
 );
-const Notebook = lazy(() => import("../components/notebook/Notebook"));
 const DecisionPacketRoute = lazy(() =>
   import("../components/lifecycle/DecisionPacketRoute").then((m) => ({
     default: m.DecisionPacketRoute,
@@ -144,9 +143,6 @@ const ArticleView = lazy(() =>
   import("../components/rich-artifacts/ArticleView").then((m) => ({
     default: m.ArticleView,
   })),
-);
-const ReviewQueueKanban = lazy(
-  () => import("../components/review/ReviewQueueKanban"),
 );
 // Tasks surface (list + detail + new).
 const TasksList = lazy(() =>
@@ -309,14 +305,8 @@ class ErrorBoundary extends Component<
 // the single navigation source; route-owned Zustand fields were removed in
 // step 4 of the migration.
 
-function navigateWikiTab(tab: WikiTab): void {
-  if (tab === "wiki") {
-    void router.navigate({ to: "/wiki" });
-  } else if (tab === "notebooks") {
-    void router.navigate({ to: "/notebooks" });
-  } else {
-    void router.navigate({ to: "/reviews" });
-  }
+function navigateWikiTab(_tab: WikiTab): void {
+  void router.navigate({ to: "/wiki" });
 }
 
 function navigateWikiArticle(path: string | null): void {
@@ -325,34 +315,6 @@ function navigateWikiArticle(path: string | null): void {
   } else {
     void router.navigate({ to: "/wiki" });
   }
-}
-
-function navigateNotebookCatalog(): void {
-  void router.navigate({ to: "/notebooks" });
-}
-
-function navigateNotebookAgent(slug: string): void {
-  void router.navigate({
-    to: "/notebooks/$agentSlug",
-    params: { agentSlug: slug },
-  });
-}
-
-function navigateNotebookEntry(
-  agentSlug: string,
-  entrySlug: string | null,
-): void {
-  if (!entrySlug) {
-    void router.navigate({
-      to: "/notebooks/$agentSlug",
-      params: { agentSlug },
-    });
-    return;
-  }
-  void router.navigate({
-    to: "/notebooks/$agentSlug/$entrySlug",
-    params: { agentSlug, entrySlug },
-  });
 }
 
 const APP_PANELS = {
@@ -422,28 +384,8 @@ function ChannelRedirect({ channelSlug }: { channelSlug: string }) {
 }
 
 interface WikiSurfaceProps {
-  current: "wiki" | "notebooks" | "reviews";
+  current: "wiki";
   route: CurrentRoute;
-}
-
-/**
- * When a wiki splat path collides with a sibling Wiki-surface tab
- * (`/wiki/notebooks`, `/wiki/reviews`), redirect to the canonical
- * top-level route instead of trying to load a non-existent article.
- * `/wiki/notebooks` used to leave the right pane stuck on
- * "Loading article…" because fetchArticle would 404 across all
- * candidate paths and the loader never reconciled — see issue #935.
- */
-function wikiTabRedirectTarget(
-  articlePath: string | null,
-): "/notebooks" | "/reviews" | null {
-  if (articlePath === "notebooks" || articlePath === "notebooks/") {
-    return "/notebooks";
-  }
-  if (articlePath === "reviews" || articlePath === "reviews/") {
-    return "/reviews";
-  }
-  return null;
 }
 
 function WikiSurface({ current, route }: WikiSurfaceProps) {
@@ -453,66 +395,21 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
   const [articleRefreshNonce, setArticleRefreshNonce] = useState(0);
 
   const articlePath = route.kind === "wiki-article" ? route.articlePath : null;
-  const tabRedirect = wikiTabRedirectTarget(articlePath);
-  useEffect(() => {
-    if (!tabRedirect) return;
-    void router.navigate({ to: tabRedirect, replace: true });
-  }, [tabRedirect]);
-  if (tabRedirect) {
-    return (
-      <div className="wiki-shell" data-testid="wiki-tab-redirect">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flex: 1,
-            color: "var(--text-tertiary)",
-            fontSize: 14,
-          }}
-        >
-          Redirecting…
-        </div>
-      </div>
-    );
-  }
-  const pamArticlePath = current === "wiki" ? articlePath : null;
-  const notebookAgentSlug =
-    route.kind === "notebook-agent" || route.kind === "notebook-entry"
-      ? route.agentSlug
-      : null;
-  const notebookEntrySlug =
-    route.kind === "notebook-entry" ? route.entrySlug : null;
 
   return (
     <div className="wiki-shell">
       <WikiTabs
         current={current}
         onSelect={navigateWikiTab}
-        pamArticlePath={pamArticlePath}
+        pamArticlePath={articlePath}
         onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
       />
       <div className="wiki-shell-body">
-        {current === "wiki" && (
-          <Wiki
-            articlePath={articlePath}
-            externalRefreshNonce={articleRefreshNonce}
-            onNavigate={navigateWikiArticle}
-          />
-        )}
-        {current === "notebooks" && (
-          <Notebook
-            agentSlug={notebookAgentSlug}
-            entrySlug={notebookEntrySlug}
-            onOpenCatalog={navigateNotebookCatalog}
-            onOpenAgent={navigateNotebookAgent}
-            onOpenEntry={navigateNotebookEntry}
-            onNavigateWiki={(path) => navigateWikiArticle(path || null)}
-          />
-        )}
-        {current === "reviews" && (
-          <ReviewQueueKanban onOpenEntry={navigateNotebookEntry} />
-        )}
+        <Wiki
+          articlePath={articlePath}
+          externalRefreshNonce={articleRefreshNonce}
+          onNavigate={navigateWikiArticle}
+        />
       </div>
     </div>
   );
@@ -698,12 +595,6 @@ function MainContent() {
           </div>
         </div>
       );
-    case "notebook-catalog":
-    case "notebook-agent":
-    case "notebook-entry":
-      return <WikiSurface current="notebooks" route={route} />;
-    case "reviews":
-      return <WikiSurface current="reviews" route={route} />;
     case "article":
       return <ArticleView articleId={route.articleId} />;
     case "inbox":

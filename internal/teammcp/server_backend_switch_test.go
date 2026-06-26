@@ -35,8 +35,6 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_write",
 				"team_wiki_search",
 				"team_wiki_list",
-				"notebook_write",
-				"notebook_promote",
 				"notebook_visual_artifact_create",
 			},
 			mustNotHave: []string{
@@ -54,8 +52,6 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_write",
 				"team_wiki_search",
 				"team_wiki_list",
-				"notebook_write",
-				"notebook_promote",
 				"notebook_visual_artifact_create",
 			},
 			mustNotHave: []string{

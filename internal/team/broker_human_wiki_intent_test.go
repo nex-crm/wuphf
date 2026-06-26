@@ -10,8 +10,7 @@ import (
 )
 
 // brokerWithHumanWikiWriter wires a real WikiWorker on a temp git repo and
-// installs a HumanWikiIntentWriter on the broker. Mirrors
-// brokerWithAutoNotebookWriter from PR 1.
+// installs a HumanWikiIntentWriter on the broker.
 func brokerWithHumanWikiWriter(t *testing.T) (*Broker, *Repo, func()) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "wiki")

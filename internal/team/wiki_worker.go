@@ -79,10 +79,6 @@ type wikiWriteRequest struct {
 	Content   string
 	Mode      string
 	CommitMsg string
-	// IsNotebook routes the request to Repo.CommitNotebook instead of
-	// Repo.Commit. Same serialization primitive; different target subtree
-	// and no team-wiki index regen. See notebook_worker.go.
-	IsNotebook bool
 	// IsEntityFact routes the request to Repo.CommitEntityFact. Used for
 	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
 	// — same serialization primitive, non-.md extension, no index regen.
@@ -183,8 +179,7 @@ type wikiSectionsNotifier interface {
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent)         {}
-func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent) {}
 func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent) {
 }
 
@@ -212,8 +207,7 @@ type WikiWorker struct {
 	// drainDone closes when the drain goroutine has fully exited (including
 	// its own sideGoroutines.Wait). Tests register `t.Cleanup(func() {
 	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
-	drainDone       chan struct{}
-	notebookCommits atomic.Int64 // PromotionSweep gate; reader: NotebookCommitCount
+	drainDone chan struct{}
 
 	// lastStandardWrite folds byte-identical consecutive standard wiki
 	// writes per path (B4 knowledge-integrity: no commit storms — "173
@@ -406,10 +400,6 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsFactLogAppend {
 		sha, n, err = w.repo.AppendFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
-	} else if req.IsNotebook {
-		// Notebook writes do NOT regen the team wiki index. Commit target is
-		// agents/{slug}/notebook/... — scoped to the author.
-		sha, n, err = w.repo.CommitNotebook(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
 	} else {
 		// B2 update-first (wiki_update_first.go): an agent create whose
 		// target directory already holds a similar-slug article is rerouted
@@ -491,16 +481,6 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		})
 		if notifier, ok := w.publisher.(wikiSectionsNotifier); ok {
 			notifier.EnqueueSectionsRefresh()
-		}
-	case req.IsNotebook:
-		w.notebookCommits.Add(1)
-		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
-			nbPub.PublishNotebookEvent(notebookWriteEvent{
-				Slug:      req.Slug,
-				Path:      req.Path,
-				CommitSHA: sha,
-				Timestamp: ts,
-			})
 		}
 	default:
 		w.publisher.PublishWikiEvent(wikiWriteEvent{

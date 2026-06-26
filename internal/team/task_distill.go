@@ -140,12 +140,6 @@ func (b *Broker) distillCompletedTask(taskID string) {
 
 	insight := taskDistillInsight(task, res)
 
-	// B4 post-task bookend (task_notebook_bookends.go): verified done
-	// appends the deliverable link + distilled learning + ledger highlights
-	// to the owner's per-task notebook note. Idempotent — replays of this
-	// goroutine append exactly once.
-	appendTaskNotebookPostBookend(ctx, worker, task, insight)
-
 	if llog == nil {
 		return
 	}

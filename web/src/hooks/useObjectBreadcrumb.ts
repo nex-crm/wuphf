@@ -55,34 +55,6 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
     case "wiki-lookup": {
       return [{ label: "Wiki", href: "#/wiki" }];
     }
-    case "notebook-catalog": {
-      return [{ label: "Notebooks", href: "#/notebooks" }];
-    }
-    case "notebook-agent": {
-      return [
-        { label: "Notebooks", href: "#/notebooks" },
-        {
-          label: route.agentSlug,
-          href: `#/notebooks/${encodeURIComponent(route.agentSlug)}`,
-        },
-      ];
-    }
-    case "notebook-entry": {
-      return [
-        { label: "Notebooks", href: "#/notebooks" },
-        {
-          label: route.agentSlug,
-          href: `#/notebooks/${encodeURIComponent(route.agentSlug)}`,
-        },
-        {
-          label: route.entrySlug,
-          href: `#/notebooks/${encodeURIComponent(route.agentSlug)}/${encodeURIComponent(route.entrySlug)}`,
-        },
-      ];
-    }
-    case "reviews": {
-      return [{ label: "Reviews", href: "#/reviews" }];
-    }
     case "article": {
       return [{ label: "Article", href: `#/articles/${route.articleId}` }];
     }

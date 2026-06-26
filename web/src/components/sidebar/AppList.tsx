@@ -1,6 +1,5 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import { type ComponentType, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   BookStack,
   ClipboardCheck,
@@ -18,7 +17,6 @@ import {
   TaskList,
 } from "iconoir-react";
 
-import { fetchReviews } from "../../api/notebook";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import {
   SIDEBAR_TOOLS,
@@ -29,8 +27,8 @@ import { SidebarItem } from "./SidebarItem";
 import { SidebarSection } from "./SidebarSection";
 import { TasksNavButton } from "./TasksNavButton";
 
-// Notebooks and reviews render inside the Wiki app shell via tabs, so the
-// 'Wiki' sidebar entry lights up for any of those three currentApp values.
+// The Wiki surface renders inside its own app shell, so the 'Wiki' sidebar
+// entry lights up for any wiki currentApp value.
 const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
@@ -76,18 +74,6 @@ const NAV_SECTIONS: ReadonlyArray<{
 export function AppList() {
   const currentApp = useCurrentApp();
 
-  const { data: reviewsData } = useQuery({
-    queryKey: ["reviews-badge"],
-    queryFn: fetchReviews,
-    refetchInterval: 15_000,
-  });
-  const pendingReviewsCount = (reviewsData ?? []).filter(
-    (r) =>
-      r.state === "pending" ||
-      r.state === "in-review" ||
-      r.state === "changes-requested",
-  ).length;
-
   const [open, setOpen] = useState<Record<string, boolean>>({
     Work: true,
     Knowledge: true,
@@ -107,8 +93,6 @@ export function AppList() {
       id === "wiki"
         ? WIKI_SURFACE_APPS.has(currentApp ?? "")
         : currentApp === id;
-    const badge =
-      id === "wiki" && pendingReviewsCount > 0 ? pendingReviewsCount : null;
     return (
       <SidebarItem
         key={id}
@@ -122,13 +106,6 @@ export function AppList() {
         label={tool.label}
         active={isActive}
         onClick={() => navigateToSidebarApp(id)}
-        badge={
-          badge !== null ? (
-            <span className="sidebar-badge" aria-label={`${badge} pending`}>
-              {badge}
-            </span>
-          ) : undefined
-        }
       />
     );
   }

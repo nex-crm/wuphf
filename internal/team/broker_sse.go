@@ -47,8 +47,6 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeOffice()
 	wikiEvents, unsubscribeWiki := b.SubscribeWikiEvents(64)
 	defer unsubscribeWiki()
-	notebookEvents, unsubscribeNotebook := b.SubscribeNotebookEvents(64)
-	defer unsubscribeNotebook()
 	entityEvents, unsubscribeEntity := b.SubscribeEntityBriefEvents(64)
 	defer unsubscribeEntity()
 	factEvents, unsubscribeFacts := b.SubscribeEntityFactEvents(64)
@@ -116,16 +114,6 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-wikiEvents:
 			if !ok || writeEvent("wiki:write", evt) != nil {
-				return
-			}
-		case evt, ok := <-notebookEvents:
-			if !ok {
-				return
-			}
-			if actor.Kind == requestActorKindHuman {
-				continue
-			}
-			if writeEvent("notebook:write", evt) != nil {
 				return
 			}
 		case evt, ok := <-entityEvents:

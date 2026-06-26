@@ -27,18 +27,6 @@ import {
   useArtifactSkeletonTrigger,
 } from "./ArtifactSkeleton";
 import {
-  NotebookEntryCreatedCard,
-  parseNotebookEntryCreatedPayload,
-} from "./cards/NotebookEntryCreatedCard";
-import {
-  NotebookPromotionRequestedCard,
-  parseNotebookPromotionRequestedPayload,
-} from "./cards/NotebookPromotionRequestedCard";
-import {
-  NotebookPromotionResolvedCard,
-  parseNotebookPromotionResolvedPayload,
-} from "./cards/NotebookPromotionResolvedCard";
-import {
   parseSystemAuthErrorPayload,
   SystemErrorCard,
 } from "./cards/SystemErrorCard";
@@ -236,26 +224,12 @@ export function MessageBubble({
     return <TaskLifecycleCard payload={payload} sameTask={sameTask} />;
   }
 
-  // Wiki/notebook surface cards. Broker emits these in #general when one
-  // of four artifact events happens (new wiki article, new notebook
-  // entry, promotion requested, promotion resolved). Each card is a
-  // clickable banner that routes to the underlying artifact — wiki
-  // article, notebook entry, or the Reviews app.
+  // Wiki surface card. Broker emits this in #general when a new wiki
+  // article is created; the card is a clickable banner that routes to
+  // the underlying wiki article.
   if (message.kind === "wiki_article_created") {
     const payload = parseWikiArticleCreatedPayload(message.payload);
     return <WikiArticleCreatedCard payload={payload} />;
-  }
-  if (message.kind === "notebook_entry_created") {
-    const payload = parseNotebookEntryCreatedPayload(message.payload);
-    return <NotebookEntryCreatedCard payload={payload} />;
-  }
-  if (message.kind === "notebook_promotion_requested") {
-    const payload = parseNotebookPromotionRequestedPayload(message.payload);
-    return <NotebookPromotionRequestedCard payload={payload} />;
-  }
-  if (message.kind === "notebook_promotion_resolved") {
-    const payload = parseNotebookPromotionResolvedPayload(message.payload);
-    return <NotebookPromotionResolvedCard payload={payload} />;
   }
 
   return (

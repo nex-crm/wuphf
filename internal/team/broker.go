@@ -162,8 +162,6 @@ type Broker struct {
 	activitySubscribers       map[int]chan agentActivitySnapshot
 	officeSubscribers         map[int]chan officeChangeEvent
 	wikiSubscribers           map[int]chan wikiWriteEvent
-	notebookSubscribers       map[int]chan notebookWriteEvent
-	reviewSubscribers         map[int]chan ReviewStateChangeEvent
 	entitySubscribers         map[int]chan EntityBriefSynthesizedEvent
 	factSubscribers           map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers   map[int]chan WikiSectionsUpdatedEvent
@@ -171,19 +169,13 @@ type Broker struct {
 	wikiWorker                *WikiWorker
 	wikiInitMu                sync.Mutex
 	wikiInitErr               error
-	autoNotebookWriter        *AutoNotebookWriter
 	humanWikiWriter           *HumanWikiIntentWriter
 	obsidianWatcher           *ObsidianWatcher
-	demandIndex               *NotebookDemandIndex
-	channelIntentDispatcher   *ChannelIntentDispatcher
-	promotionSweep            *PromotionSweep
 	wikiIndex                 *WikiIndex
 	wikiExtractor             *Extractor
 	wikiDLQ                   *DLQ
 	wikiSectionsCache         *wikiSectionsCache
 	wikiCategoriesCache       *wikiCategoriesCache
-	reviewLog                 *ReviewLog
-	reviewResolver            ReviewerResolver
 	inboxCursorMu             sync.RWMutex
 	userInboxCursors          map[string]InboxCursor
 	factLog                   *FactLog
@@ -402,8 +394,6 @@ func NewBrokerAt(statePath string) *Broker {
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
 		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
-		notebookSubscribers: make(map[int]chan notebookWriteEvent),
-		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
@@ -507,7 +497,6 @@ func (b *Broker) Start() error {
 
 	b.ensureWikiSectionsCache()
 	b.ensureWikiCategoriesCache()
-	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.ensureWikiCompressor()
 	b.ensurePlaybookExecutionLog()
@@ -525,7 +514,6 @@ func (b *Broker) Start() error {
 		case <-ctx.Done():
 		}
 	}()
-	b.startReviewExpiryLoop(ctx)
 	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
 	// Lane D: reviewer convergence sweeper. Drives the timeout-skipped
@@ -544,9 +532,9 @@ func (b *Broker) Start() error {
 	return nil
 }
 
-// WikiReadLog returns the broker's ReadLog under b.mu, matching the pattern
-// used by ReviewLog(). Handlers must use this accessor — not b.readLog directly —
-// to avoid a data race with ensureWikiWorker's write under b.mu.
+// WikiReadLog returns the broker's ReadLog under b.mu. Handlers must use this
+// accessor — not b.readLog directly — to avoid a data race with
+// ensureWikiWorker's write under b.mu.
 func (b *Broker) WikiReadLog() *ReadLog {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -642,19 +630,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/history/", b.requireAuth(b.handleWikiHistory))
 	mux.HandleFunc("/wiki/diff", b.requireAuth(b.handleWikiDiff))
 	mux.HandleFunc("/wiki/restore", b.requireAuth(b.handleWikiRestore))
-	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
-	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
-	mux.HandleFunc("/notebook/entry", b.requireAuth(b.handleNotebookEntry))
-	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
-	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
-	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
-	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
 	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
 	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
-	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
-	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
-	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
 	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
 	mux.HandleFunc("/entity/brief/synthesize", b.requireAuth(b.handleEntityBriefSynthesize))
 	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
@@ -834,10 +812,7 @@ func (b *Broker) Stop() {
 	pbSynth := b.playbookSynthesizer
 	pamDisp := b.pamDispatcher
 	compressor := b.wikiCompressor
-	autoWriter := b.autoNotebookWriter
 	humanWikiWriter := b.humanWikiWriter
-	channelIntent := b.channelIntentDispatcher
-	promotionSweep := b.promotionSweep
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -851,17 +826,8 @@ func (b *Broker) Stop() {
 	if compressor != nil {
 		compressor.Stop()
 	}
-	if autoWriter != nil {
-		autoWriter.Stop(2 * time.Second)
-	}
 	if humanWikiWriter != nil {
 		humanWikiWriter.Stop(2 * time.Second)
-	}
-	if channelIntent != nil {
-		channelIntent.Stop(2 * time.Second)
-	}
-	if promotionSweep != nil {
-		promotionSweep.Stop(2 * time.Second)
 	}
 }
 
@@ -1018,7 +984,7 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	ensureNotebookDirsAfterUnlock := false
 	defer func() {
 		if ensureNotebookDirsAfterUnlock {
-			b.ensureNotebookDirsForRoster()
+			b.backfillAgentFilesForRoster()
 		}
 	}()
 	b.mu.Lock()

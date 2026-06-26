@@ -142,12 +142,6 @@ func (b *Broker) handleWikiSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if reader := sanitizeReader(r.URL.Query().Get("reader")); reader != "" && reader != ReaderHuman {
-		// Notebook misses are non-fatal: the wiki hits still answer.
-		if nbHits, nbErr := worker.NotebookSearch(reader, pattern); nbErr == nil {
-			hits = append(hits, nbHits...)
-		}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
 }
 

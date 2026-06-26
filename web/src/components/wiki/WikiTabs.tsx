@@ -1,10 +1,7 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-import { useQuery } from "@tanstack/react-query";
-
-import { fetchReviews } from "../../api/notebook";
 import Pam from "./Pam";
 
-export type WikiTab = "wiki" | "notebooks" | "reviews";
+export type WikiTab = "wiki";
 
 interface WikiTabsProps {
   current: WikiTab;
@@ -21,15 +18,12 @@ interface WikiTabsProps {
 }
 
 /**
- * Top tab bar for the unified Wiki app. Same substrate under the hood
- * (one git repo, markdown files) with three surfaces layered on top:
+ * Top tab bar for the unified Wiki app. The canonical team reference
+ * lives over a git repo of markdown files; Pam the Archivist rides
+ * inside the tab bar.
  *
- *   Wiki       canonical team reference
- *   Notebooks  per-agent working drafts (Caveat, DRAFT stamps, tan paper)
- *   Reviews    promotion queue (Kanban)
- *
- * Lives above the per-surface design systems so it reads as app chrome,
- * not as a wiki- or notebook-themed element.
+ * Lives above the per-surface design system so it reads as app chrome,
+ * not as a wiki-themed element.
  */
 export default function WikiTabs({
   current,
@@ -37,27 +31,8 @@ export default function WikiTabs({
   pamArticlePath = null,
   onPamActionDone,
 }: WikiTabsProps) {
-  const { data: reviews } = useQuery({
-    queryKey: ["reviews-tab-badge"],
-    queryFn: fetchReviews,
-    refetchInterval: 15_000,
-  });
-
-  const pendingReviews = (reviews ?? []).filter(
-    (r) =>
-      r.state === "pending" ||
-      r.state === "in-review" ||
-      r.state === "changes-requested",
-  ).length;
-
   const tabs: Array<{ id: WikiTab; label: string; badge?: number }> = [
     { id: "wiki", label: "Wiki" },
-    { id: "notebooks", label: "Notebooks" },
-    {
-      id: "reviews",
-      label: "Reviews",
-      badge: pendingReviews > 0 ? pendingReviews : undefined,
-    },
   ];
 
   return (

@@ -97,7 +97,7 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 						"notebook_visual_artifact_create",
 						"self-contained HTML article",
 						"interactive tuning surfaces",
-						"notebook HTML visual artifact",
+						"HTML visual artifact",
 						"long markdown wall",
 					} {
 						if !strings.Contains(msgs[0].Content, want) {

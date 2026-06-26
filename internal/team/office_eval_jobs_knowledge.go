@@ -15,9 +15,6 @@ package team
 //	(b) B2 — agent creates with a similar slug duplicated articles on disk
 //	    (two Corti briefs, [20:15]); the write boundary must route the
 //	    create onto the existing article instead.
-//	(c) B2 — double review submissions of the same (path, content)
-//	    stacked duplicate reviews ([17:39:51] 8 reviews = 4 files × 2);
-//	    the second submission must collapse onto the open promotion.
 //	(d) B3 — git history attributed agent writes to "human · wiki:
 //	    external edit"; an agent write through the worker must keep the
 //	    agent as the git author.
@@ -51,13 +48,9 @@ func evalJobKnowledgeIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error
 	repo := worker.Repo()
 
 	// Serve the exact routes the FE uses, behind the same auth middleware.
-	fx.broker.SetReviewerResolver(func(string) string { return "ceo" })
-	fx.broker.ensureReviewLog()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tasks", fx.broker.requireAuth(fx.broker.handleTasks))
 	mux.HandleFunc("/tasks/", fx.broker.requireAuth(fx.broker.handleTaskByID))
-	mux.HandleFunc("/notebook/write", fx.broker.requireAuth(fx.broker.handleNotebookWrite))
-	mux.HandleFunc("/notebook/promote", fx.broker.requireAuth(fx.broker.handleNotebookPromote))
 	mux.HandleFunc("/entity/graph/all", fx.broker.requireAuth(fx.broker.handleEntityGraphAll))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -182,50 +175,6 @@ func evalJobKnowledgeIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error
 	r.add(job, "similar-slug agent create folds into the existing article (no second file)",
 		os.IsNotExist(dupErr) && strings.Contains(string(existingBody), "UPDATE-FIRST-MARKER"),
 		fmt.Sprintf("duplicateExists=%v existing=%dB", dupErr == nil, len(existingBody)), "")
-
-	// ── (c) B2: duplicate review submission collapses ──────────────────────
-	if status, body, err := client.postJSON("/notebook/write", map[string]any{
-		"slug": "eng", "path": "agents/eng/notebook/corti-brief.md",
-		"content": "# Corti Labs brief\n\nDraft for review.\n", "mode": "create", "commit_message": "seed",
-	}); err != nil || status != http.StatusOK {
-		return fmt.Errorf("notebook write: status=%d body=%s err=%w", status, body, err)
-	}
-	promote := func() (string, bool, error) {
-		status, body, err := client.postJSON("/notebook/promote", map[string]any{
-			"my_slug": "eng", "source_path": "agents/eng/notebook/corti-brief.md",
-			"target_wiki_path": "team/accounts/corti-labs.md", "rationale": "Ready for review.",
-		})
-		if err != nil || status != http.StatusOK {
-			return "", false, fmt.Errorf("promote: status=%d body=%s err=%w", status, body, err)
-		}
-		var parsed struct {
-			PromotionID  string `json:"promotion_id"`
-			Deduplicated bool   `json:"deduplicated"`
-		}
-		if err := json.Unmarshal([]byte(body), &parsed); err != nil {
-			return "", false, err
-		}
-		return parsed.PromotionID, parsed.Deduplicated, nil
-	}
-	firstID, _, err := promote()
-	if err != nil {
-		return err
-	}
-	secondID, deduped, err := promote()
-	if err != nil {
-		return err
-	}
-	openForTarget := 0
-	if rl := fx.broker.ReviewLog(); rl != nil {
-		for _, p := range rl.List("all") {
-			if p != nil && p.TargetPath == "team/accounts/corti-labs.md" {
-				openForTarget++
-			}
-		}
-	}
-	r.add(job, "duplicate review submission collapses onto the open promotion",
-		firstID != "" && secondID == firstID && deduped && openForTarget == 1,
-		fmt.Sprintf("first=%s second=%s deduped=%v openForTarget=%d", firstID, secondID, deduped, openForTarget), "")
 
 	// ── (d) B3: agent wiki write attributed to the agent in git log ───────
 	refs, err := repo.Log(context.Background(), existingRel)

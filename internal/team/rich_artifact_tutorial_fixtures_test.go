@@ -51,7 +51,6 @@ func TestRichArtifactTutorialFixturesExerciseWikiFlow(t *testing.T) {
 		scenario := scenario
 		now := baseTime.Add(time.Duration(i) * time.Minute)
 		t.Run(scenario.Slug, func(t *testing.T) {
-			source := readRichArtifactTutorialFile(t, repoRoot, scenario.SourcePath)
 			wiki := readRichArtifactTutorialFile(t, repoRoot, scenario.WikiPath)
 			html := readRichArtifactTutorialFile(t, repoRoot, scenario.HTMLPath)
 
@@ -62,10 +61,6 @@ func TestRichArtifactTutorialFixturesExerciseWikiFlow(t *testing.T) {
 				if !strings.Contains(html, term) {
 					t.Fatalf("%s: html missing expected term %q", scenario.Slug, term)
 				}
-			}
-
-			if _, _, err := repo.CommitNotebook(ctx, scenario.ActorSlug, scenario.SourceMarkdownPath, source, "create", "tutorial: capture source "+scenario.Slug); err != nil {
-				t.Fatalf("commit notebook source: %v", err)
 			}
 
 			artifact, sanitizedHTML, err := newRichArtifact(RichArtifactCreateRequest{

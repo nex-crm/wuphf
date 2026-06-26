@@ -137,7 +137,7 @@ describe("rich artifact API", () => {
       });
     });
 
-    it("routes promoted_to_notebook artifacts to the notebook entry route", () => {
+    it("falls back to /articles for promoted_to_notebook artifacts (notebook surface retired)", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,
         promotion: {
@@ -147,8 +147,8 @@ describe("rich artifact API", () => {
         },
       });
       expect(dest).toEqual({
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: { agentSlug: "pm", entrySlug: "handoff" },
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
       });
     });
 
@@ -171,7 +171,7 @@ describe("rich artifact API", () => {
       });
     });
 
-    it("routes draft artifacts to their attached notebook entry home", () => {
+    it("falls back to /articles for draft artifacts attached to a notebook entry (notebook surface retired)", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,
         promotion: { status: "draft" },
@@ -181,12 +181,12 @@ describe("rich artifact API", () => {
         },
       });
       expect(dest).toEqual({
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: { agentSlug: "barista", entrySlug: "extraction-yield" },
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
       });
     });
 
-    it("attached_to_notebook_entry resolves even when promotion is absent", () => {
+    it("falls back to /articles for attached_to_notebook_entry even when promotion is absent", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,
         attached_to_notebook_entry: {
@@ -195,8 +195,8 @@ describe("rich artifact API", () => {
         },
       });
       expect(dest).toEqual({
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: { agentSlug: "pm", entrySlug: "kickoff-notes" },
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
       });
     });
 

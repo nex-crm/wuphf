@@ -50,7 +50,6 @@ func TestTeamVoiceForSlug_UnknownSlugFallsBack(t *testing.T) {
 func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 	block := markdownKnowledgeToolBlock()
 	for _, tool := range []string{
-		"notebook_write", "notebook_promote", "notebook_read",
 		"notebook_visual_artifact_create", "notebook_visual_artifact_promote",
 		"team_wiki_read", "team_wiki_write", "wuphf_wiki_lookup",
 		"team_learning_search", "team_learning_record",
@@ -62,23 +61,26 @@ func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 	for _, want := range []string{
 		"human explicitly asked",
 		"Pass human_request as the broker message ID",
-		"notebook_write and move through notebook_promote review",
+		"tag @librarian (Pam) to land it in the wiki",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeToolBlock missing direct-wiki guardrail %q", want)
 		}
 	}
+	// The removed notebook tool surface must not reappear.
+	for _, banned := range []string{"notebook_write", "notebook_promote", "notebook_read", "notebook_search"} {
+		if strings.Contains(block, banned) {
+			t.Errorf("markdownKnowledgeToolBlock still references removed tool %q", banned)
+		}
+	}
 }
 
-func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) {
+func TestMarkdownKnowledgeMemoryBlock_RoutesCanonicalKnowledgeThroughLibrarian(t *testing.T) {
 	block := markdownKnowledgeMemoryBlock()
 	for _, want := range []string{
-		"notebook_write",
-		"notebook_promote",
 		"team_learning_record",
 		"typed learning store",
-		"scratch: true",
-		"approved by the reviewer",
+		"tag @librarian (Pam) to capture it into the wiki",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeMemoryBlock missing %q", want)
@@ -86,6 +88,11 @@ func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) 
 	}
 	if strings.Contains(block, "team_learning_record succeeded") {
 		t.Errorf("markdownKnowledgeMemoryBlock must not treat team_learning_record as wiki storage")
+	}
+	for _, banned := range []string{"notebook_write", "notebook_promote"} {
+		if strings.Contains(block, banned) {
+			t.Errorf("markdownKnowledgeMemoryBlock still references removed tool %q", banned)
+		}
 	}
 }
 
@@ -120,29 +127,14 @@ func TestMarkdownKnowledgeToolBlock_HTMLArticleIsSingleTool(t *testing.T) {
 	if strings.Contains(block, "HTML companion") {
 		t.Errorf("markdownKnowledgeToolBlock still describes the HTML artifact as a companion to notebook_write")
 	}
-	// The single-tool flow must be stated: empty source_path, no companion
-	// notebook_write for the same content.
+	// The single-tool flow must be stated: empty source_path, the HTML
+	// article is the deliverable.
 	for _, want := range []string{
 		"leave source_path empty",
-		"do NOT also call notebook_write for the same content",
 		"HTML article IS the deliverable",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeToolBlock missing single-tool HTML flow phrase %q", want)
-		}
-	}
-}
-
-func TestMarkdownKnowledgeToolBlock_KeepsPlainNoteGuidance(t *testing.T) {
-	// Reconciling the HTML path must not delete legitimate notebook_write
-	// guidance for plain markdown notes.
-	block := markdownKnowledgeToolBlock()
-	for _, want := range []string{
-		"notebook_write: Save your own working notes",
-		"default write path for plain agent-authored markdown notes",
-	} {
-		if !strings.Contains(block, want) {
-			t.Errorf("markdownKnowledgeToolBlock dropped plain-note notebook_write guidance %q", want)
 		}
 	}
 }
@@ -251,8 +243,7 @@ func TestPromptBuilder_OneOnOneMarkdownMemoryMentionsHTMLArtifacts(t *testing.T)
 
 	got := pb.Build("ceo")
 	for _, want := range []string{
-		"Markdown notebook/wiki memory is active in this 1:1",
-		"notebook_write",
+		"Markdown wiki memory is active in this 1:1",
 		"notebook_visual_artifact_create",
 		"diagram, mockup, report, comparison grid, code explainer, PR review, or interactive tuning surface",
 		"visual-artifact:ra_...",
@@ -327,7 +318,7 @@ func TestPromptBuilder_MarkdownMemoryPromptsNaturalHTMLArtifactsDuringWork(t *te
 			"implementation plans",
 			"comparison grids",
 			"interactive tuning surfaces",
-			"notebook HTML visual artifact",
+			"HTML visual artifact",
 			"long markdown wall",
 			"visual-artifact:ra_...",
 		} {
@@ -472,9 +463,6 @@ func TestPromptBuilder_HTMLArtifactFlowIsConsistentAcrossBlocks(t *testing.T) {
 			// present.
 			if !strings.Contains(got, "Leave source_path empty; the HTML is the article, not a companion to a markdown file.") {
 				t.Fatalf("%s prompt missing single-tool HTML flow (empty source_path)", tc.name)
-			}
-			if !strings.Contains(got, "Do NOT also call notebook_write for the same content.") {
-				t.Fatalf("%s prompt missing the no-companion-notebook_write rule", tc.name)
 			}
 			// The deprecated companion-after-notebook_write instruction must be
 			// gone everywhere — no block may still chain the HTML artifact
@@ -767,19 +755,6 @@ func TestMarkdownKnowledgeToolBlock_HumanRememberAutoRoutingNote(t *testing.T) {
 	}
 }
 
-func TestMarkdownKnowledgeToolBlock_NotebookSearchDemandSignalNote(t *testing.T) {
-	// PR 7 edit 2: cross-agent notebook searches are demand signals.
-	block := markdownKnowledgeToolBlock()
-	for _, want := range []string{
-		"Cross-agent searches",
-		"promotion-demand",
-	} {
-		if !strings.Contains(block, want) {
-			t.Errorf("markdownKnowledgeToolBlock missing demand-signal fragment %q", want)
-		}
-	}
-}
-
 func TestPromptBuilder_LibrarianOwnsWikiReviewCEODelegates(t *testing.T) {
 	// Phase 4: wiki promotion/review authority moved from the CEO to the
 	// Librarian. The Librarian prompt mentions team_notebook_review + the demand
@@ -806,9 +781,8 @@ func TestPromptBuilder_LibrarianOwnsWikiReviewCEODelegates(t *testing.T) {
 
 	lib := mk().Build(LibrarianSlug)
 	for _, want := range []string{
-		"team_notebook_review",
-		"demand signal",
 		"WIKI OWNERSHIP (you are the Librarian)",
+		"You own the team's wiki",
 	} {
 		if !strings.Contains(lib, want) {
 			t.Errorf("Librarian prompt missing wiki-authority fragment %q", want)
@@ -819,11 +793,11 @@ func TestPromptBuilder_LibrarianOwnsWikiReviewCEODelegates(t *testing.T) {
 	if strings.Contains(ceo, "WIKI OWNERSHIP (you are the Librarian)") {
 		t.Errorf("CEO prompt must not carry the Librarian's wiki-ownership block")
 	}
-	if !strings.Contains(ceo, "You do NOT run team_notebook_review or approve promotions yourself") {
-		t.Errorf("CEO prompt should explicitly hand wiki review to @librarian")
+	if !strings.Contains(ceo, "tag @librarian (Pam) to capture it into the team wiki") {
+		t.Errorf("CEO prompt should hand durable knowledge capture to @librarian")
 	}
-	if !strings.Contains(ceo, "@librarian owns the team wiki") {
-		t.Errorf("CEO prompt should delegate the wiki to @librarian")
+	if strings.Contains(ceo, "team_notebook_review") {
+		t.Errorf("CEO prompt must not reference the removed team_notebook_review tool")
 	}
 }
 
@@ -851,10 +825,11 @@ func TestPromptBuilder_NonCEOOmitsTeamNotebookReview(t *testing.T) {
 	}
 }
 
-func TestPromptBuilder_PromoteWhenAskedBehavior(t *testing.T) {
-	// PR 7 edit 4: both CEO and specialist prompts must tell agents to call
-	// notebook_promote in the same turn when explicitly asked.
-	mk := func(slug string) *promptBuilder {
+func TestPromptBuilder_DurableKnowledgeRoutesThroughLibrarian(t *testing.T) {
+	// Wiki authority lives with the Librarian. After the notebook/promotion
+	// removal, both CEO and specialist prompts route durable knowledge capture
+	// through @librarian rather than a notebook_promote review queue.
+	mk := func() *promptBuilder {
 		return &promptBuilder{
 			isOneOnOne:  func() bool { return false },
 			isFocusMode: func() bool { return false },
@@ -871,62 +846,16 @@ func TestPromptBuilder_PromoteWhenAskedBehavior(t *testing.T) {
 			markdownMemory: true,
 		}
 	}
-	// Specialists still draft+submit (notebook_promote) when asked, now framed
-	// as queued for @librarian's review. The CEO no longer promotes itself; it
-	// delegates the wiki to @librarian.
-	fe := mk("fe").Build("fe")
-	if !strings.Contains(fe, "notebook_promote in the same turn") {
-		t.Errorf("specialist prompt missing promote-when-asked instruction")
-	}
-	if !strings.Contains(fe, "@librarian's review") {
-		t.Errorf("specialist prompt should queue promotions for @librarian's review")
-	}
-	if !strings.Contains(fe, "broker auto-writes on approval; you draft and submit") {
-		t.Errorf("specialist prompt missing updated broker-writes-on-approval framing")
-	}
-
-	ceo := mk("ceo").Build("ceo")
-	if !strings.Contains(ceo, "tag @librarian to capture or promote it") {
-		t.Errorf("CEO prompt should delegate promotion to @librarian")
-	}
-}
-
-func TestPromptBuilder_NotebookPromoteGuidanceAfterAuthorityMove(t *testing.T) {
-	// Phase 4: wiki authority moved CEO->Librarian. notebook_promote guidance
-	// must still exist for SPECIALISTS (they draft + submit), now framed as
-	// queued for @librarian. The CEO writes its own notebooks but delegates
-	// promotion/curation to @librarian rather than promoting itself.
-	pb := &promptBuilder{
-		isOneOnOne:  func() bool { return false },
-		isFocusMode: func() bool { return false },
-		packName:    func() string { return "WUPHF Office" },
-		leadSlug:    func() string { return "ceo" },
-		members: func() []officeMember {
-			return []officeMember{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "fe", Name: "Frontend"},
+	for _, slug := range []string{"ceo", "fe"} {
+		got := mk().Build(slug)
+		if !strings.Contains(got, "@librarian") {
+			t.Errorf("%s prompt should route durable knowledge through @librarian", slug)
+		}
+		for _, banned := range []string{"notebook_promote", "notebook_write", "team_notebook_review"} {
+			if strings.Contains(got, banned) {
+				t.Errorf("%s prompt still references removed tool %q", slug, banned)
 			}
-		},
-		policies:       func() []officePolicy { return nil },
-		nameFor:        func(slug string) string { return slug },
-		markdownMemory: true,
-	}
-	ceoPrompt := pb.Build("ceo")
-	if !strings.Contains(ceoPrompt, "write it to your notebook") {
-		t.Fatalf("CEO prompt should still tell it to write durable decisions to its notebook")
-	}
-	if !strings.Contains(ceoPrompt, "@librarian owns the team wiki") {
-		t.Fatalf("CEO prompt should delegate wiki curation/promotion to @librarian")
-	}
-	fePrompt := pb.Build("fe")
-	if !strings.Contains(fePrompt, "submit notebook_promote when they should become canonical") {
-		t.Fatalf("specialist prompt regression: notebook_promote guidance missing")
-	}
-	if !strings.Contains(fePrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
-		t.Fatalf("specialist prompt missing notebook promotion follow-through guardrail")
-	}
-	if !strings.Contains(fePrompt, "queued for @librarian's review") {
-		t.Fatalf("specialist prompt should queue promotions for @librarian's review")
+		}
 	}
 }
 

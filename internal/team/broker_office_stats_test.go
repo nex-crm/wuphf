@@ -43,7 +43,7 @@ func TestOfficeStats_MatchesListEndpoints(t *testing.T) {
 		t.Skip("integration: boots a real broker listener")
 	}
 
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 
 	// Roster: two agents + the human seat. ceo has a live "active"
 	// snapshot; ada is idle.

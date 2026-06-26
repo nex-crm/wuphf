@@ -77,44 +77,6 @@ describe("deriveBreadcrumbs", () => {
     expect(crumbs[0].label).toBe("Wiki");
   });
 
-  it("returns [Notebooks] for notebook-catalog route", () => {
-    const route: CurrentRoute = { kind: "notebook-catalog" };
-    const crumbs = deriveBreadcrumbs(route);
-    expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Notebooks");
-  });
-
-  it("returns [Notebooks, agentSlug] for notebook-agent route", () => {
-    const route: CurrentRoute = {
-      kind: "notebook-agent",
-      agentSlug: "researcher",
-    };
-    const crumbs = deriveBreadcrumbs(route);
-    expect(crumbs).toHaveLength(2);
-    expect(crumbs[0].label).toBe("Notebooks");
-    expect(crumbs[1].label).toBe("researcher");
-  });
-
-  it("returns [Notebooks, agent, entry] for notebook-entry route", () => {
-    const route: CurrentRoute = {
-      kind: "notebook-entry",
-      agentSlug: "researcher",
-      entrySlug: "2026-05-01-insights",
-    };
-    const crumbs = deriveBreadcrumbs(route);
-    expect(crumbs).toHaveLength(3);
-    expect(crumbs[0].label).toBe("Notebooks");
-    expect(crumbs[1].label).toBe("researcher");
-    expect(crumbs[2].label).toBe("2026-05-01-insights");
-  });
-
-  it("returns [Reviews] for reviews route", () => {
-    const route: CurrentRoute = { kind: "reviews" };
-    const crumbs = deriveBreadcrumbs(route);
-    expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Reviews");
-  });
-
   it("returns [Settings] for settings app route", () => {
     const route: CurrentRoute = { kind: "app", appId: "settings" };
     const crumbs = deriveBreadcrumbs(route);

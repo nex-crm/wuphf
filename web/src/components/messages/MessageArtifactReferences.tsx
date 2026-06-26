@@ -81,11 +81,11 @@ function ArticleCard({ id, detail, error }: ArticleCardProps) {
   }
   const { artifact } = detail;
   // Route the card to the canonical home of the artifact:
-  //   promoted_to_wiki     → /wiki/<path>
-  //   promoted_to_notebook → /notebooks/<owner>/<entry>
-  //   draft / unknown      → /articles/<id> (standalone fallback)
+  //   promoted_to_wiki        → /wiki/<path>
+  //   draft / notebook / etc. → /articles/<id> (standalone fallback; the
+  //                             notebook surface has been retired)
   // resolveArtifactDestination is the single source of truth so the link
-  // shape stays consistent across chat, notebook, and any future surface.
+  // shape stays consistent across chat and any future surface.
   const destination = resolveArtifactDestination(artifact);
   return (
     <button

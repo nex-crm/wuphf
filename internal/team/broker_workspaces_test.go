@@ -1056,18 +1056,9 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/wiki/lint/resolve",
 		"/wiki/extract/replay",
 		"/wiki/dlq",
-		// notebook
-		"/notebook/write",
-		"/notebook/read",
-		"/notebook/list",
-		"/notebook/catalog",
-		"/notebook/search",
-		"/notebook/promote",
+		// rich artifacts (visual artifact surface)
 		"/notebook/visual-artifacts",
 		"/notebook/visual-artifacts/ra_0123456789abcdef",
-		// review
-		"/review/list",
-		"/review/anything", // /review/ subpath wildcard
 		// entity
 		"/entity/fact",
 		"/entity/brief/synthesize",

@@ -14,8 +14,7 @@ import (
 )
 
 func TestInboxThreads_GroupsItemsByAgent(t *testing.T) {
-	b := newTestBrokerForReview(t)
-	rl := b.ReviewLog()
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 
 	b.mu.Lock()
@@ -37,16 +36,6 @@ func TestInboxThreads_GroupsItemsByAgent(t *testing.T) {
 		{ID: "req-1", From: "ada", Channel: "general", Question: "Bump dep?", Kind: "approval", CreatedAt: now.Add(-10 * time.Minute).Format(time.RFC3339)},
 	}
 	b.mu.Unlock()
-	seedPromotion(t, rl, &Promotion{
-		ID:           "rev-1",
-		State:        PromotionPending,
-		SourceSlug:   "ada",
-		SourcePath:   "notebook/ada/draft.md",
-		TargetPath:   "wiki/draft.md",
-		ReviewerSlug: "owner",
-		CreatedAt:    now.Add(-5 * time.Minute),
-		UpdatedAt:    now.Add(-5 * time.Minute),
-	})
 
 	payload, err := b.inboxThreadsForActor(requestActor{Kind: requestActorKindBroker})
 	if err != nil {
@@ -78,15 +67,15 @@ func TestInboxThreads_GroupsItemsByAgent(t *testing.T) {
 	if !ok {
 		t.Fatal("expected thread for ada")
 	}
-	if ada.PendingCount != 2 || len(ada.Items) != 2 {
-		t.Fatalf("ada: pending=%d items=%d, want 2/2 (1 request + 1 review)", ada.PendingCount, len(ada.Items))
+	if ada.PendingCount != 1 || len(ada.Items) != 1 {
+		t.Fatalf("ada: pending=%d items=%d, want 1/1 (1 request)", ada.PendingCount, len(ada.Items))
 	}
 	kinds := map[InboxItemKind]int{}
 	for _, item := range ada.Items {
 		kinds[item.Kind]++
 	}
-	if kinds[InboxItemKindRequest] != 1 || kinds[InboxItemKindReview] != 1 {
-		t.Fatalf("ada kinds = %+v, want 1 request + 1 review", kinds)
+	if kinds[InboxItemKindRequest] != 1 {
+		t.Fatalf("ada kinds = %+v, want 1 request", kinds)
 	}
 }
 

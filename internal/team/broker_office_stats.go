@@ -159,11 +159,11 @@ func (b *Broker) memberLiveStatusLocked(slug string, now time.Time) string {
 }
 
 // inboxItemNeedsAttention mirrors the frontend badge predicate
-// (InboxButton.isAttentionItem): requests and reviews always demand
-// attention; tasks only in the human-attention lifecycle states.
+// (InboxButton.isAttentionItem): requests always demand attention;
+// tasks only in the human-attention lifecycle states.
 func inboxItemNeedsAttention(item InboxItem) bool {
 	switch item.Kind {
-	case InboxItemKindRequest, InboxItemKindReview:
+	case InboxItemKindRequest:
 		return true
 	case InboxItemKindTask:
 		if item.TaskRow == nil {

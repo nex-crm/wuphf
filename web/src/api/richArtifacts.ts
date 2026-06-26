@@ -154,10 +154,6 @@ export type ArtifactDestination =
       params: { _splat: string };
     }
   | {
-      to: "/notebooks/$agentSlug/$entrySlug";
-      params: { agentSlug: string; entrySlug: string };
-    }
-  | {
       to: "/articles/$articleId";
       params: { articleId: string };
     };
@@ -183,46 +179,20 @@ export function resolveArtifactDestination(
       params: { _splat: stripWikiSuffix(promotion.wiki_path) },
     };
   }
-  if (
-    promotion?.status === "promoted_to_notebook" &&
-    promotion.owner_slug &&
-    promotion.entry_slug
-  ) {
-    return {
-      to: "/notebooks/$agentSlug/$entrySlug",
-      params: {
-        agentSlug: promotion.owner_slug,
-        entrySlug: promotion.entry_slug,
-      },
-    };
-  }
   // Legacy fallback for artifacts emitted before the promotion field
-  // existed: if we know a wiki path was set, route there. This must run
-  // BEFORE the attached_to_notebook_entry branch — a backfilled legacy
-  // artifact can carry BOTH fields, and the wiki page is its canonical home
-  // (the notebook attachment is only its historical origin). Mirrors the
-  // promoted_to_wiki vs attached_to_notebook_entry precedence above.
+  // existed: if we know a wiki path was set, route there. Runs only when no
+  // promotion field is present so an explicit `draft` promotion still wins.
+  // The notebook surface has been retired, so notebook-promoted /
+  // notebook-attached artifacts fall through to the standalone /articles/$id
+  // viewer below.
   if (!promotion && artifact.promotedWikiPath) {
     return {
       to: "/wiki/$",
       params: { _splat: stripWikiSuffix(artifact.promotedWikiPath) },
     };
   }
-  // Draft artifacts that are nonetheless attached to a notebook entry should
-  // route to that entry — the entry page embeds the artifact inline via
-  // NotebookVisualArtifacts, so the user sees the visual in its natural
-  // home instead of the bare /articles/$id viewer.
-  const attached = artifact.attached_to_notebook_entry;
-  if (attached?.owner_slug && attached.entry_slug) {
-    return {
-      to: "/notebooks/$agentSlug/$entrySlug",
-      params: {
-        agentSlug: attached.owner_slug,
-        entrySlug: attached.entry_slug,
-      },
-    };
-  }
-  // Draft / unknown / unpromoted: fall back to the standalone viewer.
+  // Draft / notebook / unknown / unpromoted: fall back to the standalone
+  // viewer.
   return {
     to: "/articles/$articleId",
     params: { articleId: artifact.id },
