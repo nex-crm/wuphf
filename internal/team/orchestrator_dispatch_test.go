@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -137,13 +138,40 @@ func TestDispatchViaOrchestrator_AppliesProjection(t *testing.T) {
 	if got := fake.lastRun.Record["lifecycle_state"]; got != "running" {
 		t.Fatalf("dispatched record lifecycle_state = %v, want running", got)
 	}
-	// Secrets cross by name only — never a value.
+	// Secrets cross by NAME only — and the names must be the ones mcp-team
+	// actually reads to reach the broker (token + base URL), or the agent's
+	// teammcp calls can't authenticate / find the broker.
 	office := fake.lastRun.MCP["wuphf-office"]
-	if len(office.EnvPassthrough) == 0 || office.EnvPassthrough[0] != "WUPHF_BROKER_TOKEN" {
-		t.Fatalf("expected WUPHF_BROKER_TOKEN in env_passthrough, got %v", office.EnvPassthrough)
+	if !reflect.DeepEqual(office.EnvPassthrough, []string{"WUPHF_BROKER_TOKEN", "WUPHF_BROKER_BASE_URL"}) {
+		t.Fatalf("env_passthrough = %v, want [WUPHF_BROKER_TOKEN WUPHF_BROKER_BASE_URL]", office.EnvPassthrough)
+	}
+	// The dispatch carries the task's content so the agent can act on it.
+	if len(fake.lastRun.Messages) == 0 {
+		t.Fatal("dispatch sent no messages; the agent would only get the generic fallback prompt")
+	}
+	if content, _ := fake.lastRun.Messages[0]["content"].(string); !strings.Contains(content, "task-1") || !strings.Contains(content, "demo") {
+		t.Fatalf("dispatch message missing task id/title: %q", content)
 	}
 	if got := lifecycleOf(t, b, "task-1"); got != LifecycleStateReview {
 		t.Fatalf("task lifecycle = %q, want review (projection applied)", got)
+	}
+}
+
+func TestOrchestratorTaskMessages(t *testing.T) {
+	t.Parallel()
+	msgs := orchestratorTaskMessages(teamTask{ID: "OFFICE-7", Title: "Build healthz", Details: "Add a /healthz route."})
+	if len(msgs) != 1 || msgs[0]["role"] != "user" {
+		t.Fatalf("want one user message, got %v", msgs)
+	}
+	content, _ := msgs[0]["content"].(string)
+	for _, want := range []string{"OFFICE-7", "Build healthz", "Add a /healthz route."} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("message missing %q in: %q", want, content)
+		}
+	}
+	// Nothing to say -> no message (harness falls back to its default directive).
+	if got := orchestratorTaskMessages(teamTask{ID: "  "}); got != nil {
+		t.Fatalf("blank task should yield no messages, got %v", got)
 	}
 }
 
