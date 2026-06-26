@@ -142,9 +142,19 @@ func (m *appDevManager) Ensure(id string) (appDevStatus, error) {
 		m.mu.Unlock()
 		return srv.status(), nil
 	}
+	// A dead/failed server still has a live proxy http.Server goroutine holding an
+	// ephemeral port. Capture it so we can shut it down after releasing the lock —
+	// otherwise each restart leaks a goroutine and a listener.
+	var stale *appDevServer
+	if ok {
+		stale = srv
+	}
 	srv = &appDevServer{id: id, srcDir: srcDir, startedAt: time.Now(), lastUsed: time.Now()}
 	m.servers[id] = srv
 	m.mu.Unlock()
+	if stale != nil {
+		stale.shutdown()
+	}
 
 	m.gcOnce.Do(func() { go m.gcLoop() })
 
@@ -271,7 +281,10 @@ func (s *appDevServer) installIfNeeded() error {
 	if devTreeFresh(s.srcDir) {
 		return nil
 	}
-	cmd := exec.Command("bun", "install")
+	// --ignore-scripts: agent-authored package.json is not host-protected, so a
+	// lifecycle hook would run arbitrary agent code in the broker process. Matches
+	// buildAppBundle's install step.
+	cmd := exec.Command("bun", "install", "--ignore-scripts")
 	cmd.Dir = s.srcDir
 	configureHeadlessProcess(cmd)
 	return s.pipeAndWait(cmd, nil)

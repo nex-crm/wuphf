@@ -60,6 +60,7 @@ describe("TaskActivity", () => {
     render(<TaskActivity taskId="OFFICE-2" agentSlug="revops" />);
     expect(mockUseAgentStream).toHaveBeenCalledWith("revops", "OFFICE-2", {
       keepAlive: true,
+      maxLines: 5000,
     });
   });
 
@@ -80,6 +81,7 @@ describe("TaskActivity", () => {
     // A null owner streams nothing.
     expect(mockUseAgentStream).toHaveBeenCalledWith(null, "OFFICE-4", {
       keepAlive: true,
+      maxLines: 5000,
     });
   });
 

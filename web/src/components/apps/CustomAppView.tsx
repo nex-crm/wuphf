@@ -314,10 +314,12 @@ export function CustomAppView({ appId }: CustomAppViewProps) {
         historyOpen={historyOpen}
         versions={versions.data ?? []}
         versionsLoading={versions.isLoading}
+        versionsError={versions.isError}
         previewVersion={previewVersion}
         isPreviewing={isPreviewing}
         previewHtml={versionPreview.data?.html}
         previewLoading={versionPreview.isLoading}
+        previewError={versionPreview.isError}
         previewUpdatedBy={versionPreview.data?.updatedBy}
         previewUpdatedAt={versionPreview.data?.updatedAt}
         restoring={rollback.isPending}
@@ -456,10 +458,12 @@ interface AppViewBodyProps {
   historyOpen: boolean;
   versions: CustomAppVersion[];
   versionsLoading: boolean;
+  versionsError?: boolean;
   previewVersion: number | null;
   isPreviewing: boolean;
   previewHtml?: string;
   previewLoading: boolean;
+  previewError?: boolean;
   previewUpdatedBy?: string;
   previewUpdatedAt?: string;
   restoring: boolean;
@@ -482,10 +486,12 @@ function AppViewBody({
   historyOpen,
   versions,
   versionsLoading,
+  versionsError,
   previewVersion,
   isPreviewing,
   previewHtml,
   previewLoading,
+  previewError,
   previewUpdatedBy,
   previewUpdatedAt,
   restoring,
@@ -511,6 +517,7 @@ function AppViewBody({
         <AppVersionTimeline
           versions={versions}
           isLoading={versionsLoading}
+          isError={versionsError}
           selectedVersion={previewVersion}
           currentVersion={app.version}
           onSelect={onSelectVersion}
@@ -550,6 +557,7 @@ function AppViewBody({
           previewVersion={previewVersion}
           previewHtml={previewHtml}
           previewLoading={previewLoading}
+          previewError={previewError}
           selectMode={selectMode}
           onSelectElement={onSelectElement}
           onAppError={onAppError}
@@ -575,6 +583,7 @@ interface AppViewStageFrameProps {
   previewVersion: number | null;
   previewHtml?: string;
   previewLoading: boolean;
+  previewError?: boolean;
   selectMode: boolean;
   onSelectElement: (sel: AppSelectPayload) => void;
   onAppError: (message: string) => void;
@@ -595,15 +604,26 @@ function AppViewStageFrame({
   previewVersion,
   previewHtml,
   previewLoading,
+  previewError,
   selectMode,
   onSelectElement,
   onAppError,
 }: AppViewStageFrameProps) {
   if (isPreviewing) {
-    if (previewLoading || previewHtml === undefined) {
+    if (previewLoading) {
       return (
         <div className="custom-app-view__preview-loading">
           Loading v{previewVersion}…
+        </div>
+      );
+    }
+    if (previewError || previewHtml === undefined) {
+      // Don't sit on "Loading…" forever when the fetch failed — tell the user and
+      // point them back. "Back to current" in the PreviewBanner stays available.
+      return (
+        <div className="custom-app-view__preview-loading">
+          Couldn’t load v{previewVersion}. Use “Back to current” above to
+          return.
         </div>
       );
     }

@@ -10,10 +10,14 @@ import { showNotice } from "../ui/Toast";
  *
  * Security model (the iframe is the real boundary, not the write-time HTML
  * validator):
- *   - sandbox="allow-scripts allow-downloads" — allow-downloads lets anchor-click
- *     blob URL downloads work (Chrome 83+); no allow-same-origin, so the app runs
- *     at an opaque origin with no access to cookies, localStorage, or the parent
- *     DOM; no allow-forms / allow-popups / allow-top-navigation.
+ *   - sandbox="allow-scripts" only — no allow-same-origin, so the app runs at an
+ *     opaque origin with no access to cookies, localStorage, or the parent DOM;
+ *     no allow-forms / allow-popups / allow-top-navigation / allow-downloads.
+ *     Downloads do NOT need allow-downloads: an opaque-origin blob anchor-click
+ *     is a blocked navigation anyway, so the app posts the bytes and the HOST
+ *     saves them from its own trusted origin (serviceDownload), where the 16MiB
+ *     + rate caps apply. Granting allow-downloads would only create an in-frame
+ *     path that bypasses those caps, so it is deliberately withheld.
  *   - An injected CSP with connect-src 'none' blocks ALL network from inside the
  *     frame (fetch/XHR/WebSocket), so a generated app cannot exfiltrate data,
  *     even if its own bundle tried to. default-src 'none' + inline script/style
@@ -467,6 +471,13 @@ function serviceCreateTask(
   confirm({
     message: `Create a task for the team?\n\n“${title}”`,
     confirmLabel: "Create task",
+    onCancel: () => {
+      // An explicit dismiss releases the lock immediately, instead of holding it
+      // for the full CREATE_TASK_LOCK_MS — that timeout only guards an IGNORED
+      // dialog, not a deliberate cancel.
+      window.clearTimeout(release);
+      createTaskPending = false;
+    },
     onConfirm: async () => {
       window.clearTimeout(release);
       createTaskPending = false;
@@ -501,8 +512,17 @@ function serviceCreateTask(
 function sanitizeDownloadFilename(raw: unknown): string {
   let name = typeof raw === "string" ? raw : "";
   name = name.split(/[/\\]/).pop() ?? "";
+  // Strip control chars, illegal filename chars, AND Unicode bidi/zero-width
+  // overrides (U+200B–200F, U+202A–202E, U+2066–2069, U+FEFF): a
+  // right-to-left override can visually flip an extension, spoofing the saved
+  // file's type in OS file pickers (a real ".exe" shown as ".gpj").
   // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
-  name = name.replace(/[\x00-\x1f<>:"|?*\x7f]/g, "").trim();
+  name = name
+    .replace(
+      /[\x00-\x1f<>:"|?*\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,
+      "",
+    )
+    .trim();
   if (/^\.+$/.test(name)) name = "";
   if (name.length > DOWNLOAD_FILENAME_MAX) {
     name = name.slice(0, DOWNLOAD_FILENAME_MAX);
@@ -599,11 +619,15 @@ function serviceDownload(
     );
   };
   if (!downloadRateAllows()) {
+    // Fire-and-forget downloads get no reply, so without a notice the button
+    // would just appear to do nothing.
+    showNotice("Download limit reached — try again shortly.", "error");
     reply({ ok: false, error: "Too many downloads — slow down." });
     return;
   }
   const parsed = parseDownloadPayload(message);
   if ("error" in parsed) {
+    showNotice("Could not save the download.", "error");
     reply({ ok: false, error: parsed.error });
     return;
   }
@@ -622,6 +646,7 @@ function serviceDownload(
     showNotice(`Downloaded ${parsed.filename}`, "success");
     reply({ ok: true });
   } catch (err) {
+    showNotice("Could not save the download.", "error");
     reply({ ok: false, error: errorMessage(err) });
   }
 }
@@ -979,7 +1004,7 @@ export function CustomAppFrame({
       ref={iframeRef}
       className="custom-app-frame"
       title={title}
-      sandbox="allow-scripts allow-downloads"
+      sandbox="allow-scripts"
       srcDoc={srcDoc}
     />
   );

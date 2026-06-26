@@ -107,9 +107,14 @@ export function AppsSection() {
             onClick={() => navigateToSidebarApp(app.id)}
           />
         ))}
-        {building.map((name) => (
+        {building.map((name, i) => (
           <div
-            key={`building-${name.toLowerCase()}`}
+            // Index-suffixed: two building drafts can share a name (same-named
+            // apps minted in different channels have distinct ids but identical
+            // names), which would collide on a name-only key. These rows are
+            // ephemeral status indicators with no input/focus state, so a
+            // positional key is safe.
+            key={`building-${name.toLowerCase()}-${i}`}
             className="sidebar-app-building"
             aria-live="polite"
           >

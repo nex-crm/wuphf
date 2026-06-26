@@ -34,6 +34,11 @@ export function TaskActivity({ taskId, agentSlug }: TaskActivityProps) {
   const slug = agentSlug?.trim() ? agentSlug.trim() : null;
   const { lines, connected } = useAgentStream(slug, taskId, {
     keepAlive: true,
+    // The activity feed reduces the FULL ordered event log (pairing
+    // tool_use→tool_result across the whole build), so it must keep every
+    // event — a build can run hundreds of tool calls. The default 50-line cap
+    // would evict early tool_use events and render phantom blank rows.
+    maxLines: 5000,
   });
   const [open, setOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);

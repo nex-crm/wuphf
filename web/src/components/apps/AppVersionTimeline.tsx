@@ -4,6 +4,8 @@ import { formatRelativeTime } from "../../lib/format";
 interface AppVersionTimelineProps {
   versions: CustomAppVersion[];
   isLoading: boolean;
+  /** The history fetch failed — distinct from a genuinely empty history. */
+  isError?: boolean;
   /** The version being previewed, or null when viewing the current build. */
   selectedVersion: number | null;
   currentVersion: number;
@@ -20,6 +22,7 @@ interface AppVersionTimelineProps {
 export function AppVersionTimeline({
   versions,
   isLoading,
+  isError,
   selectedVersion,
   currentVersion,
   onSelect,
@@ -29,6 +32,11 @@ export function AppVersionTimeline({
       <div className="app-version-timeline__header">Version history</div>
       {isLoading ? (
         <div className="app-version-timeline__empty">Loading history…</div>
+      ) : isError ? (
+        // A failed fetch must not read as an empty history.
+        <div className="app-version-timeline__empty" role="alert">
+          Couldn’t load version history.
+        </div>
       ) : versions.length === 0 ? (
         <div className="app-version-timeline__empty">
           No saved versions yet. Each published build is kept here.

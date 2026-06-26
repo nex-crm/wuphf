@@ -119,13 +119,27 @@ func TestResolveRegisterAppFiles(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit files map still wins", func(t *testing.T) {
+	t.Run("source_path wins when both are provided", func(t *testing.T) {
+		// source_path is the PREFERRED, complete copy; an agent that hedges by
+		// passing both must get the whole tree, not the partial map.
 		files, err := resolveRegisterAppFiles(RegisterAppArgs{
 			Files:      map[string]string{"src/App.tsx": "x"},
 			SourcePath: root,
 		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(files) <= 1 {
+			t.Fatalf("source_path should win (full tree), got partial map: %v", files)
+		}
+	})
+
+	t.Run("files map used only when source_path is absent", func(t *testing.T) {
+		files, err := resolveRegisterAppFiles(RegisterAppArgs{
+			Files: map[string]string{"src/App.tsx": "x"},
+		})
 		if err != nil || len(files) != 1 {
-			t.Fatalf("explicit files should win; got %v err %v", files, err)
+			t.Fatalf("explicit files should be used; got %v err %v", files, err)
 		}
 	})
 
@@ -139,6 +153,36 @@ func TestResolveRegisterAppFiles(t *testing.T) {
 	t.Run("relative source_path rejected", func(t *testing.T) {
 		if _, err := resolveRegisterAppFiles(RegisterAppArgs{SourcePath: "src"}); err == nil {
 			t.Fatal("expected an error for a relative source_path")
+		}
+	})
+
+	t.Run("absolute source_path outside the build dir rejected", func(t *testing.T) {
+		// The secret-exfil channel: pointing source_path at a sensitive system
+		// directory must be refused (the safe roots are temp + runtime home).
+		for _, p := range []string{"/etc", "/etc/ssh", "/root"} {
+			if _, err := resolveRegisterAppFiles(RegisterAppArgs{SourcePath: p}); err == nil {
+				t.Errorf("expected %q to be rejected as outside the build dir", p)
+			}
+		}
+	})
+
+	t.Run("absolute html_path outside the build dir rejected", func(t *testing.T) {
+		if _, err := resolveRegisterAppHTML(RegisterAppArgs{HTMLPath: "/etc/hosts"}); err == nil {
+			t.Fatal("expected /etc/hosts to be rejected as outside the build dir")
+		}
+	})
+
+	t.Run("symlinked file inside source_path is not copied", func(t *testing.T) {
+		link := filepath.Join(root, "src", "leak.txt")
+		if err := os.Symlink("/etc/hosts", link); err != nil {
+			t.Skipf("symlink unsupported: %v", err)
+		}
+		files, err := resolveRegisterAppFiles(RegisterAppArgs{SourcePath: root})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := files["src/leak.txt"]; ok {
+			t.Error("a symlinked file must not be read/copied into app source")
 		}
 	})
 }

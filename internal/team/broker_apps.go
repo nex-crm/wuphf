@@ -391,5 +391,12 @@ func (s *customAppStore) Delete(id string) error {
 		}
 		return err
 	}
-	return os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	// Evict the per-app publish mutex so the publishMu map doesn't grow without
+	// bound across create/delete cycles. Safe: the dir is gone, so no publish for
+	// this id can be in flight or start; a future same-id app lazily re-creates it.
+	s.publishMu.Delete(id)
+	return nil
 }

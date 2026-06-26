@@ -23,7 +23,41 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nex-crm/wuphf/internal/config"
 )
+
+// resolveSafeBuildPath confines an agent-supplied absolute path (html_path /
+// source_path) to where the App Builder legitimately builds — the office runtime
+// home (task worktrees + agent scratch) or the OS temp dir — and resolves
+// symlinks so a link inside the workspace can't point the read at /etc, ~/.ssh,
+// or cloud credentials. register_app reads these paths with the broker's
+// privileges and can persist them as retrievable app source, so an unbounded
+// absolute path would be a secret-exfil channel. Returns the real (symlink-
+// resolved) path on success.
+func resolveSafeBuildPath(path string) (string, error) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", path, err)
+	}
+	for _, root := range appBuildSafeRoots() {
+		rr, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		if real == rr || strings.HasPrefix(real, rr+string(os.PathSeparator)) {
+			return real, nil
+		}
+	}
+	return "", fmt.Errorf("path %q must be inside the agent's build directory", path)
+}
+
+func appBuildSafeRoots() []string {
+	roots := []string{os.TempDir()}
+	if h := strings.TrimSpace(config.RuntimeHomeDir()); h != "" {
+		roots = append(roots, h)
+	}
+	return roots
+}
 
 // appBuilderSlug mirrors company.AppBuilderSlug / team's appBuilderSlug. Kept
 // local so this package gates on the slug without importing the broker just for
@@ -267,6 +301,10 @@ func resolveRegisterAppHTML(args RegisterAppArgs) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("html_path must be an absolute path to the built dist/index.html; got %q", path)
 	}
+	path, err := resolveSafeBuildPath(path)
+	if err != nil {
+		return "", err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("read html_path %q: %w", path, err)
@@ -308,15 +346,22 @@ var registerAppSkipDirs = map[string]bool{
 // the persisted source always builds — closing the "agent dropped a file from
 // the map and shipped a broken app" gap. Falls back to an explicit files map.
 func resolveRegisterAppFiles(args RegisterAppArgs) (map[string]string, error) {
-	if len(args.Files) > 0 {
-		return args.Files, nil
-	}
+	// source_path is PREFERRED (the whole-tree copy that can't drop a file); the
+	// explicit files map is the fallback. Check source_path first so an agent that
+	// passes both gets the complete copy, not the partial map.
 	root := strings.TrimSpace(args.SourcePath)
 	if root == "" {
+		if len(args.Files) > 0 {
+			return args.Files, nil
+		}
 		return nil, nil // html-only publish; no editable source persisted
 	}
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("source_path must be an absolute path to the project root; got %q", root)
+	}
+	root, err := resolveSafeBuildPath(root)
+	if err != nil {
+		return nil, err
 	}
 	info, err := os.Stat(root)
 	if err != nil {
@@ -330,6 +375,12 @@ func resolveRegisterAppFiles(args RegisterAppArgs) (map[string]string, error) {
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		// Never follow a symlink: WalkDir does not recurse symlinked dirs, but a
+		// symlinked FILE would otherwise be read (and persisted) — a link to
+		// /etc/passwd or a key file must not be copied into app source.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
 		}
 		if d.IsDir() {
 			if p == root {

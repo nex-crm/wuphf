@@ -548,12 +548,6 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		channel = "general"
 	}
 
-	// Pre-scaffold a new App Builder app (outside b.mu — the app store has its
-	// own lock) so its live preview boots a running scaffold in seconds. This
-	// also appends the pre-created app id to the task brief so the agent
-	// publishes onto the same app. No-op for every non-app create.
-	body = b.maybePrescaffoldAppForCreate(action, channel, body)
-
 	// Permission preflight must run before any gate with external side
 	// effects. The locked auth check below still runs again after these
 	// pre-phases, so a task whose owner/reviewer changes while a verification
@@ -564,6 +558,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		return TaskResponse{}, err
 	}
 	b.mu.Unlock()
+
+	// Pre-scaffold a new App Builder app (outside b.mu — the app store has its
+	// own lock) so its live preview boots a running scaffold in seconds. This
+	// also appends the pre-created app id to the task brief so the agent
+	// publishes onto the same app. No-op for every non-app create. Runs AFTER the
+	// auth check above: the scaffold writes ~a dozen files to disk, so an
+	// unauthorized create must not leave an orphan draft behind.
+	body = b.maybePrescaffoldAppForCreate(action, channel, body)
 
 	// Resubmission artifact-delta gate (done-integrity): an agent re-landing
 	// changes-requested work must have actually changed the delivered

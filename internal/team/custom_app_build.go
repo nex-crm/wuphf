@@ -202,7 +202,12 @@ func buildAppBundle(srcDir string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), customAppBuildTimeout)
 	defer cancel()
 
-	if out, err := runAppBuildStep(ctx, srcDir, "install"); err != nil {
+	// --ignore-scripts: the source is agent-authored, and package.json is NOT a
+	// host-protected file, so a postinstall/preinstall hook would otherwise run
+	// arbitrary agent code in the broker process (its env carries provider +
+	// integration secrets, and the build host has network). The scaffold has no
+	// lifecycle scripts, so this never costs a legitimate build.
+	if out, err := runAppBuildStep(ctx, srcDir, "install", "--ignore-scripts"); err != nil {
 		return nil, buildStepError("install", out, err)
 	}
 	if out, err := runAppBuildStep(ctx, srcDir, "run", "build"); err != nil {

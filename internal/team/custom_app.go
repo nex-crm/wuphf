@@ -933,9 +933,13 @@ func (s *customAppStore) Rollback(id string, version int, actor string, now time
 		s.mu.Unlock()
 		return CustomApp{}, newCustomAppCallerError("app: v%d is already current", version)
 	}
+	// Compute the snapshot path under the lock, then read it WITHOUT the lock —
+	// the bundle can be up to customAppMaxHTMLBytes, and holding s.mu across the
+	// read would block every concurrent List/Get/Source (Save uses the same
+	// lock-free-I/O discipline).
 	snap := filepath.Join(s.appDir(id), customAppVersionsDir, fmt.Sprintf("v%d", version), customAppEntry)
-	body, readErr := os.ReadFile(snap)
 	s.mu.Unlock()
+	body, readErr := os.ReadFile(snap)
 	if readErr != nil {
 		return CustomApp{}, newCustomAppCallerError("app: version v%d not found", version)
 	}
