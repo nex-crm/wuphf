@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/provider"
 )
@@ -20,6 +21,7 @@ type fakeTaskOrchestrator struct {
 	lastCoord   provider.CoordinateRequest
 	result      *provider.StepResult
 	plan        *provider.CoordinationPlan
+	coordSignal chan string
 	err         error
 }
 
@@ -37,6 +39,9 @@ func (f *fakeTaskOrchestrator) Resume(_ context.Context, _ provider.ResumeReques
 func (f *fakeTaskOrchestrator) Coordinate(_ context.Context, req provider.CoordinateRequest) (*provider.CoordinationPlan, error) {
 	f.coordCalls++
 	f.lastCoord = req
+	if f.coordSignal != nil {
+		f.coordSignal <- req.GoalID
+	}
 	return f.plan, f.err
 }
 
@@ -400,6 +405,108 @@ func TestCoordinateGoal_SendsUnionOfDependsOnAndBlockedOn(t *testing.T) {
 	want := []string{"c1", "ext-1"}
 	if len(c2Deps) != len(want) || c2Deps[0] != want[0] || c2Deps[1] != want[1] {
 		t.Fatalf("c2 depends_on = %v, want union %v", c2Deps, want)
+	}
+}
+
+func TestGoalCompletes_WhenAllChildrenTerminal(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks,
+		teamTask{ID: "GOAL", Owner: "ceo", Title: "ship", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c1", ParentIssueID: "GOAL", Owner: "eng", LifecycleState: LifecycleStateApproved, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c2", ParentIssueID: "GOAL", Owner: "eng", LifecycleState: LifecycleStateApproved, Orchestrator: orchestratorLangGraph},
+	)
+	l := &Launcher{broker: b}
+	l.SetTaskOrchestrator(&fakeTaskOrchestrator{})
+
+	// Both children terminal -> coordinate returns all-idle; the goal completes.
+	plan := &provider.CoordinationPlan{
+		GoalID:  "GOAL",
+		Actions: map[string]string{"c1": provider.CoordIdle, "c2": provider.CoordIdle},
+		Ready:   []string{},
+	}
+	l.applyCoordinationPlan("ceo", "GOAL", l.taskGoalChildren("GOAL"), plan)
+
+	if got := lifecycleOf(t, b, "GOAL"); got != LifecycleStateReview {
+		t.Fatalf("goal with all-terminal children should complete to review; got %q", got)
+	}
+}
+
+func TestGoalDoesNotComplete_WhenAChildIsStillActive(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks,
+		teamTask{ID: "GOAL", Owner: "ceo", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c1", ParentIssueID: "GOAL", Owner: "eng", LifecycleState: LifecycleStateApproved, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c2", ParentIssueID: "GOAL", Owner: "eng", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+	)
+	l := &Launcher{broker: b}
+	l.SetTaskOrchestrator(&fakeTaskOrchestrator{})
+
+	plan := &provider.CoordinationPlan{GoalID: "GOAL", Actions: map[string]string{"c1": provider.CoordIdle, "c2": provider.CoordDispatch}, Ready: []string{"c2"}}
+	l.applyCoordinationPlan("ceo", "GOAL", l.taskGoalChildren("GOAL"), plan)
+
+	if got := lifecycleOf(t, b, "GOAL"); got != LifecycleStateRunning {
+		t.Fatalf("goal with an active child must stay running; got %q", got)
+	}
+}
+
+func TestOrchestratorGoalParent_Guards(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks,
+		teamTask{ID: "GOAL", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "DONEGOAL", LifecycleState: LifecycleStateReview, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "PLAINGOAL", LifecycleState: LifecycleStateRunning}, // not orchestrator-owned
+	)
+	l := &Launcher{broker: b}
+	l.SetTaskOrchestrator(&fakeTaskOrchestrator{})
+
+	cases := []struct {
+		name  string
+		child teamTask
+		want  bool
+	}{
+		{"child of running orchestrator goal re-ticks", teamTask{ID: "c", ParentIssueID: "GOAL"}, true},
+		{"top-level task never re-ticks a parent", teamTask{ID: "c"}, false},
+		{"child of a completed (review) goal does not re-tick", teamTask{ID: "c", ParentIssueID: "DONEGOAL"}, false},
+		{"child of a non-orchestrator parent does not re-tick", teamTask{ID: "c", ParentIssueID: "PLAINGOAL"}, false},
+		{"child of a missing parent does not re-tick", teamTask{ID: "c", ParentIssueID: "ghost"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := l.orchestratorGoalParent(tc.child)
+			if ok != tc.want {
+				t.Fatalf("orchestratorGoalParent ok = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestRetick_CoordinatesParentGoal(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.tasks = append(b.tasks,
+		teamTask{ID: "GOAL", Owner: "ceo", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+		teamTask{ID: "c1", ParentIssueID: "GOAL", Owner: "eng", LifecycleState: LifecycleStateRunning, Orchestrator: orchestratorLangGraph},
+	)
+	l := &Launcher{broker: b}
+	fake := &fakeTaskOrchestrator{
+		coordSignal: make(chan string, 1),
+		plan:        &provider.CoordinationPlan{GoalID: "GOAL", Actions: map[string]string{}, Ready: []string{}},
+	}
+	l.SetTaskOrchestrator(fake)
+
+	// A child's state change must re-coordinate its parent goal.
+	l.retickOrchestratorGoalParent(teamTask{ID: "c1", ParentIssueID: "GOAL"})
+
+	select {
+	case gid := <-fake.coordSignal:
+		if gid != "GOAL" {
+			t.Fatalf("re-tick coordinated %q, want GOAL", gid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("re-tick did not coordinate the parent goal")
 	}
 }
 

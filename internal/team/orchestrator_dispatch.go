@@ -154,6 +154,47 @@ func (l *Launcher) taskIsGoal(task teamTask) bool {
 	return len(l.taskGoalChildren(task.ID)) > 0
 }
 
+// orchestratorGoalParent returns the parent goal a child's state change should
+// re-coordinate, if any: the child must have a parent that is an executable,
+// orchestrator-owned goal. A goal that has already completed (non-executable,
+// e.g. in review) is not re-coordinated.
+func (l *Launcher) orchestratorGoalParent(child teamTask) (teamTask, bool) {
+	if l == nil || l.broker == nil || l.orchestrator == nil {
+		return teamTask{}, false
+	}
+	parentID := strings.TrimSpace(child.ParentIssueID)
+	if parentID == "" {
+		return teamTask{}, false
+	}
+	parent := l.broker.TaskByID(parentID)
+	if parent == nil || !taskUsesOrchestrator(*parent) {
+		return teamTask{}, false
+	}
+	if !isExecutableTeamTaskStatus(parent.LifecycleState) {
+		return teamTask{}, false
+	}
+	return *parent, true
+}
+
+// retickOrchestratorGoalParent re-coordinates a child's parent goal after the
+// child changes state. Lifecycle transitions append no actions, so without this a
+// goal would coordinate once and then stall — it would never notice a child
+// finishing (to dispatch the next one) or all children finishing (to complete the
+// goal). Rides the existing action-driven dispatch loop (the notifier), not a
+// timer or the lifecycle-transition chokepoint. Per-goal single-flight in
+// coordinateGoalViaOrchestrator collapses the bursts a child's actions produce.
+func (l *Launcher) retickOrchestratorGoalParent(child teamTask) {
+	parent, ok := l.orchestratorGoalParent(child)
+	if !ok {
+		return
+	}
+	go func() {
+		defer recoverPanicTo("coordinateGoalViaOrchestrator",
+			fmt.Sprintf("retick goal=%s child=%s", parent.ID, child.ID))
+		l.coordinateGoalViaOrchestrator(parent.Owner, parent)
+	}()
+}
+
 // coordinateGoalViaOrchestrator re-hydrates a goal's children, asks the
 // orchestrator for the per-child action plan, and applies it. START activates a
 // child to running (the notify loop dispatches it on the next tick); DISPATCH
@@ -241,6 +282,33 @@ func (l *Launcher) applyCoordinationPlan(slug, goalID string, children []teamTas
 			log.Printf("team: coordinate returned unrecognized action %q for child %q (goal %q) — ignoring", action, childID, goalID)
 		}
 	}
+
+	// Goal completion: when every child has reached a terminal status, the goal's
+	// work is done. Surface it for a final human review (the children were each
+	// reviewed; this is the last sign-off). Computed from the CURRENT broker state,
+	// not the dispatch snapshot, so it can't complete a goal whose child just
+	// reopened. A goal in REVIEW is non-executable, so it is not re-coordinated.
+	if l.allGoalChildrenTerminal(goalID) {
+		if err := l.broker.TransitionLifecycle(goalID, LifecycleStateReview, "orchestrator: all children complete"); err != nil {
+			log.Printf("team: completing goal %q (all children terminal) failed: %v", goalID, err)
+		}
+	}
+}
+
+// allGoalChildrenTerminal reports whether goalID has at least one child and every
+// child is in a terminal status (done/archived/...). Reads current broker state.
+func (l *Launcher) allGoalChildrenTerminal(goalID string) bool {
+	children := l.taskGoalChildren(goalID)
+	if len(children) == 0 {
+		return false
+	}
+	for _, c := range children {
+		row, ok := derivedFieldsFor(c.LifecycleState)
+		if !ok || !isTerminalTeamTaskStatus(row.Status) {
+			return false
+		}
+	}
+	return true
 }
 
 // orchestratorChildRecords builds the re-hydrate records for a goal's children.
