@@ -207,6 +207,15 @@ class ClaudeAgentHarness:
                 "ClaudeAgentHarness requires the 'claude' extra: pip install claude-agent-sdk"
             ) from e
 
+    def _allowed_mcp_tools(self) -> list[str]:
+        """Allow every tool from each wired MCP server (server-prefix grant). Without
+        this the agent's teammcp calls (team_task submit/complete/create/block) are
+        permission-DENIED: the call still appears in the transcript — so the pure
+        classifier fires correctly — but the tool body never runs, so the BROKER
+        never sees the side effect (no task is actually created/submitted). Surfaced
+        by the live service run; unit-tested here, exercised live by scripts/."""
+        return [f"mcp__{name}" for name in self._mcp]
+
     def _build_options(self, system_prompt: str, permission_mode: str):  # pragma: no cover - needs SDK
         from claude_agent_sdk import ClaudeAgentOptions  # lazy
 
@@ -215,6 +224,7 @@ class ClaudeAgentHarness:
             system_prompt=system_prompt or None,
             mcp_servers=self._mcp_servers_config(),
             permission_mode=permission_mode,
+            allowed_tools=self._allowed_mcp_tools(),
             max_turns=self._max_turns,
         )
 

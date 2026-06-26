@@ -4,7 +4,14 @@ env resolution, prompt building, degrade-safe selection) is the unit under test.
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
+
+# The degrade-path tests assert SDK-ABSENT behavior; they run in CI (SDK not
+# installed) and skip locally once claude-agent-sdk is installed for live runs.
+_SDK_PRESENT = importlib.util.find_spec("claude_agent_sdk") is not None
+_sdk_absent_only = pytest.mark.skipif(_SDK_PRESENT, reason="claude-agent-sdk installed; SDK-absent path is exercised in CI")
 
 from orchestrator.harness import (
     ClaudeAgentHarness,
@@ -107,6 +114,24 @@ def test_decompose_turn_transitions_goal_to_running():
     assert apply_turn_outcome(State.RUNNING, outcome) is State.RUNNING
 
 
+def test_allowed_mcp_tools_grants_each_wired_server():
+    # The harness must allow its wired MCP tools, or the agent's team_task calls
+    # are permission-denied (transcript shows the call, but the broker never sees
+    # the side effect). Server-prefix grant covers every tool the server exposes.
+    h = ClaudeAgentHarness(
+        model="m",
+        mcp={
+            "wuphf-office": McpServer(command="wuphf", args=["mcp-team"]),
+            "extra": McpServer(command="x", args=[]),
+        },
+    )
+    assert sorted(h._allowed_mcp_tools()) == ["mcp__extra", "mcp__wuphf-office"]
+
+
+def test_allowed_mcp_tools_empty_without_servers():
+    assert ClaudeAgentHarness(model="m", mcp={})._allowed_mcp_tools() == []
+
+
 def test_mcp_servers_config_resolves_env_names_to_values():
     h = ClaudeAgentHarness(
         model="claude-sonnet-4-6",
@@ -126,6 +151,7 @@ def test_mcp_servers_config_resolves_env_names_to_values():
     assert "UNRELATED" not in office["env"]
 
 
+@_sdk_absent_only
 def test_run_turn_raises_clear_error_without_sdk():
     # claude-agent-sdk is not installed in CI: run_turn must fail loud with guidance.
     h = ClaudeAgentHarness(model="m", mcp={})
@@ -149,12 +175,14 @@ def test_permission_mode():
     assert _permission_mode_for(State.CHANGES_REQUESTED) == "acceptEdits"
 
 
+@_sdk_absent_only
 def test_build_harness_degrades_to_fake_without_sdk():
     # No SDK in CI -> the service stays runnable via FakeHarness.
     h = build_harness("claude-sonnet-4-6", {})
     assert isinstance(h, FakeHarness)
 
 
+@_sdk_absent_only
 def test_build_harness_warns_when_degrading(caplog):
     # The degrade must be VISIBLE in operator logs — a silent FakeHarness in prod
     # means tasks transition state with no real agent work behind them.
@@ -163,3 +191,10 @@ def test_build_harness_warns_when_degrading(caplog):
     with caplog.at_level(logging.WARNING, logger="orchestrator.harness"):
         build_harness("claude-sonnet-4-6", {})
     assert any("FakeHarness" in r.message for r in caplog.records)
+
+
+@pytest.mark.skipif(not _SDK_PRESENT, reason="needs claude-agent-sdk installed")
+def test_build_harness_uses_real_harness_when_sdk_present():
+    # The complement: with the SDK installed, build_harness wires the real agent.
+    h = build_harness("claude-sonnet-4-6", {})
+    assert isinstance(h, ClaudeAgentHarness)
