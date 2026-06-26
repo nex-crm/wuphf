@@ -186,9 +186,14 @@ type Broker struct {
 	teamLearningLog           *LearningLog
 	playbookSynthesizer       *PlaybookSynthesizer
 	pamDispatcher             *PamDispatcher
-	scanTracker               *scanStatusTracker
-	nextSubscriberID          int
-	agentStreams              map[string]*agentStreamBuffer
+	// sourceCaptureDispatcher drains S2 source-capture jobs off-lock (see
+	// source_capture.go). Held as an atomic pointer so captureSource can read
+	// it WITHOUT b.mu — capture hooks fire while b.mu is held, so the read
+	// path must not re-enter the mutex.
+	sourceCaptureDispatcher atomic.Pointer[SourceCaptureDispatcher]
+	scanTracker             *scanStatusTracker
+	nextSubscriberID        int
+	agentStreams            map[string]*agentStreamBuffer
 	// mu is the broker's single big lock. contendedMutex == sync.Mutex
 	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
 	// long holder wedging every endpoint is visible in the log.
@@ -458,6 +463,11 @@ func (b *Broker) ChannelStore() *channel.Store {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	// S2 source capture: snapshot office activity into the immutable source
+	// layer off the broker's hot path. Started right after the wiki worker so
+	// capture hooks have a live drain to hand jobs to. A nil worker (non-
+	// markdown backend) leaves it unstarted and b.captureSource a no-op.
+	b.startSourceCaptureDispatcher()
 	// Lane A migration: derive LifecycleState for every persisted task
 	// that came back from disk without one, and rebuild the inverse
 	// lifecycle index. Idempotent across restarts and per-process
@@ -522,6 +532,10 @@ func (b *Broker) Start() error {
 	// at Start(), reviewer timeouts are dead code in production despite
 	// the test suite calling EvaluateConvergence directly.
 	b.StartReviewConvergenceSweeper(ctx)
+	// S2 feeder 3: daily chat-thread digest sweep → source layer (kind=chat).
+	// Same ctx/stopCh lifecycle as runActivityWatchdog; disabled when the
+	// interval env resolves to 0.
+	b.startChatDigestLoop(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
 		if b.lifecycleCancel != nil {
@@ -831,6 +845,9 @@ func (b *Broker) Stop() {
 	}
 	if humanWikiWriter != nil {
 		humanWikiWriter.Stop(2 * time.Second)
+	}
+	if sourceCapture := b.sourceCaptureDispatcher.Load(); sourceCapture != nil {
+		sourceCapture.Stop(2 * time.Second)
 	}
 }
 

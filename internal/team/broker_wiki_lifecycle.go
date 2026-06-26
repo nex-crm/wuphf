@@ -103,6 +103,14 @@ func (b *Broker) initWikiWorker() {
 	extractor := NewExtractor(brokerQueryProvider{}, worker, dlq, idx)
 	worker.SetExtractor(extractor)
 
+	// S2 feeder 4: route compiled-playbook + team-learnings commits into the
+	// immutable source layer (kind=note). The callback fires off-lock on the
+	// worker's drain goroutine; captureSource is a non-blocking buffered send,
+	// so this never blocks the drain and never re-enters b.mu.
+	worker.SetSourceCaptureHook(func(job SourceCaptureJob) {
+		b.captureSource(job)
+	})
+
 	// PR 2: human "remember" intent classifier → direct team_wiki_write.
 	// The writer is started before the broker mutex is taken, so the
 	// goroutine is alive by the time the PostMessage hook can fire.
