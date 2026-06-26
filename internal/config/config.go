@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -268,17 +269,19 @@ func NormalizeMemoryBackend(value string) string {
 }
 
 // ResolveMemoryBackend resolves the active organizational memory backend.
-// Resolution: flag/env override > config file > default.
 //
-// Defaults:
-//   - `markdown` (git-native team wiki at ~/.wuphf/wiki) — the advertised
-//     "file-over-app, git-clone-able" default. Zero config, zero API keys.
-//   - `none` when --no-nex is set and the user hasn't picked a non-Nex
-//     backend in the wizard (preserved for backwards compat with the old
-//     semantics where --no-nex was a hard off-switch).
+// Resolution order:
+//  1. Explicit --memory-backend flag value.
+//  2. WUPHF_MEMORY_BACKEND env var.
+//  3. config-file `memory_backend`.
+//  4. Default: `gbrain` when gbrain is ready (installed on PATH + an OpenAI or
+//     Anthropic provider key configured), otherwise `markdown`. gbrain is the
+//     strong-default organizational memory backend; the markdown fallback keeps
+//     a fresh OSS clone with no gbrain installed booting with a zero-config,
+//     git-native wiki at ~/.wuphf/wiki.
 //
-// `--no-nex` always disables the Nex backend itself, but does not prevent an
-// alternate backend like GBrain or Markdown from being selected.
+// After selection, `--no-nex` forces a `nex` selection to `none` (it disables
+// the Nex backend itself) but never blocks gbrain or markdown.
 func ResolveMemoryBackend(flagValue string) string {
 	backend := NormalizeMemoryBackend(flagValue)
 	if backend == "" {
@@ -289,12 +292,42 @@ func ResolveMemoryBackend(flagValue string) string {
 		backend = NormalizeMemoryBackend(cfg.MemoryBackend)
 	}
 	if backend == "" {
+		if gbrainBackendReady() {
+			return MemoryBackendGBrain
+		}
 		return MemoryBackendMarkdown
 	}
 	if backend == MemoryBackendNex && ResolveNoNex() {
 		return MemoryBackendNone
 	}
 	return backend
+}
+
+// gbrainBackendReady reports whether gbrain can serve as the default backend:
+// the gbrain binary is on PATH and at least one provider key (OpenAI or
+// Anthropic) is configured. It is intentionally implemented here rather than
+// via internal/gbrain to avoid an import cycle (internal/gbrain imports this
+// package); it mirrors gbrain.BinaryPath's lookup. Only consulted for the
+// implicit default — an explicit backend selection bypasses it entirely.
+func gbrainBackendReady() bool {
+	return gbrainBinaryInstalled() && gbrainProviderKeyConfigured()
+}
+
+func gbrainBinaryInstalled() bool {
+	if cmd := strings.TrimSpace(os.Getenv("WUPHF_GBRAIN_COMMAND")); cmd != "" {
+		if _, err := exec.LookPath(cmd); err == nil {
+			return true
+		}
+	}
+	if _, err := exec.LookPath("gbrain"); err == nil {
+		return true
+	}
+	return false
+}
+
+func gbrainProviderKeyConfigured() bool {
+	return strings.TrimSpace(ResolveOpenAIAPIKey()) != "" ||
+		strings.TrimSpace(ResolveAnthropicAPIKey()) != ""
 }
 
 // MemoryBackendLabel returns a short user-facing label for the backend.

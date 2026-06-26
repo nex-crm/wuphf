@@ -17,6 +17,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gbrain"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
@@ -176,17 +177,25 @@ type Broker struct {
 	wikiDLQ                   *DLQ
 	wikiSectionsCache         *wikiSectionsCache
 	wikiCategoriesCache       *wikiCategoriesCache
-	inboxCursorMu             sync.RWMutex
-	userInboxCursors          map[string]InboxCursor
-	factLog                   *FactLog
-	readLog                   *ReadLog
-	entityGraph               *EntityGraph
-	entitySynthesizer         *EntitySynthesizer
-	wikiCompressor            *WikiCompressor
-	teamLearningLog           *LearningLog
-	playbookSynthesizer       *PlaybookSynthesizer
-	pamDispatcher             *PamDispatcher
-	compileSweep              *CompileSweep
+	// gbrainClient is the broker-owned gbrain MCP client backing the gbrain
+	// memory backend. Constructed once on Start (lazily — it does not connect
+	// or spawn `gbrain serve` until first use) and registered with the
+	// package-level memory entry points; Close()d on Stop. nil until Start.
+	// gbrain is optional: when it is not installed the client still constructs
+	// fine and only errors on first call, which the backend's Ready() gate
+	// keeps from ever happening.
+	gbrainClient        *gbrain.Client
+	inboxCursorMu       sync.RWMutex
+	userInboxCursors    map[string]InboxCursor
+	factLog             *FactLog
+	readLog             *ReadLog
+	entityGraph         *EntityGraph
+	entitySynthesizer   *EntitySynthesizer
+	wikiCompressor      *WikiCompressor
+	teamLearningLog     *LearningLog
+	playbookSynthesizer *PlaybookSynthesizer
+	pamDispatcher       *PamDispatcher
+	compileSweep        *CompileSweep
 	// sourceCaptureDispatcher drains S2 source-capture jobs off-lock (see
 	// source_capture.go). Held as an atomic pointer so captureSource can read
 	// it WITHOUT b.mu — capture hooks fire while b.mu is held, so the read
@@ -759,6 +768,10 @@ func (b *Broker) StartOnPort(port int) error {
 		ResetRuntime:   b.Reset,
 	})
 
+	// Wire the broker-owned gbrain MCP client backing the gbrain memory
+	// backend. Non-blocking and gbrain-optional (see ensureGBrainMemoryClient).
+	b.ensureGBrainMemoryClient()
+
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	var lc net.ListenConfig
 	ln, err := lc.Listen(context.Background(), "tcp", addr)
@@ -855,6 +868,17 @@ func (b *Broker) Stop() {
 	}
 	if sourceCapture := b.sourceCaptureDispatcher.Load(); sourceCapture != nil {
 		sourceCapture.Stop(2 * time.Second)
+	}
+	// Tear down the broker-owned gbrain MCP client: unregister it from the
+	// package-level memory entry points first so no in-flight memory call
+	// reaches a half-closed session, then Close() the session/subprocess.
+	b.mu.Lock()
+	gbrainClient := b.gbrainClient
+	b.gbrainClient = nil
+	b.mu.Unlock()
+	if gbrainClient != nil {
+		setSharedGBrainClient(nil)
+		_ = gbrainClient.Close()
 	}
 }
 

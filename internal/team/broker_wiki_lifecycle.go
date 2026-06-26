@@ -9,7 +9,26 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gbrain"
 )
+
+// ensureGBrainMemoryClient constructs the broker-owned gbrain MCP client once
+// and registers it with the package-level memory entry points
+// (QuerySharedMemory / WriteSharedMemory / FetchBrief), which run without a
+// *Broker handle. Construction is non-blocking and gbrain-optional: NewClient
+// never spawns `gbrain serve` or dials a remote endpoint until the first call,
+// so this is safe to run at boot even when gbrain is not installed. The gbrain
+// memory backend's Ready() gate still decides whether the client is ever used.
+// Stop() unregisters and Close()s it.
+func (b *Broker) ensureGBrainMemoryClient() {
+	b.mu.Lock()
+	if b.gbrainClient == nil {
+		b.gbrainClient = gbrain.NewClient()
+	}
+	client := b.gbrainClient
+	b.mu.Unlock()
+	setSharedGBrainClient(client)
+}
 
 // Wiki worker lifecycle. ensureWikiWorker initialises the markdown-
 // backend pipeline (repo + index + worker + extractor + DLQ + lint
