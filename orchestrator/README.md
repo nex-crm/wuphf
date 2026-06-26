@@ -43,6 +43,26 @@ uv pip install langgraph langgraph-checkpoint-sqlite fastapi sse-starlette uvico
 - The FastAPI service surface the Go dispatch client will target.
 - Runs green with **no model key** (FakeHarness drives the loop).
 
+## Live agent verification (real Claude turns)
+
+These prove the inner-harness and service paths against a **real** Claude agent
+(via the Claude Agent SDK driving Claude Code). Install the SDK first and run with
+`PYTHONPATH=src`:
+
+```bash
+uv pip install --python .venv/bin/python claude-agent-sdk   # the `claude` extra
+PYTHONPATH=src .venv/bin/python scripts/live_harness_check.py    # 1: real turn -> classify (plan_ready)
+PYTHONPATH=src .venv/bin/python scripts/live_decompose_check.py  # 2: real team_task create calls -> DECOMPOSED + child specs
+PYTHONPATH=src .venv/bin/python scripts/live_service_check.py    # 3: full /run service path -> review gate + decompose
+```
+
+`scripts/stub_team_task_mcp.py` is a tiny stdio MCP `team_task` stand-in so the
+checks need no broker. The service check surfaced a real bug: the harness must
+**allow its wired MCP tools** (`allowed_tools=[mcp__<server>]`) — without it the
+agent's `team_task` calls appear in the transcript (so classification still fires)
+but are permission-DENIED, so the broker never sees the create/submit side effect.
+Fixed in `ClaudeAgentHarness._allowed_mcp_tools`.
+
 ## Live cross-language smoke
 
 `bash scripts/smoke.sh` boots the sidecar and POSTs the exact wire shapes the Go
