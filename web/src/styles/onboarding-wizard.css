@@ -1219,22 +1219,6 @@
   opacity: 0.72;
 }
 
-/* The currently-resolved alternative fills with the accent tint. --accent-bg is
-   a LIGHT tint in every theme, so the title and hint switch to the accent
-   foreground (same readable combo as the Recommended pill). */
-.onboarding-embedding-alt[data-active="true"] {
-  background: var(--accent-bg);
-}
-
-.onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-title {
-  color: var(--accent);
-}
-
-.onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-hint {
-  color: var(--accent);
-  opacity: 0.85;
-}
-
 .onboarding-embedding-alt-title {
   display: inline-flex;
   align-items: center;
@@ -1260,6 +1244,23 @@
   font-size: var(--text-xs);
   line-height: 1.4;
   color: var(--text-secondary);
+}
+
+/* The currently-resolved alternative fills with the accent tint. --accent-bg is
+   a LIGHT tint in every theme, so the title and hint switch to the accent
+   foreground (same readable combo as the Recommended pill). These overrides come
+   after the base rules above so specificity ascends (biome noDescendingSpecificity). */
+.onboarding-embedding-alt[data-active="true"] {
+  background: var(--accent-bg);
+}
+
+.onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-title {
+  color: var(--accent);
+}
+
+.onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-hint {
+  color: var(--accent);
+  opacity: 0.85;
 }
 
 .onboarding-embedding-code {

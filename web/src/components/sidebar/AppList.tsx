@@ -1,6 +1,5 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import { type ComponentType, Fragment, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   BookStack,
   ClipboardCheck,
