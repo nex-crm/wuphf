@@ -6,6 +6,7 @@ import {
   EMBEDDING_OPTIONS_FALLBACK,
   type EmbeddingOptions,
   fetchEmbeddingOptions,
+  installGbrain,
   resolveEmbedder,
 } from "./knowledge";
 
@@ -35,11 +36,24 @@ describe("knowledge api client", () => {
       active_embedder: "openai",
       embedding_available: true,
       recommended: "openai",
+      install_state: "installed",
+      install_progress: "Brain ready.",
+      install_error: "",
     };
     const getSpy = vi.spyOn(client, "get").mockResolvedValue(response);
 
     await expect(fetchEmbeddingOptions()).resolves.toEqual(response);
     expect(getSpy).toHaveBeenCalledWith("/knowledge/embedding-options");
+  });
+
+  it("fetchEmbeddingOptions normalizes an off-contract install_state to idle", async () => {
+    vi.spyOn(client, "get").mockResolvedValue({
+      gbrain_installed: false,
+      install_state: "bootstrapping",
+    });
+
+    const result = await fetchEmbeddingOptions();
+    expect(result.install_state).toBe("idle");
   });
 
   it("merges a partial payload onto the fallback so the shape stays complete", async () => {
@@ -82,6 +96,39 @@ describe("knowledge api client", () => {
     await expect(fetchEmbeddingOptions()).resolves.toEqual(
       EMBEDDING_OPTIONS_FALLBACK,
     );
+  });
+
+  it("installGbrain posts to /knowledge/install and merges the returned state", async () => {
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue({
+      gbrain_installed: false,
+      install_state: "installing",
+      install_progress: "Bootstrapping Bun.",
+    });
+
+    await expect(installGbrain()).resolves.toEqual({
+      ...EMBEDDING_OPTIONS_FALLBACK,
+      install_state: "installing",
+      install_progress: "Bootstrapping Bun.",
+    });
+    expect(postSpy).toHaveBeenCalledWith("/knowledge/install", {});
+  });
+
+  it("installGbrain degrades to an error state on a 404 (older broker, no route)", async () => {
+    vi.spyOn(client, "post").mockRejectedValue(apiError(404));
+
+    await expect(installGbrain()).resolves.toEqual({
+      ...EMBEDDING_OPTIONS_FALLBACK,
+      install_state: "error",
+    });
+  });
+
+  it("installGbrain degrades to an error state on a transport failure", async () => {
+    vi.spyOn(client, "post").mockRejectedValue(new Error("network down"));
+
+    await expect(installGbrain()).resolves.toEqual({
+      ...EMBEDDING_OPTIONS_FALLBACK,
+      install_state: "error",
+    });
   });
 
   it("resolveEmbedder mirrors EnsureBrain priority: openai, then ollama, then keyword", () => {

@@ -338,6 +338,17 @@ type Broker struct {
 	// (cheap — bounded by the persisted message slice). After that the field
 	// only ever flips false → true, never back. Guarded by b.mu.
 	humanHasPosted bool
+
+	// gbrain on-demand install lifecycle (broker_knowledge.go). installMu
+	// guards the three fields below — a dedicated lock so a multi-minute
+	// install goroutine streaming progress lines never contends on b.mu's
+	// hot path. installState ∈ {"idle","installing","installed","error"};
+	// the empty zero value is reported as "idle". Single-flight: only one
+	// install goroutine runs at a time (guarded by installState=="installing").
+	installMu       sync.Mutex
+	installState    string
+	installProgress string
+	installError    string
 }
 
 func stringSliceContainsFold(values []string, want string) bool {
@@ -728,6 +739,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
 	mux.HandleFunc("/knowledge/embedding-options", b.requireAuth(b.handleKnowledgeEmbeddingOptions))
+	mux.HandleFunc("/knowledge/install", b.requireAuth(b.handleKnowledgeInstall))
 	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
 	mux.HandleFunc("/image-providers", b.requireAuth(b.handleImageProviders))
 	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))

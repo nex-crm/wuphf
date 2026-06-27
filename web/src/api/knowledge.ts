@@ -12,7 +12,37 @@
  * a missing endpoint.
  */
 
-import { ApiError, get } from "./client";
+import { ApiError, get, post } from "./client";
+
+/**
+ * The lifecycle of the in-UI gbrain install. The broker drives every
+ * transition; the wizard only reflects it.
+ *
+ * - `idle`        no install has been requested (or none is running).
+ * - `installing`  the background installer is running (bootstrap Bun, install
+ *                 gbrain, init the brain). `install_progress` carries the last line.
+ * - `installed`   the install finished and the brain is ready.
+ * - `error`       the install failed. `install_error` carries the reason.
+ */
+export type InstallState = "idle" | "installing" | "installed" | "error";
+
+const INSTALL_STATES: readonly InstallState[] = [
+  "idle",
+  "installing",
+  "installed",
+  "error",
+];
+
+/**
+ * Coerce an unknown wire value to a known InstallState. An older broker (or a
+ * malformed payload) that omits or garbles the field reads as `idle` rather
+ * than poisoning the install state machine with an off-contract string.
+ */
+function normalizeInstallState(value: unknown): InstallState {
+  return INSTALL_STATES.includes(value as InstallState)
+    ? (value as InstallState)
+    : "idle";
+}
 
 /**
  * Mirrors the broker's GET /knowledge/embedding-options contract.
@@ -24,6 +54,9 @@ import { ApiError, get } from "./client";
  * - `active_embedder`      the embedder EnsureBrain currently resolves to.
  * - `embedding_available`  true when any semantic embedder is live (not keyword).
  * - `recommended`          the embedder the broker recommends ("openai" today).
+ * - `install_state`        lifecycle of the in-UI gbrain install (see InstallState).
+ * - `install_progress`     the last line the installer emitted (empty when idle).
+ * - `install_error`        a human-readable failure reason (empty unless errored).
  */
 export interface EmbeddingOptions {
   gbrain_installed: boolean;
@@ -33,6 +66,9 @@ export interface EmbeddingOptions {
   active_embedder: string;
   embedding_available: boolean;
   recommended: string;
+  install_state: InstallState;
+  install_progress: string;
+  install_error: string;
 }
 
 /**
@@ -49,7 +85,25 @@ export const EMBEDDING_OPTIONS_FALLBACK: EmbeddingOptions = {
   active_embedder: "keyword",
   embedding_available: false,
   recommended: "keyword",
+  install_state: "idle",
+  install_progress: "",
+  install_error: "",
 };
+
+/**
+ * Merge a (possibly partial) broker payload over the keyword fallback and
+ * normalize the install_state union so the result is always a complete, typed
+ * EmbeddingOptions. Shared by fetchEmbeddingOptions and installGbrain.
+ */
+function mergeEmbeddingOptions(
+  raw: Partial<EmbeddingOptions>,
+): EmbeddingOptions {
+  const merged = { ...EMBEDDING_OPTIONS_FALLBACK, ...raw };
+  return {
+    ...merged,
+    install_state: normalizeInstallState(merged.install_state),
+  };
+}
 
 /**
  * Fetch the embedding options. Merges the broker payload over the fallback so a
@@ -63,7 +117,7 @@ export async function fetchEmbeddingOptions(): Promise<EmbeddingOptions> {
     const raw = await get<Partial<EmbeddingOptions>>(
       "/knowledge/embedding-options",
     );
-    return { ...EMBEDDING_OPTIONS_FALLBACK, ...raw };
+    return mergeEmbeddingOptions(raw);
   } catch (err) {
     // 404 = older broker without the route; any other transport failure is
     // equally non-fatal here. Both degrade to the keyword/markdown default.
@@ -73,6 +127,29 @@ export async function fetchEmbeddingOptions(): Promise<EmbeddingOptions> {
       return EMBEDDING_OPTIONS_FALLBACK;
     }
     return EMBEDDING_OPTIONS_FALLBACK;
+  }
+}
+
+/**
+ * Ask the broker to install gbrain (bootstrap Bun, install gbrain globally, and
+ * init the brain) in the background. POST /knowledge/install takes an empty body
+ * and answers 202 with the current options, where `install_state` has usually
+ * flipped to "installing". The caller then polls fetchEmbeddingOptions to follow
+ * progress.
+ *
+ * Like fetchEmbeddingOptions, this never throws: a 404 (older broker without the
+ * route) or any transport failure degrades to an `error` state so the wizard can
+ * show the keyword fallback and a retry, rather than crashing onboarding.
+ */
+export async function installGbrain(): Promise<EmbeddingOptions> {
+  try {
+    const raw = await post<Partial<EmbeddingOptions>>("/knowledge/install", {});
+    return mergeEmbeddingOptions(raw);
+  } catch {
+    // We could not even kick off the install (missing route, network drop, a
+    // server error). Surface an error state so the UI offers a retry and the
+    // keyword fallback, never a thrown exception that blocks the wizard.
+    return { ...EMBEDDING_OPTIONS_FALLBACK, install_state: "error" };
   }
 }
 

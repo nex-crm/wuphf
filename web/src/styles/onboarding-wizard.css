@@ -1247,6 +1247,120 @@
   color: var(--text);
 }
 
+/* ── gbrain install affordance ──────────────────────────────────────────────
+   Shown only when the user wants semantic memory but has no gbrain index yet.
+   One block, four data-states: idle (consent + CTA), installing (spinner +
+   progress), installed (handled by the shared success line), and error. */
+.onboarding-embedding-alt-choose {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.onboarding-embedding-alt-choose:hover {
+  text-decoration: underline;
+}
+
+.onboarding-embedding-install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.onboarding-embedding-install[data-state="installing"] {
+  flex-direction: row;
+  align-items: flex-start;
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.onboarding-embedding-install[data-state="error"] {
+  border-color: var(--red);
+}
+
+.onboarding-embedding-install-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.onboarding-embedding-install-consent {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.onboarding-embedding-install-cta,
+.onboarding-embedding-install-retry {
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
+.onboarding-embedding-install-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onboarding-embedding-install-progress {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.onboarding-embedding-install-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+.onboarding-embedding-install-fail {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--red);
+}
+
+.onboarding-embedding-spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: var(--radius-full, 999px);
+  border: 2px solid var(--border-dark, var(--border));
+  border-top-color: var(--accent, var(--text));
+  animation: onboarding-embedding-spin 0.7s linear infinite;
+}
+
+@keyframes onboarding-embedding-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-embedding-spinner {
+    animation: none;
+  }
+}
+
 /* ── Touch ergonomics ──────────────────────────────────────────────────────
    On coarse pointers, the small text and pill controls need a 44px hit area
    even though their visible text stays the same size (the larger target is

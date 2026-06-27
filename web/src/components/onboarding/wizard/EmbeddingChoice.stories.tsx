@@ -20,17 +20,31 @@ const BASE: EmbeddingOptions = {
   active_embedder: "keyword",
   embedding_available: false,
   recommended: "openai",
+  install_state: "idle",
+  install_progress: "",
+  install_error: "",
 };
 
 interface HarnessProps {
   options: EmbeddingOptions;
   saving?: boolean;
   saveError?: string | null;
+  /** Pre-select the local (Ollama) path so the install affordance shows. */
+  ollamaChosen?: boolean;
+  /** Reflect the install POST being in flight (CTA / retry disabled). */
+  installBusy?: boolean;
 }
 
 /** Wraps the view with local key + save-error state so the input is live. */
-function Harness({ options, saving = false, saveError = null }: HarnessProps) {
+function Harness({
+  options,
+  saving = false,
+  saveError = null,
+  ollamaChosen = false,
+  installBusy = false,
+}: HarnessProps) {
   const [keyValue, setKeyValue] = useState("");
+  const [chosen, setChosen] = useState(ollamaChosen);
   return (
     <div style={{ maxWidth: 520, padding: "var(--space-4)" }}>
       <EmbeddingChoiceView
@@ -40,6 +54,10 @@ function Harness({ options, saving = false, saveError = null }: HarnessProps) {
         onSaveKey={() => undefined}
         saving={saving}
         saveError={saveError}
+        ollamaChosen={chosen}
+        onChooseOllama={() => setChosen(true)}
+        installBusy={installBusy}
+        onInstallGbrain={() => undefined}
       />
     </div>
   );
@@ -99,5 +117,59 @@ export const KeySet: Story = {
       active_embedder: "openai",
       embedding_available: true,
     },
+  },
+};
+
+/**
+ * No gbrain index yet. These stories drive the install affordance, which only
+ * appears when the user wants a semantic path and gbrain_installed is false.
+ */
+const NOT_INSTALLED: EmbeddingOptions = {
+  ...BASE,
+  gbrain_installed: false,
+  recommended: "openai",
+};
+
+/** User picked the local path; gbrain is not installed, so the consent shows. */
+export const InstallNeedsSetup: Story = {
+  args: {
+    options: { ...NOT_INSTALLED },
+    ollamaChosen: true,
+  },
+};
+
+/** Install running: a compact progress row with the latest line and a spinner. */
+export const Installing: Story = {
+  args: {
+    options: {
+      ...NOT_INSTALLED,
+      install_state: "installing",
+      install_progress: "Installing gbrain via Bun (this can take a minute).",
+    },
+    ollamaChosen: true,
+  },
+};
+
+/** Install finished before gbrain_installed flipped: the ready line shows. */
+export const InstalledAfterSetup: Story = {
+  args: {
+    options: {
+      ...NOT_INSTALLED,
+      install_state: "installed",
+    },
+    ollamaChosen: true,
+  },
+};
+
+/** Install failed: the reason, the keyword fallback, and a retry button. */
+export const InstallError: Story = {
+  args: {
+    options: {
+      ...NOT_INSTALLED,
+      install_state: "error",
+      install_error:
+        "Bun could not be bootstrapped. Check your network and disk space.",
+    },
+    ollamaChosen: true,
   },
 };

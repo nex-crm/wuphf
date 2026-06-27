@@ -239,6 +239,30 @@ export const ONBOARDING_EMBEDDING_COPY = {
   statusOpenAI: "OpenAI",
   statusOllama: "Local (Ollama)",
   statusKeyword: "Keyword",
+  // A small action on the Ollama alternative that signals "I want the local
+  // path", which surfaces the gbrain install affordance below.
+  ollamaChoose: "Use local embeddings",
+  // The gbrain install affordance. Shown only when the user wants a semantic
+  // path and gbrain is not installed yet. Explicit, one-time consent.
+  install: {
+    // Consent line. Names exactly what will be installed, on this machine.
+    consent:
+      "Semantic memory runs on gbrain. Set it up now? This installs gbrain (and Bun, its runtime) on this machine.",
+    cta: "Set up semantic memory",
+    // While the background installer runs.
+    installing: "Setting up gbrain",
+    installingHint:
+      "This runs in the background. You can keep going, and it will finish on its own.",
+    // Shown before the broker emits its first progress line.
+    progressPending: "Starting up",
+    // The ready state, if the install finishes before gbrain_installed flips.
+    installed: "Semantic memory is ready. gbrain is installed.",
+    // The error state: the reason (or a generic line), then the keyword
+    // fallback, then a retry.
+    errorFallback: "We could not set up gbrain just now.",
+    keywordFallback: "Using keyword search for now.",
+    retry: "Try again",
+  },
 } as const;
 
 /** UI chrome labels for the wizard host. WUPHF voice, no contractions. */
