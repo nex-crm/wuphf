@@ -1212,6 +1212,18 @@
   background: var(--accent-bg);
 }
 
+/* --accent-bg is a LIGHT tint in every theme, so the default near-white --text
+   title is invisible on it. Use the accent foreground (same readable combo as
+   the Recommended pill) for the active row's title and hint. */
+.onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-title {
+  color: var(--accent);
+}
+
+.onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-hint {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
 .onboarding-embedding-alt-title {
   display: inline-flex;
   align-items: center;
