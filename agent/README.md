@@ -16,7 +16,8 @@ data.ts`) and the Python harness, so it drops in behind the same `/build/stream`
 src/wire.ts        WorkflowSpec/Step + Build/Run request + RunResult; the build prompt; extractJson; validateSpec
 src/model.ts       model resolution: Ollama (key-free default) | subscription | BYOK
 src/buildAgent.ts  buildWorkflow(message) -> WorkflowSpec via pi-ai `complete`; streamWorkflow()
-src/executor.ts    deterministic run of a spec; a gated step halts for the approval card (CQ1)
+src/executor.ts    deterministic run; a step with an `api` is REPLAYED as a real HTTP call (auth resolved from a named ref); a gated step halts for the approval card (CQ1); a failed call halts with error
+src/sniff.ts       browsersniff: HAR -> ApiCall/WorkflowStep; strips secrets, auth->named ref, classifies stable-key vs rotating-session (A3/A4)
 src/providers.ts   inference-path detection for the FE Settings surface (subscription / BYOK / local)
 src/service.ts     Bun.serve HTTP/SSE: /health, /providers, POST /build/stream (SSE), POST /run
 src/run.ts         CLI runner (compile a description live)

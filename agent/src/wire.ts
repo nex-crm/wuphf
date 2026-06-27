@@ -5,6 +5,19 @@
 export type WorkflowStepKind = "trigger" | "enrich" | "ai" | "decision" | "action" | "branch";
 const STEP_KINDS: readonly WorkflowStepKind[] = ["trigger", "enrich", "ai", "decision", "action", "branch"];
 
+// An executable API call a step replays deterministically (the EXECUTE half). Built
+// by discovery (browsersniff: HAR -> ApiCall) and replayed by the executor. auth_ref
+// is a NAMED credential reference, never a secret value (operator-mlp A3/A4) — the
+// executor resolves it from the credential store at run time.
+export interface ApiCall {
+	method: string;
+	url: string;
+	query?: Record<string, string>;
+	headers?: Record<string, string>;
+	body?: unknown;
+	auth_ref?: string;
+}
+
 export interface WorkflowStep {
 	id: string;
 	kind: WorkflowStepKind;
@@ -12,6 +25,7 @@ export interface WorkflowStep {
 	detail: string;
 	integration?: string;
 	gated?: boolean; // external mutation -> human approval card (CQ1)
+	api?: ApiCall; // present -> the executor replays a real call; absent -> simulated
 }
 
 export interface ClarifyQuestion {
@@ -44,12 +58,13 @@ export interface RunRequest {
 
 export interface RunStep {
 	step_id: string;
-	status: "ok" | "skipped" | "awaiting_approval";
+	status: "ok" | "skipped" | "awaiting_approval" | "error";
 	detail: string;
+	http_status?: number; // present for replayed API steps
 }
 
 export interface RunResult {
-	status: "done" | "needs_approval";
+	status: "done" | "needs_approval" | "error";
 	steps: RunStep[];
 	digest: string;
 	pending_approval: { step_id: string; title: string; integration?: string; detail: string } | null;

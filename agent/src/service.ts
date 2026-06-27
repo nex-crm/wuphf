@@ -66,7 +66,7 @@ export function createServer(opts: ServerOptions = {}) {
 			if (req.method === "POST" && pathname === "/run") {
 				const body = (await req.json()) as RunRequest;
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
-				return json(runWorkflow(body.spec, body.input ?? {}));
+				return json(await runWorkflow(body.spec, body.input ?? {}));
 			}
 
 			return json({ error: "not found" }, 404);
