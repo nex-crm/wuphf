@@ -66,6 +66,31 @@ deepagents gives a prebuilt deep-agent loop on LangGraph: a planning tool, sub-a
 virtual filesystem, and steerable tool use — the right shape for "figure out the
 workflow." We use it ONLY for build/discovery; the deterministic executor is ours.
 
+## 3a. Engine decision (2026-06-27, after research)
+
+The BUILD engine is **pi-mono** (`@mariozechner/pi-ai` + `pi-agent-core`), a model-agnostic
+embeddable TypeScript agent SDK (the stack OpenClaw is built on). Why it won over the
+alternatives we evaluated:
+
+| Option | Key-free? | Multi-provider | In our stack | Verdict |
+|---|---|---|---|---|
+| **pi-mono (pi-ai)** | ✅ subscription OAuth (`/login`) + BYOK + **Ollama/open-weight** | ✅ (Anthropic, OpenAI/Codex, Google, Ollama, 2000+) | ✅ TS, embeds in Electron/Node | **chosen** |
+| Claude Code / Codex headless (`claude -p`) | ✅ (reuses CLI login) | ~ (those two) | shell-out + stdout parse | good fallback; built in `harness/` |
+| deepagents (LangChain) | ❌ BYOK only | ✅ | Python | demoted to BYOK option |
+| OpenClaw (the product) | ✅ | ✅ | heavy; security-flagged (arXiv 2603.11619) | too much; we take pi-mono underneath |
+| Hermes (Nous) | — it's an open *model*, not a harness | — | via Ollama under pi-ai | a model choice, not the engine |
+
+pi-mono gives the key-free benefit of the CLIs **without** shelling out, plus an
+open-weight escape hatch (Ollama → Hermes) and BYOK, behind one abstraction in our TS/
+Electron stack. **Verified live, key-free** against local Ollama (`agent/` package). Caveat:
+pi-ai keeps its own OAuth store (one-time operator `/login`; it does not reuse Claude Code's
+token), and Anthropic now meters third-party subscription use as per-token extra usage
+(badlogic/pi-mono#3372) — so ChatGPT/Codex/Copilot subscriptions or BYOK are the cost-neutral
+paths. The engine sits behind the `WorkflowSpec` contract, so it stays swappable.
+
+`agent/` (TS) is the chosen build engine; the Python `harness/` build agents (CLI / deepagents
+/ stub) remain as a fallback backend until the service layer is re-platformed onto pi-mono.
+
 ## 4. Salvage / delete
 
 **Salvage (carry into the clean start):**

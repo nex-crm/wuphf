@@ -1,0 +1,20 @@
+{
+  "name": "wuphf-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "pi-mono build agent: plain-language -> deterministic WorkflowSpec. Multi-provider via pi-ai (subscription OAuth / BYOK / local Ollama), key-free first.",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build:run": "bun run src/run.ts"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "0.73.1",
+    "@mariozechner/pi-agent-core": "0.73.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}
