@@ -35,8 +35,9 @@ const (
 	defaultConnectTimeout = 30 * time.Second
 )
 
-// MCPURLEnv, when set, points the Client at a remote gbrain MCP endpoint
-// (streamable HTTP) instead of spawning a local `gbrain serve` subprocess.
+// MCPURLEnv is the environment variable that, when set, points the Client at a
+// remote gbrain MCP endpoint (streamable HTTP) instead of spawning a local
+// `gbrain serve` subprocess.
 const MCPURLEnv = "WUPHF_GBRAIN_MCP_URL"
 
 // Client is a lazy, thread-safe MCP client to a gbrain knowledge backend.
