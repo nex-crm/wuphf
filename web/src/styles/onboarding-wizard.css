@@ -1066,16 +1066,24 @@
   color: var(--text);
 }
 
+/* A quiet status, not a bordered pill: a small state dot plus the label. The
+   dot is the only color, and only for meaning (green once a real semantic
+   embedder is live, neutral while it is keyword-only). */
 .onboarding-embedding-status {
   margin: 0;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-pill, 999px);
+  gap: var(--space-1-5);
   font-size: var(--text-xs);
   color: var(--text-secondary);
+}
+
+.onboarding-embedding-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-tertiary, var(--text-secondary));
 }
 
 .onboarding-embedding-status strong {
@@ -1083,11 +1091,9 @@
   font-weight: 600;
 }
 
-/* The pill goes green once a real semantic embedder is live. */
-.onboarding-embedding-status[data-embedder="openai"],
-.onboarding-embedding-status[data-embedder="ollama"] {
-  border-color: var(--green);
-  background: var(--green-bg);
+.onboarding-embedding-status[data-embedder="openai"]::before,
+.onboarding-embedding-status[data-embedder="ollama"]::before {
+  background: var(--green);
 }
 
 .onboarding-embedding-status[data-embedder="openai"] strong,
@@ -1181,40 +1187,45 @@
   color: var(--text-secondary);
 }
 
+/* The two alternatives are ONE bordered group with hairline-divided rows, not
+   two stacked cards. The active row fills with the accent tint; the others stay
+   on the group surface. No per-row borders, no nested cards. */
 .onboarding-embedding-alts {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-card);
 }
 
 .onboarding-embedding-alt {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
+  padding: var(--space-2-5) var(--space-3);
+}
+
+.onboarding-embedding-alt + .onboarding-embedding-alt {
+  border-top: 1px solid var(--border-dark);
 }
 
 /* Not-yet-available choices (e.g. Ollama with no model pulled) read as quiet,
-   not blocked: the setup one-liner stays legible but the card recedes. */
+   not blocked: the setup one-liner stays legible but the row recedes. */
 .onboarding-embedding-alt[data-available="false"] {
   opacity: 0.72;
 }
 
-/* The currently-resolved alternative gets the accent edge. */
+/* The currently-resolved alternative fills with the accent tint. --accent-bg is
+   a LIGHT tint in every theme, so the title and hint switch to the accent
+   foreground (same readable combo as the Recommended pill). */
 .onboarding-embedding-alt[data-active="true"] {
-  border-color: var(--accent);
   background: var(--accent-bg);
 }
 
-/* --accent-bg is a LIGHT tint in every theme, so the default near-white --text
-   title is invisible on it. Use the accent foreground (same readable combo as
-   the Recommended pill) for the active row's title and hint. */
 .onboarding-embedding-alt[data-active="true"] .onboarding-embedding-alt-title {
   color: var(--accent);
 }
@@ -1237,7 +1248,8 @@
   padding: 1px var(--space-1-5);
   border-radius: var(--radius-pill, 999px);
   background: var(--accent);
-  color: var(--bg-card);
+  /* White on the accent fill, matching the app's .btn-primary convention. */
+  color: #ffffff;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1279,25 +1291,22 @@
   text-decoration: underline;
 }
 
+/* A flat section separated by a hairline, not another boxed card. The state is
+   carried by the spinner, the progress text, and the red fail line, not by a
+   border. */
 .onboarding-embedding-install {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
+  margin-top: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-dark);
 }
 
 .onboarding-embedding-install[data-state="installing"] {
   flex-direction: row;
   align-items: flex-start;
-  border-color: var(--accent);
-  background: var(--accent-bg);
-}
-
-.onboarding-embedding-install[data-state="error"] {
-  border-color: var(--red);
+  gap: var(--space-2-5);
 }
 
 .onboarding-embedding-install-body {
