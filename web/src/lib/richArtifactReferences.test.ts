@@ -20,13 +20,14 @@ describe("rich artifact references", () => {
     ]);
   });
 
-  it("extracts notebook and wiki visual artifact paths", () => {
+  it("extracts current and legacy visual artifact paths", () => {
     const content =
-      "[open](/notebook/visual-artifacts/ra_aaaaaaaaaaaaaaaa) and wiki/visual-artifacts/ra_bbbbbbbbbbbbbbbb.html";
+      "[a](/visual-artifacts/ra_aaaaaaaaaaaaaaaa), [b](/notebook/visual-artifacts/ra_bbbbbbbbbbbbbbbb) and wiki/visual-artifacts/ra_cccccccccccccccc.html";
 
     expect(extractRichArtifactIds(content)).toEqual([
       "ra_aaaaaaaaaaaaaaaa",
       "ra_bbbbbbbbbbbbbbbb",
+      "ra_cccccccccccccccc",
     ]);
   });
 

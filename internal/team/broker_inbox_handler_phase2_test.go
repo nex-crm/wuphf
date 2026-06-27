@@ -17,8 +17,7 @@ import (
 )
 
 func TestHandleInboxItems_OwnerSeesAllKinds(t *testing.T) {
-	b := newTestBrokerForReview(t)
-	rl := b.ReviewLog()
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 
 	b.mu.Lock()
@@ -33,16 +32,6 @@ func TestHandleInboxItems_OwnerSeesAllKinds(t *testing.T) {
 		{ID: "req-1", From: "owner", Channel: "general", Question: "Approve?", CreatedAt: now.Format(time.RFC3339), Kind: "approval"},
 	}
 	b.mu.Unlock()
-	seedPromotion(t, rl, &Promotion{
-		ID:           "rev-1",
-		State:        PromotionPending,
-		SourceSlug:   "ada",
-		SourcePath:   "notebook/ada/draft.md",
-		TargetPath:   "wiki/draft.md",
-		ReviewerSlug: "owner",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/inbox/items", b.requireAuth(b.handleInboxItems))
@@ -75,16 +64,13 @@ func TestHandleInboxItems_OwnerSeesAllKinds(t *testing.T) {
 	if counts[InboxItemKindRequest] != 1 {
 		t.Fatalf("request count = %d, want 1; items = %+v", counts[InboxItemKindRequest], payload.Items)
 	}
-	if counts[InboxItemKindReview] != 1 {
-		t.Fatalf("review count = %d, want 1; items = %+v", counts[InboxItemKindReview], payload.Items)
-	}
 	if payload.RefreshedAt == "" {
 		t.Fatal("refreshedAt must be populated")
 	}
 }
 
 func TestHandleInboxItems_KindFilterNarrowsResponse(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 
 	b.mu.Lock()
@@ -247,7 +233,7 @@ func TestHandleTaskDecision_NoCommentLeavesFeedbackEmpty(t *testing.T) {
 // unread; after the cursor moves past the items' UpdatedAt, all items
 // flip to read.
 func TestHandleInboxItems_StampsUnreadAndCounts(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 	older := now.Add(-time.Hour).Format(time.RFC3339)
 	b.mu.Lock()
@@ -321,7 +307,7 @@ func TestHandleInboxItems_StampsUnreadAndCounts(t *testing.T) {
 // TestHandleInboxItems_UnreadFilterTrimsReadItems exercises the
 // post-fetch trim that powers the "Unread" sidebar filter.
 func TestHandleInboxItems_UnreadFilterTrimsReadItems(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 	older := now.Add(-time.Hour).Format(time.RFC3339)
 	b.mu.Lock()
@@ -370,7 +356,7 @@ func TestHandleInboxItems_UnreadFilterTrimsReadItems(t *testing.T) {
 // blocked-card payload extension (details + blockedOn) actually surfaces
 // on /inbox/items so the PacketPending fallback can render real info.
 func TestHandleInboxItems_TaskRowCarriesBlockerAndDetails(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
 	b.tasks = []teamTask{
@@ -426,7 +412,7 @@ func TestHandleInboxItems_TaskRowCarriesBlockerAndDetails(t *testing.T) {
 // transitions away from blocked and that the JSON envelope
 // carries changed=true.
 func TestHandleTaskResume(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
 	b.tasks = []teamTask{
@@ -484,7 +470,7 @@ func TestHandleTaskResume(t *testing.T) {
 // in TestHandleTaskResume above; this case fills the other half of the
 // auth matrix.
 func TestHandleTaskResume_NonReviewerForbidden(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
 	b.tasks = []teamTask{
@@ -542,7 +528,7 @@ func TestHandleTaskResume_NonReviewerForbidden(t *testing.T) {
 // hardening: a non-empty body that fails to parse must yield 400 and
 // must not mutate the task.
 func TestHandleTaskResume_RejectsMalformedJSON(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
 	b.tasks = []teamTask{
@@ -589,7 +575,7 @@ func TestHandleTaskResume_RejectsMalformedJSON(t *testing.T) {
 // CreatedAt. An older task that just transitioned must outrank a newer
 // task that has not been touched since creation.
 func TestHandleInboxItems_SortsByUpdatedAtDescending(t *testing.T) {
-	b := newTestBrokerForReview(t)
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 	older := now.Add(-2 * time.Hour).Format(time.RFC3339)
 	newer := now.Add(-1 * time.Hour).Format(time.RFC3339)

@@ -96,12 +96,6 @@ export function StatusBar() {
       case "wiki-article":
       case "wiki-lookup":
         return appTitle("wiki");
-      case "notebook-catalog":
-      case "notebook-agent":
-      case "notebook-entry":
-        return "Notebooks";
-      case "reviews":
-        return "Reviews";
       case "article":
         return "Article";
       case "inbox":

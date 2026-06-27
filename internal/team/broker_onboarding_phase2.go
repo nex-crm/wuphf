@@ -174,7 +174,7 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 		if seedErr != nil {
 			return seedErr
 		}
-		b.ensureNotebookDirsForRoster()
+		b.backfillAgentFilesForRoster()
 		b.materializeBlueprintWiki(loaded)
 		// Seed the team/getting-started/ pages so a brand-new office is never
 		// empty. Mirrors the team/about/ seed and is gated identically (only
@@ -198,7 +198,7 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 	if seedErr != nil {
 		return seedErr
 	}
-	b.ensureNotebookDirsForRoster()
+	b.backfillAgentFilesForRoster()
 	// Materialize the about/ skeleton outside the broker lock. Mirrors the
 	// website-scan path's team/about/{README,company,owner}.md so the
 	// skip-website user lands in an office with a populated wiki section

@@ -143,7 +143,8 @@ func richArtifactPrefixOK(prefix string) bool {
 		strings.HasSuffix(prefix, "visual_artifact:") ||
 		strings.HasSuffix(prefix, "rich-artifact:") ||
 		strings.HasSuffix(prefix, "rich_artifact:") ||
-		strings.HasSuffix(prefix, "notebook/visual-artifacts/") ||
+		strings.HasSuffix(prefix, "/visual-artifacts/") ||
+		strings.HasSuffix(prefix, "notebook/visual-artifacts/") || // legacy route, kept for old data
 		strings.HasSuffix(prefix, "wiki/visual-artifacts/")
 }
 

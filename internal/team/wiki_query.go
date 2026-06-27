@@ -206,6 +206,45 @@ func (h *QueryHandler) Answer(ctx context.Context, req QueryRequest) (QueryAnswe
 		}, nil
 	}
 
+	return h.synthesize(ctx, req, class, sources, start)
+}
+
+// AnswerWithSources runs the cited-answer synthesis over caller-supplied
+// sources, skipping the built-in index retrieval. It is used by the gbrain-
+// backed lookup path, which retrieves hits from gbrain.Query instead of the
+// SQLite index. The handler may be constructed with a nil index for this path
+// because synthesize never touches h.index.
+func (h *QueryHandler) AnswerWithSources(ctx context.Context, req QueryRequest, sources []QuerySource) (QueryAnswer, error) {
+	start := time.Now()
+	if req.Timeout <= 0 {
+		req.Timeout = 10 * time.Second
+	}
+
+	class, conf := ClassifyQuery(req.Query)
+	if class == QueryClassGeneral && conf >= 0.8 {
+		return QueryAnswer{
+			QueryClass:     class,
+			AnswerMarkdown: generalRefusalText,
+			SourcesCited:   []int{},
+			Sources:        []QuerySource{},
+			Confidence:     conf,
+			Coverage:       "none",
+			LatencyMs:      time.Since(start).Milliseconds(),
+		}, nil
+	}
+
+	if sources == nil {
+		sources = []QuerySource{}
+	}
+	return h.synthesize(ctx, req, class, sources, start)
+}
+
+// synthesize runs the prompt-render → provider → parse half of the cited-answer
+// loop over already-retrieved sources. Shared by Answer (index retrieval) and
+// AnswerWithSources (gbrain retrieval); it never touches h.index.
+func (h *QueryHandler) synthesize(ctx context.Context, req QueryRequest, class QueryClass, sources []QuerySource, start time.Time) (QueryAnswer, error) {
+	now := time.Now()
+
 	// Step 5: render the prompt template.
 	//
 	// Security: both the user-submitted Query and each Source.Excerpt reach

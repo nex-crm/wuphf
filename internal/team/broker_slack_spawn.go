@@ -422,7 +422,7 @@ func (b *Broker) createSpawnedSlackMember(rec slackSpawnRecord, userID string) e
 		b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
 	}
 	b.mu.Unlock()
-	b.ensureNotebookDirsForRoster()
+	b.backfillAgentFilesForRoster()
 	return nil
 }
 

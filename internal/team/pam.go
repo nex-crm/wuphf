@@ -213,11 +213,11 @@ func pamJobKey(action PamActionID, path string) string {
 // the existing job's id is returned — zero is reserved for errors.
 func (d *PamDispatcher) Enqueue(action PamActionID, articlePath, requestBy string) (uint64, error) {
 	articlePath = strings.TrimSpace(articlePath)
-	if articlePath == "" {
-		return 0, fmt.Errorf("pam: empty article path")
-	}
 	if _, err := LookupPamAction(action); err != nil {
 		return 0, err
+	}
+	if articlePath == "" {
+		return 0, fmt.Errorf("pam: empty article path")
 	}
 	d.mu.Lock()
 	if !d.running {

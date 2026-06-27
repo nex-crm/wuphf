@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getMessages, type Message, post } from "../../api/client";
-import { type NotebookSearchHit, searchNotebook } from "../../api/notebook";
 import { searchWiki, type WikiSearchHit } from "../../api/wiki";
 import { useChannels } from "../../hooks/useChannels";
 import { useOfficeMembers } from "../../hooks/useMembers";
@@ -30,20 +29,9 @@ function navigateToWikiArticle(path: string): void {
   void router.navigate({ to: "/wiki/$", params: { _splat: path } });
 }
 
-function navigateToNotebookEntry(agentSlug: string, entrySlug: string): void {
-  void router.navigate({
-    to: "/notebooks/$agentSlug/$entrySlug",
-    params: { agentSlug, entrySlug },
-  });
-}
-
-function navigateToNotebookCatalog(): void {
-  void router.navigate({ to: "/notebooks" });
-}
-
 interface PaletteItem {
   id: string;
-  group: "Channels" | "Agents" | "Commands" | "Messages" | "Wiki" | "Notebooks";
+  group: "Channels" | "Agents" | "Commands" | "Messages" | "Wiki";
   icon: string;
   label: string;
   desc?: string;
@@ -84,21 +72,6 @@ function prettyWikiPath(path: string): string {
   return path.replace(/^team\//, "").replace(/\.md$/, "");
 }
 
-function parseNotebookPath(
-  path: string,
-): { agent: string; entry: string } | null {
-  // `agents/<slug>/<entry>.md` — split and validate the shape without regex
-  // capture groups that trip up some static analyzers.
-  if (!(path.startsWith("agents/") && path.endsWith(".md"))) return null;
-  const stripped = path.slice("agents/".length, -3);
-  const firstSlash = stripped.indexOf("/");
-  if (firstSlash <= 0 || firstSlash === stripped.length - 1) return null;
-  const agent = stripped.slice(0, firstSlash);
-  const entry = stripped.slice(firstSlash + 1);
-  if (entry.includes("/")) return null;
-  return { agent, entry };
-}
-
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function SearchModal() {
   const searchOpen = useAppStore((s) => s.searchOpen);
@@ -117,7 +90,6 @@ export function SearchModal() {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [messageHits, setMessageHits] = useState<MessageHit[]>([]);
   const [wikiHits, setWikiHits] = useState<WikiSearchHit[]>([]);
-  const [notebookHits, setNotebookHits] = useState<NotebookSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,7 +103,6 @@ export function SearchModal() {
       if (needle.length < 2 || channels.length === 0) {
         setMessageHits([]);
         setWikiHits([]);
-        setNotebookHits([]);
         return;
       }
       setSearching(true);
@@ -160,36 +131,14 @@ export function SearchModal() {
 
         const wikiP = searchWiki(trimmed).then((hits) => hits.slice(0, 8));
 
-        const agentSlugs = members
-          .map((m) => m.slug)
-          .filter(
-            (s): s is string =>
-              typeof s === "string" &&
-              s !== "human" &&
-              s !== "you" &&
-              s !== "system",
-          );
-        const notebookP = Promise.all(
-          agentSlugs.map((slug) =>
-            searchNotebook(slug, trimmed).catch(
-              () => [] as NotebookSearchHit[],
-            ),
-          ),
-        ).then((notebookGroups) => notebookGroups.flat().slice(0, 8));
-
-        const [msg, wiki, nb] = await Promise.all([
-          messagesP,
-          wikiP,
-          notebookP,
-        ]);
+        const [msg, wiki] = await Promise.all([messagesP, wikiP]);
         setMessageHits(msg);
         setWikiHits(wiki);
-        setNotebookHits(nb);
       } finally {
         setSearching(false);
       }
     },
-    [channels, members],
+    [channels],
   );
 
   const handleQueryChange = useCallback(
@@ -224,7 +173,6 @@ export function SearchModal() {
     setQuery("");
     setMessageHits([]);
     setWikiHits([]);
-    setNotebookHits([]);
     setSelectedIdx(0);
   }, [searchOpen]);
 
@@ -344,27 +292,6 @@ export function SearchModal() {
           },
         });
       }
-
-      for (const hit of notebookHits) {
-        const parsed = parseNotebookPath(hit.path);
-        const label = parsed ? `${parsed.agent} · ${parsed.entry}` : hit.path;
-        list.push({
-          id: `nb:${hit.path}:${hit.line}`,
-          group: "Notebooks",
-          icon: "📓",
-          label,
-          desc: hit.snippet.trim().slice(0, 120),
-          meta: `L${hit.line}`,
-          run: () => {
-            if (parsed) {
-              navigateToNotebookEntry(parsed.agent, parsed.entry);
-            } else {
-              navigateToNotebookCatalog();
-            }
-            close();
-          },
-        });
-      }
     }
 
     return list;
@@ -374,7 +301,6 @@ export function SearchModal() {
     members,
     messageHits,
     wikiHits,
-    notebookHits,
     setActiveAgentSlug,
     setSearchOpen,
     close,
@@ -463,7 +389,7 @@ export function SearchModal() {
             ref={inputRef}
             className="search-input"
             type="text"
-            placeholder="Search channels, agents, commands, messages, wiki, notebooks..."
+            placeholder="Search channels, agents, commands, messages, wiki..."
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
           />
@@ -493,15 +419,13 @@ export function SearchModal() {
                     <span className="cmd-palette-item-icon">{item.icon}</span>
                     <span className="cmd-palette-item-text">
                       <span className="cmd-palette-item-label">
-                        {item.group === "Messages" ||
-                        item.group === "Wiki" ||
-                        item.group === "Notebooks"
+                        {item.group === "Messages" || item.group === "Wiki"
                           ? highlightMatch(item.label, query.trim())
                           : item.label}
                       </span>
                       {item.desc ? (
                         <span className="cmd-palette-item-desc">
-                          {item.group === "Wiki" || item.group === "Notebooks"
+                          {item.group === "Wiki"
                             ? highlightMatch(item.desc, query.trim())
                             : item.desc}
                         </span>

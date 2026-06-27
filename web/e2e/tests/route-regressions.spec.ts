@@ -233,22 +233,19 @@ test.describe("PR #634 review pins", () => {
     await expectNoReactErrors(page, getErrors, "threads app removal");
   });
 
-  test("StatusBar and ChannelHeader show identical titles on wiki / notebooks / reviews", async ({
+  test("StatusBar and ChannelHeader show identical titles on wiki", async ({
     page,
   }) => {
     // Repro: the channelLabel switch in StatusBar drifted from
     // ChannelHeader.headerTitleAndDesc — wiki-lookup rendered as the
-    // raw route key "wiki-lookup" while the header showed "Wiki",
-    // and notebooks/reviews were lower-cased on one side and
-    // capitalized on the other. Aligning them means the user sees one
-    // canonical title for each surface.
+    // raw route key "wiki-lookup" while the header showed "Wiki".
+    // Aligning them means the user sees one canonical title for each
+    // surface.
     const getErrors = collectReactErrors(page);
 
     const surfaces = [
       { route: "/#/wiki", label: "Wiki" },
       { route: "/#/wiki/lookup?q=test", label: "Wiki" },
-      { route: "/#/notebooks", label: "Notebooks" },
-      { route: "/#/reviews", label: "Reviews" },
     ];
 
     for (const { route, label } of surfaces) {

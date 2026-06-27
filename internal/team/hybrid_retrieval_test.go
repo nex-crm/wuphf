@@ -13,7 +13,7 @@ import (
 // tests. Cleans up via t.Cleanup.
 func newTestLearningLog(t *testing.T) *LearningLog {
 	t.Helper()
-	worker, _, _, cancel := newStartedNotebookWorker(t)
+	worker, cancel := newStartedWikiWorkerForTest(t)
 	t.Cleanup(cancel)
 	return NewLearningLog(worker)
 }

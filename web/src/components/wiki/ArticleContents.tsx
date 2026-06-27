@@ -67,7 +67,10 @@ export default function ArticleContents({ entries }: ArticleContentsProps) {
   const [collapsed, setCollapsed] = useState(false);
   const active = useActiveSection(entries);
 
-  if (entries.length === 0) return null;
+  // Wikipedia-style: only surface "On this page" once there are at least two
+  // top-level (H2) sections — a single section is not worth a TOC.
+  const sectionCount = entries.filter((entry) => entry.level === 1).length;
+  if (sectionCount < 2) return null;
   return (
     <nav
       className="wk-contents"

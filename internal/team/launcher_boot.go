@@ -42,16 +42,6 @@ func (l *Launcher) Launch() error {
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
-	// Wire the notebook-promotion reviewer resolver from the active
-	// blueprint. Without this, every promotion falls back to "ceo"
-	// regardless of blueprint reviewer_paths. Safe on nil (packs-only
-	// launches or blank-slate runs).
-	if l.operationBlueprint != nil {
-		bp := l.operationBlueprint
-		l.broker.SetReviewerResolver(librarianAwareReviewer(l.broker, func(wikiPath string) string {
-			return bp.ResolveReviewer(wikiPath)
-		}))
-	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
@@ -179,16 +169,6 @@ func (l *Launcher) launchHeadlessCodex() error {
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
-	// Wire the notebook-promotion reviewer resolver from the active
-	// blueprint, mirroring Launch(). Without this, every promotion
-	// in headless mode falls back to "ceo" regardless of blueprint
-	// reviewer_paths.
-	if l.operationBlueprint != nil {
-		bp := l.operationBlueprint
-		l.broker.SetReviewerResolver(librarianAwareReviewer(l.broker, func(wikiPath string) string {
-			return bp.ResolveReviewer(wikiPath)
-		}))
-	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}

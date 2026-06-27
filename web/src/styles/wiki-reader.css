@@ -1,0 +1,391 @@
+/* Wiki reader — the Wikipedia-shaped READING experience for compiled
+ * articles, plus the Sources browser + compile chrome. Scoped tightly so it
+ * never disturbs editor or non-compiled surfaces:
+ *   - `.wk-article-body.wiki-reader` only applies to compiled articles.
+ *   - `.wk-cite*`, `.wk-mermaid*`, `.wk-sources*`, `.wk-compile*` are net-new
+ *     class namespaces.
+ * Every value derives from a design token (no hardcoded colors) so Nex Light,
+ * Nex Dark, and Noir Gold all remap correctly.
+ */
+
+/* ─── Reader column: warm paper, a ~720px measure, generous rhythm ─── */
+.wk-article-body.wiki-reader {
+  max-width: 46rem; /* ~720px reading measure */
+  margin-inline: auto;
+  background: var(--wk-paper);
+  color: var(--wk-text);
+  font-size: 15px;
+  line-height: 1.8;
+}
+.wk-article-body.wiki-reader p {
+  margin: 0 0 1.1em;
+}
+.wk-article-body.wiki-reader li {
+  margin-bottom: 0.4em;
+}
+/* h2 as a section divider: a top hairline rule with breathing room above. */
+.wk-article-body.wiki-reader h2 {
+  margin-top: 2.2rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--wk-border);
+}
+.wk-article-body.wiki-reader h3 {
+  margin-top: 1.6rem;
+}
+/* Blue links + the lead paragraph reads slightly larger, Wikipedia-style. */
+.wk-article-body.wiki-reader a {
+  color: var(--wk-wikilink);
+}
+.wk-article-body.wiki-reader > p:first-of-type {
+  font-size: 1.04em;
+}
+
+/* ─── Inline citation badges (`^[source-id]` → `[n]`) ─── */
+.wk-cite {
+  position: relative;
+  line-height: 0;
+  white-space: nowrap;
+}
+.wk-cite-badge {
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--wk-accent);
+  background: color-mix(in srgb, var(--wk-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wk-accent) 30%, transparent);
+  border-radius: var(--radius-full);
+  padding: 1px 5px;
+  margin-left: 1px;
+  cursor: pointer;
+  vertical-align: super;
+}
+.wk-cite-badge:hover,
+.wk-cite-badge:focus-visible {
+  background: color-mix(in srgb, var(--wk-accent) 22%, transparent);
+  outline: none;
+}
+.wk-cite-popover {
+  position: absolute;
+  z-index: 70;
+  top: 1.4em;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 10px 12px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--wk-shadow-popover);
+  font-family: var(--wk-body-font);
+  line-height: 1.4;
+  white-space: normal;
+  text-align: left;
+}
+.wk-cite-kind {
+  font-family: var(--wk-chrome);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wk-text-tertiary);
+}
+.wk-cite-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wk-text);
+}
+.wk-cite-origin {
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  word-break: break-word;
+}
+.wk-cite-loading,
+.wk-cite-missing {
+  font-size: 12px;
+  color: var(--wk-text-muted);
+}
+.wk-cite-view {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--wk-wikilink);
+  cursor: pointer;
+}
+.wk-cite-view:hover {
+  text-decoration: underline;
+}
+
+/* ─── Mermaid diagrams (fenced ```mermaid in compiled articles) ─── */
+.wk-mermaid {
+  margin: 1.4rem 0;
+  padding: 1rem;
+  background: var(--wk-paper-dark);
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+.wk-mermaid-svg {
+  max-width: 100%;
+  height: auto;
+}
+.wk-mermaid-loading {
+  font-size: 13px;
+  color: var(--wk-text-muted);
+}
+.wk-mermaid-fallback {
+  margin: 1.4rem 0;
+  padding: 12px;
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: var(--wk-mono);
+  font-size: 13px;
+}
+
+/* ─── Compile trigger ─── */
+.wk-compile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.wk-compile-btn {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wk-paper);
+  background: var(--wk-accent);
+  border: 1px solid var(--wk-accent);
+  border-radius: var(--radius-full);
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.wk-compile-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--wk-accent) 85%, var(--wk-text));
+}
+.wk-compile-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.wk-compile-result {
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  text-align: right;
+}
+.wk-compile-tally {
+  display: block;
+}
+.wk-compile-warnings summary {
+  cursor: pointer;
+  color: var(--wk-wikilink);
+}
+.wk-compile-warnings ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  text-align: left;
+}
+.wk-compile-error {
+  font-size: 12px;
+  color: var(--wk-stale-text);
+}
+
+/* ─── Sources browser ─── */
+.wk-sources {
+  padding: 28px 32px 48px;
+  overflow-y: auto;
+}
+.wk-sources-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--wk-border);
+}
+.wk-sources-title {
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h1-size);
+  font-weight: var(--wk-heading-weight);
+  letter-spacing: var(--wk-heading-track);
+  margin: 0;
+  color: var(--wk-text);
+}
+.wk-sources-sub {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--wk-text-muted);
+}
+.wk-sources-status {
+  font-size: 14px;
+  color: var(--wk-text-muted);
+}
+.wk-sources-status--error {
+  color: var(--wk-stale-text);
+}
+.wk-sources-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.wk-sources-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h3-size);
+  font-weight: var(--wk-heading-weight);
+  margin: 0 0 8px;
+  color: var(--wk-text);
+}
+.wk-sources-group-count {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--wk-text-tertiary);
+  background: var(--wk-row-active);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+}
+.wk-sources-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+/* Scoped under .wk-sources so its specificity stays >= the reader `li` rule
+ * above (avoids a descending-specificity lint warning across the two `li`
+ * scopes, which are otherwise unrelated component contexts). */
+.wk-sources .wk-sources-list > li + li {
+  border-top: 1px solid var(--wk-border-light);
+}
+.wk-sources-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.wk-sources-row:hover {
+  background: var(--wk-row-hover);
+}
+.wk-sources-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--wk-text);
+}
+.wk-sources-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--wk-text-muted);
+}
+.wk-sources-row-kind {
+  font-family: var(--wk-chrome);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wk-accent);
+  background: color-mix(in srgb, var(--wk-accent) 12%, transparent);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+}
+.wk-sources-row-origin {
+  word-break: break-word;
+}
+.wk-sources-row-date {
+  color: var(--wk-text-tertiary);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.wk-sources-empty {
+  max-width: 32rem;
+  padding: 40px 0;
+}
+.wk-sources-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--wk-text);
+  margin: 0 0 8px;
+}
+.wk-sources-empty-sub {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--wk-text-muted);
+  margin: 0;
+}
+
+/* Sources record detail */
+.wk-sources-back {
+  display: inline-block;
+  margin-bottom: 18px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--wk-wikilink);
+  cursor: pointer;
+}
+.wk-sources-back:hover {
+  text-decoration: underline;
+}
+.wk-source-record-head {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--wk-border);
+}
+.wk-source-record-title {
+  font-family: var(--wk-heading-font);
+  font-size: var(--wk-h2-size);
+  font-weight: var(--wk-heading-weight);
+  letter-spacing: var(--wk-heading-track);
+  margin: 8px 0 12px;
+  color: var(--wk-text);
+}
+.wk-source-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+  font-size: 12px;
+}
+.wk-source-record-meta div {
+  display: flex;
+  gap: 6px;
+}
+.wk-source-record-meta dt {
+  color: var(--wk-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.wk-source-record-meta dd {
+  margin: 0;
+  color: var(--wk-text-muted);
+}
+.wk-source-record-id {
+  font-family: var(--wk-mono);
+}
+.wk-source-record-body {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--wk-text);
+}

@@ -88,9 +88,7 @@ test.describe("canonical route matrix", () => {
     );
   });
 
-  test("wiki, notebook, and review routes mount their first-class surfaces", async ({
-    page,
-  }) => {
+  test("wiki routes mount their first-class surfaces", async ({ page }) => {
     await expectCanonicalRoute(page, "/#/wiki", async (p) => {
       await expect(p.getByTestId("wiki-root")).toBeVisible();
     });
@@ -103,22 +101,6 @@ test.describe("canonical route matrix", () => {
 
     await expectCanonicalRoute(page, "/#/wiki/companies/acme", async (p) => {
       await expect(p.getByTestId("wiki-root")).toBeVisible();
-    });
-
-    await expectCanonicalRoute(page, "/#/notebooks", async (p) => {
-      await expect(p.getByTestId("notebook-surface")).toBeVisible();
-    });
-
-    await expectCanonicalRoute(page, "/#/notebooks/pm", async (p) => {
-      await expect(p.getByTestId("notebook-surface")).toBeVisible();
-    });
-
-    await expectCanonicalRoute(page, "/#/notebooks/pm/handoff", async (p) => {
-      await expect(p.getByTestId("notebook-surface")).toBeVisible();
-    });
-
-    await expectCanonicalRoute(page, "/#/reviews", async (p) => {
-      await expect(p.getByTestId("review-queue-surface")).toBeVisible();
     });
   });
 

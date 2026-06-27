@@ -5,10 +5,10 @@ export type RichArtifactTrustLevel = "draft" | "reviewed" | "promoted";
 
 // ArtifactPromotion is the canonical "where does this artifact live now?"
 // signal that drives link routing in chat bubbles and embed wiring in the
-// notebook + wiki detail views. Backend contract (agreed with the Go side):
+// wiki detail views. Backend contract (agreed with the Go side):
 //
 //   { status: "draft" }                                            // unpromoted, only at /articles/$id
-//   { status: "promoted_to_notebook", owner_slug, entry_slug }     // attached to a notebook entry
+//   { status: "promoted_to_notebook", owner_slug, entry_slug }     // legacy wire field (surface retired); resolves to /articles/$id
 //   { status: "promoted_to_wiki", wiki_path }                      // promoted into the team wiki
 //
 // wiki_path is relative to the wiki root, e.g.
@@ -85,20 +85,17 @@ export interface PromoteRichArtifactParams {
 export async function createRichArtifact(
   params: CreateRichArtifactParams,
 ): Promise<RichArtifact> {
-  const res = await post<{ artifact: RichArtifact }>(
-    "/notebook/visual-artifacts",
-    {
-      slug: params.slug,
-      title: params.title,
-      summary: params.summary ?? "",
-      html: params.html,
-      source_markdown_path: params.sourceMarkdownPath,
-      related_task_id: params.relatedTaskId,
-      related_message_id: params.relatedMessageId,
-      related_receipt_ids: params.relatedReceiptIds ?? [],
-      commit_message: params.commitMessage,
-    },
-  );
+  const res = await post<{ artifact: RichArtifact }>("/visual-artifacts", {
+    slug: params.slug,
+    title: params.title,
+    summary: params.summary ?? "",
+    html: params.html,
+    source_markdown_path: params.sourceMarkdownPath,
+    related_task_id: params.relatedTaskId,
+    related_message_id: params.relatedMessageId,
+    related_receipt_ids: params.relatedReceiptIds ?? [],
+    commit_message: params.commitMessage,
+  });
   return res.artifact;
 }
 
@@ -112,7 +109,7 @@ export async function fetchRichArtifacts(params: {
     query.source_path = params.sourceMarkdownPath;
   }
   const res = await get<{ artifacts: RichArtifact[] }>(
-    "/notebook/visual-artifacts",
+    "/visual-artifacts",
     query,
   );
   return Array.isArray(res.artifacts) ? res.artifacts : [];
@@ -122,7 +119,7 @@ export async function fetchRichArtifact(
   id: string,
 ): Promise<RichArtifactDetail> {
   return await get<RichArtifactDetail>(
-    `/notebook/visual-artifacts/${encodeURIComponent(id)}`,
+    `/visual-artifacts/${encodeURIComponent(id)}`,
   );
 }
 
@@ -131,7 +128,7 @@ export async function promoteRichArtifact(
   params: PromoteRichArtifactParams,
 ): Promise<RichArtifact> {
   const res = await post<{ artifact: RichArtifact }>(
-    `/notebook/visual-artifacts/${encodeURIComponent(id)}/promote`,
+    `/visual-artifacts/${encodeURIComponent(id)}/promote`,
     {
       target_wiki_path: params.targetWikiPath,
       markdown_summary: params.markdownSummary,
@@ -152,10 +149,6 @@ export type ArtifactDestination =
   | {
       to: "/wiki/$";
       params: { _splat: string };
-    }
-  | {
-      to: "/notebooks/$agentSlug/$entrySlug";
-      params: { agentSlug: string; entrySlug: string };
     }
   | {
       to: "/articles/$articleId";
@@ -183,46 +176,20 @@ export function resolveArtifactDestination(
       params: { _splat: stripWikiSuffix(promotion.wiki_path) },
     };
   }
-  if (
-    promotion?.status === "promoted_to_notebook" &&
-    promotion.owner_slug &&
-    promotion.entry_slug
-  ) {
-    return {
-      to: "/notebooks/$agentSlug/$entrySlug",
-      params: {
-        agentSlug: promotion.owner_slug,
-        entrySlug: promotion.entry_slug,
-      },
-    };
-  }
   // Legacy fallback for artifacts emitted before the promotion field
-  // existed: if we know a wiki path was set, route there. This must run
-  // BEFORE the attached_to_notebook_entry branch — a backfilled legacy
-  // artifact can carry BOTH fields, and the wiki page is its canonical home
-  // (the notebook attachment is only its historical origin). Mirrors the
-  // promoted_to_wiki vs attached_to_notebook_entry precedence above.
+  // existed: if we know a wiki path was set, route there. Runs only when no
+  // promotion field is present so an explicit `draft` promotion still wins.
+  // The notebook surface has been retired, so notebook-promoted /
+  // notebook-attached artifacts fall through to the standalone /articles/$id
+  // viewer below.
   if (!promotion && artifact.promotedWikiPath) {
     return {
       to: "/wiki/$",
       params: { _splat: stripWikiSuffix(artifact.promotedWikiPath) },
     };
   }
-  // Draft artifacts that are nonetheless attached to a notebook entry should
-  // route to that entry — the entry page embeds the artifact inline via
-  // NotebookVisualArtifacts, so the user sees the visual in its natural
-  // home instead of the bare /articles/$id viewer.
-  const attached = artifact.attached_to_notebook_entry;
-  if (attached?.owner_slug && attached.entry_slug) {
-    return {
-      to: "/notebooks/$agentSlug/$entrySlug",
-      params: {
-        agentSlug: attached.owner_slug,
-        entrySlug: attached.entry_slug,
-      },
-    };
-  }
-  // Draft / unknown / unpromoted: fall back to the standalone viewer.
+  // Draft / notebook / unknown / unpromoted: fall back to the standalone
+  // viewer.
   return {
     to: "/articles/$articleId",
     params: { articleId: artifact.id },

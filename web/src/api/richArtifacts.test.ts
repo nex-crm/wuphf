@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe("rich artifact API", () => {
-  it("creates notebook visual artifacts with backend snake_case fields", async () => {
+  it("creates visual artifacts with backend snake_case fields", async () => {
     const postSpy = vi
       .spyOn(client, "post")
       .mockResolvedValue({ artifact: ARTIFACT });
@@ -46,7 +46,7 @@ describe("rich artifact API", () => {
       relatedReceiptIds: ["rcpt-1"],
     });
 
-    expect(postSpy).toHaveBeenCalledWith("/notebook/visual-artifacts", {
+    expect(postSpy).toHaveBeenCalledWith("/visual-artifacts", {
       slug: "pm",
       title: "Visual plan",
       summary: "A richer plan.",
@@ -69,7 +69,7 @@ describe("rich artifact API", () => {
       sourceMarkdownPath: "agents/pm/notebook/plan.md",
     });
 
-    expect(getSpy).toHaveBeenCalledWith("/notebook/visual-artifacts", {
+    expect(getSpy).toHaveBeenCalledWith("/visual-artifacts", {
       source_path: "agents/pm/notebook/plan.md",
     });
     expect(artifacts).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("rich artifact API", () => {
     });
 
     expect(postSpy).toHaveBeenCalledWith(
-      "/notebook/visual-artifacts/ra_0123456789abcdef/promote",
+      "/visual-artifacts/ra_0123456789abcdef/promote",
       {
         target_wiki_path: "team/drafts/visual-plan.md",
         markdown_summary: "# Visual plan\n",
@@ -137,7 +137,7 @@ describe("rich artifact API", () => {
       });
     });
 
-    it("routes promoted_to_notebook artifacts to the notebook entry route", () => {
+    it("falls back to /articles for promoted_to_notebook artifacts (notebook surface retired)", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,
         promotion: {
@@ -147,8 +147,8 @@ describe("rich artifact API", () => {
         },
       });
       expect(dest).toEqual({
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: { agentSlug: "pm", entrySlug: "handoff" },
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
       });
     });
 
@@ -171,7 +171,7 @@ describe("rich artifact API", () => {
       });
     });
 
-    it("routes draft artifacts to their attached notebook entry home", () => {
+    it("falls back to /articles for draft artifacts attached to a notebook entry (notebook surface retired)", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,
         promotion: { status: "draft" },
@@ -181,12 +181,12 @@ describe("rich artifact API", () => {
         },
       });
       expect(dest).toEqual({
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: { agentSlug: "barista", entrySlug: "extraction-yield" },
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
       });
     });
 
-    it("attached_to_notebook_entry resolves even when promotion is absent", () => {
+    it("falls back to /articles for attached_to_notebook_entry even when promotion is absent", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,
         attached_to_notebook_entry: {
@@ -195,8 +195,8 @@ describe("rich artifact API", () => {
         },
       });
       expect(dest).toEqual({
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: { agentSlug: "pm", entrySlug: "kickoff-notes" },
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
       });
     });
 

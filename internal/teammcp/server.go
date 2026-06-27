@@ -99,9 +99,10 @@ func registerSharedMemoryTools(server *mcp.Server) {
 			"wuphf_wiki_lookup",
 			"Cited-answer lookup against the team wiki. Returns a structured JSON answer with sources and inline citations. Use when you need a verified, sourced answer rather than a raw search.",
 		), handleTeamWikiLookup)
-		// Notebook tools ride on the same markdown backend. Registered here
-		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
-		registerNotebookTools(server)
+		// Rich-artifact (visual artifact) tools: agents author self-contained
+		// HTML articles that promote into the wiki. They share the markdown
+		// backend gate with team_wiki_*.
+		registerVisualArtifactTools(server)
 		// Entity brief tools (v1.2) — fact log + broker-level synthesis.
 		// Same backend gate: entity briefs live in the wiki subtree.
 		registerEntityTools(server)
@@ -173,13 +174,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
 		), handleTeamRuntimeState)
 
-		// In 1:1 / DM mode the CEO (and the Librarian, the wiki curator) can
-		// still call review to see the office's promotion candidates from a
-		// private chat. Same gate as the office and DM branches below.
+		// In 1:1 / DM mode the CEO (and the Librarian, the wiki curator) link
+		// wiki articles to tasks, so the context-packer can hand those refs to
+		// first-party agents. Same gate as the office and DM branches below.
 		if slug == "" || slug == "ceo" || slug == team.LibrarianSlug {
-			registerNotebookReviewTool(server)
-			// The wiki-curation roles also link wiki articles to tasks, so the
-			// context-packer can hand those refs to first-party agents.
 			registerWikiLinkTool(server)
 		}
 
@@ -225,7 +223,6 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		registerSkillTools(server)
 		registerRoutineTools(server)
 		if isLead || isLibrarian {
-			registerNotebookReviewTool(server)
 			registerWikiLinkTool(server)
 		}
 		if hasActionProvider() {
@@ -374,11 +371,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		// fires only on explicit human operating feedback.
 		registerPolicyTools(server)
 	}
-	// Promotion-review tool: the lead AND the Librarian (wiki curator) get it.
+	// Wiki-link tool: the lead AND the Librarian (wiki curator) get it.
 	// Kept out of the lead-only block above so the Librarian does not also gain
 	// team_plan / team_channel / team_member.
 	if isLead || isLibrarian {
-		registerNotebookReviewTool(server)
 		// link_task_wiki rides with the wiki-curation roles: the CEO/Librarian
 		// link the canonical articles a task needs so the context-packer can
 		// hand exactly those refs to first-party agents.

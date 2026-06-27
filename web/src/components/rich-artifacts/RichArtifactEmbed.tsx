@@ -50,7 +50,7 @@ if (typeof window !== "undefined" && !customElements.get(ELEMENT_NAME)) {
 // SECURITY MODEL — layered, trust boundary:
 //
 //   Untrusted input:  the `html` argument is agent-generated, fetched via
-//                     /notebook/visual-artifacts/{id} from the broker.
+//                     /visual-artifacts/{id} from the broker.
 //   Layer 1 (server): validateRichArtifactHTML at
 //                     internal/team/rich_artifact.go strips <script>, every
 //                     on* event handler, all external URLs in href/src/url(),

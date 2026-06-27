@@ -1010,6 +1010,10 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 		if action == RecordDecisionApprove && target == LifecycleStateApproved {
 			b.writeWikiPromotionLocked(taskID, *packet)
 			b.broadcastDecisionLocked(taskID, *packet)
+			// S2 feeder 1: snapshot the completed task + decision packet into
+			// the immutable source layer (kind=task). Non-blocking under b.mu —
+			// it only hands a pre-built payload to the capture dispatcher.
+			b.captureCompletedTaskSourceLocked(taskID, *packet)
 		}
 		// The issue_lifecycle chat card is now emitted from
 		// applyLifecycleStateLocked on every transition, so we no

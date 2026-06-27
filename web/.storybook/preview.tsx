@@ -14,14 +14,11 @@ import "../src/styles/command.css";
 import "../src/styles/wiki-shell.css";
 import "../src/styles/wiki.css";
 import "../src/styles/kbd.css";
-import "../src/styles/console.css";
 import "../src/styles/pixel-skill-card.css";
 import "../src/styles/lifecycle.css";
 import "../src/styles/onboarding.css";
 import "../src/styles/office-tour.css";
 import "../src/styles/office-tour-slides.css";
-import "../src/styles/getting-started-checklist.css";
-import "../src/styles/notebook.css";
 import "../src/styles/pam.css";
 import "../src/styles/rich-artifacts.css";
 

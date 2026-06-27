@@ -24,6 +24,13 @@ import (
 const (
 	TeamLearningsJSONLPath = "team/learnings/index.jsonl"
 	TeamLearningsPagePath  = "team/learnings/index.md"
+
+	// teamLearningsSourceOrigin / teamLearningsSourceTitle key the S2 source
+	// snapshot (kind=note) of the regenerated learnings page. Origin groups
+	// every version under one slug; the id is content-hashed so distinct
+	// versions are kept and identical writes dedupe.
+	teamLearningsSourceOrigin = "team-learnings"
+	teamLearningsSourceTitle  = "Team Learnings"
 )
 
 var learningLogPathPattern = regexp.MustCompile(`^team/learnings/index\.jsonl$`)

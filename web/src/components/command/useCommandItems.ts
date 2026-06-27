@@ -348,7 +348,7 @@ export function useCommandItems({
         group: "Actions",
         icon: "🔎",
         label: `Search "${query.trim()}" everywhere`,
-        desc: "Search channels, messages, notebooks, and wiki",
+        desc: "Search channels, messages, and wiki",
         run: () => {
           setSearchOpen(true);
           onClose();

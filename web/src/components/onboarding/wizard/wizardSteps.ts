@@ -201,6 +201,70 @@ export const ONBOARDING_ANALYTICS_CONSENT_COPY = {
     "Allow session recordings. We mask everything you type — passwords, keys, form fields — and capture layout, clicks, and navigation to fix rough edges.",
 } as const;
 
+/**
+ * Semantic-memory copy for the wiki step. The wiki is the shared brain, so this
+ * is where we offer the embedder that powers recall by meaning. The backend's
+ * EnsureBrain auto-selects in priority order (OpenAI key, then local Ollama,
+ * then keyword), so this section recommends the key, presents the alternatives
+ * in that same order, and reflects the resulting state. It is always optional:
+ * keyword search works with zero setup, so onboarding is never blocked here.
+ * WUPHF voice: no contractions, no em-dashes, Oxford comma. Single source of
+ * truth; the section component reads only from here.
+ */
+export const ONBOARDING_EMBEDDING_COPY = {
+  heading: "Power semantic memory",
+  note: "Semantic memory lets your agents find a rule by meaning, not just by an exact word match. Add an OpenAI key for the best recall, or start on keyword search and upgrade whenever you like.",
+  // Primary: the recommended OpenAI key.
+  openaiLabel: "OpenAI API key",
+  openaiRecommended: "Recommended",
+  openaiHint: "Best quality. One key powers chat and memory.",
+  openaiPlaceholder: "sk-...",
+  openaiSet: "Semantic memory is on, powered by OpenAI embeddings.",
+  saveKey: "Save key",
+  savingKey: "Saving…",
+  saveError:
+    "We could not save that key. Check it and try again, or continue on keyword search.",
+  // Alternatives, shown only while no key is set, in EnsureBrain priority order.
+  alternativesLabel: "No key? You have two other ways:",
+  ollamaTitle: "Local embeddings (Ollama)",
+  ollamaAvailable: "Free, on-device, and no API key.",
+  // ollama_model is interpolated by the section; this is the prose around it.
+  ollamaSetupPrefix: "Install Ollama and run ",
+  ollamaSetupSuffix: " to turn this on.",
+  ollamaModelFallback: "ollama pull nomic-embed-text",
+  keywordTitle: "Keyword search",
+  keywordHint: "Works now, no setup at all. Upgrade anytime.",
+  // The resulting-state pill. The label plus one of the three backend names.
+  statusLabel: "Semantic memory:",
+  statusOpenAI: "OpenAI",
+  statusOllama: "Local (Ollama)",
+  statusKeyword: "Keyword",
+  // A small action on the Ollama alternative that signals "I want the local
+  // path", which surfaces the gbrain install affordance below.
+  ollamaChoose: "Use local embeddings",
+  // The gbrain install affordance. Shown only when the user wants a semantic
+  // path and gbrain is not installed yet. Explicit, one-time consent.
+  install: {
+    // Consent line. Names exactly what will be installed, on this machine.
+    consent:
+      "Semantic memory runs on gbrain. Set it up now? This installs gbrain (and Bun, its runtime) on this machine.",
+    cta: "Set up semantic memory",
+    // While the background installer runs.
+    installing: "Setting up gbrain",
+    installingHint:
+      "This runs in the background. You can keep going, and it will finish on its own.",
+    // Shown before the broker emits its first progress line.
+    progressPending: "Starting up",
+    // The ready state, if the install finishes before gbrain_installed flips.
+    installed: "Semantic memory is ready. gbrain is installed.",
+    // The error state: the reason (or a generic line), then the keyword
+    // fallback, then a retry.
+    errorFallback: "We could not set up gbrain just now.",
+    keywordFallback: "Using keyword search for now.",
+    retry: "Try again",
+  },
+} as const;
+
 /** UI chrome labels for the wizard host. WUPHF voice, no contractions. */
 export const ONBOARDING_WIZARD_LABELS = {
   /** Accessible label for the wizard dialog surface. */

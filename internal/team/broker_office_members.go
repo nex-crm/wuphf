@@ -200,7 +200,7 @@ func (b *Broker) serveOfficeMemberMutation(w http.ResponseWriter, r *http.Reques
 	}
 	b.publishOfficeChanges(result.events)
 	if result.ensureNotebookDirs {
-		b.ensureNotebookDirsForRoster()
+		b.backfillAgentFilesForRoster()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

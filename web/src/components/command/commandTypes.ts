@@ -11,7 +11,6 @@ export type CommandGroup =
   | "Channels"
   | "Tasks"
   | "Wiki"
-  | "Notebooks"
   | "Messages";
 
 /**
