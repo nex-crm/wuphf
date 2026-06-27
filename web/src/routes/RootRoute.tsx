@@ -190,6 +190,14 @@ const SkillDetailRoute = lazy(() =>
   })),
 );
 
+// Operator product shell. Mounted full-bleed at /#/operator, ahead of the office
+// Shell / onboarding / broker gates so the shape is always viewable regardless of
+// backend state. The clean-start product (web/src/operator) — talks to the pi-mono
+// agent service over HTTP/SSE, not the broker. See operator-harness-clean-start.md.
+const OperatorApp = lazy(() =>
+  import("../operator/OperatorApp").then((m) => ({ default: m.OperatorApp })),
+);
+
 function LazyPanelFallback() {
   return (
     <div
@@ -909,6 +917,20 @@ export default function RootRoute() {
   const [bootError, setBootError] = useState(false);
   const [bootAttempt, setBootAttempt] = useState(0);
 
+  // Operator shell mount. The product shell lives at /#/operator and is fully
+  // self-contained, so it short-circuits the office boot/onboarding/Shell. Read
+  // the hash directly (not useRouterState) so it also works where RootRoute
+  // renders without a RouterProvider (bootstrap-fallback tests).
+  const [hashPath, setHashPath] = useState<string>(() =>
+    typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "",
+  );
+  useEffect(() => {
+    const onHash = () => setHashPath(window.location.hash.replace(/^#/, ""));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const isOperatorRoute = hashPath.startsWith("/operator");
+
   // Manual SPA pageviews (autocapture is off). We subscribe to the router
   // singleton rather than useRouterState so this works even where RootRoute is
   // rendered without a RouterProvider (the bootstrap-fallback tests). Fires the
@@ -1100,7 +1122,15 @@ export default function RootRoute() {
   }, [bootError, bootAttempt]);
 
   let body: ReactNode;
-  if (bootError) {
+  if (isOperatorRoute) {
+    // Operator product shell — self-contained, full-bleed. Bypasses the office
+    // boot/onboarding/Shell so it renders regardless of backend state.
+    body = (
+      <Suspense fallback={<LazyPanelFallback />}>
+        <OperatorApp />
+      </Suspense>
+    );
+  } else if (bootError) {
     body = (
       <BrokerUnreachableScreen onRetry={() => setBootAttempt((a) => a + 1)} />
     );
