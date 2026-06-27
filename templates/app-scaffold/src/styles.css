@@ -1,0 +1,36 @@
+/*
+ * App-level styles. Mantine ships its own component CSS (imported in main.tsx as
+ * "@mantine/core/styles.css", inlined into the single-file build) — so this file
+ * is only for page-level layout and any custom, non-Mantine bits. No @import, no
+ * Google Fonts, no external assets — the sandbox blocks them. The app renders on
+ * a light surface inside WUPHF (we pin MantineProvider to the light scheme).
+ */
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  /* Mantine sets its own font; this is the fallback before its CSS applies. */
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  background: #fff;
+}
+
+/* The app root container. Mantine's <Stack className="app"> uses this for the
+ * outer max width; component styling otherwise comes from Mantine. */
+.app {
+  max-width: 880px;
+  margin: 0 auto;
+}

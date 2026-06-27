@@ -458,6 +458,11 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("Never launch another WUPHF office from inside your turn (`wuphf`, `./wuphf`, `/reset`, or a new browser instance). The office is already running; inspect the current repo and UI instead.\n")
 	}
 
+	// Apps guidance for every office agent: awareness of propose_app for most,
+	// the full build playbook for the App Builder.
+	sb.WriteString("\n")
+	sb.WriteString(appsPromptBlock(slug, member.Role))
+
 	return sb.String()
 }
 

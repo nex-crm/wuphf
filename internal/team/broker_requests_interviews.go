@@ -607,6 +607,8 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		// (slice 4b) for approval cards: typed fields + the masked raw envelope.
 		IntegrationAction    *approvalActionPayload `json:"integration_action,omitempty"`
 		ConnectionUnverified bool                   `json:"connection_unverified,omitempty"`
+		// AppProposal marks the request as an App Builder proposal (propose_app).
+		AppProposal *appProposalSpec `json:"app_proposal,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -779,6 +781,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			IssueID:              strings.TrimSpace(body.IssueID),
 			Action:               sanitizeApprovalActionPayload(body.IntegrationAction),
 			ConnectionUnverified: body.ConnectionUnverified,
+			AppProposal:          sanitizeAppProposalSpec(body.AppProposal),
 			CreatedAt:            time.Now().UTC().Format(time.RFC3339),
 			UpdatedAt:            time.Now().UTC().Format(time.RFC3339),
 		}
@@ -788,6 +791,14 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			req.Required = true
 		}
 		if requestIsHumanInterview(req) {
+			req.Blocking = false
+			req.Required = false
+		}
+		// App Builder proposals keep the approval option set (approve /
+		// approve_with_note / reject) but are non-blocking by design: the human
+		// decides at leisure while the team keeps working. Never freeze a
+		// channel just because an agent suggested building a tool.
+		if req.AppProposal != nil {
 			req.Blocking = false
 			req.Required = false
 		}
@@ -886,6 +897,11 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		http.Error(w, msg, status)
 		return
 	}
+	// App Builder proposal hook: if the just-answered request was a propose_app
+	// approval and the human approved, spawn the App Builder task now. Runs
+	// AFTER answerRequestFromActor releases b.mu because MutateTask locks
+	// internally (mirrors how the integration gate proceeds post-answer).
+	b.maybeSpawnAppBuilderTaskFromProposal(body.ID)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

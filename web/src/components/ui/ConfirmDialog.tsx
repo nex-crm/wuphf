@@ -15,6 +15,12 @@ interface ConfirmOptions {
   /** Red "danger" styling for destructive actions. */
   danger?: boolean;
   onConfirm: () => void | Promise<void>;
+  /**
+   * Called when the user dismisses the dialog WITHOUT confirming (Cancel
+   * button, Escape, or overlay click). Not called after a successful confirm.
+   * Use it to release any state the open dialog was guarding.
+   */
+  onCancel?: () => void;
 }
 
 let requestConfirm: ((opts: ConfirmOptions) => void) | null = null;
@@ -47,6 +53,14 @@ export function ConfirmHost() {
     setRunning(false);
   }, []);
 
+  // dismiss is close + the caller's onCancel — used for every NON-confirm exit
+  // (Cancel button, Escape, overlay click). run()'s success path uses close()
+  // directly so onCancel never fires after a confirm.
+  const dismiss = useCallback(() => {
+    opts?.onCancel?.();
+    close();
+  }, [opts, close]);
+
   useEffect(() => {
     requestConfirm = (o) => {
       setOpts(o);
@@ -64,11 +78,11 @@ export function ConfirmHost() {
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") dismiss();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, close]);
+  }, [open, dismiss]);
 
   if (!(open && opts)) return null;
 
@@ -91,7 +105,7 @@ export function ConfirmHost() {
     <div
       className="confirm-overlay"
       onClick={(e) => {
-        if (e.target === e.currentTarget) close();
+        if (e.target === e.currentTarget) dismiss();
       }}
       role="dialog"
       aria-modal="true"
@@ -109,7 +123,7 @@ export function ConfirmHost() {
           <button
             type="button"
             className="btn btn-ghost btn-sm"
-            onClick={close}
+            onClick={dismiss}
             disabled={running}
           >
             {opts.cancelLabel || "Cancel"}

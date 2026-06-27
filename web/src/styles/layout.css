@@ -3592,6 +3592,105 @@ html[data-theme="nex"]
   transition-duration: 100ms;
 }
 
+/* Governor: budget/turn review checkpoint banner + status-bar run control.
+   Tokens only, so all three themes (Nex Light/Dark, Noir Gold) inherit. */
+.governor-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--accent-bg);
+  border-bottom: 1px solid var(--accent);
+  animation: fadeIn 0.2s ease-out;
+}
+.governor-banner-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text);
+  min-width: 0;
+}
+.governor-banner-content svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.governor-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.governor-banner-text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.governor-banner-text span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.governor-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.btn.governor-banner-continue {
+  background: var(--accent);
+  color: var(--bg-card);
+  border-color: var(--accent);
+}
+.btn.governor-banner-stop {
+  color: var(--red);
+  border-color: var(--red);
+  background: transparent;
+}
+.btn.governor-banner-stop:hover {
+  background: var(--red-bg);
+}
+
+/* Compact running meter + Pause/Stop in the status bar. */
+.governor-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 4px;
+}
+.governor-control-meter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.governor-control-btn {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.governor-control-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.governor-control-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.governor-control-stop:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
+
 /* ─── Resizable pane drag handle ─────────────────────────────────
    Thin vertical splitter anchored to a side pane's edge. The visible
    rule is 1px wide so the layout doesn't shift, while a pseudo-element

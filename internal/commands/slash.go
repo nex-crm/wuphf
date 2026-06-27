@@ -61,6 +61,10 @@ func RegisterAllCommands(r *Registry) {
 	// Wiki intelligence
 	r.Register(SlashCommand{Name: "lint", Description: "Run wiki lint — checks contradictions, orphans, stale claims, cross-refs", WebSupported: true})
 
+	// Apps — agent-generated internal tools, built by the App Builder agent.
+	r.Register(SlashCommand{Name: "create-app", Description: "Build a new internal tool (App Builder)", WebSupported: true})
+	r.Register(SlashCommand{Name: "update-app", Description: "Improve an existing app (App Builder)", WebSupported: true})
+
 	// Channel workflows
 	r.Register(SlashCommand{Name: "request", Description: "Request commands (focus/answer/dismiss)"})
 	r.Register(SlashCommand{Name: "reply", Description: "Reply in thread"})

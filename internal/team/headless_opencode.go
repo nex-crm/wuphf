@@ -187,7 +187,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			}
 			l.updateHeadlessProgress(slug, "active", "tool", "running "+detail, metrics)
 			pushStream("[tool] " + detail)
-			turnToolNames = append(turnToolNames, detail)
+			// opencode exposes no tool input, so the proxy action_id cannot be
+			// unwrapped here; manifestToolToken falls back to the raw name.
+			turnToolNames = append(turnToolNames, manifestToolToken(detail, ""))
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, ev.ToolName, "", "opencode.tool_use")
 		case "tool_result":
 			if d := strings.TrimSpace(ev.Detail); d != "" {

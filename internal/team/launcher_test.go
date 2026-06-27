@@ -109,11 +109,12 @@ func TestNewLauncherFromScratchUsesGenericOffice(t *testing.T) {
 	if got := l.PackName(); got != "WUPHF Office" {
 		t.Fatalf("PackName: got %q, want %q", got, "WUPHF Office")
 	}
-	if got := l.AgentCount(); got != 4 {
-		t.Fatalf("AgentCount: got %d, want 4", got)
+	if got := l.AgentCount(); got != 5 {
+		t.Fatalf("AgentCount: got %d, want 5", got)
 	}
 	got := l.officeMembersSnapshot()
-	want := []string{"founder", "operator", "builder", "reviewer"}
+	// app-builder is the built-in App Builder agent, seeded into every office.
+	want := []string{"founder", "operator", "app-builder", "builder", "reviewer"}
 	if len(got) != len(want) {
 		t.Fatalf("officeMembersSnapshot: got %d members, want %d (%+v)", len(got), len(want), got)
 	}

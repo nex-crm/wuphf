@@ -90,6 +90,20 @@ func (l *Launcher) raisePlanApprovalAfterTurn(taskID, slug, plan string) {
 	l.broker.RaisePlanApproval(taskID, slug, plan)
 }
 
+// maybeQueueInlineDetection fires inline workflow→App detection after a turn that
+// was NOT attributed to a real task — the only case the post-task detection hook
+// misses. A task-attributed turn is handled when its task reaches done, so this
+// returns early for those. Best-effort and gated inside the broker.
+func (l *Launcher) maybeQueueInlineDetection(ctx context.Context, slug string, channel ...string) {
+	if l == nil || l.broker == nil || !l.broker.workflowDetectionEnabled {
+		return // cheapest gate first: with detection off, skip the task-id lookup
+	}
+	if strings.TrimSpace(l.turnTaskIDForCtx(ctx, slug)) != "" {
+		return // task turn — the reachedDone hook owns detection for it
+	}
+	l.broker.queueInlineWorkflowDetection(slug, firstNonEmpty(channel...))
+}
+
 // turnTaskIDForCtx returns the running turn's task id, preferring the id carried
 // on ctx over the legacy agentActiveTaskID(slug) lookup. Used for stream/event
 // labelling so each parallel instance's output is tagged with its own task.

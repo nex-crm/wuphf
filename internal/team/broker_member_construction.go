@@ -59,6 +59,8 @@ func applyOfficeMemberDefaults(member *officeMember) {
 func inferOfficeExpertise(slug, role string) []string {
 	text := strings.ToLower(strings.TrimSpace(slug + " " + role))
 	switch {
+	case strings.Contains(text, "app build"), strings.Contains(text, "app-build"):
+		return []string{"internal tools", "React", "TypeScript", "Vite", "app generation"}
 	case strings.Contains(text, "front"), strings.Contains(text, "ui"), strings.Contains(text, "design eng"):
 		return []string{"frontend", "UI", "interaction design", "components", "accessibility"}
 	case strings.Contains(text, "back"), strings.Contains(text, "api"), strings.Contains(text, "infra"):
@@ -81,6 +83,8 @@ func inferOfficeExpertise(slug, role string) []string {
 func inferOfficePersonality(slug, role string) string {
 	text := strings.ToLower(strings.TrimSpace(slug + " " + role))
 	switch {
+	case strings.Contains(text, "app build"), strings.Contains(text, "app-build"):
+		return "Pragmatic tool-smith who turns repeatable workflows into small, dependable internal apps and ships the simplest thing that works."
 	case strings.Contains(text, "front"):
 		return "Frontend specialist focused on polished user-facing work and sharp interaction details."
 	case strings.Contains(text, "back"):

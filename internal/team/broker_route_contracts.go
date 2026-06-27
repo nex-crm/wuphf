@@ -137,6 +137,20 @@ var platformBrokerRoutes = []brokerRoute{
 	{
 		contract: RouteContract{
 			Domain:       "platform",
+			Capability:   "Run governor: budget/turn checkpoints + pause/stop/resume",
+			Path:         "/governor",
+			Method:       RouteMethodGetPost,
+			Auth:         RouteAuthBearer,
+			RequestType:  "team.governorActionRequest",
+			ResponseType: "team.governorStatus",
+		},
+		handler: func(b *Broker) http.HandlerFunc {
+			return b.handleGovernor
+		},
+	},
+	{
+		contract: RouteContract{
+			Domain:       "platform",
 			Capability:   "Health, usage, version, upgrade",
 			Path:         "/web-token",
 			Method:       RouteMethodAny,

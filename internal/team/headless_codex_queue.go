@@ -396,6 +396,27 @@ func (l *Launcher) stopHeadlessWorkers() {
 	}
 }
 
+// CancelHeadlessTurns cancels in-flight headless turns so a governor Stop takes
+// effect immediately instead of waiting out the per-turn timeout. slug == ""
+// cancels every active turn; a specific slug cancels just that agent. Queued
+// work is left intact and parked at the governor gate until resume. Implements
+// headlessDispatchController (wired via Broker.SetHeadlessDispatchController).
+func (l *Launcher) CancelHeadlessTurns(slug string) {
+	slug = strings.TrimSpace(slug)
+	l.headless.mu.Lock()
+	defer l.headless.mu.Unlock()
+	// active is keyed by lane (slug + worktree); an agent can hold several
+	// lanes, so cancel every lane whose slug matches.
+	for lane, active := range l.headless.active {
+		if slug != "" && lane.slug != slug {
+			continue
+		}
+		if active != nil && active.Cancel != nil {
+			active.Cancel()
+		}
+	}
+}
+
 func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}) {
 	defer l.headless.workerWg.Done()
 	slug := lane.slug
@@ -412,10 +433,27 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			return
 		default:
 		}
+		// Governor checkpoint: park here while the session is paused (budget or
+		// turn-count gate tripped, or a human hit Pause/Stop) so we never start
+		// a fresh token-spending turn during a review. gate returns false only
+		// when stop fires while parked, in which case we exit cleanly and leave
+		// the queue intact for the next worker.
+		if l.broker != nil && !l.broker.governorGate(stop) {
+			l.headless.mu.Lock()
+			delete(l.headless.workers, lane)
+			l.headless.mu.Unlock()
+			return
+		}
+		countTurn := true
 		func() {
 			defer recoverPanicTo("runHeadlessCodexQueue", fmt.Sprintf("slug=%s", slug))
 			turn, turnCtx, startedAt, timeout, ok := l.beginHeadlessCodexTurn(lane)
 			if !ok {
+				// No work dequeued (empty queue or shutdown). This is an idle
+				// drain, not a completed turn — don't credit the governor or
+				// the turn-checkpoint would fire well before MaxTurnsPerGate
+				// real turns ran.
+				countTurn = false
 				l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
 				return
 			}
@@ -461,6 +499,10 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
 				l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
+				// A cancelled turn is a restart (newer work, human preempt, or a
+				// governor Stop), not a completed unit of work — don't count it
+				// toward the turn-checkpoint or it would inflate the cadence.
+				countTurn = false
 			case isDurabilityError:
 				// The provider returned successfully but left no durable task state.
 				// Don't retry — the agent already had its turn. Block the task immediately.
@@ -492,6 +534,12 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 			}
 			l.recordTaskLedgerEntry(slug, turn, startedAt, err)
 		}()
+		// Record the completed turn with the governor. If this pushed the
+		// session past a budget or the turn-count checkpoint, the governor is
+		// now paused and the next loop iteration parks at the gate above.
+		if countTurn && l.broker != nil {
+			l.broker.governorNoteTurn()
+		}
 		l.headless.mu.Lock()
 		_, stillRunning := l.headless.workers[lane]
 		l.headless.mu.Unlock()

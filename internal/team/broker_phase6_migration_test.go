@@ -171,6 +171,21 @@ func TestPhase6MigrationLoadsLegacyWorkspaceClean(t *testing.T) {
 	if pam.Name != librarianName {
 		t.Fatalf("Librarian name = %q, want %q", pam.Name, librarianName)
 	}
+
+	// --- App Builder back-filled onto the existing roster, built-in. The
+	// roster was persisted before the Apps feature, so this is the same
+	// load-time migration as the Librarian: the agent must appear in the
+	// office (and therefore the sidebar) without re-onboarding. ---
+	ab, ok := memberBySlug(t, b, appBuilderSlug)
+	if !ok {
+		t.Fatalf("App Builder (%q) was not added to the legacy roster", appBuilderSlug)
+	}
+	if !ab.BuiltIn {
+		t.Fatalf("App Builder should be built-in after migration, got BuiltIn=false")
+	}
+	if ab.Name != appBuilderRole {
+		t.Fatalf("App Builder name = %q, want %q", ab.Name, appBuilderRole)
+	}
 	// The pre-existing specialists must still be present (no roster clobber).
 	for _, slug := range []string{"ceo", "dwight", "angela"} {
 		if _, found := memberBySlug(t, b, slug); !found {

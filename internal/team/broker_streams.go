@@ -609,7 +609,17 @@ func (b *Broker) runActivityWatchdog(ctx context.Context) {
 			if b.markSilentRunningTasksLocked(now, taskStallThreshold) {
 				_ = b.saveLocked()
 			}
+			// Stalled-build backstop: the acceptance gate is done-triggered, so an
+			// App Builder build that stalls in_progress and never reaches done is
+			// otherwise invisible to it. Grade those stalled builds (once per stall
+			// episode) so an unfinalized one is reopened with concrete gaps instead
+			// of sitting stuck. Queue OUTSIDE the lock — the gate reads the app
+			// store under its own lock.
+			dueAppBuilds := b.sweepStalledAppBuildsLocked()
 			b.mu.Unlock()
+			for _, id := range dueAppBuilds {
+				b.queueAppAcceptanceEval(id)
+			}
 		}
 	}
 }
