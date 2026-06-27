@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import re
 from collections.abc import AsyncIterator
-from typing import Protocol
+from typing import Any, Protocol
 
+from .providers import detect_providers
 from .wire import ClarifyQuestion, WorkflowSpec, WorkflowStep
 
 _log = logging.getLogger(__name__)
@@ -104,11 +106,88 @@ class StubBuildAgent:
         yield {"type": "spec", "spec": spec.model_dump()}
 
 
+_BUILD_SYSTEM_PROMPT = """You are the BUILD agent for an operator tool-builder. The \
+operator describes, in plain language, an internal workflow they want. Your job is to \
+FIGURE OUT a small, deterministic workflow and emit it — you do NOT execute anything.
+
+Design an ordered pipeline of steps. Each step has a kind:
+- trigger : what starts the workflow (an inbound item, a form, a ticket)
+- enrich  : look up related context
+- ai      : a model step that scores/classifies from the enriched context
+- decision: branch on a threshold/condition
+- action  : do something in an external system (set gated=true — it needs human approval)
+- branch  : a conditional fork
+
+Keep it tight (3-6 steps). Any step that mutates an external system MUST be gated.
+Ask AT MOST ONE sharp clarifying question (a threshold or a destination channel) only \
+if you genuinely cannot proceed. When done, call submit_workflow exactly once with the \
+full spec. Do not narrate after the tool call."""
+
+
+def _spec_from_capture(captured: dict[str, Any], fallback_tool_id: str | None) -> WorkflowSpec:
+    """Build a validated WorkflowSpec from the agent's submit_workflow arguments. Pure
+    + tolerant of missing optional fields, so it is unit-testable without a model."""
+    steps = [WorkflowStep(**s) if not isinstance(s, WorkflowStep) else s for s in captured.get("steps", [])]
+    clarify_raw = captured.get("clarify")
+    clarify = ClarifyQuestion(**clarify_raw) if isinstance(clarify_raw, dict) else None
+    return WorkflowSpec(
+        name=str(captured.get("name") or "Untitled workflow"),
+        tool_id=str(captured.get("tool_id") or fallback_tool_id or "inbound-routing"),
+        steps=steps,
+        narration=str(captured.get("narration") or ""),
+        clarify=clarify,
+    )
+
+
+class DeepAgentBuildAgent:
+    """The real BUILD agent: a LangChain deep agent (deepagents) that plans and emits a
+    WorkflowSpec via a submit_workflow tool. Same output contract as the stub, so the
+    executor and FE are unchanged. Requires a model API key (deepagents/LangChain does
+    NOT use Claude Code auth) — `build_agent()` only selects this when one is present."""
+
+    def __init__(self, model: str | None = None):
+        self._model = model or os.getenv("HARNESS_MODEL") or "anthropic:claude-sonnet-4-5"
+
+    def _invoke(self, message: str, tool_id: str | None) -> dict[str, Any]:  # pragma: no cover - needs a model key
+        from deepagents import create_deep_agent
+
+        captured: dict[str, Any] = {}
+
+        def submit_workflow(name: str, tool_id: str, steps: list[dict], narration: str = "", clarify: dict | None = None) -> str:
+            """Record the final deterministic workflow spec. Call exactly once."""
+            captured.update(name=name, tool_id=tool_id, steps=steps, narration=narration, clarify=clarify)
+            return "workflow recorded"
+
+        agent = create_deep_agent(model=self._model, tools=[submit_workflow], system_prompt=_BUILD_SYSTEM_PROMPT)
+        prompt = message if not tool_id else f"{message}\n\n(Refine the existing tool: {tool_id})"
+        agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+        if "name" not in captured:
+            raise RuntimeError("deep agent finished without calling submit_workflow")
+        return captured
+
+    def compile(self, message: str, tool_id: str | None = None) -> WorkflowSpec:  # pragma: no cover - needs a model key
+        return _spec_from_capture(self._invoke(message, tool_id), tool_id)
+
+    async def stream(self, message: str, tool_id: str | None = None) -> AsyncIterator[dict]:  # pragma: no cover - needs a model key
+        spec = self.compile(message, tool_id)
+        for step in spec.steps:
+            yield {"type": "step", "step": step.model_dump()}
+        yield {"type": "spec", "spec": spec.model_dump()}
+
+
+def _model_key_available() -> bool:
+    """Whether a real LangChain model can authenticate (an api_key provider). Claude
+    Code CLI auth does NOT count — deepagents/LangChain needs a key."""
+    return any(p.available and p.via == "api_key" for p in detect_providers())
+
+
 def build_agent() -> BuildAgent:
-    """Pick the BUILD agent: the real deep agent when the `agent` extra is present,
-    else the deterministic stub so the harness runs key-free."""
+    """Pick the BUILD agent: the real deepagents agent when it is installed AND a model
+    key is configured (BYOK); otherwise the deterministic stub so the harness always
+    runs key-free. Keyless authoring uses the stub today; a key unlocks the real agent."""
     if importlib.util.find_spec("deepagents") is None:
         return StubBuildAgent()
-    # S2: construct and return the real LangChain deep-agent here (same contract).
-    _log.info("deepagents present — real build agent lands in S2; using stub for now")
-    return StubBuildAgent()
+    if not _model_key_available():
+        _log.info("deepagents installed but no model key — using the deterministic stub (set a provider key for the real agent)")
+        return StubBuildAgent()
+    return DeepAgentBuildAgent()

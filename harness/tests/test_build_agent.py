@@ -1,6 +1,12 @@
 import asyncio
 
-from harness.build_agent import StubBuildAgent, build_agent
+from harness import build_agent as ba
+from harness.build_agent import (
+    DeepAgentBuildAgent,
+    StubBuildAgent,
+    _spec_from_capture,
+    build_agent,
+)
 
 
 def test_subject_detection_and_tool_mapping():
@@ -35,5 +41,37 @@ def test_stream_yields_one_step_each_then_the_spec():
     assert sum(1 for e in evs if e["type"] == "step") == len(evs[-1]["spec"]["steps"])
 
 
-def test_build_agent_degrades_to_stub_without_deepagents():
+def test_build_agent_degrades_to_stub_without_model_key(monkeypatch):
+    # No api_key provider (Claude Code CLI auth doesn't count for LangChain) -> stub,
+    # whether or not deepagents is installed.
+    monkeypatch.setattr(ba, "_model_key_available", lambda: False)
     assert isinstance(build_agent(), StubBuildAgent)
+
+
+def test_build_agent_uses_deep_agent_when_installed_and_keyed(monkeypatch):
+    if ba.importlib.util.find_spec("deepagents") is None:
+        import pytest
+
+        pytest.skip("deepagents not installed (the `agent` extra)")
+    monkeypatch.setattr(ba, "_model_key_available", lambda: True)
+    agent = build_agent()
+    assert isinstance(agent, DeepAgentBuildAgent)  # constructed; no live model call
+
+
+def test_spec_from_capture_builds_validated_spec():
+    spec = _spec_from_capture(
+        {
+            "name": "Inbound routing",
+            "tool_id": "inbound-routing",
+            "steps": [
+                {"id": "t", "kind": "trigger", "title": "New lead", "detail": "d"},
+                {"id": "a", "kind": "action", "title": "Route", "detail": "d", "integration": "Slack", "gated": True},
+            ],
+            "narration": "done",
+            "clarify": {"field": "channel", "prompt": "where?", "step_id": "a"},
+        },
+        fallback_tool_id=None,
+    )
+    assert spec.tool_id == "inbound-routing"
+    assert spec.steps[1].gated is True
+    assert spec.clarify.field == "channel"
