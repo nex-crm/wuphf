@@ -34,8 +34,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nex-crm/wuphf/internal/gbrain"
 	"gopkg.in/yaml.v3"
+
+	"github.com/nex-crm/wuphf/internal/gbrain"
 )
 
 // SourceCaptureQueue is the buffered job-channel capacity. Generous on purpose:
