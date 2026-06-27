@@ -7,7 +7,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build:run": "bun run src/run.ts"
+    "build:run": "bun run src/run.ts",
+    "serve": "bun run src/service.ts",
+    "smoke": "bash scripts/smoke.sh"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "0.73.1",

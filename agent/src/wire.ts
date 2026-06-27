@@ -28,6 +28,33 @@ export interface WorkflowSpec {
 	clarify: ClarifyQuestion | null;
 }
 
+export const SCHEMA_VERSION = 1;
+
+export interface BuildRequest {
+	schema_version?: number;
+	message: string;
+	tool_id?: string;
+}
+
+export interface RunRequest {
+	schema_version?: number;
+	spec: WorkflowSpec;
+	input?: Record<string, unknown>;
+}
+
+export interface RunStep {
+	step_id: string;
+	status: "ok" | "skipped" | "awaiting_approval";
+	detail: string;
+}
+
+export interface RunResult {
+	status: "done" | "needs_approval";
+	steps: RunStep[];
+	digest: string;
+	pending_approval: { step_id: string; title: string; integration?: string; detail: string } | null;
+}
+
 // The BUILD brief: identical intent to the Python harness so any engine produces
 // the same shape. The agent must output ONLY this JSON object.
 export const SCHEMA_PROMPT = `You are the BUILD agent for an operator tool-builder. The operator describes an internal workflow. FIGURE OUT a small deterministic pipeline and OUTPUT ONLY a single JSON object (no prose, no code fence) of this shape:
