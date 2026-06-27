@@ -422,8 +422,8 @@ func TestGBrainSourceWriter_NilClientLogsAndDrops(t *testing.T) {
 	if ok := disp.Enqueue(job); !ok {
 		t.Fatal("Enqueue returned false")
 	}
-	// Give the drain a moment to process-and-drop; no assertion beyond no-panic.
-	time.Sleep(100 * time.Millisecond)
+	// The deferred Stop(2s) drains the queued job through the nil-backend path;
+	// the test asserts only that this does not panic, so no extra wait is needed.
 }
 
 // TestSourceCapture_Feeder1_CompletedTask drives a real RecordTaskDecision

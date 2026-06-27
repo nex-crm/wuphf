@@ -145,16 +145,14 @@ func readInstallState(t *testing.T, b *Broker) (state, progress, errMsg string) 
 // the deadline elapses. It returns the last observed progress and error lines.
 func pollInstallState(t *testing.T, b *Broker, want string) (progress, errMsg string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		state, p, e := readInstallState(t, b)
-		if state == want {
-			return p, e
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	ok := testTickUntil(t, 2*time.Second, func() bool {
+		state, _, _ := readInstallState(t, b)
+		return state == want
+	})
 	state, p, e := readInstallState(t, b)
-	t.Fatalf("install_state never reached %q: last state=%q progress=%q error=%q", want, state, p, e)
+	if !ok {
+		t.Fatalf("install_state never reached %q: last state=%q progress=%q error=%q", want, state, p, e)
+	}
 	return p, e
 }
 

@@ -108,8 +108,9 @@ func TestSweepChatDigests_CapturesAndDedupes(t *testing.T) {
 
 	// Re-running the sweep upserts the same slug: still exactly one distinct page.
 	b.sweepChatDigests(base.Add(2 * time.Hour))
-	// Give the drain a moment to process the second sweep.
-	time.Sleep(300 * time.Millisecond)
+	// Wait for the second sweep to drain (a second put for the same slug)
+	// instead of sleeping a fixed interval.
+	testTickUntil(t, 5*time.Second, func() bool { return fake.count() >= 2 })
 	if slugs := fake.distinctSlugs(); len(slugs) != 1 {
 		t.Fatalf("re-sweep changed distinct page count: got %d (%v), want 1", len(slugs), slugs)
 	}

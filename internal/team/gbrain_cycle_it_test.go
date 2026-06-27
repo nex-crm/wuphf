@@ -63,7 +63,12 @@ func TestGBrainCompoundingCycle(t *testing.T) {
 		gbrain.PutOptions{Slug: relatedSlug}); err != nil {
 		t.Fatalf("seed related page: %v", err)
 	}
-	time.Sleep(2 * time.Second)
+	// Wait for gbrain to embed the seeded page so capture-time association has a
+	// target, instead of sleeping a fixed interval.
+	testTickUntil(t, 30*time.Second, func() bool {
+		res, qErr := client.Query(ctx, "pricing strategy premium tiers", 5)
+		return qErr == nil && len(res) > 0
+	})
 
 	// 2) PROCESS INTO GBRAIN — the real G4 capture writer (chat -> put_page),
 	// which also auto-associates the new page with related pages.
@@ -71,7 +76,12 @@ func TestGBrainCompoundingCycle(t *testing.T) {
 	if err := writer.WriteSource(ctx, job); err != nil {
 		t.Fatalf("capture WriteSource: %v", err)
 	}
-	time.Sleep(2 * time.Second) // let gbrain finish embedding/reconcile
+	// Wait for gbrain to finish writing and embedding the captured page instead
+	// of sleeping a fixed interval.
+	testTickUntil(t, 30*time.Second, func() bool {
+		p, gErr := client.GetPage(ctx, slug)
+		return gErr == nil && strings.Contains(p.Content, "$49")
+	})
 
 	// 3) WRITTEN WITH SOURCE ATTRIBUTION — read the page back from gbrain.
 	page, err := client.GetPage(ctx, slug)
