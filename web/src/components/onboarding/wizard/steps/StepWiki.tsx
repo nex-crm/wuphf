@@ -10,10 +10,14 @@
  * playbooks light up and @revops reads them. The clip is a self-contained
  * product window, so it reads correctly on every onboarding page theme.
  *
- * Informational step (no inputs, no advance gate). Copy from
- * ONBOARDING_WIZARD_COPY.wiki.
+ * Informational step plus the one optional input on this page: the
+ * "Power semantic memory" section, where the user can hand the shared brain an
+ * OpenAI key (the recommended embedder), see the local Ollama alternative, or
+ * stay on the no-setup keyword default. Advancing is never gated on it. Copy
+ * from ONBOARDING_WIZARD_COPY.wiki and ONBOARDING_EMBEDDING_COPY.
  */
 
+import { EmbeddingChoice } from "../EmbeddingChoice";
 import {
   ONBOARDING_WIZARD_COPY,
   type OnboardingWizardStepProps,
@@ -38,6 +42,8 @@ export function StepWiki({ active }: OnboardingWizardStepProps) {
           Your agents read these rules before they merge an account, route a
           lead, or close a stale opportunity.
         </p>
+
+        <EmbeddingChoice />
       </div>
 
       <div className="office-tour-slide-stage office-tour-slide-stage--wiki">

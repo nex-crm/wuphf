@@ -727,6 +727,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
+	mux.HandleFunc("/knowledge/embedding-options", b.requireAuth(b.handleKnowledgeEmbeddingOptions))
 	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
 	mux.HandleFunc("/image-providers", b.requireAuth(b.handleImageProviders))
 	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))

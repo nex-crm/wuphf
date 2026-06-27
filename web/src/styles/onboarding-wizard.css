@@ -1035,6 +1035,218 @@
   text-align: left;
 }
 
+/* ── Semantic-memory section (wiki step) ─────────────────────────────────────
+   The "Power semantic memory" block on the wiki step: the recommended OpenAI
+   key input, the resulting-state pill, and the keyword / Ollama alternatives.
+   Token-only so it reads in every onboarding theme. */
+.onboarding-embedding {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2-5);
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+}
+
+.onboarding-embedding-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.onboarding-embedding-heading {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.onboarding-embedding-status {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.onboarding-embedding-status strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The pill goes green once a real semantic embedder is live. */
+.onboarding-embedding-status[data-embedder="openai"],
+.onboarding-embedding-status[data-embedder="ollama"] {
+  border-color: var(--green);
+  background: var(--green-bg);
+}
+
+.onboarding-embedding-status[data-embedder="openai"] strong,
+.onboarding-embedding-status[data-embedder="ollama"] strong {
+  color: var(--green-dark, var(--green));
+}
+
+.onboarding-embedding-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.onboarding-embedding-key {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.onboarding-embedding-key-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.onboarding-embedding-recommended {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-1-5);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.onboarding-embedding-key-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.onboarding-embedding-key-row .onboarding-team-input {
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+}
+
+.onboarding-embedding-save {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.onboarding-embedding-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+.onboarding-embedding-error {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--red);
+}
+
+.onboarding-embedding-success {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2-5) var(--space-3);
+  border: 1px solid var(--green);
+  border-radius: var(--radius-md);
+  background: var(--green-bg);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.onboarding-embedding-check {
+  flex: 0 0 auto;
+  color: var(--green-dark, var(--green));
+}
+
+.onboarding-embedding-alts-label {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.onboarding-embedding-alts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-embedding-alt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+/* Not-yet-available choices (e.g. Ollama with no model pulled) read as quiet,
+   not blocked: the setup one-liner stays legible but the card recedes. */
+.onboarding-embedding-alt[data-available="false"] {
+  opacity: 0.72;
+}
+
+/* The currently-resolved alternative gets the accent edge. */
+.onboarding-embedding-alt[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.onboarding-embedding-alt-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onboarding-embedding-alt-active {
+  padding: 1px var(--space-1-5);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent);
+  color: var(--bg-card);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.onboarding-embedding-alt-hint {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.onboarding-embedding-code {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--overlay-soft, var(--bg-subtle));
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--text);
+}
+
 /* ── Touch ergonomics ──────────────────────────────────────────────────────
    On coarse pointers, the small text and pill controls need a 44px hit area
    even though their visible text stays the same size (the larger target is
