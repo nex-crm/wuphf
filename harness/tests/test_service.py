@@ -2,12 +2,14 @@ import json
 
 from fastapi.testclient import TestClient
 
+from harness.build_agent import StubBuildAgent
 from harness.service import create_app
 from harness.wire import WorkflowSpec
 
 
 def _client():
-    return TestClient(create_app())
+    # Pin the deterministic stub so unit tests never shell out to a live CLI agent.
+    return TestClient(create_app(agent_factory=lambda: StubBuildAgent()))
 
 
 def test_health_and_providers():

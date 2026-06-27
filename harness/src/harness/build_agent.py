@@ -13,9 +13,12 @@ The agent only FIGURES OUT the workflow. It never executes it (see executor.py).
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import os
 import re
+import shutil
+import subprocess
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
@@ -175,6 +178,91 @@ class DeepAgentBuildAgent:
         yield {"type": "spec", "spec": spec.model_dump()}
 
 
+_CLI_SCHEMA_PROMPT = """You are the BUILD agent for an operator tool-builder. The \
+operator will describe an internal workflow. FIGURE OUT a small deterministic \
+pipeline and OUTPUT ONLY a single JSON object (no prose, no code fence) of this shape:
+
+{"name": str, "tool_id": str, "narration": str,
+ "steps": [{"id": str, "kind": "trigger|enrich|ai|decision|action|branch",
+            "title": str, "detail": str, "integration": str|null, "gated": bool}],
+ "clarify": {"field": "threshold|channel", "prompt": str, "step_id": str} | null}
+
+Rules: 3-6 steps; any step that mutates an external system MUST have gated=true and \
+an integration; include at most one clarify question (only if you truly cannot \
+proceed); tool_id is a slug. Output the JSON object and nothing else."""
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    """Pull the first balanced JSON object out of CLI stdout (which may carry log
+    preamble). Raises if none parses."""
+    start = text.find("{")
+    while start != -1:
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                esc = (c == "\\") and not esc
+                if c == '"' and not esc:
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break  # try the next "{"
+        start = text.find("{", start + 1)
+    raise ValueError("no JSON object found in CLI output")
+
+
+class CliBuildAgent:
+    """Key-free BUILD agent: drives Claude Code (`claude -p`) or Codex (`codex exec`)
+    in HEADLESS mode using the operator's existing CLI login — no API key. Asks for a
+    JSON WorkflowSpec and validates it. Same contract as the other agents; multi-
+    provider (the founder's 'keep Claude Code/Codex as the inner harness' stance)."""
+
+    def __init__(self, provider: str, timeout: int = 180):
+        self._provider = provider  # "claude" | "codex"
+        self._timeout = timeout
+
+    def _argv(self, prompt: str) -> list[str]:
+        if self._provider == "codex":
+            return ["codex", "exec", prompt]
+        return ["claude", "-p", prompt]
+
+    def compile(self, message: str, tool_id: str | None = None) -> WorkflowSpec:
+        prompt = _CLI_SCHEMA_PROMPT + "\n\nOPERATOR REQUEST:\n" + message.strip()
+        if tool_id:
+            prompt += f"\n\n(Refine the existing tool: {tool_id})"
+        proc = subprocess.run(self._argv(prompt), capture_output=True, text=True, timeout=self._timeout)  # noqa: S603
+        if proc.returncode != 0:
+            raise RuntimeError(f"{self._provider} headless build failed (exit {proc.returncode}): {proc.stderr[:500]}")
+        return _spec_from_capture(_extract_json(proc.stdout), tool_id)
+
+    async def stream(self, message: str, tool_id: str | None = None) -> AsyncIterator[dict]:
+        spec = self.compile(message, tool_id)
+        for step in spec.steps:
+            yield {"type": "step", "step": step.model_dump()}
+        yield {"type": "spec", "spec": spec.model_dump()}
+
+
+def _cli_provider() -> str | None:
+    """Which headless CLI to drive, if any. Honours HARNESS_BUILD_PROVIDER, else
+    prefers Claude Code, then Codex. Both run key-free off the operator's login."""
+    pref = os.getenv("HARNESS_BUILD_PROVIDER", "").strip().lower()
+    if pref in ("claude", "codex") and shutil.which(pref):
+        return pref
+    if shutil.which("claude"):
+        return "claude"
+    if shutil.which("codex"):
+        return "codex"
+    return None
+
+
 def _model_key_available() -> bool:
     """Whether a real LangChain model can authenticate (an api_key provider). Claude
     Code CLI auth does NOT count — deepagents/LangChain needs a key."""
@@ -182,12 +270,16 @@ def _model_key_available() -> bool:
 
 
 def build_agent() -> BuildAgent:
-    """Pick the BUILD agent: the real deepagents agent when it is installed AND a model
-    key is configured (BYOK); otherwise the deterministic stub so the harness always
-    runs key-free. Keyless authoring uses the stub today; a key unlocks the real agent."""
-    if importlib.util.find_spec("deepagents") is None:
-        return StubBuildAgent()
-    if not _model_key_available():
-        _log.info("deepagents installed but no model key — using the deterministic stub (set a provider key for the real agent)")
-        return StubBuildAgent()
-    return DeepAgentBuildAgent()
+    """Pick the BUILD agent, key-free first:
+      1. A headless CLI (Claude Code / Codex) using the operator's existing login —
+         no API key. This is the primary, activation-friendly path.
+      2. deepagents (LangChain) when installed AND a model key is set (BYOK).
+      3. The deterministic stub, so the harness always runs (CI, no CLI, no key).
+    """
+    provider = _cli_provider()
+    if provider is not None:
+        return CliBuildAgent(provider)
+    if importlib.util.find_spec("deepagents") is not None and _model_key_available():
+        return DeepAgentBuildAgent()
+    _log.info("no headless CLI and no model key — using the deterministic stub")
+    return StubBuildAgent()
