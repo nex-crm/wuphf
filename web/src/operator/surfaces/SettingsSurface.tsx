@@ -22,7 +22,7 @@ export function SettingsSurface() {
 
       <div className="opr-settings">
         <div className="opr-set-group">
-          <Eyebrow>Voice · the call</Eyebrow>
+          <Eyebrow>Voice</Eyebrow>
           <div className="opr-set-row">
             <div>
               <div className="opr-set-label">OpenAI Realtime key</div>

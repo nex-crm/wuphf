@@ -112,8 +112,6 @@
 .opr-schema-type,
 .opr-step-chip,
 .opr-step-node,
-.opr-figure-label,
-.opr-figure-title,
 .opr-tool-figure-chip,
 .opr-tool-figure-step-title,
 .opr-nav-count,
@@ -590,19 +588,6 @@
   bottom: 7px;
   border-right: 1px solid;
   border-bottom: 1px solid;
-}
-.opr-figure-label {
-  color: var(--t-accent-3);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.opr-figure-title {
-  color: var(--t-faint);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin-top: 2px;
 }
 .opr-tool-figure-rail {
   display: grid;
@@ -2192,15 +2177,6 @@
   bottom: var(--space-4);
   border-right: 1px solid;
   border-bottom: 1px solid;
-}
-.opr-builder-figure-label {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  margin-bottom: var(--space-2);
-  width: fit-content;
-  background: color-mix(in srgb, var(--t-surface) 75%, var(--t-paper));
-  padding-right: var(--space-2);
 }
 .opr-canvas-head {
   display: flex;

@@ -319,7 +319,6 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
       </div>
 
       <aside className="opr-builder-canvas" aria-label="Workflow preview">
-        <div className="opr-figure-label opr-builder-figure-label">FIG_002</div>
         <div className="opr-canvas-head">
           <Eyebrow>{plan ? plan.name : "Your workflow"}</Eyebrow>
           <span className="opr-canvas-state">
