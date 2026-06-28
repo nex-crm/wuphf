@@ -10,7 +10,7 @@ def _spec() -> WorkflowSpec:
 def test_run_halts_at_gated_step_for_approval():
     res = run_workflow(_spec())
     assert res.status == "needs_approval"
-    assert res.pending_approval and res.pending_approval["step_id"] == "p-action"
+    assert res.pending_approval and res.pending_approval.step_id == "p-action"
     assert res.steps[-1].status == "awaiting_approval"
 
 

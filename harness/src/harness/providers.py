@@ -11,6 +11,11 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import dataclass
+from typing import Literal
+
+
+# How a provider is reachable. Mirrors agent/src/providers.ts Provider["via"].
+Via = Literal["subscription_cli", "api_key", "local", "none"]
 
 
 @dataclass(frozen=True)
@@ -18,7 +23,7 @@ class Provider:
     id: str
     label: str
     available: bool
-    via: str  # how it's available: "api_key" | "cli" | "none"
+    via: Via  # "subscription_cli" | "api_key" | "local" | "none"
 
 
 def _env_any(*names: str) -> bool:
@@ -26,23 +31,30 @@ def _env_any(*names: str) -> bool:
 
 
 def detect_providers() -> list[Provider]:
-    """Which inference providers are usable right now. BYOK = set the key (never
-    stored by the harness) or install the CLI."""
-    out: list[Provider] = []
-
+    """Which inference providers are usable right now. Always returns exactly the
+    same three rows (anthropic, codex, ollama) so the FE Settings surface can render
+    a stable list; availability/via reflect a key (BYOK, never stored), a logged-in
+    subscription CLI, or a local runtime. Matches agent/src/providers.ts."""
     if _env_any("ANTHROPIC_API_KEY"):
-        out.append(Provider("anthropic", "Anthropic API", True, "api_key"))
+        anthropic = Provider("anthropic", "Anthropic API", True, "api_key")
     elif shutil.which("claude"):
-        out.append(Provider("anthropic", "Claude Code (CLI auth)", True, "cli"))
+        anthropic = Provider("anthropic", "Claude Code (subscription)", True, "subscription_cli")
     else:
-        out.append(Provider("anthropic", "Anthropic", False, "none"))
+        anthropic = Provider("anthropic", "Anthropic", False, "none")
 
-    out.append(Provider("openai", "OpenAI API", _env_any("OPENAI_API_KEY", "WUPHF_OPENAI_API_KEY"), "api_key" if _env_any("OPENAI_API_KEY", "WUPHF_OPENAI_API_KEY") else "none"))
+    if _env_any("OPENAI_API_KEY", "WUPHF_OPENAI_API_KEY"):
+        codex = Provider("codex", "OpenAI / Codex", True, "api_key")
+    elif shutil.which("codex"):
+        codex = Provider("codex", "OpenAI / Codex (subscription)", True, "subscription_cli")
+    else:
+        codex = Provider("codex", "OpenAI / Codex", False, "none")
 
-    if shutil.which("codex"):
-        out.append(Provider("codex", "Codex (CLI)", True, "cli"))
+    if shutil.which("ollama"):
+        ollama = Provider("ollama", "Ollama (local / open-weight)", True, "local")
+    else:
+        ollama = Provider("ollama", "Ollama (local / open-weight)", False, "none")
 
-    return out
+    return [anthropic, codex, ollama]
 
 
 def providers_payload() -> dict:

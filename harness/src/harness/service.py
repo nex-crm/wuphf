@@ -12,7 +12,7 @@ the dead stack's hardening. See docs/specs/operator-harness-clean-start.md.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 from fastapi import FastAPI, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -50,11 +50,17 @@ def create_app(agent_factory: AgentFactory = build_agent) -> FastAPI:
         _check_schema_version(req.schema_version)
         agent = agent_factory()
 
-        async def generate():
+        async def generate() -> AsyncIterator[dict]:
             yield {"event": "start", "data": json.dumps({"message": req.message})}
-            async for ev in agent.stream(req.message, req.tool_id):
-                name = "spec" if ev.get("type") == "spec" else "step"
-                yield {"event": name, "data": json.dumps(ev)}
+            try:
+                async for ev in agent.stream(req.message, req.tool_id):
+                    name = "spec" if ev.get("type") == "spec" else "step"
+                    yield {"event": name, "data": json.dumps(ev)}
+            except Exception as exc:  # noqa: BLE001 - surface any build failure as a structured SSE error
+                # The stream has already started, so a raw raise would truncate the
+                # SSE response mid-flight; emit a typed error event instead (matches
+                # the Bun service) so the FE can show the failure rather than hang.
+                yield {"event": "error", "data": json.dumps({"message": str(exc)})}
 
         return EventSourceResponse(generate())
 

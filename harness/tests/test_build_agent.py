@@ -92,6 +92,25 @@ def test_cli_build_agent_parses_headless_json(monkeypatch):
     assert spec.steps[1].gated is True
 
 
+def test_spec_from_capture_forces_gate_on_action_step():
+    # A model-generated action step that asks to skip approval (gated=false) must be
+    # re-gated: external mutations always hit the human approval card (CQ1).
+    spec = _spec_from_capture(
+        {
+            "name": "Inbound routing",
+            "tool_id": "inbound-routing",
+            "steps": [
+                {"id": "t", "kind": "trigger", "title": "New lead", "detail": "d"},
+                {"id": "a", "kind": "action", "title": "Route", "detail": "d",
+                 "integration": "Slack", "gated": False},
+            ],
+        },
+        fallback_tool_id=None,
+    )
+    action = next(s for s in spec.steps if s.kind == "action")
+    assert action.gated is True
+
+
 def test_spec_from_capture_builds_validated_spec():
     spec = _spec_from_capture(
         {

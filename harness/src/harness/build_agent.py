@@ -12,6 +12,7 @@ The agent only FIGURES OUT the workflow. It never executes it (see executor.py).
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
@@ -130,7 +131,15 @@ full spec. Do not narrate after the tool call."""
 def _spec_from_capture(captured: dict[str, Any], fallback_tool_id: str | None) -> WorkflowSpec:
     """Build a validated WorkflowSpec from the agent's submit_workflow arguments. Pure
     + tolerant of missing optional fields, so it is unit-testable without a model."""
-    steps = [WorkflowStep(**s) if not isinstance(s, WorkflowStep) else s for s in captured.get("steps", [])]
+    steps: list[WorkflowStep] = []
+    for raw in captured.get("steps", []):
+        step = raw if isinstance(raw, WorkflowStep) else WorkflowStep(**raw)
+        # Approval is non-negotiable: a model-generated action step that mutates an
+        # external system MUST hit the human approval card (CQ1). Never trust the
+        # payload's gated flag to opt out of it.
+        if step.kind == "action" and not step.gated:
+            step = step.model_copy(update={"gated": True})
+        steps.append(step)
     clarify_raw = captured.get("clarify")
     clarify = ClarifyQuestion(**clarify_raw) if isinstance(clarify_raw, dict) else None
     return WorkflowSpec(
@@ -172,7 +181,8 @@ class DeepAgentBuildAgent:
         return _spec_from_capture(self._invoke(message, tool_id), tool_id)
 
     async def stream(self, message: str, tool_id: str | None = None) -> AsyncIterator[dict]:  # pragma: no cover - needs a model key
-        spec = self.compile(message, tool_id)
+        # compile() blocks on agent.invoke(); keep it off the SSE event loop.
+        spec = await asyncio.to_thread(self.compile, message, tool_id)
         for step in spec.steps:
             yield {"type": "step", "step": step.model_dump()}
         yield {"type": "spec", "spec": spec.model_dump()}
@@ -238,27 +248,70 @@ class CliBuildAgent:
         prompt = _CLI_SCHEMA_PROMPT + "\n\nOPERATOR REQUEST:\n" + message.strip()
         if tool_id:
             prompt += f"\n\n(Refine the existing tool: {tool_id})"
-        proc = subprocess.run(self._argv(prompt), capture_output=True, text=True, timeout=self._timeout)  # noqa: S603
+        # stdin=DEVNULL so a headless build fails fast instead of blocking on a login
+        # prompt; check=False because we surface returncode below with the CLI's stderr.
+        proc = subprocess.run(  # noqa: S603
+            self._argv(prompt),
+            capture_output=True,
+            text=True,
+            timeout=self._timeout,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
         if proc.returncode != 0:
             raise RuntimeError(f"{self._provider} headless build failed (exit {proc.returncode}): {proc.stderr[:500]}")
         return _spec_from_capture(_extract_json(proc.stdout), tool_id)
 
-    async def stream(self, message: str, tool_id: str | None = None) -> AsyncIterator[dict]:
-        spec = self.compile(message, tool_id)
+    async def stream(self, message: str, tool_id: str | None = None) -> AsyncIterator[dict]:  # pragma: no cover - needs a CLI login
+        # compile() blocks on subprocess.run(); keep it off the SSE event loop.
+        spec = await asyncio.to_thread(self.compile, message, tool_id)
         for step in spec.steps:
             yield {"type": "step", "step": step.model_dump()}
         yield {"type": "spec", "spec": spec.model_dump()}
 
 
+# Non-interactive auth checks per CLI: the subcommand that exits 0 only when the
+# operator is already logged in. Run headless (stdin closed) so an unauthed CLI
+# reports failure instead of dropping into an interactive login prompt.
+_CLI_AUTH_CHECK: dict[str, list[str]] = {
+    "claude": ["claude", "auth", "status"],
+    "codex": ["codex", "login", "status"],
+}
+
+
+def _cli_authed(provider: str) -> bool:
+    """Whether `provider` is installed AND already logged in. A binary on PATH is
+    not enough: an installed-but-unauthed CLI would hang the build on a login
+    prompt, so we require its readiness check to exit 0 non-interactively."""
+    if not shutil.which(provider):
+        return False
+    argv = _CLI_AUTH_CHECK.get(provider)
+    if argv is None:
+        return False
+    try:
+        proc = subprocess.run(  # noqa: S603
+            argv,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
 def _cli_provider() -> str | None:
     """Which headless CLI to drive, if any. Honours HARNESS_BUILD_PROVIDER, else
-    prefers Claude Code, then Codex. Both run key-free off the operator's login."""
+    prefers Claude Code, then Codex. Both run key-free off the operator's login —
+    but only a CLI whose non-interactive auth check passes is selected, so an
+    installed-but-unauthed CLI never takes (and hangs) the build."""
     pref = os.getenv("HARNESS_BUILD_PROVIDER", "").strip().lower()
-    if pref in ("claude", "codex") and shutil.which(pref):
+    if pref in ("claude", "codex") and _cli_authed(pref):
         return pref
-    if shutil.which("claude"):
+    if _cli_authed("claude"):
         return "claude"
-    if shutil.which("codex"):
+    if _cli_authed("codex"):
         return "codex"
     return None
 
