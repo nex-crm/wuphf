@@ -2075,7 +2075,7 @@
 .opr-activity-trace {
   margin-top: var(--space-2);
   padding-left: var(--space-3);
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--t-line);
   display: flex;
   flex-direction: column;
   gap: 3px;

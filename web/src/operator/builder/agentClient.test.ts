@@ -73,13 +73,31 @@ describe("buildPlanSmart fallback boundary", () => {
     await expect(buildPlanSmart("anything")).rejects.toThrow(/spec/i);
   });
 
-  it("surfaces a terminal error event instead of returning the mock", async () => {
+  it("surfaces a terminal error event (service's { message } shape) instead of the mock", async () => {
+    // The service emits failures as `event: error` with { message }, matching
+    // agent/src/service.ts — the regression must use that real payload shape.
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(
-        streamResponse('event: error\ndata: {"error":"boom"}\n\n'),
+        streamResponse('event: error\ndata: {"message":"boom"}\n\n'),
       ) as unknown as typeof fetch;
 
     await expect(buildPlanSmart("anything")).rejects.toThrow(/boom/i);
+  });
+
+  it("forwards `step` events to onActivity and resolves the terminal spec", async () => {
+    // The service streams one `step` event per WorkflowStep ({ type, step }),
+    // then a terminal `spec` event — the client must surface the steps live.
+    const sse =
+      'event: step\ndata: {"type":"step","step":{"title":"Look up the record","integration":"HubSpot"}}\n\n' +
+      'event: spec\ndata: {"spec":{"name":"X","tool_id":"inbound-routing","steps":[]}}\n\n';
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(streamResponse(sse)) as unknown as typeof fetch;
+
+    const activity: string[] = [];
+    const plan = await buildPlanSmart("anything", (a) => activity.push(a.text));
+    expect(activity).toContain("Look up the record");
+    expect(plan.toolId).toBe("inbound-routing");
   });
 });

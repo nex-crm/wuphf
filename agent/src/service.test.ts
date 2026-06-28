@@ -66,3 +66,15 @@ test("/build/stream returns 400 on a malformed JSON body before streaming", asyn
 	expect(res.status).toBe(400);
 	expect(res.headers.get("content-type")).toContain("application/json"); // a clean 400, not a half-open SSE
 });
+
+test("POST handlers reject structurally-invalid JSON (regression: CodeRabbit service.ts:55)", async () => {
+	// Parseable but wrong-shape bodies (null/[]/{}) must 400 before being read as
+	// BuildRequest/RunRequest, not 200-SSE-error or 500.
+	for (const bad of ["null", "[]", "{}"]) {
+		const b = await fetch(`${base}/build/stream`, { method: "POST", headers: { "content-type": "application/json" }, body: bad });
+		expect(b.status).toBe(400);
+		expect(b.headers.get("content-type")).toContain("application/json");
+		const r = await fetch(`${base}/run`, { method: "POST", headers: { "content-type": "application/json" }, body: bad });
+		expect(r.status).toBe(400);
+	}
+});
