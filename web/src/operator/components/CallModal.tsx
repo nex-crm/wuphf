@@ -14,14 +14,35 @@ interface CallLine {
 }
 
 const SCRIPT: CallLine[] = [
-  { who: "ai", text: "Walk me through how you handle a new demo request. I'm watching your screen." },
-  { who: "you", text: "So a request comes into this form. First I check the company in HubSpot..." },
-  { who: "ai", text: "What makes one worth sending to an AE versus nurturing?" },
-  { who: "you", text: "Size and industry, mostly. 200+ people in our core verticals, and they named a use case." },
+  {
+    who: "ai",
+    text: "Walk me through how you handle a new demo request. I'm watching your screen.",
+  },
+  {
+    who: "you",
+    text: "So a request comes into this form. First I check the company in HubSpot...",
+  },
+  {
+    who: "ai",
+    text: "What makes one worth sending to an AE versus nurturing?",
+  },
+  {
+    who: "you",
+    text: "Size and industry, mostly. 200+ people in our core verticals, and they named a use case.",
+  },
   { who: "ai", text: "And where does a hot one go from there?" },
-  { who: "you", text: "I post it in #ae-handoffs in Slack with the reason, and it gets assigned." },
-  { who: "ai", text: "Got it. I've drafted a tool: enrich from HubSpot, score fit 0 to 100, route 70 and up to an AE, nurture the rest. Want to see it?" },
+  {
+    who: "you",
+    text: "I post it in #ae-handoffs in Slack with the reason, and it gets assigned.",
+  },
+  {
+    who: "ai",
+    text: "Got it. I've drafted a tool: enrich from HubSpot, score fit 0 to 100, route 70 and up to an AE, nurture the rest. Want to see it?",
+  },
 ];
+
+// How long each scripted line lingers before the next one reveals.
+const REVEAL_MS = 1400;
 
 interface CallModalProps {
   onClose: () => void;
@@ -63,8 +84,15 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
     };
   }, [onClose]);
 
-  // Reveal the scripted exchange progressively so the call feels alive.
-  const [revealed, setRevealed] = useState(SCRIPT.length);
+  // Reveal the scripted exchange progressively so the call feels alive: start
+  // on the first line and advance on a timer until the whole script is shown.
+  const [revealed, setRevealed] = useState(1);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRevealed((r) => (r >= SCRIPT.length ? r : r + 1));
+    }, REVEAL_MS);
+    return () => clearInterval(timer);
+  }, []);
   const lines = SCRIPT.slice(0, revealed);
   const last = lines[lines.length - 1];
   const done = last?.who === "ai" && revealed === SCRIPT.length;
@@ -91,7 +119,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
           <div className="opr-call-screenshare">
             operator screen: inbound demo requests
           </div>
-          <div className="opr-call-wave" aria-hidden>
+          <div className="opr-call-wave" aria-hidden={true}>
             ▁▂▃▅▇▅▃▂▁ ▁▂▃▅▇▅▃▂▁ ▁▂▃▅▇▅▃▂▁
           </div>
           <div className="opr-call-caption">
@@ -110,19 +138,22 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
             ))}
           </div>
 
-          <div className="opr-detail-actions" style={{ justifyContent: "flex-end" }}>
+          <div
+            className="opr-detail-actions"
+            style={{ justifyContent: "flex-end" }}
+          >
             {!done ? (
               <button
                 type="button"
                 className="opr-btn opr-btn-sm"
                 onClick={() => setRevealed(SCRIPT.length)}
               >
-                <SkipForward size={13} strokeWidth={1.9} aria-hidden />
+                <SkipForward size={13} strokeWidth={1.9} aria-hidden={true} />
                 Skip ahead
               </button>
             ) : null}
             <button type="button" className="opr-btn" onClick={onClose}>
-              <PhoneOff size={14} strokeWidth={1.9} aria-hidden />
+              <PhoneOff size={14} strokeWidth={1.9} aria-hidden={true} />
               End call
             </button>
             <button
@@ -132,7 +163,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
               disabled={!done}
             >
               See the drafted tool
-              <ArrowRight size={14} strokeWidth={1.9} aria-hidden />
+              <ArrowRight size={14} strokeWidth={1.9} aria-hidden={true} />
             </button>
           </div>
         </div>

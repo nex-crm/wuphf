@@ -20,23 +20,24 @@ import {
 
 import { ApprovalCard } from "../components/ApprovalCard";
 import { EmptyState } from "../components/EmptyState";
-import { ToolEditChat } from "./ToolEditChat";
 import {
   Eyebrow,
   RequestStatusPill,
   ScorePill,
   sigil,
+  type TabDef,
   Tabs,
   ToolStatusBadge,
-  type TabDef,
 } from "../components/primitives";
 import {
   INBOUND_REQUESTS,
   type InboundRequest,
   type InternalTool,
   TODAY_DIGEST,
+  type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
+import { ToolEditChat } from "./ToolEditChat";
 
 type ToolTab = "ui" | "workflow" | "data";
 
@@ -50,150 +51,182 @@ interface InternalToolDetailProps {
   tool: InternalTool;
   onBack: () => void;
   onStartCall: () => void;
+  // Which tab to land on. "Run on test data" hands off to the Workflow tab
+  // (where run history lives); a plain open stays on the UI tab.
+  initialTab?: ToolTab;
 }
 
 export function InternalToolDetail({
   tool,
   onBack,
   onStartCall,
+  initialTab = "ui",
 }: InternalToolDetailProps) {
-  const [tab, setTab] = useState<ToolTab>("ui");
+  const [tab, setTab] = useState<ToolTab>(initialTab);
   const [editing, setEditing] = useState(false);
+  // Parent-owned version state: an edit applied in ToolEditChat lifts up here so
+  // the version meta and version history reflect the publish. Seeded from the
+  // tool prop; remounted per tool via a key at the mount site (OperatorApp).
+  const [version, setVersion] = useState(tool.version);
+  const [versions, setVersions] = useState<ToolVersion[]>(tool.versions);
   const isInbound = tool.id === "inbound-routing";
   const canEdit = tool.status !== "suggested";
+
+  function handleApply(applied: ToolVersion) {
+    setVersion(applied.version);
+    setVersions((prev) => [applied, ...prev]);
+  }
 
   return (
     <div className={`opr-detail-wrap${editing ? " is-editing" : ""}`}>
       <div className="opr-surface-wide">
-      <button type="button" className="opr-back" onClick={onBack}>
-        <ArrowLeft size={13} strokeWidth={1.9} aria-hidden />
-        All tools
-      </button>
+        <button type="button" className="opr-back" onClick={onBack}>
+          <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
+          All tools
+        </button>
 
-      <div className="opr-detail-head">
-        <span className="opr-tool-emoji" aria-hidden>
-          {sigil(tool.name)}
-        </span>
-        <div className="opr-detail-titles">
-          <div className="opr-detail-name">{tool.name}</div>
-          <p className="opr-tool-summary">{tool.summary}</p>
-          <div className="opr-tool-meta">
-            <ToolStatusBadge status={tool.status} />
-            <span className="opr-meta-dot">
-              v{tool.version} · built from {tool.builtFrom}
-            </span>
-            <span className="opr-meta-dot">{tool.runsToday} runs today</span>
+        <div className="opr-detail-head">
+          <span className="opr-tool-emoji" aria-hidden={true}>
+            {sigil(tool.name)}
+          </span>
+          <div className="opr-detail-titles">
+            <div className="opr-detail-name">{tool.name}</div>
+            <p className="opr-tool-summary">{tool.summary}</p>
+            <div className="opr-tool-meta">
+              <ToolStatusBadge status={tool.status} />
+              <span className="opr-meta-dot">
+                v{version} · built from {tool.builtFrom}
+              </span>
+              <span className="opr-meta-dot">{tool.runsToday} runs today</span>
+            </div>
+          </div>
+          <div className="opr-detail-actions">
+            {canEdit && (
+              <button
+                type="button"
+                className="opr-btn opr-btn-sm"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil size={13} strokeWidth={1.9} aria-hidden={true} />
+                Edit with AI
+              </button>
+            )}
+            {tool.status === "enabled" && (
+              <>
+                <button type="button" className="opr-btn opr-btn-sm">
+                  <Power size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Disable
+                </button>
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-primary opr-btn-sm"
+                >
+                  <CheckCircle2
+                    size={13}
+                    strokeWidth={1.9}
+                    aria-hidden={true}
+                  />
+                  Publish new version
+                </button>
+              </>
+            )}
+            {tool.status === "disabled" && (
+              <>
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-primary opr-btn-sm"
+                >
+                  <Power size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Enable
+                </button>
+                <button type="button" className="opr-btn opr-btn-sm">
+                  <CheckCircle2
+                    size={13}
+                    strokeWidth={1.9}
+                    aria-hidden={true}
+                  />
+                  Publish new version
+                </button>
+              </>
+            )}
+            {tool.status === "draft" && (
+              <>
+                <button type="button" className="opr-btn opr-btn-sm">
+                  <Play size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Run on test data
+                </button>
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-primary opr-btn-sm"
+                >
+                  <CheckCircle2
+                    size={13}
+                    strokeWidth={1.9}
+                    aria-hidden={true}
+                  />
+                  Publish
+                </button>
+              </>
+            )}
+            {tool.status === "suggested" && (
+              <button
+                type="button"
+                className="opr-btn opr-btn-primary opr-btn-sm"
+              >
+                <Plus size={13} strokeWidth={1.9} aria-hidden={true} />
+                Build it
+              </button>
+            )}
           </div>
         </div>
-        <div className="opr-detail-actions">
-          {canEdit && (
-            <button
-              type="button"
-              className="opr-btn opr-btn-sm"
-              onClick={() => setEditing(true)}
-            >
-              <Pencil size={13} strokeWidth={1.9} aria-hidden />
-              Edit with AI
-            </button>
+
+        <Tabs
+          tabs={TABS}
+          active={tab}
+          onSelect={setTab}
+          hint={tab === "workflow" ? "deterministic · audited" : undefined}
+        />
+
+        <div
+          role="tabpanel"
+          id={`opr-panel-${tab}`}
+          aria-labelledby={`opr-tab-${tab}`}
+        >
+          {tab === "ui" &&
+            (isInbound ? (
+              <UITab />
+            ) : (
+              <EmptyState
+                glyph="◧"
+                title="No screen built yet"
+                hint="Build the screen your team will use to run this tool. Talk it through on a call and your AI assembles it."
+                actionLabel="Teach your workflow to Nex"
+                onAction={onStartCall}
+              />
+            ))}
+          {tab === "workflow" && (
+            <WorkflowTab tool={tool} versions={versions} />
           )}
-          {tool.status === "enabled" && (
-            <>
-              <button type="button" className="opr-btn opr-btn-sm">
-                <Power size={13} strokeWidth={1.9} aria-hidden />
-                Disable
-              </button>
-              <button
-                type="button"
-                className="opr-btn opr-btn-primary opr-btn-sm"
-              >
-                <CheckCircle2 size={13} strokeWidth={1.9} aria-hidden />
-                Publish new version
-              </button>
-            </>
-          )}
-          {tool.status === "disabled" && (
-            <>
-              <button
-                type="button"
-                className="opr-btn opr-btn-primary opr-btn-sm"
-              >
-                <Power size={13} strokeWidth={1.9} aria-hidden />
-                Enable
-              </button>
-              <button type="button" className="opr-btn opr-btn-sm">
-                <CheckCircle2 size={13} strokeWidth={1.9} aria-hidden />
-                Publish new version
-              </button>
-            </>
-          )}
-          {tool.status === "draft" && (
-            <>
-              <button type="button" className="opr-btn opr-btn-sm">
-                <Play size={13} strokeWidth={1.9} aria-hidden />
-                Run on test data
-              </button>
-              <button
-                type="button"
-                className="opr-btn opr-btn-primary opr-btn-sm"
-              >
-                <CheckCircle2 size={13} strokeWidth={1.9} aria-hidden />
-                Publish
-              </button>
-            </>
-          )}
-          {tool.status === "suggested" && (
-            <button
-              type="button"
-              className="opr-btn opr-btn-primary opr-btn-sm"
-            >
-              <Plus size={13} strokeWidth={1.9} aria-hidden />
-              Build it
-            </button>
-          )}
+          {tab === "data" &&
+            (isInbound ? (
+              <DataTab tool={tool} />
+            ) : (
+              <EmptyState
+                glyph="▦"
+                title="No data yet"
+                hint="Run this tool on test data. The rows it produces, with their statuses, show up here as a table you own."
+                actionLabel="Run on test data"
+              />
+            ))}
         </div>
-      </div>
-
-      <Tabs
-        tabs={TABS}
-        active={tab}
-        onSelect={setTab}
-        hint={tab === "workflow" ? "deterministic · audited" : undefined}
-      />
-
-      <div
-        role="tabpanel"
-        id={`opr-panel-${tab}`}
-        aria-labelledby={`opr-tab-${tab}`}
-      >
-        {tab === "ui" &&
-          (isInbound ? (
-            <UITab />
-          ) : (
-            <EmptyState
-              glyph="◧"
-              title="No screen built yet"
-              hint="Build the screen your team will use to run this tool. Talk it through on a call and your AI assembles it."
-              actionLabel="Teach your workflow to Nex"
-              onAction={onStartCall}
-            />
-          ))}
-        {tab === "workflow" && <WorkflowTab tool={tool} />}
-        {tab === "data" &&
-          (isInbound ? (
-            <DataTab tool={tool} />
-          ) : (
-            <EmptyState
-              glyph="▦"
-              title="No data yet"
-              hint="Run this tool on test data. The rows it produces, with their statuses, show up here as a table you own."
-              actionLabel="Run on test data"
-            />
-          ))}
-      </div>
       </div>
 
       {editing ? (
-        <ToolEditChat tool={tool} onClose={() => setEditing(false)} />
+        <ToolEditChat
+          tool={tool}
+          onClose={() => setEditing(false)}
+          onApply={handleApply}
+        />
       ) : null}
     </div>
   );
@@ -257,67 +290,75 @@ function UITab() {
           actionLabel="Run on test data"
         />
       ) : (
-      <div className="opr-table-wrap">
-        <div className="opr-table-toolbar">
-          <Eyebrow>Incoming demo requests · today</Eyebrow>
-          <span className="opr-pill opr-pill-muted">{rows.length} requests</span>
-        </div>
-        <table className="opr-table">
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th>Contact</th>
-              <th>Source</th>
-              <th>Fit</th>
-              <th>Status</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <div className="opr-cell-primary">{r.company}</div>
-                  <div className="opr-cell-sub">{r.receivedAt}</div>
-                </td>
-                <td>
-                  <div>{r.contact}</div>
-                  <div className="opr-cell-sub">{r.email}</div>
-                </td>
-                <td className="opr-cell-sub">{r.source}</td>
-                <td>
-                  <ScorePill score={r.fitScore} />
-                </td>
-                <td>
-                  <RequestStatusPill status={r.status} />
-                  {r.routedTo ? (
-                    <div className="opr-cell-sub">assigned to {r.routedTo}</div>
-                  ) : null}
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  {r.status === "scored" &&
-                  r.fitScore !== null &&
-                  r.fitScore >= 70 ? (
-                    <button
-                      type="button"
-                      className="opr-btn opr-btn-sm"
-                      onClick={() => setPending(r)}
-                    >
-                      Route
-                      <Send size={13} strokeWidth={1.9} aria-hidden />
-                    </button>
-                  ) : r.status === "needs-you" ? (
-                    <button type="button" className="opr-btn opr-btn-sm">
-                      <ArrowRight size={13} strokeWidth={1.9} aria-hidden />
-                      Review
-                    </button>
-                  ) : null}
-                </td>
+        <div className="opr-table-wrap">
+          <div className="opr-table-toolbar">
+            <Eyebrow>Incoming demo requests · today</Eyebrow>
+            <span className="opr-pill opr-pill-muted">
+              {rows.length} requests
+            </span>
+          </div>
+          <table className="opr-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Source</th>
+                <th>Fit</th>
+                <th>Status</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <div className="opr-cell-primary">{r.company}</div>
+                    <div className="opr-cell-sub">{r.receivedAt}</div>
+                  </td>
+                  <td>
+                    <div>{r.contact}</div>
+                    <div className="opr-cell-sub">{r.email}</div>
+                  </td>
+                  <td className="opr-cell-sub">{r.source}</td>
+                  <td>
+                    <ScorePill score={r.fitScore} />
+                  </td>
+                  <td>
+                    <RequestStatusPill status={r.status} />
+                    {r.routedTo ? (
+                      <div className="opr-cell-sub">
+                        assigned to {r.routedTo}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {r.status === "scored" &&
+                    r.fitScore !== null &&
+                    r.fitScore >= 70 ? (
+                      <button
+                        type="button"
+                        className="opr-btn opr-btn-sm"
+                        onClick={() => setPending(r)}
+                      >
+                        Route
+                        <Send size={13} strokeWidth={1.9} aria-hidden={true} />
+                      </button>
+                    ) : r.status === "needs-you" ? (
+                      <button type="button" className="opr-btn opr-btn-sm">
+                        <ArrowRight
+                          size={13}
+                          strokeWidth={1.9}
+                          aria-hidden={true}
+                        />
+                        Review
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -338,7 +379,13 @@ function stepNodeClass(kind: WorkflowStep["kind"]): string {
   return `opr-step-node opr-step-node-${kind}`;
 }
 
-function WorkflowTab({ tool }: { tool: InternalTool }) {
+function WorkflowTab({
+  tool,
+  versions,
+}: {
+  tool: InternalTool;
+  versions: ToolVersion[];
+}) {
   return (
     <div className="opr-detail-cols">
       <div>
@@ -347,7 +394,7 @@ function WorkflowTab({ tool }: { tool: InternalTool }) {
           {tool.steps.map((step, i) => (
             <div className="opr-step" key={step.id}>
               <div className="opr-step-rail">
-                <div className={stepNodeClass(step.kind)} aria-hidden>
+                <div className={stepNodeClass(step.kind)} aria-hidden={true}>
                   {STEP_GLYPH[step.kind]}
                 </div>
                 {i < tool.steps.length - 1 ? (
@@ -409,7 +456,7 @@ function WorkflowTab({ tool }: { tool: InternalTool }) {
         <div className="opr-rail-card">
           <Eyebrow>Version history</Eyebrow>
           <div style={{ marginTop: "var(--space-2)" }}>
-            {tool.versions.map((v) => (
+            {versions.map((v) => (
               <div className="opr-version-row" key={v.version}>
                 <span className="opr-version-num">v{v.version}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -439,16 +486,13 @@ function DataTab({ tool }: { tool: InternalTool }) {
   return (
     <div>
       <Eyebrow>Requests</Eyebrow>
-      <div
-            className="opr-table-wrap"
-            style={{ marginTop: "var(--space-3)" }}
-          >
+      <div className="opr-table-wrap" style={{ marginTop: "var(--space-3)" }}>
         <div className="opr-table-toolbar">
           <span className="opr-pill opr-pill-muted">
             {INBOUND_REQUESTS.length} rows
           </span>
           <button type="button" className="opr-btn opr-btn-sm">
-            <Plus size={13} strokeWidth={1.9} aria-hidden />
+            <Plus size={13} strokeWidth={1.9} aria-hidden={true} />
             Add column
           </button>
         </div>

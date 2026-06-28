@@ -118,13 +118,19 @@ export function planWorkflow(description: string): WorkflowPlan {
     "salesforce",
   );
   if (wantsEnrich) {
-    const onCrm = has(t, "crm", "hubspot", "salesforce", "account", "company");
+    // Honor the CRM the operator named. Salesforce wins when mentioned by name;
+    // otherwise the generic CRM/account/company words default to HubSpot.
+    const crmIntegration = has(t, "salesforce")
+      ? "Salesforce"
+      : has(t, "crm", "hubspot", "account", "company")
+        ? "HubSpot"
+        : undefined;
     steps.push({
       id: ENRICH_ID,
       kind: "enrich",
       title: "Look up the record",
       detail: "Find the matching account and its details before deciding.",
-      integration: onCrm ? "HubSpot" : undefined,
+      integration: crmIntegration,
     });
   }
 
@@ -220,7 +226,9 @@ export function planWorkflow(description: string): WorkflowPlan {
   });
 
   // 6. Branch — the "otherwise" path, if implied.
-  if (has(t, "otherwise", "else", "nurture", "queue", "ignore", "rest", "low")) {
+  if (
+    has(t, "otherwise", "else", "nurture", "queue", "ignore", "rest", "low")
+  ) {
     const nurture = has(t, "nurture");
     steps.push({
       id: BRANCH_ID,
@@ -275,18 +283,53 @@ export function applyClarify(
   answer: string,
 ): WorkflowStep[] {
   if (field === "threshold") {
-    const num = answer.match(/\d{1,3}/)?.[0] ?? "70";
+    // Preserve what the step actually gates on. A dollar amount stays an
+    // amount; a classify/severity flow stays severity; otherwise it is a fit
+    // score. Hardcoding "Is the score at least N?" turned expense and support
+    // flows into nonsense after a refine.
+    const amount = answer.match(/\$\s?(\d[\d,]*\s?[km]?)/i);
+    const aiStep = steps.find((s) => s.id === AI_ID);
+    const isClassify = aiStep?.title.startsWith("Classify") ?? false;
+    return steps.map((s) => {
+      if (s.id !== DECISION_ID) return s;
+      if (amount) {
+        const label = `$${amount[1].replace(/\s/g, "")}`;
+        return {
+          ...s,
+          title: `Is it over ${label}?`,
+          detail: `Over ${label} routes to a person; everything else takes the other branch.`,
+        };
+      }
+      const num = answer.match(/\d{1,3}/)?.[0] ?? "70";
+      if (isClassify) {
+        return {
+          ...s,
+          title: `Is it severity ${num} or higher?`,
+          detail: `Severity ${num} and above routes to a person; everything else takes the other branch.`,
+        };
+      }
+      return {
+        ...s,
+        title: `Is the score at least ${num}?`,
+        detail: `At or above ${num} routes to a person; everything else takes the other branch.`,
+      };
+    });
+  }
+  // channel — a Slack send wants a #channel; an email handoff wants a recipient.
+  // Forcing a "#" prefix and "Post to …" wording onto a Gmail step produced
+  // nonsense like "Post to #owner@acme.com".
+  const action = steps.find((s) => s.id === ACTION_ID);
+  if (action?.integration === "Gmail") {
+    const recipient = answer.trim();
     return steps.map((s) =>
-      s.id === DECISION_ID
+      s.id === ACTION_ID
         ? {
             ...s,
-            title: `Is the score at least ${num}?`,
-            detail: `At or above ${num} routes to a person; everything else takes the other branch.`,
+            detail: `Email ${recipient} the result with the reason so they have context.`,
           }
         : s,
     );
   }
-  // channel
   const channel =
     answer.match(/#[\w-]+/)?.[0] ??
     (answer.trim().startsWith("#") ? answer.trim() : `#${answer.trim()}`);

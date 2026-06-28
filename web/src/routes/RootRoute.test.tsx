@@ -67,6 +67,9 @@ vi.mock("../hooks/useBrokerEvents", () => ({ useBrokerEvents: vi.fn() }));
 vi.mock("../hooks/useKeyboardShortcuts", () => ({
   useKeyboardShortcuts: vi.fn(),
 }));
+vi.mock("../operator/OperatorApp", () => ({
+  OperatorApp: () => <div data-testid="operator-stub" />,
+}));
 
 vi.mock("../api/client", async () => {
   const actual =
@@ -106,6 +109,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  window.location.hash = "";
 });
 
 describe("RootRoute bootstrap fallback", () => {
@@ -160,6 +164,19 @@ describe("RootRoute bootstrap fallback", () => {
     renderRoot();
 
     expect(await screen.findByTestId("prepick-stub")).toBeInTheDocument();
+    expect(screen.queryByTestId("broker-unreachable")).not.toBeInTheDocument();
+  });
+
+  it("does not boot the office broker on the /#/operator route", async () => {
+    // The operator shell is self-contained; gating must keep the bootstrap from
+    // firing initApi()/onboarding traffic and the failing retry loop.
+    window.location.hash = "#/operator";
+
+    renderRoot();
+
+    expect(await screen.findByTestId("operator-stub")).toBeInTheDocument();
+    expect(initApiMock).not.toHaveBeenCalled();
+    expect(getMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId("broker-unreachable")).not.toBeInTheDocument();
   });
 

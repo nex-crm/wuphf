@@ -944,6 +944,10 @@ export default function RootRoute() {
   }, [theme]);
 
   useEffect(() => {
+    // The operator shell at /#/operator is self-contained and never talks to
+    // the office broker. Skip the whole bootstrap so it does not fire initApi(),
+    // hit /onboarding/state, or arm the retry loop with failing broker traffic.
+    if (isOperatorRoute) return;
     let cancelled = false;
     let unreachable = false;
     initApi()
@@ -997,20 +1001,20 @@ export default function RootRoute() {
     return () => {
       cancelled = true;
     };
-  }, [bootAttempt, setBrokerConnected, setOnboardingComplete]);
+  }, [bootAttempt, isOperatorRoute, setBrokerConnected, setOnboardingComplete]);
 
   // Auto-retry while the broker is unreachable — the fallback copy promises
   // "retrying…", so keep that promise without requiring a click. Reads
   // bootAttempt (not a functional update) so a failed retry — which leaves
   // bootError true but bumps the attempt — re-arms the timer.
   useEffect(() => {
-    if (!bootError) return;
+    if (isOperatorRoute || !bootError) return;
     const next = bootAttempt + 1;
     const timer = setTimeout(() => {
       setBootAttempt(next);
     }, BOOT_RETRY_MS);
     return () => clearTimeout(timer);
-  }, [bootError, bootAttempt]);
+  }, [isOperatorRoute, bootError, bootAttempt]);
 
   let body: ReactNode;
   if (isOperatorRoute) {

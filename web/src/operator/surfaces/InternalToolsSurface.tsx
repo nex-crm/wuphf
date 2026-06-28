@@ -6,8 +6,8 @@ import { ArrowRight, PhoneCall, Plus } from "lucide-react";
 
 import {
   Eyebrow,
-  sigil,
   SurfaceHeader,
+  sigil,
   ToolStatusBadge,
 } from "../components/primitives";
 import { type InternalTool, TOOLS } from "../mock/data";
@@ -42,15 +42,11 @@ export function InternalToolsSurface({
               className="opr-btn opr-btn-primary"
               onClick={onBuild}
             >
-              <Plus size={14} strokeWidth={1.9} aria-hidden />
+              <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
               Build a tool
             </button>
-            <button
-              type="button"
-              className="opr-btn"
-              onClick={onStartCall}
-            >
-              <PhoneCall size={14} strokeWidth={1.9} aria-hidden />
+            <button type="button" className="opr-btn" onClick={onStartCall}>
+              <PhoneCall size={14} strokeWidth={1.9} aria-hidden={true} />
               Teach your workflow to Nex
             </button>
           </div>
@@ -114,7 +110,7 @@ function HeroToolCard({
       style={{ cursor: "pointer", marginBottom: "var(--space-2)" }}
     >
       <div className="opr-detail-head" style={{ marginBottom: 0 }}>
-        <span className="opr-tool-emoji" aria-hidden>
+        <span className="opr-tool-emoji" aria-hidden={true}>
           {sigil(tool.name)}
         </span>
         <div className="opr-detail-titles">
@@ -126,22 +122,16 @@ function HeroToolCard({
             <span className="opr-meta-dot">last run {tool.lastRun}</span>
           </div>
         </div>
-        <button type="button" className="opr-btn opr-btn-sm">
+        <span className="opr-btn opr-btn-sm" aria-hidden={true}>
           Open
-          <ArrowRight size={13} strokeWidth={1.9} aria-hidden />
-        </button>
+          <ArrowRight size={13} strokeWidth={1.9} />
+        </span>
       </div>
     </div>
   );
 }
 
-function ToolRow({
-  tool,
-  onOpen,
-}: {
-  tool: InternalTool;
-  onOpen: () => void;
-}) {
+function ToolRow({ tool, onOpen }: { tool: InternalTool; onOpen: () => void }) {
   return (
     <div
       className="opr-tool-row"
@@ -155,7 +145,7 @@ function ToolRow({
         }
       }}
     >
-      <span className="opr-tool-emoji" aria-hidden>
+      <span className="opr-tool-emoji" aria-hidden={true}>
         {sigil(tool.name)}
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>

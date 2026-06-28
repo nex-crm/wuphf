@@ -44,13 +44,14 @@ export function SettingsSurface() {
             <div>
               <div className="opr-set-label">Let wuphf host voice for me</div>
               <div className="opr-set-help">
-                Metered through wuphf cloud. With no key and this off, the call is
-                optional. You can still build everything from chat.
+                Metered through wuphf cloud. With no key and this off, the call
+                is optional. You can still build everything from chat.
               </div>
             </div>
             <button
               type="button"
               aria-pressed={nexHosted}
+              aria-label="Let wuphf host voice for me"
               className={`opr-toggle${nexHosted ? " is-on" : ""}`}
               onClick={() => setNexHosted((v) => !v)}
             />
@@ -70,6 +71,7 @@ export function SettingsSurface() {
             <button
               type="button"
               aria-pressed={digestOn}
+              aria-label="Daily digest"
               className={`opr-toggle${digestOn ? " is-on" : ""}`}
               onClick={() => setDigestOn((v) => !v)}
             />
@@ -100,6 +102,7 @@ export function SettingsSurface() {
             <button
               type="button"
               aria-pressed={approvalsOn}
+              aria-label="Ask before sending externally"
               className={`opr-toggle${approvalsOn ? " is-on" : ""}`}
               onClick={() => setApprovalsOn((v) => !v)}
             />

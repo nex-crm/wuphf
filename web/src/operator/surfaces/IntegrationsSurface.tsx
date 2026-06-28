@@ -5,8 +5,8 @@
 import {
   Eyebrow,
   IntegrationStatusPill,
-  sigil,
   SurfaceHeader,
+  sigil,
 } from "../components/primitives";
 import { INTEGRATIONS, type Integration } from "../mock/data";
 
@@ -50,8 +50,8 @@ function IntegrationCard({ integration }: { integration: Integration }) {
   const needsAttn = integration.status === "needs-attention";
   return (
     <div className="opr-int-card">
-      <span className="opr-int-emoji" aria-hidden>
-        {sigil(integration.name)}
+      <span className="opr-int-emoji" aria-hidden={true}>
+        {integration.emoji || sigil(integration.name)}
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
