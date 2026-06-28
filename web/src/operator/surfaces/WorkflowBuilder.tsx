@@ -252,11 +252,6 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   const seq = useRef(0);
   const startedAt = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
-  // Live token estimate from streamed chars, until the authoritative usage count
-  // arrives at the turn's end — so the counter moves during the reasoning, not
-  // only after it. Keyed by streamId so a replaced partial updates, not sums.
-  const streamChars = useRef<Record<string, number>>({});
-  const gotUsage = useRef(false);
   // Latest token count, mirrored to a ref so the completion handler can snapshot
   // the final telemetry onto the settled turn ("Thinking · 12s · 10.8k tokens").
   const tokensRef = useRef(0);
@@ -337,8 +332,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     setPendingClarify(null);
     setTokens(0);
     setElapsedMs(0);
-    streamChars.current = {};
-    gotUsage.current = false;
+    tokensRef.current = 0;
     startedAt.current = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -353,23 +347,13 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
       { id: traceId, from: "ai", body: "", trace: [] },
     ]);
     const appendActivity = (a: BuildActivity) => {
-      // Usage is telemetry, not a line: the authoritative token count.
+      // Usage is telemetry, not a line: the authoritative token count from the
+      // provider (includes hidden reasoning tokens), shown live and snapshot onto
+      // the settled turn.
       if (a.kind === "usage") {
-        gotUsage.current = true;
         tokensRef.current = a.tokens ?? 0;
         setTokens(tokensRef.current);
         return;
-      }
-      // Keep the counter moving during the reasoning: estimate ~4 chars/token
-      // from streamed text until the real usage count supersedes it.
-      if (a.streamId && !gotUsage.current) {
-        streamChars.current[a.streamId] = a.text.length;
-        const chars = Object.values(streamChars.current).reduce(
-          (s, n) => s + n,
-          0,
-        );
-        tokensRef.current = Math.round(chars / 4);
-        setTokens(tokensRef.current);
       }
       setMessages((prev) =>
         prev.map((m) => {
