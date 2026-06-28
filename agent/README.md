@@ -12,7 +12,7 @@ data.ts`) and the Python harness, so it drops in behind the same `/build/stream`
 
 ## Layout
 
-```
+```text
 src/wire.ts        WorkflowSpec/Step + Build/Run request + RunResult; the build prompt; extractJson; validateSpec
 src/model.ts       model resolution: Ollama (key-free default) | subscription | BYOK
 src/buildAgent.ts  buildWorkflow(message) -> WorkflowSpec via pi-ai `complete`; streamWorkflow()

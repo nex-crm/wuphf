@@ -40,4 +40,5 @@ The clean-start scaffold: the FE-facing API is real end to end with a determinis
 stub build agent and a simulated executor. Slice S2 swaps the stub for the real
 LangChain deep agent (planning + gbrain/browsersniff tools over MCP) behind the same
 wire contract; S3 replaces the simulated executor with API-first replay. Runs
-key-free; `build_agent()` degrades to the stub unless the `agent` extra is installed.
+key-free; `build_agent()` degrades to the stub unless the `agent` extra is installed
+and a supported model credential is available.

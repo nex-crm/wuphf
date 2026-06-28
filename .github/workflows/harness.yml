@@ -28,6 +28,11 @@ jobs:
         working-directory: harness
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          # This job only needs read access; don't persist the workflow token in
+          # local git config where later install/test steps could reuse it
+          # (zizmor: artipacked).
+          persist-credentials: false
       - name: Set up venv + install (base + dev, NOT the `agent` extra)
         # Omit the `agent` extra (deepagents/claude-agent-sdk): it is absent in CI so
         # the degrade-to-stub path runs here. A venv sidesteps PEP 668.

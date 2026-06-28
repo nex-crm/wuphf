@@ -10,8 +10,10 @@ PORT="$PORT" bun run src/service.ts &
 PID=$!
 trap 'kill "$PID" 2>/dev/null || true' EXIT
 
-for _ in $(seq 1 50); do curl -fsS -m 1 "$BASE/health" >/dev/null 2>&1 && break; sleep 0.2; done
 fail() { echo "SMOKE FAIL: $1" >&2; exit 1; }
+ready=""
+for _ in $(seq 1 50); do curl -fsS -m 1 "$BASE/health" >/dev/null 2>&1 && { ready=1; break; }; sleep 0.2; done
+[ -n "$ready" ] || fail "service never became ready on $BASE (startup regressed?)"
 
 echo "== health =="; curl -fsS "$BASE/health" | python3 -m json.tool
 echo "== providers =="; curl -fsS "$BASE/providers" | python3 -m json.tool
