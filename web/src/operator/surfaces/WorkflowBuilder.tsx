@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { ArrowRight, Check, Send, X } from "lucide-react";
 
-import { ThinkingLoader } from "../../components/ui/ThinkingLoader";
+import { useCyclingPhrase } from "../../hooks/useCyclingPhrase";
 import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { type BuildActivity, buildPlanSmart } from "../builder/agentClient";
 import {
@@ -43,22 +43,14 @@ const ACTIVE_PHASES: ReadonlySet<Phase> = new Set<Phase>([
   "assembling",
 ]);
 
-// One line of the agent's workings, rendered by kind in pi's grammar:
-//  - thinking: the model's reasoning, dimmed + italic markdown (pi's thinkingText)
-//  - text:     the model's prose, as markdown
-//  - tool:     a tool call, mono, e.g. `$ ls` / `read path` (pi's tool title)
-//  - tool_result: the tool's output, mono + dimmed, newlines preserved (the BE
-//                 already caps it with a "+N more lines" note, like pi's client)
-//  - submitted/status: milestones and system lines
+// One non-thinking line of the agent's workings, rendered by kind in pi's
+// grammar and marked Claude-Code style (⏺ a tool call, ⎿ its result):
+//  - text:        the model's prose, as markdown
+//  - tool:        a tool call, mono, e.g. `$ ls` / `read path` (pi's tool title)
+//  - tool_result: the tool's output, mono + dimmed, nested under the call
+//  - submitted:   the milestone where the plan is registered
 function ActivityLine({ activity }: { activity: TracedActivity }) {
   const { kind, text } = activity;
-  if (kind === "thinking") {
-    return (
-      <div className="opr-act-line opr-act-think">
-        <ReactMarkdown skipHtml={true}>{text}</ReactMarkdown>
-      </div>
-    );
-  }
   if (kind === "text") {
     return (
       <div className="opr-act-line opr-act-text">
@@ -67,43 +59,88 @@ function ActivityLine({ activity }: { activity: TracedActivity }) {
     );
   }
   if (kind === "tool_result") {
-    return <pre className="opr-act-line opr-act-result">{text}</pre>;
+    return (
+      <pre className="opr-act-line opr-act-result">
+        <span className="opr-act-marker" aria-hidden={true}>
+          ⎿
+        </span>
+        <span className="opr-act-result-text">{text}</span>
+      </pre>
+    );
   }
   if (kind === "tool" || kind === "submitted") {
     return (
       <div className={`opr-act-line opr-act-${kind}`}>
         <span className="opr-act-marker" aria-hidden={true}>
-          {kind === "submitted" ? "✓" : "›"}
+          {kind === "submitted" ? "✓" : "⏺"}
         </span>
         {text}
       </div>
     );
   }
-  return <div className="opr-act-line opr-act-status">{text}</div>;
+  return null;
 }
 
-// The agent's live workings, mirroring pi's own client. Open while the agent
-// works, then collapses to a disclosure so the chat history stays clean.
-function ActivityTrace({
-  activities,
-  phase,
+// One agentic turn, woven inline in the thread (the Claude-cowork layout): a
+// collapsible Thinking block on top, then tool calls + their results and the
+// model's prose in order. Open while the turn is live, collapsed once settled so
+// the thread stays a clean conversation, not a wall of reasoning.
+function BuildTurn({
+  trace,
+  active,
 }: {
-  activities: TracedActivity[];
-  phase: Phase;
+  trace: TracedActivity[];
+  active: boolean;
 }) {
-  if (activities.length === 0) return null;
-  const active = ACTIVE_PHASES.has(phase);
+  const thinking = trace.filter((t) => t.kind === "thinking");
+  const steps = trace.filter(
+    (t) => t.kind !== "thinking" && t.kind !== "status",
+  );
+  if (thinking.length === 0 && steps.length === 0) return null;
   return (
-    <details className="opr-activity" open={active}>
-      <summary className="opr-activity-summary">
-        {active ? "Working" : "How your AI built this"}
-      </summary>
-      <div className="opr-activity-trace" aria-live="polite">
-        {activities.map((a) => (
-          <ActivityLine key={a.id} activity={a} />
-        ))}
-      </div>
-    </details>
+    <div className="opr-turn">
+      {thinking.length > 0 ? (
+        <details className="opr-think-block" open={active}>
+          <summary className="opr-think-summary">Thinking</summary>
+          <div className="opr-think-body">
+            {thinking.map((t) => (
+              <div key={t.id} className="opr-act-think">
+                <ReactMarkdown skipHtml={true}>{t.text}</ReactMarkdown>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+      {steps.map((a) => (
+        <ActivityLine key={a.id} activity={a} />
+      ))}
+    </div>
+  );
+}
+
+// The live "still working" indicator, trace-native (not the chat-bubble loader):
+// soft wave dots plus a cycling Office gerund, in the builder's own type so it
+// reads as part of the workings, not a message. Decorative text is aria-hidden
+// behind a stable status label.
+function BuildingIndicator() {
+  const phrase = useCyclingPhrase(OFFICE_LOADING_PHRASES, 2400, true);
+  return (
+    <div
+      className="opr-act-working"
+      role="status"
+      aria-label="Your AI is building the workflow"
+    >
+      <span className="opr-work-dots" aria-hidden={true}>
+        <span />
+        <span />
+        <span />
+      </span>
+      {phrase ? (
+        <span key={phrase} className="opr-work-phrase" aria-hidden={true}>
+          {phrase}…
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -120,6 +157,9 @@ interface BuilderMessage {
   from: "you" | "ai";
   body: string;
   finish?: FinishCard;
+  // When present, this message is the agent's workings for a turn (thinking +
+  // tool calls + prose), rendered inline by BuildTurn instead of a bubble.
+  trace?: TracedActivity[];
 }
 
 const STARTERS: readonly string[] = [
@@ -162,7 +202,6 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     null,
   );
   const [flashStepId, setFlashStepId] = useState<string | null>(null);
-  const [activities, setActivities] = useState<TracedActivity[]>([]);
 
   const timers = useRef<number[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -180,7 +219,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages, phase, activities]);
+  }, [messages, phase]);
 
   function nextId(prefix: string) {
     seq.current += 1;
@@ -222,15 +261,32 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     setFlashStepId(null);
     setRevealCount(0);
     setPendingClarify(null);
-    setActivities([]);
     setPhase("thinking");
+
+    // Anchor the agent's workings as a message in the thread so its reasoning and
+    // tool calls render INLINE, in turn order, where they happen — not in a
+    // trailing box. Activity streams into this anchor's trace as it arrives.
+    const traceId = nextId("trace");
+    setMessages((prev) => [
+      ...prev,
+      { id: traceId, from: "ai", body: "", trace: [] },
+    ]);
+    const appendActivity = (a: BuildActivity) =>
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === traceId
+            ? {
+                ...m,
+                trace: [...(m.trace ?? []), { ...a, id: m.trace?.length ?? 0 }],
+              }
+            : m,
+        ),
+      );
+
     // Real pi-mono engine when the agent service is reachable; deterministic mock
     // otherwise (frontend-first graceful degrade). The thinking phase covers the
-    // round-trip; activity streams in live (the agent's reasoning + tool calls);
-    // the staggered reveal below is unchanged.
-    void buildPlanSmart(text, (a) =>
-      setActivities((prev) => [...prev, { ...a, id: prev.length }]),
-    )
+    // round-trip; activity streams in live; the staggered reveal below is unchanged.
+    void buildPlanSmart(text, appendActivity)
       .then((built) => {
         setPlan(built);
         setTargetSteps(built.steps);
@@ -325,6 +381,8 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     (phase === "thinking" || phase === "assembling") &&
     revealCount < targetSteps.length;
   const composerLocked = phase === "thinking" || phase === "assembling";
+  // The turn whose workings are still live (so only it stays expanded).
+  const lastTraceId = messages.findLast((m) => m.trace)?.id;
 
   return (
     <div className="opr-builder">
@@ -348,63 +406,63 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
         </header>
 
         <div className="opr-builder-scroll" ref={scrollRef}>
-          {messages.map((m) => (
-            <div key={m.id} className="opr-edit-msgwrap">
-              <div
-                className={`opr-msg ${
-                  m.from === "ai" ? "opr-msg-ai" : "opr-msg-you"
-                }`}
-              >
-                {m.body}
-              </div>
-              {m.finish ? (
-                <div className="opr-finish-card">
-                  <div className="opr-finish-row">
-                    <span className="opr-finish-glyph" aria-hidden={true}>
-                      <Check size={15} strokeWidth={2.2} />
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="opr-finish-name">{m.finish.name}</div>
-                      <div className="opr-finish-sub">
-                        <ToolStatusBadge status="draft" />
-                        <span>{m.finish.steps.length}-step workflow</span>
+          {messages.map((m) =>
+            m.trace ? (
+              <BuildTurn
+                key={m.id}
+                trace={m.trace}
+                active={ACTIVE_PHASES.has(phase) && m.id === lastTraceId}
+              />
+            ) : (
+              <div key={m.id} className="opr-edit-msgwrap">
+                <div
+                  className={`opr-msg ${
+                    m.from === "ai" ? "opr-msg-ai" : "opr-msg-you"
+                  }`}
+                >
+                  {m.body}
+                </div>
+                {m.finish ? (
+                  <div className="opr-finish-card">
+                    <div className="opr-finish-row">
+                      <span className="opr-finish-glyph" aria-hidden={true}>
+                        <Check size={15} strokeWidth={2.2} />
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="opr-finish-name">{m.finish.name}</div>
+                        <div className="opr-finish-sub">
+                          <ToolStatusBadge status="draft" />
+                          <span>{m.finish.steps.length}-step workflow</span>
+                        </div>
                       </div>
                     </div>
+                    <div className="opr-finish-actions">
+                      <button
+                        type="button"
+                        className="opr-btn opr-btn-primary opr-btn-sm"
+                        onClick={() => onFinish(draftFrom(m.finish!), "open")}
+                      >
+                        Open the tool
+                        <ArrowRight
+                          size={13}
+                          strokeWidth={1.9}
+                          aria-hidden={true}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        className="opr-btn opr-btn-sm"
+                        onClick={() => onFinish(draftFrom(m.finish!), "run")}
+                      >
+                        Run on test data
+                      </button>
+                    </div>
                   </div>
-                  <div className="opr-finish-actions">
-                    <button
-                      type="button"
-                      className="opr-btn opr-btn-primary opr-btn-sm"
-                      onClick={() => onFinish(draftFrom(m.finish!), "open")}
-                    >
-                      Open the tool
-                      <ArrowRight
-                        size={13}
-                        strokeWidth={1.9}
-                        aria-hidden={true}
-                      />
-                    </button>
-                    <button
-                      type="button"
-                      className="opr-btn opr-btn-sm"
-                      onClick={() => onFinish(draftFrom(m.finish!), "run")}
-                    >
-                      Run on test data
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ))}
-          <ActivityTrace activities={activities} phase={phase} />
-          {ACTIVE_PHASES.has(phase) ? (
-            <ThinkingLoader
-              variant="inline"
-              label="Your AI is building the workflow"
-              phrases={OFFICE_LOADING_PHRASES}
-              className="opr-build-loader"
-            />
-          ) : null}
+                ) : null}
+              </div>
+            ),
+          )}
+          {ACTIVE_PHASES.has(phase) ? <BuildingIndicator /> : null}
         </div>
 
         {phase === "intro" ? (
