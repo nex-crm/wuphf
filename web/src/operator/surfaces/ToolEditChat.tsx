@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { InternalTool } from "../mock/data";
+import type { InternalTool, ToolVersion } from "../mock/data";
 
 interface Proposal {
   summary: string[];
@@ -23,6 +23,9 @@ interface EditMessage {
 interface ToolEditChatProps {
   tool: InternalTool;
   onClose: () => void;
+  // Lift an applied edit back to the parent tool model so the detail view's
+  // version meta and version history reflect the publish, not just this chat.
+  onApply: (version: ToolVersion) => void;
 }
 
 // Read the operator's request and turn it into a concrete, named change list.
@@ -49,7 +52,7 @@ function proposeFrom(text: string): string[] {
   return changes;
 }
 
-export function ToolEditChat({ tool, onClose }: ToolEditChatProps) {
+export function ToolEditChat({ tool, onClose, onApply }: ToolEditChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
   const [version, setVersion] = useState(tool.version);
@@ -82,7 +85,8 @@ export function ToolEditChat({ tool, onClose }: ToolEditChatProps) {
     setDraft("");
   }
 
-  function apply(msgId: string, v: number) {
+  function apply(msgId: string, proposal: Proposal) {
+    const v = proposal.version;
     setVersion(v);
     setMessages((prev) =>
       prev.map((m) => (m.id === msgId ? { ...m, applied: true } : m)),
@@ -95,6 +99,15 @@ export function ToolEditChat({ tool, onClose }: ToolEditChatProps) {
         body: `Done. Published v${v}. The change is live and shows in the version history.`,
       },
     ]);
+    // Hand the published version up so the parent tool model is the source of
+    // truth; the detail view's "v{n}" meta and version history update for real.
+    onApply({
+      version: v,
+      label: proposal.summary[0] ?? `Edited to v${v}`,
+      at: "Just now",
+      author: "you",
+      note: proposal.summary.join("; "),
+    });
   }
 
   return (
@@ -141,7 +154,7 @@ export function ToolEditChat({ tool, onClose }: ToolEditChatProps) {
                     <button
                       type="button"
                       className="opr-btn opr-btn-primary opr-btn-sm"
-                      onClick={() => apply(m.id, m.proposal!.version)}
+                      onClick={() => apply(m.id, m.proposal!)}
                     >
                       Apply &amp; publish
                     </button>

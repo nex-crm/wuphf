@@ -97,7 +97,8 @@ export const INBOUND_REQUESTS: InboundRequest[] = [
     receivedAt: "9:02am",
     fitScore: 92,
     status: "routed",
-    reason: "500+ employees, manufacturing, asked about API access. Strong ICP fit.",
+    reason:
+      "500+ employees, manufacturing, asked about API access. Strong ICP fit.",
     routedTo: "Priya (AE)",
   },
   {
@@ -121,7 +122,8 @@ export const INBOUND_REQUESTS: InboundRequest[] = [
     receivedAt: "9:31am",
     fitScore: 41,
     status: "nurturing",
-    reason: "Solo founder, 2 employees. Below size threshold, added to nurture.",
+    reason:
+      "Solo founder, 2 employees. Below size threshold, added to nurture.",
   },
   {
     id: "req-4",
@@ -131,8 +133,9 @@ export const INBOUND_REQUESTS: InboundRequest[] = [
     source: "Demo form",
     receivedAt: "9:48am",
     fitScore: 76,
-    status: "scored",
-    reason: "Good fit but no company match in CRM, confirm before routing.",
+    status: "routed",
+    reason: "Scored 76, matched in CRM, routed to the on-call AE.",
+    routedTo: "Marco (AE)",
   },
   {
     id: "req-5",
@@ -153,8 +156,9 @@ export const INBOUND_REQUESTS: InboundRequest[] = [
     source: "Demo form",
     receivedAt: "10:22am",
     fitScore: 84,
-    status: "scored",
-    reason: "Fintech, 300 employees, compliance use case. Routing on next run.",
+    status: "routed",
+    reason: "Fintech, 300 employees, compliance use case. Routed to an AE.",
+    routedTo: "Priya (AE)",
   },
 ];
 
@@ -200,7 +204,8 @@ const INBOUND_TOOL: InternalTool = {
       id: "s5",
       kind: "action",
       title: "Route to the on-call AE",
-      detail: "Post the lead + score + reason to #ae-handoffs and assign an AE.",
+      detail:
+        "Post the lead + score + reason to #ae-handoffs and assign an AE.",
       integration: "Slack",
       gated: true,
     },
@@ -573,12 +578,14 @@ export const KNOWLEDGE: KnowledgePage[] = [
       "The company most likely to buy: mid-market and up, in a core industry, with a named use case.",
     infobox: [
       { label: "Size floor", value: "200 employees" },
-      { label: "Core industries", value: "Manufacturing, Healthcare, Fintech, Logistics" },
+      {
+        label: "Core industries",
+        value: "Manufacturing, Healthcare, Fintech, Logistics",
+      },
       { label: "Fit threshold", value: "70 / 100" },
       { label: "Owner", value: "Maya (RevOps)" },
     ],
-    lead:
-      "The ideal customer profile (ICP) is the shape of company most likely to become a customer. It is the basis on which the inbound-routing tool scores every demo request and decides whether to route it to an account executive.[[1]]",
+    lead: "The ideal customer profile (ICP) is the shape of company most likely to become a customer. It is the basis on which the inbound-routing tool scores every demo request and decides whether to route it to an account executive.[[1]]",
     sections: [
       {
         heading: "Definition",
@@ -651,8 +658,7 @@ export const KNOWLEDGE: KnowledgePage[] = [
       { label: "Channel", value: "#ae-handoffs (Slack)" },
       { label: "Assignment", value: "Round-robin, on-call list" },
     ],
-    lead:
-      "The routing policy governs how a request that clears the fit threshold reaches a specific account executive.[[1]]",
+    lead: "The routing policy governs how a request that clears the fit threshold reaches a specific account executive.[[1]]",
     sections: [
       {
         heading: "Handoff",
@@ -682,7 +688,8 @@ export const KNOWLEDGE: KnowledgePage[] = [
         title: "On-call roster",
         detail: "Slack user group @ae-oncall",
         kind: "roster",
-        snippet: "@ae-oncall: Priya, Marco, Dana — rotates weekly, OOO members skipped.",
+        snippet:
+          "@ae-oncall: Priya, Marco, Dana — rotates weekly, OOO members skipped.",
         why: "Assignments pull live from this Slack group, so it is the source for who is currently on call and eligible for a handoff.",
       },
     ],
@@ -699,8 +706,7 @@ export const KNOWLEDGE: KnowledgePage[] = [
       { label: "Tool", value: "HubSpot workflow" },
       { label: "Re-entry", value: "On firmographic change" },
     ],
-    lead:
-      "The nurture sequence holds leads that do not yet clear the fit threshold and keeps them warm until they might.[[1]]",
+    lead: "The nurture sequence holds leads that do not yet clear the fit threshold and keeps them warm until they might.[[1]]",
     sections: [
       {
         heading: "Behavior",

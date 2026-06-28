@@ -12,13 +12,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Send, X } from "lucide-react";
 
-import { Eyebrow, ToolStatusBadge } from "../components/primitives";
-import { buildPlanSmart } from "../builder/agentClient";
+import { type BuildActivity, buildPlanSmart } from "../builder/agentClient";
 import {
   applyClarify,
   type ClarifyQuestion,
   type WorkflowPlan,
 } from "../builder/planWorkflow";
+import { Eyebrow, ToolStatusBadge } from "../components/primitives";
 import type { WorkflowStep } from "../mock/data";
 
 const STEP_GLYPH: Record<WorkflowStep["kind"], string> = {
@@ -31,6 +31,42 @@ const STEP_GLYPH: Record<WorkflowStep["kind"], string> = {
 };
 
 type Phase = "intro" | "thinking" | "assembling" | "refining" | "done";
+
+// Each streamed activity carries an id so the trace has stable React keys.
+type TracedActivity = BuildActivity & { id: number };
+
+const ACTIVE_PHASES: ReadonlySet<Phase> = new Set<Phase>([
+  "thinking",
+  "assembling",
+]);
+
+// The agent's live workings: its reasoning, the tools it touches, and brief
+// results, mirroring pi's own client. Open while the agent works, then collapses
+// to a disclosure so the chat history stays clean.
+function ActivityTrace({
+  activities,
+  phase,
+}: {
+  activities: TracedActivity[];
+  phase: Phase;
+}) {
+  if (activities.length === 0) return null;
+  const active = ACTIVE_PHASES.has(phase);
+  return (
+    <details className="opr-activity" open={active}>
+      <summary className="opr-activity-summary">
+        {active ? "Working" : "How your AI built this"}
+      </summary>
+      <div className="opr-activity-trace" aria-live="polite">
+        {activities.map((a) => (
+          <div key={a.id} className={`opr-act-line opr-act-${a.kind}`}>
+            {a.text}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
 
 interface FinishCard {
   name: string;
@@ -53,9 +89,22 @@ const STARTERS: readonly string[] = [
 const GREETING =
   "Tell me what you want to automate. Walk me through how you would do it by hand, start to finish, and I will build the workflow as you talk.";
 
+// The workflow the builder hands off on finish. Carries the clarified steps
+// (threshold/channel answers are applied into targetSteps), not just an id, so
+// nothing the operator confirmed is lost when the tool opens.
+export interface BuiltWorkflow {
+  name: string;
+  toolId: string;
+  steps: WorkflowStep[];
+}
+
+export type FinishMode = "open" | "run";
+
 interface WorkflowBuilderProps {
   onClose: () => void;
-  onFinish: (toolId: string) => void;
+  // mode distinguishes "open the tool" from "run on test data" so the two
+  // finish actions stay distinct end to end.
+  onFinish: (draft: BuiltWorkflow, mode: FinishMode) => void;
 }
 
 export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
@@ -71,6 +120,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     null,
   );
   const [flashStepId, setFlashStepId] = useState<string | null>(null);
+  const [activities, setActivities] = useState<TracedActivity[]>([]);
 
   const timers = useRef<number[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -88,7 +138,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages, phase]);
+  }, [messages, phase, activities]);
 
   function nextId(prefix: string) {
     seq.current += 1;
@@ -102,6 +152,12 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   }
   function pushYou(body: string) {
     setMessages((prev) => [...prev, { id: nextId("you"), from: "you", body }]);
+  }
+
+  // Snapshot the finished workflow with its current (clarified) steps so the
+  // handoff carries what was built, not just an id to a seeded mock.
+  function draftFrom(finish: FinishCard): BuiltWorkflow {
+    return { name: finish.name, toolId: finish.toolId, steps: targetSteps };
   }
 
   function presentFinish(p: WorkflowPlan) {
@@ -118,43 +174,60 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   function runBuild(text: string) {
     setRevealCount(0);
     setPendingClarify(null);
+    setActivities([]);
     setPhase("thinking");
     // Real pi-mono engine when the agent service is reachable; deterministic mock
     // otherwise (frontend-first graceful degrade). The thinking phase covers the
-    // round-trip; the staggered reveal below is unchanged.
-    void buildPlanSmart(text).then((built) => {
-    setPlan(built);
-    setTargetSteps(built.steps);
+    // round-trip; activity streams in live (the agent's reasoning + tool calls);
+    // the staggered reveal below is unchanged.
+    void buildPlanSmart(text, (a) =>
+      setActivities((prev) => [...prev, { ...a, id: prev.length }]),
+    )
+      .then((built) => {
+        setPlan(built);
+        setTargetSteps(built.steps);
 
-    const start = window.setTimeout(() => {
-      pushAI(built.narration);
-      setPhase("assembling");
-      built.steps.forEach((_, i) => {
-        const reveal = window.setTimeout(
-          () => setRevealCount((c) => Math.max(c, i + 1)),
-          280 + i * 440,
+        const start = window.setTimeout(() => {
+          pushAI(built.narration);
+          setPhase("assembling");
+          built.steps.forEach((_, i) => {
+            const reveal = window.setTimeout(
+              () => setRevealCount((c) => Math.max(c, i + 1)),
+              280 + i * 440,
+            );
+            track(reveal);
+          });
+          const done = window.setTimeout(
+            () => {
+              if (built.clarify) {
+                pushAI(built.clarify.prompt);
+                setPendingClarify(built.clarify);
+                setPhase("refining");
+              } else {
+                presentFinish(built);
+              }
+            },
+            280 + built.steps.length * 440 + 240,
+          );
+          track(done);
+        }, 720);
+        track(start);
+      })
+      .catch(() => {
+        // A reachable service that errored (the mock only covers unreachable).
+        // Tell the operator plainly and let them retry, rather than hang.
+        pushAI(
+          "I hit a problem building that one. Give it another try, or rephrase the steps.",
         );
-        track(reveal);
+        setPhase("intro");
       });
-      const done = window.setTimeout(
-        () => {
-          if (built.clarify) {
-            pushAI(built.clarify.prompt);
-            setPendingClarify(built.clarify);
-            setPhase("refining");
-          } else {
-            presentFinish(built);
-          }
-        },
-        280 + built.steps.length * 440 + 240,
-      );
-      track(done);
-    }, 720);
-    track(start);
-    });
   }
 
-  function handleAnswer(text: string, clarify: ClarifyQuestion, p: WorkflowPlan) {
+  function handleAnswer(
+    text: string,
+    clarify: ClarifyQuestion,
+    p: WorkflowPlan,
+  ) {
     setPhase("thinking");
     const t = window.setTimeout(() => {
       const updated = applyClarify(targetSteps, clarify.field, text);
@@ -207,7 +280,9 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
         <header className="opr-builder-head">
           <div>
             <Eyebrow>Build a tool</Eyebrow>
-            <div className="opr-builder-title">Describe it, I will build it</div>
+            <div className="opr-builder-title">
+              Describe it, I will build it
+            </div>
           </div>
           <button
             type="button"
@@ -215,7 +290,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
             onClick={onClose}
             aria-label="Close builder"
           >
-            <X size={13} strokeWidth={1.9} aria-hidden />
+            <X size={13} strokeWidth={1.9} aria-hidden={true} />
             Close
           </button>
         </header>
@@ -233,7 +308,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
               {m.finish ? (
                 <div className="opr-finish-card">
                   <div className="opr-finish-row">
-                    <span className="opr-finish-glyph" aria-hidden>
+                    <span className="opr-finish-glyph" aria-hidden={true}>
                       <Check size={15} strokeWidth={2.2} />
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -248,15 +323,19 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                     <button
                       type="button"
                       className="opr-btn opr-btn-primary opr-btn-sm"
-                      onClick={() => onFinish(m.finish!.toolId)}
+                      onClick={() => onFinish(draftFrom(m.finish!), "open")}
                     >
                       Open the tool
-                      <ArrowRight size={13} strokeWidth={1.9} aria-hidden />
+                      <ArrowRight
+                        size={13}
+                        strokeWidth={1.9}
+                        aria-hidden={true}
+                      />
                     </button>
                     <button
                       type="button"
                       className="opr-btn opr-btn-sm"
-                      onClick={() => onFinish(m.finish!.toolId)}
+                      onClick={() => onFinish(draftFrom(m.finish!), "run")}
                     >
                       Run on test data
                     </button>
@@ -265,7 +344,8 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
               ) : null}
             </div>
           ))}
-          {phase === "thinking" ? (
+          <ActivityTrace activities={activities} phase={phase} />
+          {phase === "thinking" && activities.length === 0 ? (
             <div className="opr-msg opr-msg-ai opr-thinking" aria-live="polite">
               <span className="opr-think-dot" />
               <span className="opr-think-dot" />
@@ -312,7 +392,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
             onClick={() => send()}
             disabled={composerLocked}
           >
-            <Send size={14} strokeWidth={1.9} aria-hidden />
+            <Send size={14} strokeWidth={1.9} aria-hidden={true} />
             Send
           </button>
         </div>
@@ -337,16 +417,16 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
 
         {visibleSteps.length === 0 && !showGhost ? (
           <div className="opr-canvas-empty">
-            <div className="opr-canvas-empty-glyph" aria-hidden>
+            <div className="opr-canvas-empty-glyph" aria-hidden={true}>
               ◇
             </div>
             <div className="opr-canvas-empty-title">
               Your workflow takes shape here
             </div>
             <p className="opr-canvas-empty-hint">
-              As you describe what should happen, each step appears on this side,
-              wired up and scripted, so you can see exactly what your AI is
-              building.
+              As you describe what should happen, each step appears on this
+              side, wired up and scripted, so you can see exactly what your AI
+              is building.
             </p>
           </div>
         ) : (
@@ -361,7 +441,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                 <div className="opr-step-rail">
                   <div
                     className={`opr-step-node opr-step-node-${step.kind}`}
-                    aria-hidden
+                    aria-hidden={true}
                   >
                     {STEP_GLYPH[step.kind]}
                   </div>
@@ -389,14 +469,19 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
             {showGhost ? (
               <div className="opr-step opr-step-ghost">
                 <div className="opr-step-rail">
-                  <div className="opr-step-node opr-step-node-ghost" aria-hidden>
+                  <div
+                    className="opr-step-node opr-step-node-ghost"
+                    aria-hidden={true}
+                  >
                     <span className="opr-think-dot" />
                     <span className="opr-think-dot" />
                     <span className="opr-think-dot" />
                   </div>
                 </div>
                 <div className="opr-step-body">
-                  <div className="opr-step-detail">working out the next step...</div>
+                  <div className="opr-step-detail">
+                    working out the next step...
+                  </div>
                 </div>
               </div>
             ) : null}

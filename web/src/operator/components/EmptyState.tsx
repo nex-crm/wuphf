@@ -18,12 +18,12 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className="opr-empty">
-      <span className="opr-empty-glyph" aria-hidden>
+      <span className="opr-empty-glyph" aria-hidden={true}>
         {glyph}
       </span>
       <div className="opr-empty-title">{title}</div>
       <div className="opr-empty-hint">{hint}</div>
-      {actionLabel ? (
+      {actionLabel && onAction ? (
         <div className="opr-empty-actions">
           <button
             type="button"

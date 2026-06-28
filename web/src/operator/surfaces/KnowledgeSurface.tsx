@@ -10,9 +10,9 @@ import { Sparkles } from "lucide-react";
 
 import { Eyebrow } from "../components/primitives";
 import {
+  KNOWLEDGE,
   type KnowledgeRef,
   type KnowledgeSourceKind,
-  KNOWLEDGE,
 } from "../mock/data";
 
 const KIND_LABEL: Record<KnowledgeSourceKind, string> = {
@@ -23,6 +23,13 @@ const KIND_LABEL: Record<KnowledgeSourceKind, string> = {
   roster: "Roster",
 };
 
+// Jump to a reference list item without mutating the URL hash. Writing
+// `#ref-n` into window.location.hash would replace the /#/operator route and
+// unmount the hash-routed shell, so we scroll to the target imperatively.
+function jumpToRef(n: number) {
+  document.getElementById(`ref-${n}`)?.scrollIntoView({ block: "start" });
+}
+
 // A single [n] citation with a hover/focus popover over its source.
 function Citation({ n, source }: { n: number; source?: KnowledgeRef }) {
   const [explained, setExplained] = useState(false);
@@ -30,16 +37,26 @@ function Citation({ n, source }: { n: number; source?: KnowledgeRef }) {
   if (!source) {
     return (
       <sup className="opr-cite">
-        <a href={`#ref-${n}`}>[{n}]</a>
+        <button
+          type="button"
+          onClick={() => jumpToRef(n)}
+          aria-label={`Jump to reference ${n}`}
+        >
+          [{n}]
+        </button>
       </sup>
     );
   }
 
   return (
     <sup className="opr-cite opr-cite-has-pop">
-      <a href={`#ref-${n}`} aria-label={`Source ${n}: ${source.title}`}>
+      <button
+        type="button"
+        onClick={() => jumpToRef(n)}
+        aria-label={`Source ${n}: ${source.title}`}
+      >
         [{n}]
-      </a>
+      </button>
       <span className="opr-cite-pop" role="note">
         <span className="opr-cite-pop-head">
           <span className="opr-cite-pop-kind">{KIND_LABEL[source.kind]}</span>
@@ -50,7 +67,8 @@ function Citation({ n, source }: { n: number; source?: KnowledgeRef }) {
         {explained ? (
           <span className="opr-cite-pop-why">
             <span className="opr-cite-pop-why-label">
-              <Sparkles size={11} strokeWidth={2} aria-hidden /> Why this source
+              <Sparkles size={11} strokeWidth={2} aria-hidden={true} /> Why this
+              source
             </span>
             {source.why}
           </span>
@@ -60,7 +78,7 @@ function Citation({ n, source }: { n: number; source?: KnowledgeRef }) {
             className="opr-btn opr-btn-sm opr-cite-pop-explain"
             onClick={() => setExplained(true)}
           >
-            <Sparkles size={12} strokeWidth={2} aria-hidden />
+            <Sparkles size={12} strokeWidth={2} aria-hidden={true} />
             Explain
           </button>
         )}
@@ -106,8 +124,8 @@ export function KnowledgeSurface() {
           <h1 className="opr-surface-title">What your AI knows</h1>
           <p className="opr-surface-lede">
             The shared brain behind every tool. Each fact is cited back to where
-            it came from, so you can trust what the tools act on. Hover a citation
-            to see the source, and ask why it was chosen.
+            it came from, so you can trust what the tools act on. Hover a
+            citation to see the source, and ask why it was chosen.
           </p>
         </div>
         <button type="button" className="opr-btn opr-btn-sm">
@@ -117,7 +135,10 @@ export function KnowledgeSurface() {
 
       <div className="opr-wiki">
         <nav className="opr-kn-list" aria-label="Knowledge pages">
-          <div className="opr-eyebrow" style={{ marginBottom: "var(--space-2)" }}>
+          <div
+            className="opr-eyebrow"
+            style={{ marginBottom: "var(--space-2)" }}
+          >
             Pages
           </div>
           {KNOWLEDGE.map((k) => (
