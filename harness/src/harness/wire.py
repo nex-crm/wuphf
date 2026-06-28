@@ -20,6 +20,22 @@ WorkflowStepKind = Literal["trigger", "enrich", "ai", "decision", "action", "bra
 ClarifyField = Literal["threshold", "channel"]
 
 
+class ApiCall(BaseModel):
+    """An executable API call a step replays deterministically (the EXECUTE half).
+    Built by discovery (browsersniff: HAR -> ApiCall) and replayed by the executor.
+    auth_ref is a NAMED credential reference, never a secret value (operator-mlp
+    A3/A4) — the executor resolves it from the credential store at run time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    method: str
+    url: str
+    query: dict[str, str] | None = None
+    headers: dict[str, str] | None = None
+    body: Any | None = None
+    auth_ref: str | None = None  # NAMED credential reference, never a secret value
+
+
 class WorkflowStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -29,6 +45,7 @@ class WorkflowStep(BaseModel):
     detail: str
     integration: str | None = None  # e.g. "HubSpot", "Slack"
     gated: bool = False  # external mutation -> human approval card (CQ1)
+    api: ApiCall | None = None  # present -> executor replays a real call; absent -> simulated
 
 
 class ClarifyQuestion(BaseModel):
@@ -69,16 +86,30 @@ class RunRequest(BaseModel):
 
 
 class RunStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     step_id: str
-    status: Literal["ok", "skipped", "awaiting_approval"]
+    status: Literal["ok", "skipped", "awaiting_approval", "error"]
     detail: str = ""
+    http_status: int | None = None  # present for replayed API steps
+
+
+class PendingApproval(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str
+    title: str
+    integration: str | None = None
+    detail: str
 
 
 class RunResult(BaseModel):
     """Deterministic execution result. status=needs_approval when a gated step
     requires the human approval card before the run can proceed (CQ1)."""
 
-    status: Literal["done", "needs_approval"]
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["done", "needs_approval", "error"]
     steps: list[RunStep] = Field(default_factory=list)
     digest: str = ""
-    pending_approval: dict[str, Any] | None = None
+    pending_approval: PendingApproval | None = None

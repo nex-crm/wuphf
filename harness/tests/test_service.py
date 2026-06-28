@@ -56,3 +56,21 @@ def test_run_executes_a_spec_and_halts_on_gate():
 def test_schema_version_mismatch_rejected():
     c = _client()
     assert c.post("/build/stream", json={"schema_version": 99, "message": "x"}).status_code == 400
+
+
+class _ExplodingAgent:
+    async def stream(self, message, tool_id=None):
+        # An agent that fails AFTER the stream has started (the real-build risk).
+        raise RuntimeError("boom")
+        yield  # pragma: no cover - makes this an async generator
+
+
+def test_build_stream_emits_structured_error_on_failure():
+    # A mid-stream failure must surface as a typed SSE error event, not a truncated
+    # response: the `start` event still lands, then an `error` event with a message.
+    c = TestClient(create_app(agent_factory=lambda: _ExplodingAgent()))
+    evs = _sse(c, {"message": "anything"})
+    names = [n for n, _ in evs]
+    assert names[0] == "start"
+    assert names[-1] == "error"
+    assert evs[-1][1]["message"] == "boom"

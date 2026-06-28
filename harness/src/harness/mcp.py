@@ -26,7 +26,9 @@ def resolve_env(server: McpServer, environ: dict | None = None) -> dict[str, str
     """Resolve the server's passthrough NAMES to values from the harness env. The
     values are injected into the launched MCP subprocess, never returned on a wire."""
     env = environ if environ is not None else os.environ
-    return {name: env.get(name, "") for name in server.env_passthrough}
+    # Omit names that are unset: injecting a blank value masks a real, inherited
+    # credential and makes "missing secret" look like "empty secret" to the server.
+    return {name: env[name] for name in server.env_passthrough if name in env}
 
 
 def allowed_tools(servers: dict[str, McpServer]) -> list[str]:
