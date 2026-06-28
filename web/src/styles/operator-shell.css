@@ -2148,20 +2148,30 @@
 .opr-act-submitted .opr-act-marker {
   color: var(--t-accent);
 }
-/* Tool output: pi shows it mono + dimmed, newlines preserved, wrapped, with a
-   scroll cap so a long result never floods the conversation. */
+/* Tool output, nested under its call with a ⎿ connector: pi shows it mono +
+   dimmed, newlines preserved, wrapped, with a scroll cap so a long result never
+   floods the conversation. */
 .opr-act-result {
   margin: 0;
+  display: flex;
+  gap: 6px;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   color: var(--t-faint);
   opacity: 0.9;
+  padding-left: var(--space-2);
+}
+.opr-act-result .opr-act-marker {
+  align-self: flex-start;
+}
+.opr-act-result-text {
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 220px;
   overflow: auto;
-  padding-left: var(--space-3);
+  flex: 1;
+  min-width: 0;
 }
 /* Trace-native "still working" line: dots + a cycling Office gerund, in the
    builder's own dimmed type so it reads as part of the workings, not a bubble. */
