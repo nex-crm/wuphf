@@ -54,3 +54,15 @@ test("schema_version mismatch is rejected", async () => {
 	const res = await fetch(`${base}/build/stream`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 99, message: "x" }) });
 	expect(res.status).toBe(400);
 });
+
+test("/run returns 400 on a malformed JSON body (regression: CodeRabbit service.ts:48)", async () => {
+	const res = await fetch(`${base}/run`, { method: "POST", headers: { "content-type": "application/json" }, body: "{not valid json" });
+	expect(res.status).toBe(400);
+	expect((await res.json()).error).toBeTruthy();
+});
+
+test("/build/stream returns 400 on a malformed JSON body before streaming", async () => {
+	const res = await fetch(`${base}/build/stream`, { method: "POST", headers: { "content-type": "application/json" }, body: "{nope" });
+	expect(res.status).toBe(400);
+	expect(res.headers.get("content-type")).toContain("application/json"); // a clean 400, not a half-open SSE
+});

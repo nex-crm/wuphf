@@ -40,7 +40,7 @@ test("sniff strips secrets and turns auth into a named ref (A3)", () => {
 	const calls = sniff(sampleHar);
 	const blob = JSON.stringify(calls);
 	expect(blob).not.toContain(SECRET); // no secret value anywhere
-	expect(calls[0].call.auth_ref).toBe("api-acme-com_auth");
+	expect(calls[0].call.auth_ref).toBe("api-acme-com_x-api-key");
 	expect(calls[0].call.headers?.["x-api-key"]).toBeUndefined(); // auth header dropped
 	expect(calls[0].call.query?.access_token).toBe("<redacted>"); // secret query redacted
 	expect(calls[0].call.query?.id).toBe("42"); // benign query kept
@@ -83,6 +83,46 @@ test("sniff redacts secret-looking request body fields (A3, regression: CodeRabb
 	expect(json.email).toBe("sam@acme.com"); // benign field kept
 	expect((json.nested as Record<string, unknown>).refresh_token).toBe("<redacted>");
 	expect(calls[1].call.body).toBe("<redacted>"); // non-JSON body dropped wholesale
+});
+
+test("sniff redacts keyless string secrets in bodies (A3, regression: CodeRabbit sniff.ts redactBody)", () => {
+	// redactBody matches object fields by key; a keyless secret (a bare top-level
+	// string, or a string inside an array) has no key to match, so it must still
+	// be redacted wholesale. Non-string primitives are kept (not credentials).
+	const token = "sk-live-KEYLESS-must-not-leak";
+	const refresh = "rt-array-MUST-NOT-LEAK";
+	const har: Har = {
+		log: {
+			entries: [
+				{ request: { method: "POST", url: "https://api.acme.com/a", postData: { mimeType: "application/json", text: JSON.stringify(token) } }, response: { status: 200 } },
+				{ request: { method: "POST", url: "https://api.acme.com/b", postData: { mimeType: "application/json", text: JSON.stringify([refresh, 42]) } }, response: { status: 200 } },
+			],
+		},
+	};
+	const calls = sniff(har);
+	const blob = JSON.stringify(calls);
+	expect(blob).not.toContain(token);
+	expect(blob).not.toContain(refresh);
+	expect(calls[0].call.body).toBe("<redacted>"); // bare top-level string redacted
+	expect(calls[1].call.body).toEqual(["<redacted>", 42]); // array string redacted, number kept
+});
+
+test("sniff gives distinct auth_refs per mechanism on the same host (regression: CodeRabbit sniff.ts:99)", () => {
+	// Two calls to the same host, one authed by api-key and one by cookie, must not
+	// collapse into one auth_ref or the executor can't tell the credentials apart.
+	const har: Har = {
+		log: {
+			entries: [
+				{ request: { method: "GET", url: "https://api.acme.com/v1/a", headers: [{ name: "x-api-key", value: "k-" + SECRET }] }, response: { status: 200 } },
+				{ request: { method: "GET", url: "https://api.acme.com/v1/b", headers: [{ name: "cookie", value: "session=" + SECRET }] }, response: { status: 200 } },
+			],
+		},
+	};
+	const calls = sniff(har);
+	expect(calls[0].call.auth_ref).toBe("api-acme-com_x-api-key");
+	expect(calls[1].call.auth_ref).toBe("api-acme-com_cookie");
+	expect(calls[0].call.auth_ref).not.toBe(calls[1].call.auth_ref);
+	expect(JSON.stringify(calls)).not.toContain(SECRET); // names only, never values
 });
 
 test("sniff classifies auth: api_key stable vs JWT rotating (A4)", () => {

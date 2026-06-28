@@ -40,11 +40,16 @@ const _SECRET_QUERY = /(token|key|apikey|api_key|access[_-]?token|sig|signature|
 const _AUTH_HEADERS = new Set(["authorization", "cookie", "x-api-key", "api-key", "x-auth-token"]);
 const _SAFE_HEADERS = new Set(["content-type", "accept"]);
 
-/** Recursively redact secret-looking fields from a parsed request body (A3).
+/** Recursively redact secret-looking content from a parsed request body (A3).
  * A login/write HAR can carry passwords or tokens in the body; those must never
- * land in the saved spec. Keys matching _SECRET_QUERY are replaced by value. */
+ * land in the saved spec. Object fields are matched by key (_SECRET_QUERY).
+ * Array items and bare top-level values have NO key to match on, so any string
+ * there (e.g. ["rt-..."] or a raw "sk-live-...") is redacted wholesale; benign
+ * non-string primitives (numbers/bools) are kept so the body shape stays useful. */
 function redactBody(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(redactBody);
+	if (Array.isArray(value)) {
+		return value.map((item) => (item !== null && typeof item === "object" ? redactBody(item) : typeof item === "string" ? "<redacted>" : item));
+	}
 	if (value && typeof value === "object") {
 		const out: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
@@ -94,7 +99,10 @@ export function sniff(har: Har): SniffResult[] {
 			const lower = h.name.toLowerCase();
 			if (_AUTH_HEADERS.has(lower)) {
 				const c = classifyAuth(h.name, h.value);
-				auth_ref = `${host(req.url)}_auth`; // a NAMED ref — the value is dropped here
+				// A NAMED ref (the value is dropped here). Scope it to the auth MECHANISM,
+				// not just the host, so a cookie, an api-key, and a bearer on the same host
+				// resolve to distinct credentials instead of colliding on one ref.
+				auth_ref = `${host(req.url)}_${lower.replace(/[^a-z0-9]+/g, "-")}`;
 				auth_kind = c.kind;
 				rotating = rotating || c.rotating;
 			} else if (_SAFE_HEADERS.has(lower)) {
@@ -111,7 +119,10 @@ export function sniff(har: Har): SniffResult[] {
 		let body: unknown;
 		if (req.postData?.text) {
 			try {
-				body = redactBody(JSON.parse(req.postData.text));
+				const parsed: unknown = JSON.parse(req.postData.text);
+				// A keyless top-level string body (e.g. a raw token) can't be matched
+				// by field name, so redact it wholesale; walk objects/arrays.
+				body = parsed !== null && typeof parsed === "object" ? redactBody(parsed) : typeof parsed === "string" ? "<redacted>" : parsed;
 			} catch {
 				// A non-JSON body (form-encoded, raw) may carry credentials we can't
 				// safely walk — drop it wholesale rather than leak (A3).
