@@ -6,6 +6,13 @@ test("extractJson pulls the object out of a fenced/noisy reply", () => {
 	expect(extractJson(text)).toEqual({ name: "X", steps: [] });
 });
 
+test("extractJson handles escaped quotes inside strings (regression: CodeRabbit wire.ts:95)", () => {
+	// A backslash-escaped quote must not terminate the string early, or valid
+	// model output with quoted detail/narration gets treated as malformed.
+	const text = 'preamble {"name":"X","narration":"say \\"hi\\" now","steps":[]} tail';
+	expect(extractJson(text)).toEqual({ name: "X", narration: 'say "hi" now', steps: [] });
+});
+
 test("validateSpec coerces + keeps only valid step kinds and gating", () => {
 	const spec = validateSpec({
 		name: "Inbound routing",

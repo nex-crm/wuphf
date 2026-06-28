@@ -90,8 +90,11 @@ export function extractJson(text: string): Record<string, unknown> {
 		for (let i = start; i < text.length; i++) {
 			const c = text[i];
 			if (inStr) {
-				esc = c === "\\" && !esc;
-				if (c === '"' && !esc) inStr = false;
+				// Resolve an escape FIRST: a backslash-escaped char (e.g. \" inside
+				// a string) must not be read as a string terminator.
+				if (esc) esc = false;
+				else if (c === "\\") esc = true;
+				else if (c === '"') inStr = false;
 			} else if (c === '"') inStr = true;
 			else if (c === "{") depth++;
 			else if (c === "}") {

@@ -33,14 +33,13 @@ export function apiKeyFor(model: Model<string>): string | undefined {
 }
 
 /**
- * Resolve the build model. Defaults to Ollama (key-free) so the agent runs
- * out-of-the-box; HARNESS_PROVIDER=anthropic|codex selects a subscription model
- * (resolved by pi-ai from the operator's `/login` OAuth credentials) — wired in
- * the service slice. Falls back to Ollama if a subscription model can't resolve.
+ * Resolve the build model for the agent core. Defaults to Ollama (key-free) so
+ * the agent runs out-of-the-box. Subscription providers (anthropic|codex) are
+ * resolved by pi-ai's getModel + OAuth at the SERVICE layer, not here — so this
+ * core path fails loud rather than silently substituting Ollama for a requested
+ * subscription model (which would run the wrong engine without anyone noticing).
  */
 export function resolveModel(provider: Provider = (process.env.HARNESS_PROVIDER as Provider) || "ollama"): Model<string> {
-	// Subscription providers are resolved by pi-ai's getModel + OAuth at the service
-	// layer; for this agent core we default to the always-available Ollama path.
 	if (provider === "ollama") return ollamaModel();
-	return ollamaModel();
+	throw new Error(`resolveModel: provider "${provider}" must be resolved at the service layer (pi-ai OAuth), not the agent core`);
 }

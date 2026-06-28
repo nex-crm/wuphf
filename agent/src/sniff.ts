@@ -40,6 +40,21 @@ const _SECRET_QUERY = /(token|key|apikey|api_key|access[_-]?token|sig|signature|
 const _AUTH_HEADERS = new Set(["authorization", "cookie", "x-api-key", "api-key", "x-auth-token"]);
 const _SAFE_HEADERS = new Set(["content-type", "accept"]);
 
+/** Recursively redact secret-looking fields from a parsed request body (A3).
+ * A login/write HAR can carry passwords or tokens in the body; those must never
+ * land in the saved spec. Keys matching _SECRET_QUERY are replaced by value. */
+function redactBody(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(redactBody);
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+			out[k] = _SECRET_QUERY.test(k) ? "<redacted>" : redactBody(v);
+		}
+		return out;
+	}
+	return value;
+}
+
 function host(url: string): string {
 	try {
 		return new URL(url).host.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
@@ -96,9 +111,11 @@ export function sniff(har: Har): SniffResult[] {
 		let body: unknown;
 		if (req.postData?.text) {
 			try {
-				body = JSON.parse(req.postData.text);
+				body = redactBody(JSON.parse(req.postData.text));
 			} catch {
-				body = req.postData.text;
+				// A non-JSON body (form-encoded, raw) may carry credentials we can't
+				// safely walk — drop it wholesale rather than leak (A3).
+				body = "<redacted>";
 			}
 		}
 
