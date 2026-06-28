@@ -71,6 +71,9 @@ function ActivityTrace({
 interface FinishCard {
   name: string;
   toolId: string;
+  // The step list is frozen INTO the card at finish time, so a later build in
+  // the same chat can't make an older finish card reopen the newest steps.
+  steps: WorkflowStep[];
 }
 
 interface BuilderMessage {
@@ -154,17 +157,18 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     setMessages((prev) => [...prev, { id: nextId("you"), from: "you", body }]);
   }
 
-  // Snapshot the finished workflow with its current (clarified) steps so the
-  // handoff carries what was built, not just an id to a seeded mock.
+  // The finish card already holds the frozen snapshot, so the handoff carries
+  // exactly what was built — not just an id to a seeded mock, and not whatever
+  // targetSteps happens to hold now.
   function draftFrom(finish: FinishCard): BuiltWorkflow {
-    return { name: finish.name, toolId: finish.toolId, steps: targetSteps };
+    return { name: finish.name, toolId: finish.toolId, steps: finish.steps };
   }
 
-  function presentFinish(p: WorkflowPlan) {
+  function presentFinish(finish: FinishCard) {
     const t = window.setTimeout(() => {
       pushAI(
         `That is a complete workflow. I have saved it as a draft so nothing runs until you say so. Run it on a few real ones to see how it does, then publish.`,
-        { name: p.name, toolId: p.toolId },
+        finish,
       );
       setPhase("done");
     }, 520);
@@ -172,6 +176,11 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   }
 
   function runBuild(text: string) {
+    // Clear any prior draft so a retry/new build doesn't show a stale name or a
+    // ghost preview from the previous workflow until the new response lands.
+    setPlan(null);
+    setTargetSteps([]);
+    setFlashStepId(null);
     setRevealCount(0);
     setPendingClarify(null);
     setActivities([]);
@@ -204,7 +213,11 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                 setPendingClarify(built.clarify);
                 setPhase("refining");
               } else {
-                presentFinish(built);
+                presentFinish({
+                  name: built.name,
+                  toolId: built.toolId,
+                  steps: built.steps,
+                });
               }
             },
             280 + built.steps.length * 440 + 240,
@@ -241,7 +254,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
           : "Got it. I pointed the handoff at that channel.",
       );
       setPendingClarify(null);
-      presentFinish(p);
+      presentFinish({ name: p.name, toolId: p.toolId, steps: updated });
     }, 640);
     track(t);
   }
@@ -315,7 +328,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                       <div className="opr-finish-name">{m.finish.name}</div>
                       <div className="opr-finish-sub">
                         <ToolStatusBadge status="draft" />
-                        <span>{targetSteps.length}-step workflow</span>
+                        <span>{m.finish.steps.length}-step workflow</span>
                       </div>
                     </div>
                   </div>

@@ -4,9 +4,9 @@
 // prototype always works. When the service is up, the operator gets the real
 // engine (key-free via the operator's subscription /login, or local Ollama).
 //
-// The build streams over SSE: intermediate `status` events carry the agent's
-// workings (its thinking, the tools it touches, results) so the UI can show what
-// is happening live, then a terminal `spec` event carries the WorkflowPlan.
+// The build streams over SSE: a `start` event, then one `step` event per
+// WorkflowStep so the UI can show progress live, then a terminal `spec` event
+// carrying the WorkflowPlan (or an `error` event with { message } on failure).
 
 import type { WorkflowStep } from "../mock/data";
 import {
@@ -22,7 +22,10 @@ const AGENT_URL =
 
 /** A line in the agent's live activity trace, mirroring pi's own client. */
 export interface BuildActivity {
-  kind: "status" | "thinking" | "tool" | "tool_result" | "submitted";
+  // status = system line; thinking = reasoning (dimmed italic); text = the
+  // model's prose; tool = a tool call; tool_result = its output; submitted =
+  // the plan was registered.
+  kind: "status" | "thinking" | "text" | "tool" | "tool_result" | "submitted";
   text: string;
   tool?: string;
 }
@@ -68,10 +71,24 @@ function handleEvent(
   } catch {
     return null;
   }
-  if (event === "status") {
-    const a = data as BuildActivity;
-    if (a && typeof a.text === "string")
-      onActivity?.({ kind: a.kind, text: a.text, tool: a.tool });
+  // The service emits one `step` event per WorkflowStep ({ type:"step", step }).
+  // Surface each as a live activity line. (`status` is also accepted for the
+  // legacy BuildActivity shape.)
+  if (event === "step" || event === "status") {
+    const withStep = data as {
+      step?: { title?: string; detail?: string; integration?: string };
+    };
+    if (withStep.step && typeof withStep.step.title === "string") {
+      onActivity?.({
+        kind: "status",
+        text: withStep.step.title,
+        tool: withStep.step.integration,
+      });
+    } else {
+      const a = data as BuildActivity;
+      if (a && typeof a.text === "string")
+        onActivity?.({ kind: a.kind, text: a.text, tool: a.tool });
+    }
     return null;
   }
   if (event === "spec") {
@@ -79,9 +96,9 @@ function handleEvent(
     return spec ?? null;
   }
   if (event === "error") {
-    throw new Error(
-      String((data as { error?: string }).error ?? "build failed"),
-    );
+    // The service sends failures as { message }; tolerate { error } too.
+    const e = data as { message?: string; error?: string };
+    throw new Error(String(e.message ?? e.error ?? "build failed"));
   }
   return null;
 }

@@ -52,6 +52,11 @@ export function createServer(opts: ServerOptions = {}) {
 				} catch {
 					return json({ error: "invalid JSON body" }, 400);
 				}
+				// Parseable JSON is not enough: null/[]/"x" cast to BuildRequest then read
+				// as undefined. Validate the shape before dereferencing.
+				if (!body || typeof body !== "object" || typeof body.message !== "string") {
+					return json({ error: "invalid build request: message (string) required" }, 400);
+				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
 				const stream = new ReadableStream({
 					async start(controller) {
@@ -77,6 +82,9 @@ export function createServer(opts: ServerOptions = {}) {
 					body = (await req.json()) as RunRequest;
 				} catch {
 					return json({ error: "invalid JSON body" }, 400);
+				}
+				if (!body || typeof body !== "object" || !body.spec || typeof body.spec !== "object") {
+					return json({ error: "invalid run request: spec (object) required" }, 400);
 				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
 				return json(await runWorkflow(body.spec, body.input ?? {}));

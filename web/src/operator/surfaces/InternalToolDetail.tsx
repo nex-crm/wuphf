@@ -69,8 +69,22 @@ export function InternalToolDetail({
   // tool prop; remounted per tool via a key at the mount site (OperatorApp).
   const [version, setVersion] = useState(tool.version);
   const [versions, setVersions] = useState<ToolVersion[]>(tool.versions);
+  // Parent-owned inbound rows, shared by the UI and Data tabs so approving a
+  // request on the UI tab is reflected in the Data tab too (no tab-local copy).
+  const [inboundRows, setInboundRows] =
+    useState<InboundRequest[]>(INBOUND_REQUESTS);
   const isInbound = tool.id === "inbound-routing";
   const canEdit = tool.status !== "suggested";
+
+  function approveInbound(req: InboundRequest) {
+    setInboundRows((rs) =>
+      rs.map((r) =>
+        r.id === req.id
+          ? { ...r, status: "routed", routedTo: "Priya (AE)" }
+          : r,
+      ),
+    );
+  }
 
   function handleApply(applied: ToolVersion) {
     setVersion(applied.version);
@@ -194,7 +208,7 @@ export function InternalToolDetail({
         >
           {tab === "ui" &&
             (isInbound ? (
-              <UITab />
+              <UITab rows={inboundRows} onApprove={approveInbound} />
             ) : (
               <EmptyState
                 glyph="◧"
@@ -209,7 +223,7 @@ export function InternalToolDetail({
           )}
           {tab === "data" &&
             (isInbound ? (
-              <DataTab tool={tool} />
+              <DataTab tool={tool} rows={inboundRows} />
             ) : (
               <EmptyState
                 glyph="▦"
@@ -234,19 +248,18 @@ export function InternalToolDetail({
 
 // ── UI tab: the built mini-app ──────────────────────────────────────────
 
-function UITab() {
-  // Local copy so the approval demo can mutate a row's status on approve.
-  const [rows, setRows] = useState<InboundRequest[]>(INBOUND_REQUESTS);
+function UITab({
+  rows,
+  onApprove,
+}: {
+  rows: InboundRequest[];
+  onApprove: (req: InboundRequest) => void;
+}) {
   const [pending, setPending] = useState<InboundRequest | null>(null);
 
   function approve(req: InboundRequest) {
-    setRows((rs) =>
-      rs.map((r) =>
-        r.id === req.id
-          ? { ...r, status: "routed", routedTo: "Priya (AE)" }
-          : r,
-      ),
-    );
+    // Mutate the parent-owned rows so the Data tab sees the same routed status.
+    onApprove(req);
     setPending(null);
   }
 
@@ -482,15 +495,19 @@ function WorkflowTab({
 
 // ── Data tab: operator-owned typed tables ───────────────────────────────
 
-function DataTab({ tool }: { tool: InternalTool }) {
+function DataTab({
+  tool,
+  rows,
+}: {
+  tool: InternalTool;
+  rows: InboundRequest[];
+}) {
   return (
     <div>
       <Eyebrow>Requests</Eyebrow>
       <div className="opr-table-wrap" style={{ marginTop: "var(--space-3)" }}>
         <div className="opr-table-toolbar">
-          <span className="opr-pill opr-pill-muted">
-            {INBOUND_REQUESTS.length} rows
-          </span>
+          <span className="opr-pill opr-pill-muted">{rows.length} rows</span>
           <button type="button" className="opr-btn opr-btn-sm">
             <Plus size={13} strokeWidth={1.9} aria-hidden={true} />
             Add column
@@ -508,7 +525,7 @@ function DataTab({ tool }: { tool: InternalTool }) {
             </tr>
           </thead>
           <tbody>
-            {INBOUND_REQUESTS.map((r) => (
+            {rows.map((r) => (
               <tr key={r.id}>
                 <td className="opr-cell-primary">{r.company}</td>
                 <td>{r.contact}</td>
