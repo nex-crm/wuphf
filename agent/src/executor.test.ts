@@ -61,6 +61,26 @@ test("resolves auth_ref into headers (secret never in the spec)", async () => {
 	expect(cap.headers?.Authorization).toBe("Bearer SECRET");
 });
 
+test("a 3xx halts the run with error and does NOT follow the redirect (regression: CodeRabbit executor.ts:42)", async () => {
+	let calls = 0;
+	let redirectMode: string | undefined;
+	const fetchImpl = (async (_url: string, init: { redirect?: string }) => {
+		calls++;
+		redirectMode = init?.redirect;
+		return { ok: false, status: 302 } as Response;
+	}) as unknown as typeof fetch;
+	const spec: WorkflowSpec = {
+		name: "n", tool_id: "t", narration: "", clarify: null,
+		steps: [{ id: "x", kind: "enrich", title: "Lookup", detail: "d", api: { method: "GET", url: "https://api.example.com/c" } }],
+	};
+	const r = await runWorkflow(spec, {}, { fetchImpl });
+	expect(r.status).toBe("error");
+	expect(r.steps[0].status).toBe("error");
+	expect(r.steps[0].http_status).toBe(302);
+	expect(calls).toBe(1); // replayed exactly once
+	expect(redirectMode).toBe("manual"); // redirect not auto-followed
+});
+
 test("halts with error when a replayed call fails", async () => {
 	const spec: WorkflowSpec = {
 		name: "n", tool_id: "t", narration: "", clarify: null,

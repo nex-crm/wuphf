@@ -39,8 +39,17 @@ async function replay(call: ApiCall, opts: ExecOptions): Promise<{ ok: boolean; 
 			headers,
 			body: call.body == null ? undefined : typeof call.body === "string" ? call.body : JSON.stringify(call.body),
 			signal: ctrl.signal,
+			// Don't auto-follow redirects: a captured call must replay exactly once, or a
+			// 3xx silently fans out into extra requests and hides the original response.
+			redirect: "manual",
 		});
-		return { ok: res.ok, status: res.status, detail: `${call.method} ${call.url} -> ${res.status}` };
+		// A 3xx is a stop, not a success — there is no opt-in to follow it, so halt the
+		// run and surface the redirect status rather than chasing it.
+		const redirected = res.status >= 300 && res.status < 400;
+		const detail = redirected
+			? `${call.method} ${call.url} -> ${res.status} (redirect not followed)`
+			: `${call.method} ${call.url} -> ${res.status}`;
+		return { ok: res.ok && !redirected, status: res.status, detail };
 	} catch (e) {
 		return { ok: false, status: 0, detail: `${call.method} ${call.url} failed: ${String(e)}` };
 	} finally {

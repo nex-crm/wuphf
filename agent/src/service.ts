@@ -11,7 +11,7 @@ import { providersPayload } from "./providers.js";
 import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type WorkflowSpec } from "./wire.js";
 
 type BuildEvent = { type: "step"; step: WorkflowSpec["steps"][number] } | { type: "spec"; spec: WorkflowSpec };
-type BuildStream = (message: string, opts: { toolId?: string }) => AsyncGenerator<BuildEvent>;
+type BuildStream = (message: string, opts: { toolId?: string; signal?: AbortSignal }) => AsyncGenerator<BuildEvent>;
 
 export interface ServerOptions {
 	port?: number;
@@ -44,14 +44,22 @@ export function createServer(opts: ServerOptions = {}) {
 			if (req.method === "GET" && pathname === "/providers") return json(providersPayload());
 
 			if (req.method === "POST" && pathname === "/build/stream") {
-				const body = (await req.json()) as BuildRequest;
+				// Guard the parse BEFORE the stream starts: an unparseable body must be a
+				// plain 400, not a 500 (and never a half-open SSE response).
+				let body: BuildRequest;
+				try {
+					body = (await req.json()) as BuildRequest;
+				} catch {
+					return json({ error: "invalid JSON body" }, 400);
+				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
 				const stream = new ReadableStream({
 					async start(controller) {
 						const enc = new TextEncoder();
 						controller.enqueue(enc.encode(sse("start", { message: body.message })));
 						try {
-							for await (const ev of buildStream(body.message, { toolId: body.tool_id })) {
+							// Thread the request's abort signal so a dropped client tears the build down.
+							for await (const ev of buildStream(body.message, { toolId: body.tool_id, signal: req.signal })) {
 								controller.enqueue(enc.encode(sse(ev.type === "spec" ? "spec" : "step", ev)));
 							}
 						} catch (e) {
@@ -64,7 +72,12 @@ export function createServer(opts: ServerOptions = {}) {
 			}
 
 			if (req.method === "POST" && pathname === "/run") {
-				const body = (await req.json()) as RunRequest;
+				let body: RunRequest;
+				try {
+					body = (await req.json()) as RunRequest;
+				} catch {
+					return json({ error: "invalid JSON body" }, 400);
+				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
 				return json(await runWorkflow(body.spec, body.input ?? {}));
 			}

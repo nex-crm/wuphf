@@ -28,8 +28,12 @@ export function detectProviders(): Provider[] {
 	else if (onPath("claude")) out.push({ id: "anthropic", label: "Claude Code (subscription)", available: true, via: "subscription_cli" });
 	else out.push({ id: "anthropic", label: "Anthropic", available: false, via: "none" });
 
-	if (envAny("OPENAI_API_KEY")) out.push({ id: "openai", label: "OpenAI API", available: true, via: "api_key" });
+	// id is ALWAYS "codex" (the only id resolveModel accepts) and the row is ALWAYS
+	// emitted — even when unavailable — so the Settings list shows a disabled row to
+	// connect rather than dropping it, and round-trips cleanly with resolveModel.
+	if (envAny("OPENAI_API_KEY")) out.push({ id: "codex", label: "OpenAI API", available: true, via: "api_key" });
 	else if (onPath("codex")) out.push({ id: "codex", label: "Codex (subscription)", available: true, via: "subscription_cli" });
+	else out.push({ id: "codex", label: "OpenAI / Codex", available: false, via: "none" });
 
 	out.push({ id: "ollama", label: "Ollama (local / open-weight)", available: onPath("ollama"), via: onPath("ollama") ? "local" : "none" });
 
