@@ -92,20 +92,27 @@ function ActivityLine({ activity }: { activity: TracedActivity }) {
 function BuildTurn({
   trace,
   active,
+  meta,
 }: {
   trace: TracedActivity[];
   active: boolean;
+  meta?: { seconds: number; tokens: number };
 }) {
   const thinking = trace.filter((t) => t.kind === "thinking");
   const steps = trace.filter(
     (t) => t.kind !== "thinking" && t.kind !== "status",
   );
   if (thinking.length === 0 && steps.length === 0) return null;
+  // Claude-style settled summary: "Thinking · 12s · 10.8k tokens".
+  const summary =
+    meta && !active
+      ? `Thinking · ${meta.seconds}s${meta.tokens > 0 ? ` · ${formatTokens(meta.tokens)}` : ""}`
+      : "Thinking";
   return (
     <div className="opr-turn">
       {thinking.length > 0 ? (
         <details className="opr-think-block" open={active}>
-          <summary className="opr-think-summary">Thinking</summary>
+          <summary className="opr-think-summary">{summary}</summary>
           <div className="opr-think-body">
             {thinking.map((t) => (
               <div key={t.id} className="opr-act-think">
@@ -181,6 +188,9 @@ interface BuilderMessage {
   // When present, this message is the agent's workings for a turn (thinking +
   // tool calls + prose), rendered inline by BuildTurn instead of a bubble.
   trace?: TracedActivity[];
+  // Final telemetry, snapshot when the turn settles, shown on the collapsed
+  // Thinking header ("Thinking · 12s · 10.8k tokens"), like Claude's summary.
+  meta?: { seconds: number; tokens: number };
 }
 
 const STARTERS: readonly string[] = [
@@ -233,6 +243,14 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   const seq = useRef(0);
   const startedAt = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  // Live token estimate from streamed chars, until the authoritative usage count
+  // arrives at the turn's end — so the counter moves during the reasoning, not
+  // only after it. Keyed by streamId so a replaced partial updates, not sums.
+  const streamChars = useRef<Record<string, number>>({});
+  const gotUsage = useRef(false);
+  // Latest token count, mirrored to a ref so the completion handler can snapshot
+  // the final telemetry onto the settled turn ("Thinking · 12s · 10.8k tokens").
+  const tokensRef = useRef(0);
 
   function track(id: number) {
     timers.current.push(id);
@@ -310,6 +328,8 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     setPendingClarify(null);
     setTokens(0);
     setElapsedMs(0);
+    streamChars.current = {};
+    gotUsage.current = false;
     startedAt.current = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -324,10 +344,23 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
       { id: traceId, from: "ai", body: "", trace: [] },
     ]);
     const appendActivity = (a: BuildActivity) => {
-      // Usage is telemetry, not a line: it drives the token counter.
+      // Usage is telemetry, not a line: the authoritative token count.
       if (a.kind === "usage") {
-        setTokens(a.tokens ?? 0);
+        gotUsage.current = true;
+        tokensRef.current = a.tokens ?? 0;
+        setTokens(tokensRef.current);
         return;
+      }
+      // Keep the counter moving during the reasoning: estimate ~4 chars/token
+      // from streamed text until the real usage count supersedes it.
+      if (a.streamId && !gotUsage.current) {
+        streamChars.current[a.streamId] = a.text.length;
+        const chars = Object.values(streamChars.current).reduce(
+          (s, n) => s + n,
+          0,
+        );
+        tokensRef.current = Math.round(chars / 4);
+        setTokens(tokensRef.current);
       }
       setMessages((prev) =>
         prev.map((m) => {
@@ -355,17 +388,23 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
       .then((built) => {
         setPlan(built);
         setTargetSteps(built.steps);
+        // Stream is done: freeze this turn's telemetry onto its anchor so the
+        // settled Thinking header carries the real elapsed + token count.
+        const meta = {
+          seconds: Math.round((Date.now() - startedAt.current) / 1000),
+          tokens: tokensRef.current,
+        };
+        setMessages((prev) =>
+          prev.map((m) => (m.id === traceId ? { ...m, meta } : m)),
+        );
 
         const start = window.setTimeout(() => {
           pushAI(built.narration);
           setPhase("assembling");
-          built.steps.forEach((_, i) => {
-            const reveal = window.setTimeout(
-              () => setRevealCount((c) => Math.max(c, i + 1)),
-              280 + i * 440,
-            );
-            track(reveal);
-          });
+          // The agent already built these steps; reveal them together as a
+          // presentation of the real result (CSS fades them in), not a fake
+          // multi-second "construction" that claims work it is not doing.
+          setRevealCount(built.steps.length);
           const done = window.setTimeout(
             () => {
               if (built.clarify) {
@@ -380,10 +419,11 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                 });
               }
             },
-            280 + built.steps.length * 440 + 240,
+            // A brief beat to let the steps settle in before the AI's follow-up.
+            700,
           );
           track(done);
-        }, 720);
+        }, 360);
         track(start);
       })
       .catch((err: unknown) => {
@@ -486,6 +526,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                 key={m.id}
                 trace={m.trace}
                 active={ACTIVE_PHASES.has(phase) && m.id === lastTraceId}
+                meta={m.meta}
               />
             ) : (
               <div key={m.id} className="opr-edit-msgwrap">
