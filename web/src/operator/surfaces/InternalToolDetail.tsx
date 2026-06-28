@@ -342,7 +342,6 @@ function WorkflowTab({ tool }: { tool: InternalTool }) {
   return (
     <div className="opr-detail-cols">
       <div>
-        <div className="opr-figure-label">FIG_003</div>
         <Eyebrow>How it runs · every step is scripted</Eyebrow>
         <div className="opr-flow" style={{ marginTop: "var(--space-3)" }}>
           {tool.steps.map((step, i) => (
@@ -439,7 +438,7 @@ function WorkflowTab({ tool }: { tool: InternalTool }) {
 function DataTab({ tool }: { tool: InternalTool }) {
   return (
     <div>
-      <Eyebrow>requests · a typed table this tool owns</Eyebrow>
+      <Eyebrow>Requests</Eyebrow>
       <div
             className="opr-table-wrap"
             style={{ marginTop: "var(--space-3)" }}

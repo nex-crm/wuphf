@@ -100,7 +100,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
         </div>
 
         <div className="opr-call-body">
-          <div className="opr-eyebrow">Live call · building with you</div>
+          <div className="opr-eyebrow">Live call</div>
           <div className="opr-call-transcript">
             {lines.map((l, i) => (
               <div className="opr-call-line" key={i}>
