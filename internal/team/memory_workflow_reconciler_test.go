@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-func newMemoryWorkflowReconcilerFixture(t *testing.T) (*WikiWorker, *ReviewLog, *Promotion) {
+// newMemoryWorkflowReconcilerFixture returns a WikiWorker backed by a repo
+// that already holds a canonical wiki article, so the reconciler's on-disk
+// existence check (team/ paths) can verify present artifacts.
+func newMemoryWorkflowReconcilerFixture(t *testing.T) *WikiWorker {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "wiki")
 	backup := filepath.Join(t.TempDir(), "wiki.bak")
@@ -15,28 +18,14 @@ func newMemoryWorkflowReconcilerFixture(t *testing.T) (*WikiWorker, *ReviewLog, 
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init repo: %v", err)
 	}
-	if _, _, err := repo.CommitNotebook(context.Background(), "pm", "agents/pm/notebook/onboarding.md", "# Onboarding\n\nReusable note.\n", "create", "seed notebook"); err != nil {
-		t.Fatalf("seed notebook: %v", err)
+	if _, _, err := repo.Commit(context.Background(), "pm", "team/process/onboarding.md", "# Onboarding\n\nReusable note.\n", "create", "seed wiki"); err != nil {
+		t.Fatalf("seed wiki: %v", err)
 	}
-	clockTime := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
-	review, err := NewReviewLog(ReviewLogPath(root), func(string) string { return "ceo" }, func() time.Time { return clockTime })
-	if err != nil {
-		t.Fatalf("new review log: %v", err)
-	}
-	promotion, err := review.SubmitPromotion(SubmitPromotionRequest{
-		SourceSlug: "pm",
-		SourcePath: "agents/pm/notebook/onboarding.md",
-		TargetPath: "team/process/onboarding.md",
-		Rationale:  "promote durable onboarding note",
-	})
-	if err != nil {
-		t.Fatalf("submit promotion: %v", err)
-	}
-	return NewWikiWorker(repo, noopPublisher{}), review, promotion
+	return NewWikiWorker(repo, noopPublisher{})
 }
 
 func TestMemoryWorkflowReconcilerNoOp(t *testing.T) {
-	worker, review, promotion := newMemoryWorkflowReconcilerFixture(t)
+	worker := newMemoryWorkflowReconcilerFixture(t)
 	now := "2026-04-30T10:00:00Z"
 	task := teamTask{
 		ID:        "task-1",
@@ -47,19 +36,17 @@ func TestMemoryWorkflowReconcilerNoOp(t *testing.T) {
 		UpdatedAt: now,
 	}
 	syncTaskMemoryWorkflow(&task, now)
-	recordMemoryWorkflowLookup(&task, "pm", "prior onboarding", []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}}, now)
-	recordMemoryWorkflowCapture(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}, now)
+	recordMemoryWorkflowLookup(&task, "pm", "prior onboarding", []ContextCitation{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}}, now)
+	recordMemoryWorkflowCapture(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}, now)
 	recordMemoryWorkflowPromotion(&task, "pm", MemoryWorkflowArtifact{
-		Backend:     "markdown",
-		Source:      "promotion",
-		Path:        promotion.TargetPath,
-		PromotionID: promotion.ID,
-		State:       string(promotion.State),
-		RecordedAt:  now,
-		UpdatedAt:   now,
+		Backend:    "markdown",
+		Source:     "wiki",
+		Path:       "team/process/onboarding.md",
+		RecordedAt: now,
+		UpdatedAt:  now,
 	}, now)
 
-	reconciler := NewMemoryWorkflowReconciler(worker, review, func() time.Time {
+	reconciler := NewMemoryWorkflowReconciler(worker, func() time.Time {
 		return time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
 	})
 	_, report, err := reconciler.ReconcileTasks(context.Background(), []teamTask{task})
@@ -72,7 +59,7 @@ func TestMemoryWorkflowReconcilerNoOp(t *testing.T) {
 }
 
 func TestMemoryWorkflowReconcilerRepairsStaleWorkflow(t *testing.T) {
-	worker, review, promotion := newMemoryWorkflowReconcilerFixture(t)
+	worker := newMemoryWorkflowReconcilerFixture(t)
 	task := teamTask{
 		ID:        "task-1",
 		TaskType:  "research",
@@ -88,12 +75,13 @@ func TestMemoryWorkflowReconcilerRepairsStaleWorkflow(t *testing.T) {
 			Lookup:            MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending, Query: "prior onboarding"},
 			Capture:           MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
 			Promote:           MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
-			Citations:         []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}},
-			Captures:          []MemoryWorkflowArtifact{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}},
+			Citations:         []ContextCitation{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}},
+			Captures:          []MemoryWorkflowArtifact{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}},
+			Promotions:        []MemoryWorkflowArtifact{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}},
 		},
 	}
 
-	reconciler := NewMemoryWorkflowReconciler(worker, review, func() time.Time {
+	reconciler := NewMemoryWorkflowReconciler(worker, func() time.Time {
 		return time.Date(2026, 4, 30, 10, 5, 0, 0, time.UTC)
 	})
 	updated, report, err := reconciler.ReconcileTasks(context.Background(), []teamTask{task})
@@ -110,13 +98,10 @@ func TestMemoryWorkflowReconcilerRepairsStaleWorkflow(t *testing.T) {
 	if wf.Lookup.Status != MemoryWorkflowStepStatusSatisfied || wf.Capture.Status != MemoryWorkflowStepStatusSatisfied || wf.Promote.Status != MemoryWorkflowStepStatusSatisfied {
 		t.Fatalf("expected all steps satisfied, got %+v", wf)
 	}
-	if len(wf.Promotions) != 1 || wf.Promotions[0].PromotionID != promotion.ID {
-		t.Fatalf("expected promotion repair from review log, got %+v", wf.Promotions)
-	}
 }
 
 func TestMemoryWorkflowReconcilerMarksMissingArtifacts(t *testing.T) {
-	worker, review, _ := newMemoryWorkflowReconcilerFixture(t)
+	worker := newMemoryWorkflowReconcilerFixture(t)
 	task := teamTask{
 		ID:        "task-1",
 		TaskType:  "research",
@@ -131,11 +116,11 @@ func TestMemoryWorkflowReconcilerMarksMissingArtifacts(t *testing.T) {
 			Lookup:        MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusSatisfied, Query: "prior onboarding", CompletedAt: "2026-04-30T10:00:00Z"},
 			Capture:       MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusSatisfied, CompletedAt: "2026-04-30T10:01:00Z"},
 			Promote:       MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
-			Captures:      []MemoryWorkflowArtifact{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/missing.md"}},
+			Captures:      []MemoryWorkflowArtifact{{Backend: "markdown", Source: "wiki", Path: "team/process/missing.md"}},
 		},
 	}
 
-	reconciler := NewMemoryWorkflowReconciler(worker, review, func() time.Time {
+	reconciler := NewMemoryWorkflowReconciler(worker, func() time.Time {
 		return time.Date(2026, 4, 30, 10, 5, 0, 0, time.UTC)
 	})
 	updated, report, err := reconciler.ReconcileTasks(context.Background(), []teamTask{task})
@@ -165,11 +150,11 @@ func TestMemoryWorkflowReconcilerNilWorkerSkipsArtifactExistenceRepairs(t *testi
 		UpdatedAt: now,
 	}
 	syncTaskMemoryWorkflow(&task, now)
-	recordMemoryWorkflowLookup(&task, "pm", "prior onboarding", []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}}, now)
-	recordMemoryWorkflowCapture(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}, now)
+	recordMemoryWorkflowLookup(&task, "pm", "prior onboarding", []ContextCitation{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}}, now)
+	recordMemoryWorkflowCapture(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}, now)
 	recordMemoryWorkflowPromotion(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}, now)
 
-	reconciler := NewMemoryWorkflowReconciler(nil, nil, func() time.Time {
+	reconciler := NewMemoryWorkflowReconciler(nil, func() time.Time {
 		return time.Date(2026, 4, 30, 10, 5, 0, 0, time.UTC)
 	})
 	updated, report, err := reconciler.ReconcileTasks(context.Background(), []teamTask{task})
@@ -199,11 +184,10 @@ func TestReconciledTaskNewerRequiresStrictlyNewerTimestamp(t *testing.T) {
 }
 
 func TestBrokerRunMemoryWorkflowReconcilerManualTrigger(t *testing.T) {
-	worker, review, _ := newMemoryWorkflowReconcilerFixture(t)
+	worker := newMemoryWorkflowReconcilerFixture(t)
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.wikiWorker = worker
-	b.reviewLog = review
 	b.tasks = []teamTask{
 		{
 			ID:        "task-1",
@@ -219,8 +203,9 @@ func TestBrokerRunMemoryWorkflowReconcilerManualTrigger(t *testing.T) {
 				Lookup:        MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusSatisfied, Query: "prior onboarding", CompletedAt: "2026-04-30T10:00:00Z"},
 				Capture:       MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
 				Promote:       MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
-				Citations:     []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}},
-				Captures:      []MemoryWorkflowArtifact{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}},
+				Citations:     []ContextCitation{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}},
+				Captures:      []MemoryWorkflowArtifact{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}},
+				Promotions:    []MemoryWorkflowArtifact{{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}},
 			},
 		},
 	}

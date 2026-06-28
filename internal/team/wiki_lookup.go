@@ -63,14 +63,6 @@ func (b *Broker) handleWikiLookup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	worker := b.WikiWorker()
-	if worker == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "wiki backend is not active",
-		})
-		return
-	}
-
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -88,21 +80,37 @@ func (b *Broker) handleWikiLookup(w http.ResponseWriter, r *http.Request) {
 
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 
-	idx := b.WikiIndex()
-	if idx == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "wiki index is not ready — the boot reconcile may still be in progress",
-		})
-		return
-	}
-	handler := NewQueryHandler(idx, brokerQueryProvider{})
-
-	ans, err := handler.Answer(r.Context(), QueryRequest{
+	req := QueryRequest{
 		Query:       q,
 		RequestedBy: "human",
 		TopK:        topK,
 		Timeout:     15 * time.Second,
-	})
+	}
+
+	var (
+		ans QueryAnswer
+		err error
+	)
+	if worker := b.WikiWorker(); worker != nil {
+		// Markdown deployment: retrieve from the broker's WikiIndex.
+		idx := b.WikiIndex()
+		if idx == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "wiki index is not ready — the boot reconcile may still be in progress",
+			})
+			return
+		}
+		ans, err = NewQueryHandler(idx, brokerQueryProvider{}).Answer(r.Context(), req)
+	} else {
+		// gbrain-backed deployment: retrieve hits from gbrain.Query and run the
+		// same cited-answer synthesis. ok is false when gbrain is unreachable.
+		var ok bool
+		ans, ok, err = b.gbrainLookup(r.Context(), req)
+		if !ok {
+			writeWikiBackendUnavailable(w, http.StatusServiceUnavailable)
+			return
+		}
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": err.Error(),
@@ -122,6 +130,37 @@ func (b *Broker) handleWikiLookup(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ans)
+}
+
+// gbrainLookup retrieves hits from gbrain.Query and runs the cited-answer
+// synthesis over them. ok is false (and the caller degrades to the
+// "knowledge backend unavailable" signal) when gbrain is not reachable: no
+// broker-registered client, or the query fails with ErrNotInstalled. A
+// non-availability query error is logged and treated as zero sources so the
+// synthesis still runs (the LLM reports no coverage) rather than 500-ing.
+func (b *Broker) gbrainLookup(ctx context.Context, req QueryRequest) (QueryAnswer, bool, error) {
+	client := b.wikiReadGBrain()
+	if client == nil {
+		return QueryAnswer{}, false, nil
+	}
+	limit := req.TopK
+	if limit <= 0 {
+		limit = 20
+	}
+	hits, err := client.Query(ctx, req.Query, limit)
+	if err != nil {
+		if isGBrainUnavailable(err) {
+			return QueryAnswer{}, false, nil
+		}
+		log.Printf("wiki/lookup: gbrain query %q: %v", req.Query, err)
+		hits = nil
+	}
+	sources := make([]QuerySource, 0, len(hits))
+	for _, hit := range hits {
+		sources = append(sources, gbrainHitToSource(hit))
+	}
+	ans, aerr := NewQueryHandler(nil, brokerQueryProvider{}).AnswerWithSources(ctx, req, sources)
+	return ans, true, aerr
 }
 
 // FormatLookupMessage renders a QueryAnswer as a wiki-shaped chat message

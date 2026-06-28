@@ -17,6 +17,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gbrain"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
@@ -162,8 +163,6 @@ type Broker struct {
 	activitySubscribers       map[int]chan agentActivitySnapshot
 	officeSubscribers         map[int]chan officeChangeEvent
 	wikiSubscribers           map[int]chan wikiWriteEvent
-	notebookSubscribers       map[int]chan notebookWriteEvent
-	reviewSubscribers         map[int]chan ReviewStateChangeEvent
 	entitySubscribers         map[int]chan EntityBriefSynthesizedEvent
 	factSubscribers           map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers   map[int]chan WikiSectionsUpdatedEvent
@@ -177,32 +176,39 @@ type Broker struct {
 	customAppOnce             sync.Once
 	appDev                    *appDevManager
 	appDevOnce                sync.Once
-	autoNotebookWriter        *AutoNotebookWriter
 	humanWikiWriter           *HumanWikiIntentWriter
 	obsidianWatcher           *ObsidianWatcher
-	demandIndex               *NotebookDemandIndex
-	channelIntentDispatcher   *ChannelIntentDispatcher
-	promotionSweep            *PromotionSweep
 	wikiIndex                 *WikiIndex
 	wikiExtractor             *Extractor
 	wikiDLQ                   *DLQ
 	wikiSectionsCache         *wikiSectionsCache
 	wikiCategoriesCache       *wikiCategoriesCache
-	reviewLog                 *ReviewLog
-	reviewResolver            ReviewerResolver
-	inboxCursorMu             sync.RWMutex
-	userInboxCursors          map[string]InboxCursor
-	factLog                   *FactLog
-	readLog                   *ReadLog
-	entityGraph               *EntityGraph
-	entitySynthesizer         *EntitySynthesizer
-	wikiCompressor            *WikiCompressor
-	teamLearningLog           *LearningLog
-	playbookSynthesizer       *PlaybookSynthesizer
-	pamDispatcher             *PamDispatcher
-	scanTracker               *scanStatusTracker
-	nextSubscriberID          int
-	agentStreams              map[string]*agentStreamBuffer
+	// gbrainClient is the broker-owned gbrain MCP client backing the gbrain
+	// memory backend. Constructed once on Start (lazily — it does not connect
+	// or spawn `gbrain serve` until first use) and registered with the
+	// package-level memory entry points; Close()d on Stop. nil until Start.
+	// gbrain is optional: when it is not installed the client still constructs
+	// fine and only errors on first call, which the backend's Ready() gate
+	// keeps from ever happening.
+	gbrainClient        *gbrain.Client
+	inboxCursorMu       sync.RWMutex
+	userInboxCursors    map[string]InboxCursor
+	factLog             *FactLog
+	readLog             *ReadLog
+	entityGraph         *EntityGraph
+	entitySynthesizer   *EntitySynthesizer
+	wikiCompressor      *WikiCompressor
+	teamLearningLog     *LearningLog
+	playbookSynthesizer *PlaybookSynthesizer
+	pamDispatcher       *PamDispatcher
+	// sourceCaptureDispatcher drains S2 source-capture jobs off-lock (see
+	// source_capture.go). Held as an atomic pointer so captureSource can read
+	// it WITHOUT b.mu — capture hooks fire while b.mu is held, so the read
+	// path must not re-enter the mutex.
+	sourceCaptureDispatcher atomic.Pointer[SourceCaptureDispatcher]
+	scanTracker             *scanStatusTracker
+	nextSubscriberID        int
+	agentStreams            map[string]*agentStreamBuffer
 	// appBuildStallSwept dedupes the stalled-build acceptance sweep: taskID ->
 	// the StalledSince it was last acted on, so a still-stuck App Builder build
 	// is nudged at most once per stall episode (broker_app_eval.go).
@@ -362,6 +368,17 @@ type Broker struct {
 	// (cheap — bounded by the persisted message slice). After that the field
 	// only ever flips false → true, never back. Guarded by b.mu.
 	humanHasPosted bool
+
+	// gbrain on-demand install lifecycle (broker_knowledge.go). installMu
+	// guards the three fields below — a dedicated lock so a multi-minute
+	// install goroutine streaming progress lines never contends on b.mu's
+	// hot path. installState ∈ {"idle","installing","installed","error"};
+	// the empty zero value is reported as "idle". Single-flight: only one
+	// install goroutine runs at a time (guarded by installState=="installing").
+	installMu       sync.Mutex
+	installState    string
+	installProgress string
+	installError    string
 }
 
 func stringSliceContainsFold(values []string, want string) bool {
@@ -432,8 +449,6 @@ func NewBrokerAt(statePath string) *Broker {
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
 		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
-		notebookSubscribers: make(map[int]chan notebookWriteEvent),
-		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
@@ -504,6 +519,11 @@ func (b *Broker) ChannelStore() *channel.Store {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	// S2 source capture: snapshot office activity into the immutable source
+	// layer off the broker's hot path. Started right after the wiki worker so
+	// capture hooks have a live drain to hand jobs to. A nil worker (non-
+	// markdown backend) leaves it unstarted and b.captureSource a no-op.
+	b.startSourceCaptureDispatcher()
 	// Lane A migration: derive LifecycleState for every persisted task
 	// that came back from disk without one, and rebuild the inverse
 	// lifecycle index. Idempotent across restarts and per-process
@@ -543,7 +563,6 @@ func (b *Broker) Start() error {
 
 	b.ensureWikiSectionsCache()
 	b.ensureWikiCategoriesCache()
-	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.ensureWikiCompressor()
 	b.ensurePlaybookExecutionLog()
@@ -561,7 +580,6 @@ func (b *Broker) Start() error {
 		case <-ctx.Done():
 		}
 	}()
-	b.startReviewExpiryLoop(ctx)
 	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
 	// Lane D: reviewer convergence sweeper. Drives the timeout-skipped
@@ -570,6 +588,10 @@ func (b *Broker) Start() error {
 	// at Start(), reviewer timeouts are dead code in production despite
 	// the test suite calling EvaluateConvergence directly.
 	b.StartReviewConvergenceSweeper(ctx)
+	// S2 feeder 3: daily chat-thread digest sweep → source layer (kind=chat).
+	// Same ctx/stopCh lifecycle as runActivityWatchdog; disabled when the
+	// interval env resolves to 0.
+	b.startChatDigestLoop(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
 		if b.lifecycleCancel != nil {
@@ -580,9 +602,9 @@ func (b *Broker) Start() error {
 	return nil
 }
 
-// WikiReadLog returns the broker's ReadLog under b.mu, matching the pattern
-// used by ReviewLog(). Handlers must use this accessor — not b.readLog directly —
-// to avoid a data race with ensureWikiWorker's write under b.mu.
+// WikiReadLog returns the broker's ReadLog under b.mu. Handlers must use this
+// accessor — not b.readLog directly — to avoid a data race with
+// ensureWikiWorker's write under b.mu.
 func (b *Broker) WikiReadLog() *ReadLog {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -678,15 +700,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/history/", b.requireAuth(b.handleWikiHistory))
 	mux.HandleFunc("/wiki/diff", b.requireAuth(b.handleWikiDiff))
 	mux.HandleFunc("/wiki/restore", b.requireAuth(b.handleWikiRestore))
-	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
-	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
-	mux.HandleFunc("/notebook/entry", b.requireAuth(b.handleNotebookEntry))
-	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
-	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
-	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
-	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
-	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
-	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	mux.HandleFunc("/visual-artifacts", b.requireAuth(b.handleVisualArtifacts))
+	mux.HandleFunc("/visual-artifacts/", b.requireAuth(b.handleVisualArtifactSubpath))
 	// Apps: agent-generated internal tools. Reached only via the /api proxy, so
 	// these never shadow the SPA's client-side /apps/<id> route.
 	mux.HandleFunc("/apps", b.requireAuth(b.handleApps))
@@ -699,34 +714,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/apps/integrations/catalog", b.requireAuth(b.handleAppsIntegrationsCatalog))
 	mux.HandleFunc("/apps/ai", b.requireAuth(b.handleAppsAI))
 	mux.HandleFunc("/apps/", b.requireAuth(b.handleAppByID))
-	mux.HandleFunc("/article-attribution", b.requireAuth(b.handleArticleAttribution))
-	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
-	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
-	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
-	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
-	mux.HandleFunc("/entity/brief/synthesize", b.requireAuth(b.handleEntityBriefSynthesize))
-	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
-	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
-	mux.HandleFunc("/entity/graph", b.requireAuth(b.handleEntityGraph))
-	mux.HandleFunc("/entity/graph/all", b.requireAuth(b.handleEntityGraphAll))
-	mux.HandleFunc("/playbook/list", b.requireAuth(b.handlePlaybookList))
-	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
-	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
-	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
-	mux.HandleFunc("/playbook/synthesize", b.requireAuth(b.handlePlaybookSynthesize))
-	mux.HandleFunc("/playbook/synthesis-status", b.requireAuth(b.handlePlaybookSynthesisStatus))
-	mux.HandleFunc("/learning/record", b.requireAuth(b.handleLearningRecord))
-	mux.HandleFunc("/learning/search", b.requireAuth(b.handleLearningSearch))
-	mux.HandleFunc("/pam/actions", b.requireAuth(b.handlePamActions))
-	mux.HandleFunc("/pam/action", b.requireAuth(b.handlePamAction))
-	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
-	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
-	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
-	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(handleOperationBootstrapPackage))
-	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(handleOperationBootstrapPackage))
-	mux.HandleFunc("/studio/run-workflow", b.requireAuth(b.handleStudioRunWorkflow))
-	mux.HandleFunc("/requests", b.requireAuth(b.handleRequests))
-	mux.HandleFunc("/requests/answer", b.requireAuth(b.handleRequestAnswer))
+	b.registerKnowledgeRoutes(mux)
 	mux.HandleFunc("/interview", b.requireAuth(b.handleInterview))
 	mux.HandleFunc("/interview/answer", b.requireAuth(b.handleInterviewAnswer))
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
@@ -774,6 +762,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
+	mux.HandleFunc("/knowledge/embedding-options", b.requireAuth(b.handleKnowledgeEmbeddingOptions))
+	mux.HandleFunc("/knowledge/install", b.requireAuth(b.handleKnowledgeInstall))
 	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
 	mux.HandleFunc("/image-providers", b.requireAuth(b.handleImageProviders))
 	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))
@@ -808,6 +798,10 @@ func (b *Broker) StartOnPort(port int) error {
 		AuthMiddleware: b.requireAuth,
 		ResetRuntime:   b.Reset,
 	})
+
+	// Wire the broker-owned gbrain MCP client backing the gbrain memory
+	// backend. Non-blocking and gbrain-optional (see ensureGBrainMemoryClient).
+	b.ensureGBrainMemoryClient()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	var lc net.ListenConfig
@@ -888,10 +882,7 @@ func (b *Broker) Stop() {
 	pbSynth := b.playbookSynthesizer
 	pamDisp := b.pamDispatcher
 	compressor := b.wikiCompressor
-	autoWriter := b.autoNotebookWriter
 	humanWikiWriter := b.humanWikiWriter
-	channelIntent := b.channelIntentDispatcher
-	promotionSweep := b.promotionSweep
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -905,17 +896,22 @@ func (b *Broker) Stop() {
 	if compressor != nil {
 		compressor.Stop()
 	}
-	if autoWriter != nil {
-		autoWriter.Stop(2 * time.Second)
-	}
 	if humanWikiWriter != nil {
 		humanWikiWriter.Stop(2 * time.Second)
 	}
-	if channelIntent != nil {
-		channelIntent.Stop(2 * time.Second)
+	if sourceCapture := b.sourceCaptureDispatcher.Load(); sourceCapture != nil {
+		sourceCapture.Stop(2 * time.Second)
 	}
-	if promotionSweep != nil {
-		promotionSweep.Stop(2 * time.Second)
+	// Tear down the broker-owned gbrain MCP client: unregister it from the
+	// package-level memory entry points first so no in-flight memory call
+	// reaches a half-closed session, then Close() the session/subprocess.
+	b.mu.Lock()
+	gbrainClient := b.gbrainClient
+	b.gbrainClient = nil
+	b.mu.Unlock()
+	if gbrainClient != nil {
+		setSharedGBrainClient(nil)
+		_ = gbrainClient.Close()
 	}
 }
 
@@ -1072,7 +1068,7 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	ensureNotebookDirsAfterUnlock := false
 	defer func() {
 		if ensureNotebookDirsAfterUnlock {
-			b.ensureNotebookDirsForRoster()
+			b.backfillAgentFilesForRoster()
 		}
 	}()
 	b.mu.Lock()

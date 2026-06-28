@@ -70,9 +70,12 @@ describe("<MessageArtifactReferences> destination routing", () => {
     });
   });
 
-  it("navigates to the notebook entry when the artifact is promoted to a notebook", async () => {
+  it("falls back to /articles for an artifact promoted to a notebook (notebook surface retired)", async () => {
+    // Distinct id so the shared router singleton sees a fresh destination
+    // (sibling /articles tests would otherwise no-op on an identical href).
     vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(
       makeDetail({
+        id: "ra_0123456789abcde1",
         promotion: {
           status: "promoted_to_notebook",
           owner_slug: "barista",
@@ -82,20 +85,23 @@ describe("<MessageArtifactReferences> destination routing", () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(
-      <MessageArtifactReferences artifactIds={["ra_0123456789abcdef"]} />,
+      <MessageArtifactReferences artifactIds={["ra_0123456789abcde1"]} />,
     );
     const card = await screen.findByRole("button", {
       name: "Open article: Coffee extraction science",
     });
     await user.click(card);
     await waitFor(() => {
-      expect(window.location.hash).toBe("#/notebooks/barista/extraction-yield");
+      expect(window.location.hash).toBe("#/articles/ra_0123456789abcde1");
     });
   });
 
-  it("navigates to the notebook entry home for a draft attached to a notebook", async () => {
+  it("falls back to /articles for a draft attached to a notebook (notebook surface retired)", async () => {
+    // Distinct id so the shared router singleton sees a fresh destination
+    // (sibling /articles tests would otherwise no-op on an identical href).
     vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(
       makeDetail({
+        id: "ra_0123456789abcde2",
         promotion: { status: "draft" },
         attached_to_notebook_entry: {
           owner_slug: "pm",
@@ -105,14 +111,14 @@ describe("<MessageArtifactReferences> destination routing", () => {
     );
     const user = userEvent.setup();
     renderWithQueryClient(
-      <MessageArtifactReferences artifactIds={["ra_0123456789abcdef"]} />,
+      <MessageArtifactReferences artifactIds={["ra_0123456789abcde2"]} />,
     );
     const card = await screen.findByRole("button", {
       name: "Open article: Coffee extraction science",
     });
     await user.click(card);
     await waitFor(() => {
-      expect(window.location.hash).toBe("#/notebooks/pm/kickoff-notes");
+      expect(window.location.hash).toBe("#/articles/ra_0123456789abcde2");
     });
   });
 

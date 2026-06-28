@@ -10,13 +10,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const notebookVisualArtifactGuidance = "Use for visual/diagram-heavy explainers, multi-section deep-dives, comparisons, or rich interactive surfaces — the HTML IS the article. NOT for short factual replies, status updates, conversational answers, quick acknowledgments, agent↔agent coordination, or anything that fits in a chat bubble. The HTML article MUST include genuine SVG figures — a text-only \"article\" should be a plain team_broadcast instead. Do NOT also call notebook_write for the same content: the markdown-companion pattern is deprecated, and a notebook_write that duplicates this HTML is the failure mode this tool replaces. When you do use it, compose the article Wikipedia-style with text and figures interleaved at the right semantic places — opening summary, sections with prose, figures embedded inline next to the paragraph they support, tables/charts/equations placed where they belong in the reading flow. Do not write a wall of text followed by a separate visuals section. Default to the WUPHF technical-manual style: old mathematics/physics book on real paper, warm paper texture, black editorial serif reading copy, Making Software cobalt shades for figure ink (oklch(50.58% .2886 264.84) / rgb(19, 66, 255) as the primary stroke), muted complementary state colors, faint construction grids inside figure plates, monospaced figure labels like FIG_001, IN/OUT blocks, trust/source metadata, equations or measured annotations when useful, and table-of-contents-style lists. Keep it original to WUPHF; do not copy external logos, illustrations, or brand assets. HTML must be self-contained: inline CSS/JS only, no network fetches, no external images/scripts/fonts, responsive layout, readable copy, and copy/export controls when the interactive surface needs them. NEVER include a CSS `@import` rule in any form — not even an empty `@import url('data:text/css,');` reflex line — and never load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`. The sanitizer rejects any `@import` substring. After creating, include visual-artifact:ra_0123456789abcdef on its own line in the chat reply so the UI renders a clickable card linking to the full-screen article."
+const visualArtifactGuidance = "Use for visual/diagram-heavy explainers, multi-section deep-dives, comparisons, or rich interactive surfaces — the HTML IS the article. NOT for short factual replies, status updates, conversational answers, quick acknowledgments, agent↔agent coordination, or anything that fits in a chat bubble. The HTML article MUST include genuine SVG figures — a text-only \"article\" should be a plain team_broadcast instead. Do NOT also call notebook_write for the same content: the markdown-companion pattern is deprecated, and a notebook_write that duplicates this HTML is the failure mode this tool replaces. When you do use it, compose the article Wikipedia-style with text and figures interleaved at the right semantic places — opening summary, sections with prose, figures embedded inline next to the paragraph they support, tables/charts/equations placed where they belong in the reading flow. Do not write a wall of text followed by a separate visuals section. Default to the WUPHF technical-manual style: old mathematics/physics book on real paper, warm paper texture, black editorial serif reading copy, Making Software cobalt shades for figure ink (oklch(50.58% .2886 264.84) / rgb(19, 66, 255) as the primary stroke), muted complementary state colors, faint construction grids inside figure plates, monospaced figure labels like FIG_001, IN/OUT blocks, trust/source metadata, equations or measured annotations when useful, and table-of-contents-style lists. Keep it original to WUPHF; do not copy external logos, illustrations, or brand assets. HTML must be self-contained: inline CSS/JS only, no network fetches, no external images/scripts/fonts, responsive layout, readable copy, and copy/export controls when the interactive surface needs them. NEVER include a CSS `@import` rule in any form — not even an empty `@import url('data:text/css,');` reflex line — and never load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`. The sanitizer rejects any `@import` substring. After creating, include visual-artifact:ra_0123456789abcdef on its own line in the chat reply so the UI renders a clickable card linking to the full-screen article."
 
-const notebookVisualArtifactPromoteGuidance = "Promote a reviewed HTML article into the canonical team wiki. After a successful promote, broadcast the exact `card_broadcast` string returned by this tool via team_broadcast. Do NOT retype the artifact ID — copy the `card_marker` (`visual-artifact:ra_...`) verbatim from this tool's response, because retyping the 16-hex-char ID is the load-bearing failure mode this contract avoids."
+const visualArtifactPromoteGuidance = "Promote a reviewed HTML article into the canonical team wiki. After a successful promote, broadcast the exact `card_broadcast` string returned by this tool via team_broadcast. Do NOT retype the artifact ID — copy the `card_marker` (`visual-artifact:ra_...`) verbatim from this tool's response, because retyping the 16-hex-char ID is the load-bearing failure mode this contract avoids."
 
-// TeamNotebookVisualArtifactCreateArgs is the contract for
-// notebook_visual_artifact_create.
-type TeamNotebookVisualArtifactCreateArgs struct {
+// TeamVisualArtifactCreateArgs is the contract for
+// visual_artifact_create.
+type TeamVisualArtifactCreateArgs struct {
 	MySlug            string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
 	TaskID            string   `json:"task_id,omitempty" jsonschema:"Task ID this visual artifact supports, when relevant."`
 	SourcePath        string   `json:"source_path,omitempty" jsonschema:"OPTIONAL legacy field. Set ONLY when this artifact is the visual companion to a pre-existing markdown notebook entry (path agents/{my_slug}/notebook/{filename}.md). Leave EMPTY for new HTML articles — the artifact is the article and there is no separate markdown source to pair with."`
@@ -28,22 +28,22 @@ type TeamNotebookVisualArtifactCreateArgs struct {
 	CommitMsg         string   `json:"commit_message,omitempty" jsonschema:"Why this visual artifact exists - becomes the git commit message."`
 }
 
-// TeamNotebookVisualArtifactListArgs is the contract for
-// notebook_visual_artifact_list.
-type TeamNotebookVisualArtifactListArgs struct {
+// TeamVisualArtifactListArgs is the contract for
+// visual_artifact_list.
+type TeamVisualArtifactListArgs struct {
 	TargetSlug string `json:"target_slug,omitempty" jsonschema:"Agent whose visual artifacts to list. Defaults to your own when source_path is omitted."`
 	SourcePath string `json:"source_path,omitempty" jsonschema:"Optional notebook source path filter, like agents/{slug}/notebook/{filename}.md."`
 }
 
-// TeamNotebookVisualArtifactReadArgs is the contract for
-// notebook_visual_artifact_read.
-type TeamNotebookVisualArtifactReadArgs struct {
-	ArtifactID string `json:"artifact_id" jsonschema:"Visual artifact ID returned by notebook_visual_artifact_create or notebook_visual_artifact_list, like ra_0123456789abcdef."`
+// TeamVisualArtifactReadArgs is the contract for
+// visual_artifact_read.
+type TeamVisualArtifactReadArgs struct {
+	ArtifactID string `json:"artifact_id" jsonschema:"Visual artifact ID returned by visual_artifact_create or visual_artifact_list, like ra_0123456789abcdef."`
 }
 
-// TeamNotebookVisualArtifactPromoteArgs is the contract for
-// notebook_visual_artifact_promote.
-type TeamNotebookVisualArtifactPromoteArgs struct {
+// TeamVisualArtifactPromoteArgs is the contract for
+// visual_artifact_promote.
+type TeamVisualArtifactPromoteArgs struct {
 	MySlug          string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
 	ArtifactID      string `json:"artifact_id" jsonschema:"Visual artifact ID to promote, like ra_0123456789abcdef."`
 	TargetWikiPath  string `json:"target_wiki_path" jsonschema:"Canonical wiki path - MUST start with team/ and end in .md."`
@@ -52,26 +52,26 @@ type TeamNotebookVisualArtifactPromoteArgs struct {
 	CommitMsg       string `json:"commit_message,omitempty" jsonschema:"Why this visual artifact is ready for the wiki - becomes the git commit message."`
 }
 
-func registerNotebookVisualArtifactTools(server *mcp.Server) {
+func registerVisualArtifactTools(server *mcp.Server) {
 	mcp.AddTool(server, officeWriteTool(
-		"notebook_visual_artifact_create",
-		"Create a self-contained HTML article. "+notebookVisualArtifactGuidance,
-	), handleTeamNotebookVisualArtifactCreate)
+		"visual_artifact_create",
+		"Create a self-contained HTML article. "+visualArtifactGuidance,
+	), handleTeamVisualArtifactCreate)
 	mcp.AddTool(server, readOnlyTool(
-		"notebook_visual_artifact_list",
-		"List HTML articles authored by an agent so you can reuse, inspect, or promote them. "+notebookVisualArtifactGuidance,
-	), handleTeamNotebookVisualArtifactList)
+		"visual_artifact_list",
+		"List HTML articles authored by an agent so you can reuse, inspect, or promote them. "+visualArtifactGuidance,
+	), handleTeamVisualArtifactList)
 	mcp.AddTool(server, readOnlyTool(
-		"notebook_visual_artifact_read",
-		"Read one HTML article and its metadata. Use before editing or promoting an existing article. "+notebookVisualArtifactGuidance,
-	), handleTeamNotebookVisualArtifactRead)
+		"visual_artifact_read",
+		"Read one HTML article and its metadata. Use before editing or promoting an existing article. "+visualArtifactGuidance,
+	), handleTeamVisualArtifactRead)
 	mcp.AddTool(server, officeWriteTool(
-		"notebook_visual_artifact_promote",
-		notebookVisualArtifactPromoteGuidance,
-	), handleTeamNotebookVisualArtifactPromote)
+		"visual_artifact_promote",
+		visualArtifactPromoteGuidance,
+	), handleTeamVisualArtifactPromote)
 }
 
-func handleTeamNotebookVisualArtifactCreate(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookVisualArtifactCreateArgs) (*mcp.CallToolResult, any, error) {
+func handleTeamVisualArtifactCreate(ctx context.Context, _ *mcp.CallToolRequest, args TeamVisualArtifactCreateArgs) (*mcp.CallToolResult, any, error) {
 	slug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
@@ -94,7 +94,7 @@ func handleTeamNotebookVisualArtifactCreate(ctx context.Context, _ *mcp.CallTool
 	}
 
 	var result map[string]any
-	err = brokerPostJSON(ctx, "/notebook/visual-artifacts", map[string]any{
+	err = brokerPostJSON(ctx, "/visual-artifacts", map[string]any{
 		"slug":                 slug,
 		"title":                title,
 		"summary":              strings.TrimSpace(args.Summary),
@@ -115,7 +115,7 @@ func handleTeamNotebookVisualArtifactCreate(ctx context.Context, _ *mcp.CallTool
 	return textResult(string(payload)), nil, nil
 }
 
-func handleTeamNotebookVisualArtifactList(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookVisualArtifactListArgs) (*mcp.CallToolResult, any, error) {
+func handleTeamVisualArtifactList(ctx context.Context, _ *mcp.CallToolRequest, args TeamVisualArtifactListArgs) (*mcp.CallToolResult, any, error) {
 	q := url.Values{}
 	sourcePath := strings.TrimSpace(args.SourcePath)
 	if sourcePath != "" {
@@ -134,7 +134,7 @@ func handleTeamNotebookVisualArtifactList(ctx context.Context, _ *mcp.CallToolRe
 	var result struct {
 		Artifacts []map[string]any `json:"artifacts"`
 	}
-	path := "/notebook/visual-artifacts"
+	path := "/visual-artifacts"
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
 	}
@@ -151,13 +151,13 @@ func handleTeamNotebookVisualArtifactList(ctx context.Context, _ *mcp.CallToolRe
 	return textResult(string(payload)), nil, nil
 }
 
-func handleTeamNotebookVisualArtifactRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookVisualArtifactReadArgs) (*mcp.CallToolResult, any, error) {
+func handleTeamVisualArtifactRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamVisualArtifactReadArgs) (*mcp.CallToolResult, any, error) {
 	id := strings.TrimSpace(args.ArtifactID)
 	if err := validateRichArtifactIDLocal(id); err != nil {
 		return toolError(err), nil, nil
 	}
 	var result map[string]any
-	if err := brokerGetJSON(ctx, "/notebook/visual-artifacts/"+url.PathEscape(id), &result); err != nil {
+	if err := brokerGetJSON(ctx, "/visual-artifacts/"+url.PathEscape(id), &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	payload, err := json.Marshal(result)
@@ -167,7 +167,7 @@ func handleTeamNotebookVisualArtifactRead(ctx context.Context, _ *mcp.CallToolRe
 	return textResult(string(payload)), nil, nil
 }
 
-func handleTeamNotebookVisualArtifactPromote(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookVisualArtifactPromoteArgs) (*mcp.CallToolResult, any, error) {
+func handleTeamVisualArtifactPromote(ctx context.Context, _ *mcp.CallToolRequest, args TeamVisualArtifactPromoteArgs) (*mcp.CallToolResult, any, error) {
 	slug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
@@ -198,7 +198,7 @@ func handleTeamNotebookVisualArtifactPromote(ctx context.Context, _ *mcp.CallToo
 	}
 
 	var result map[string]any
-	err = brokerPostJSON(ctx, "/notebook/visual-artifacts/"+url.PathEscape(id)+"/promote", map[string]any{
+	err = brokerPostJSON(ctx, "/visual-artifacts/"+url.PathEscape(id)+"/promote", map[string]any{
 		"actor_slug":       slug,
 		"target_wiki_path": targetPath,
 		"markdown_summary": markdown,

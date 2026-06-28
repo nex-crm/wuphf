@@ -20,7 +20,7 @@ export const FIRST_CLASS_APP_IDS = [
 ] as const;
 export type FirstClassAppId = (typeof FIRST_CLASS_APP_IDS)[number];
 
-export const WIKI_SURFACE_APP_IDS = ["wiki", "notebooks", "reviews"] as const;
+export const WIKI_SURFACE_APP_IDS = ["wiki"] as const;
 
 const APP_PANEL_ID_SET = new Set<string>(APP_PANEL_IDS);
 const FIRST_CLASS_APP_ID_SET = new Set<string>(FIRST_CLASS_APP_IDS);
@@ -147,10 +147,6 @@ export const ROUTE_PATHS = {
   wiki: "/wiki",
   wikiLookup: "/wiki/lookup",
   wikiArticle: "/wiki/$",
-  notebooks: "/notebooks",
-  notebookAgent: "/notebooks/$agentSlug",
-  notebookEntry: "/notebooks/$agentSlug/$entrySlug",
-  reviews: "/reviews",
   /** Full-screen HTML article viewer. id is an ra_... artifact id. */
   article: "/articles/$articleId",
   inbox: "/inbox",
@@ -244,20 +240,6 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["_splat"],
     search: [],
   },
-  { key: "notebooks", path: ROUTE_PATHS.notebooks, params: [], search: [] },
-  {
-    key: "notebookAgent",
-    path: ROUTE_PATHS.notebookAgent,
-    params: ["agentSlug"],
-    search: [],
-  },
-  {
-    key: "notebookEntry",
-    path: ROUTE_PATHS.notebookEntry,
-    params: ["agentSlug", "entrySlug"],
-    search: [],
-  },
-  { key: "reviews", path: ROUTE_PATHS.reviews, params: [], search: [] },
   {
     key: "article",
     path: ROUTE_PATHS.article,

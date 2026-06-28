@@ -41,6 +41,11 @@ const MENU_LINKS: SidebarLink[] = [
   { label: "Wiki health", path: LINT_PATH, testId: "wk-sidebar-lint" },
 ];
 
+/** Whether a menu link is the active surface. */
+function isMenuLinkActive(linkPath: string, current: string): boolean {
+  return current === linkPath;
+}
+
 export default function WikiSidebar({
   currentPath,
   onNavigate,
@@ -77,7 +82,7 @@ export default function WikiSidebar({
       ) : null}
       <nav aria-label="Wiki navigation" className="wk-sidebar-menu">
         {MENU_LINKS.map((link) => {
-          const isActive = current === link.path;
+          const isActive = isMenuLinkActive(link.path, current);
           return (
             <a
               key={link.testId}

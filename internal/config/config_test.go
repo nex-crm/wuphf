@@ -213,30 +213,153 @@ func TestResolveAPIKeyConfigFile(t *testing.T) {
 	})
 }
 
-func TestResolveMemoryBackendDefaultsToMarkdown(t *testing.T) {
-	// Empty config + no env override resolves to the git-native markdown
-	// wiki. This matches the onboarding wizard's "Markdown (default)" tile
-	// and the CLAUDE.md project statement that markdown is the shipping
-	// default.
+// setGBrainOllamaEmbedder overrides the ollama-embedder probe seam so the
+// implicit-default resolution is deterministic regardless of whether the host
+// running the suite has ollama installed with an embedding model pulled.
+func setGBrainOllamaEmbedder(t *testing.T, available bool) {
+	t.Helper()
+	prev := gbrainOllamaEmbedderAvailable
+	gbrainOllamaEmbedderAvailable = func() bool { return available }
+	t.Cleanup(func() { gbrainOllamaEmbedderAvailable = prev })
+}
+
+// clearGBrainReadiness forces gbrainBackendReady() to report false within a
+// test: an empty PATH (no gbrain binary), no provider keys, and no local ollama
+// embedder. Use it when a test wants the implicit default to fall back to
+// markdown deterministically, regardless of the host environment.
+func clearGBrainReadiness(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WUPHF_GBRAIN_COMMAND", "")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	setGBrainOllamaEmbedder(t, false)
+}
+
+// fakeGBrainOnPath puts an executable named "gbrain" on PATH so
+// gbrainBackendReady() sees the binary as installed.
+func fakeGBrainOnPath(t *testing.T) {
+	t.Helper()
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "gbrain")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("create fake gbrain: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestResolveMemoryBackendDefaultsToMarkdownWhenGBrainNotReady(t *testing.T) {
+	// Empty config + no env override, gbrain unavailable: a fresh OSS clone
+	// without gbrain must still boot on the git-native markdown wiki. This is
+	// the graceful-fallback half of the gbrain-default flip.
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_NO_NEX", "")
 		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		clearGBrainReadiness(t)
 		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
-			t.Fatalf("expected default memory backend markdown, got %q", got)
+			t.Fatalf("expected markdown fallback when gbrain not ready, got %q", got)
 		}
 	})
 }
 
-func TestResolveMemoryBackendDefaultsToMarkdownWhenNoNex(t *testing.T) {
-	// --no-nex says "don't reach for Nex." Markdown doesn't reach for Nex,
-	// so it's a valid and strictly better default than silent 'none' —
-	// previous behaviour left the user with no shared memory at all when
-	// they simply asked to skip Nex.
+func TestResolveMemoryBackendDefaultsToMarkdownWhenNoNexAndGBrainNotReady(t *testing.T) {
+	// --no-nex says "don't reach for Nex." With gbrain unavailable, markdown
+	// is a valid and strictly better default than silent 'none'.
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_NO_NEX", "1")
 		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		clearGBrainReadiness(t)
 		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
 			t.Fatalf("expected --no-nex default to resolve to markdown, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToGBrainWhenReady(t *testing.T) {
+	// gbrain is the strong default: with the binary installed and a provider
+	// key configured, an empty config resolves to gbrain rather than markdown.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		t.Setenv("WUPHF_OPENAI_API_KEY", "sk-test-openai")
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		fakeGBrainOnPath(t)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendGBrain {
+			t.Fatalf("expected gbrain default when ready, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToMarkdownWhenGBrainInstalledButNoEmbedder(t *testing.T) {
+	// Installed but with no embedding provider (no OpenAI key, no local ollama
+	// embedder) gbrain is not "ready": semantic search cannot run, and a
+	// keyword-only gbrain is ~equivalent to markdown, so the default falls back
+	// to markdown rather than selecting a backend that adds nothing.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		t.Setenv("WUPHF_OPENAI_API_KEY", "")
+		t.Setenv("OPENAI_API_KEY", "")
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		fakeGBrainOnPath(t)
+		setGBrainOllamaEmbedder(t, false)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
+			t.Fatalf("expected markdown when gbrain installed but no embedder, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToMarkdownWhenAnthropicOnly(t *testing.T) {
+	// An Anthropic key alone does not make gbrain ready: Anthropic has no
+	// embeddings API. Without OpenAI or a local ollama embedder, the implicit
+	// default stays on the markdown wiki.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		t.Setenv("WUPHF_OPENAI_API_KEY", "")
+		t.Setenv("OPENAI_API_KEY", "")
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "sk-ant-test")
+		fakeGBrainOnPath(t)
+		setGBrainOllamaEmbedder(t, false)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
+			t.Fatalf("expected markdown when only an Anthropic key is set, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToGBrainWithLocalOllamaEmbedder(t *testing.T) {
+	// No cloud key, but gbrain is installed and a local ollama embedding model
+	// is pulled: gbrain can do semantic retrieval entirely on-device, so it is
+	// the strong default even without an OpenAI key.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		t.Setenv("WUPHF_OPENAI_API_KEY", "")
+		t.Setenv("OPENAI_API_KEY", "")
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		fakeGBrainOnPath(t)
+		setGBrainOllamaEmbedder(t, true)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendGBrain {
+			t.Fatalf("expected gbrain default with local ollama embedder, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendExplicitMarkdownOverridesGBrainDefault(t *testing.T) {
+	// An explicit selection bypasses the gbrain-ready probe entirely, even
+	// when gbrain would otherwise be the default.
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", MemoryBackendMarkdown)
+		t.Setenv("WUPHF_OPENAI_API_KEY", "sk-test-openai")
+		fakeGBrainOnPath(t)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
+			t.Fatalf("expected explicit markdown to win over gbrain default, got %q", got)
 		}
 	})
 }

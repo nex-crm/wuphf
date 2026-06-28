@@ -11,10 +11,6 @@ import {
   channelRoute,
   inboxRoute,
   indexRoute,
-  notebookAgentRoute,
-  notebookEntryRoute,
-  notebooksRoute,
-  reviewsRoute,
   routineDetailRoute,
   routineNewRoute,
   skillDetailRoute,
@@ -49,10 +45,6 @@ export type CurrentRoute =
   | { kind: "wiki" }
   | { kind: "wiki-article"; articlePath: string }
   | { kind: "wiki-lookup"; query: string | null }
-  | { kind: "notebook-catalog" }
-  | { kind: "notebook-agent"; agentSlug: string }
-  | { kind: "notebook-entry"; agentSlug: string; entrySlug: string }
-  | { kind: "reviews" }
   | { kind: "article"; articleId: string }
   | { kind: "inbox" }
   | { kind: "task-decision"; taskId: string }
@@ -94,10 +86,6 @@ type CurrentRouteId =
   | typeof wikiIndexRoute.id
   | typeof wikiLookupRoute.id
   | typeof wikiArticleRoute.id
-  | typeof notebooksRoute.id
-  | typeof notebookAgentRoute.id
-  | typeof notebookEntryRoute.id
-  | typeof reviewsRoute.id
   | typeof articleRoute.id
   | typeof inboxRoute.id
   | typeof taskDecisionRoute.id
@@ -119,10 +107,6 @@ const CURRENT_ROUTE_IDS = [
   wikiIndexRoute.id,
   wikiLookupRoute.id,
   wikiArticleRoute.id,
-  notebooksRoute.id,
-  notebookAgentRoute.id,
-  notebookEntryRoute.id,
-  reviewsRoute.id,
   articleRoute.id,
   inboxRoute.id,
   taskDecisionRoute.id,
@@ -172,17 +156,6 @@ const ROUTE_DERIVERS = {
     if (splat.length === 0) return { kind: "wiki" };
     return { kind: "wiki-article", articlePath: splat };
   },
-  [notebooksRoute.id]: () => ({ kind: "notebook-catalog" }),
-  [notebookAgentRoute.id]: (params) => ({
-    kind: "notebook-agent",
-    agentSlug: params.agentSlug ?? "",
-  }),
-  [notebookEntryRoute.id]: (params) => ({
-    kind: "notebook-entry",
-    agentSlug: params.agentSlug ?? "",
-    entrySlug: params.entrySlug ?? "",
-  }),
-  [reviewsRoute.id]: () => ({ kind: "reviews" }),
   [articleRoute.id]: (params) => ({
     kind: "article",
     articleId: params.articleId ?? "",
@@ -315,8 +288,6 @@ export function useFallbackChannelSlug(): string {
  *   - "tasks" for /tasks route variants,
  *   - "wiki" for any wiki article or catalog route,
  *   - "wiki-lookup" for /wiki/lookup,
- *   - "notebooks" for any notebook route,
- *   - "reviews" for /reviews,
  *   - null when the matched route is a conversation (channel) or
  *     unknown.
  */
@@ -334,12 +305,6 @@ export function useCurrentApp(): string | null {
       return "wiki";
     case "wiki-lookup":
       return "wiki-lookup";
-    case "notebook-catalog":
-    case "notebook-agent":
-    case "notebook-entry":
-      return "notebooks";
-    case "reviews":
-      return "reviews";
     case "article":
       return "article";
     case "inbox":

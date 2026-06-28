@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -168,14 +169,95 @@ func (nexMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite)
 	return key, nil
 }
 
-type gbrainMemoryBackend struct{}
+// gbrainMemoryClient is the narrow slice of *gbrain.Client the shared-memory
+// backend depends on. Reducing it to the two methods the backend actually
+// calls lets tests inject a fake (no live gbrain subprocess) and keeps the
+// backend decoupled from the full MCP surface.
+type gbrainMemoryClient interface {
+	Query(ctx context.Context, query string, limit int) ([]gbrain.SearchResult, error)
+	PutPage(ctx context.Context, content string, opts gbrain.PutOptions) (gbrain.PutResult, error)
+	// AddLink wires a graph edge; used by capture to associate a freshly
+	// written page with related pages immediately (not only via gbrain's async
+	// dream-cycle).
+	AddLink(ctx context.Context, from, to, linkType, linkSource, note string) error
+}
 
-func (gbrainMemoryBackend) Kind() string { return config.MemoryBackendGBrain }
-func (gbrainMemoryBackend) Label() string {
+// gbrainSharedMemorySourceKind labels shared-memory writes for provenance on
+// the gbrain side. The legacy CLI put_page call did not set source_kind; the
+// MCP client carries it so gbrain can attribute these pages to WUPHF's
+// agent-authored shared memory rather than human-curated wiki content.
+const gbrainSharedMemorySourceKind = "wuphf_shared_memory"
+
+// sharedGBrainClientMu guards the process-wide gbrain MCP client the broker
+// owns. The broker constructs one client on Start and registers it here so the
+// package-level memory entry points (QuerySharedMemory / WriteSharedMemory /
+// FetchBrief) — which run without a *Broker handle — can reach it. Cleared on
+// broker Stop. nil until a broker registers one.
+var (
+	sharedGBrainClientMu sync.RWMutex
+	sharedGBrainClientV  gbrainMemoryClient
+
+	// defaultGBrainClientOnce lazily builds a fallback client for paths that
+	// run without a broker (standalone teammcp callers, focused tests). The
+	// broker-owned client is always preferred; this is only a safety net so a
+	// gbrain-backed call never nil-panics. Like the broker client it connects
+	// lazily, so an absent gbrain costs nothing until first use.
+	defaultGBrainClientOnce sync.Once
+	defaultGBrainClientV    *gbrain.Client
+)
+
+// setSharedGBrainClient registers (or, with nil, clears) the broker-owned
+// gbrain client for the package-level memory entry points.
+func setSharedGBrainClient(client gbrainMemoryClient) {
+	sharedGBrainClientMu.Lock()
+	defer sharedGBrainClientMu.Unlock()
+	sharedGBrainClientV = client
+}
+
+// sharedGBrainClient returns the broker-registered client, or nil if no broker
+// has registered one yet.
+func sharedGBrainClient() gbrainMemoryClient {
+	sharedGBrainClientMu.RLock()
+	defer sharedGBrainClientMu.RUnlock()
+	return sharedGBrainClientV
+}
+
+// defaultGBrainClient lazily constructs the no-broker fallback client.
+func defaultGBrainClient() *gbrain.Client {
+	defaultGBrainClientOnce.Do(func() {
+		defaultGBrainClientV = gbrain.NewClient()
+	})
+	return defaultGBrainClientV
+}
+
+type gbrainMemoryBackend struct {
+	// client overrides the shared/broker client. Tests inject a fake here;
+	// it is nil in production, where resolveClient falls back to the
+	// broker-owned client (or a lazy default).
+	client gbrainMemoryClient
+}
+
+// resolveClient returns the gbrain client this backend should talk to: an
+// injected client (tests) first, then the broker-owned client, then a lazily
+// built fallback so a gbrain-backed call never nil-panics.
+func (b gbrainMemoryBackend) resolveClient() gbrainMemoryClient {
+	if b.client != nil {
+		return b.client
+	}
+	if shared := sharedGBrainClient(); shared != nil {
+		return shared
+	}
+	return defaultGBrainClient()
+}
+
+func (b gbrainMemoryBackend) Kind() string { return config.MemoryBackendGBrain }
+func (b gbrainMemoryBackend) Label() string {
 	return config.MemoryBackendLabel(config.MemoryBackendGBrain)
 }
-func (gbrainMemoryBackend) Ready() bool { return gbrain.IsInstalled() && gbrainProviderKeyConfigured() }
-func (gbrainMemoryBackend) MCPServer() (*memoryMCPServer, error) {
+func (b gbrainMemoryBackend) Ready() bool {
+	return gbrain.IsInstalled() && gbrain.EmbeddingAvailable()
+}
+func (b gbrainMemoryBackend) MCPServer() (*memoryMCPServer, error) {
 	bin := gbrain.BinaryPath()
 	if bin == "" {
 		return nil, nil
@@ -188,7 +270,7 @@ func (gbrainMemoryBackend) MCPServer() (*memoryMCPServer, error) {
 		EnvVars: gbrainMCPEnvVars(),
 	}, nil
 }
-func (gbrainMemoryBackend) FetchBrief(ctx context.Context, notification string) string {
+func (b gbrainMemoryBackend) FetchBrief(ctx context.Context, notification string) string {
 	query := strings.TrimSpace(notification)
 	if query == "" {
 		return ""
@@ -196,7 +278,7 @@ func (gbrainMemoryBackend) FetchBrief(ctx context.Context, notification string) 
 	if len(query) > 400 {
 		query = query[:400]
 	}
-	results, err := gbrain.Query(ctx, query, 5)
+	results, err := b.resolveClient().Query(ctx, query, 5)
 	if err != nil || len(results) == 0 {
 		return ""
 	}
@@ -228,11 +310,11 @@ func (gbrainMemoryBackend) FetchBrief(ctx context.Context, notification string) 
 	lines = append(lines, "== END GBRAIN CONTEXT ==")
 	return strings.Join(lines, "\n")
 }
-func (gbrainMemoryBackend) QueryShared(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error) {
+func (b gbrainMemoryBackend) QueryShared(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error) {
 	if limit <= 0 {
 		limit = 5
 	}
-	results, err := gbrain.Query(ctx, query, limit)
+	results, err := b.resolveClient().Query(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -279,37 +361,31 @@ func scopedMemoryHitFromGBrainResult(result gbrain.SearchResult) ScopedMemoryHit
 		Stale:      &stale,
 	}
 }
-func (gbrainMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite) (string, error) {
+func (b gbrainMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite) (string, error) {
+	// Slug derivation is unchanged from the legacy CLI path: gbrain's put_page
+	// requires a slug, so the backend has always derived a kebab slug here
+	// rather than relying on gbrain to infer one from the frontmatter title.
 	slug := slugify(firstNonEmpty(note.Key, note.Title, note.Content))
 	if slug == "" {
 		slug = "shared-note"
 	}
 	actor := slugify(firstNonEmpty(note.Actor, "wuphf"))
 	slug = fmt.Sprintf("wuphf-shared--%s--%s--%s", actor, slug, time.Now().UTC().Format("20060102-150405"))
-	raw, err := gbrain.Call(ctx, "put_page", map[string]any{
-		"slug":    slug,
-		"content": renderGBrainSharedMemoryPage(slug, note),
-	})
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(raw) == "" {
-		return slug, nil
+	content := renderGBrainSharedMemoryPage(slug, note)
+	if _, err := b.resolveClient().PutPage(ctx, content, gbrain.PutOptions{
+		Slug:       slug,
+		SourceKind: gbrainSharedMemorySourceKind,
+	}); err != nil {
+		return "", fmt.Errorf("write shared gbrain memory: %w", err)
 	}
 	return slug, nil
 }
 
-func gbrainProviderKeyConfigured() bool {
-	return strings.TrimSpace(config.ResolveOpenAIAPIKey()) != "" ||
-		strings.TrimSpace(config.ResolveAnthropicAPIKey()) != ""
-}
-
+// gbrainOpenAIConfigured reports whether an OpenAI key is configured. OpenAI is
+// the strongest gbrain embedder (one key serves both chat and embeddings); it
+// distinguishes the OpenAI status detail from the local-Ollama detail.
 func gbrainOpenAIConfigured() bool {
 	return strings.TrimSpace(config.ResolveOpenAIAPIKey()) != ""
-}
-
-func gbrainAnthropicConfigured() bool {
-	return strings.TrimSpace(config.ResolveAnthropicAPIKey()) != ""
 }
 
 func ResolveMemoryBackendStatus() MemoryBackendStatus {
@@ -355,9 +431,14 @@ func ResolveMemoryBackendStatus() MemoryBackendStatus {
 		status.ActiveLabel = config.MemoryBackendLabel(config.MemoryBackendMarkdown)
 		status.Detail = "Markdown-backed team wiki at ~/.wuphf/wiki is configured. Every edit commits to git with per-agent authorship."
 	case config.MemoryBackendGBrain:
-		if !gbrainProviderKeyConfigured() {
-			status.Detail = "GBrain backend selected, but no provider key is configured. OpenAI is required for embeddings and vector search; Anthropic alone only enables reduced-mode retrieval."
-			status.NextStep = "Run /init and add an OpenAI key for full GBrain search, or add an Anthropic key for reduced mode."
+		if !gbrain.EmbeddingAvailable() {
+			// gbrain needs an embedding provider for semantic retrieval.
+			// Anthropic has no embeddings API, so an Anthropic key alone does
+			// not qualify. Without an embedder gbrain can only run keyword-only,
+			// which is ~equivalent to the markdown wiki, so we report it
+			// inactive and steer the user toward a real embedder.
+			status.Detail = "GBrain backend selected, but no embedding provider is configured. Semantic vector search needs an OpenAI key or a local Ollama embedding model; an Anthropic key alone has no embeddings API."
+			status.NextStep = "Run /init and add an OpenAI key for full GBrain vector search, or pull a local Ollama embedding model (e.g. nomic-embed-text)."
 			return status
 		}
 		if !gbrain.IsInstalled() {
@@ -367,14 +448,10 @@ func ResolveMemoryBackendStatus() MemoryBackendStatus {
 		}
 		status.ActiveKind = config.MemoryBackendGBrain
 		status.ActiveLabel = config.MemoryBackendLabel(config.MemoryBackendGBrain)
-		switch {
-		case gbrainOpenAIConfigured():
+		if gbrainOpenAIConfigured() {
 			status.Detail = "GBrain-backed organizational context is configured with an OpenAI key, so embeddings and vector search are available."
-		case gbrainAnthropicConfigured():
-			status.Detail = "GBrain-backed organizational context is configured in Anthropic-only mode. Keyword search and query expansion work, but embeddings and vector search still require OpenAI."
-			status.NextStep = "Add WUPHF_OPENAI_API_KEY if you want full GBrain embeddings and vector search."
-		default:
-			status.Detail = "GBrain-backed organizational context is configured with provider credentials."
+		} else {
+			status.Detail = "GBrain-backed organizational context is configured with a local Ollama embedding model, so embeddings and vector search run on your machine."
 		}
 	default:
 		status.SelectedKind = config.MemoryBackendNone

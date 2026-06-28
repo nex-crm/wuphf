@@ -12,7 +12,7 @@ package team
 // The plan from /plan-design-review + /plan-eng-review on 2026-05-11
 // (artifact /tmp/wuphf-unified-inbox-plan.md) locks the contract:
 //
-//   - InboxItemKind is a closed string set; "task" / "request" / "review"
+//   - InboxItemKind is a closed string set; "task" / "request"
 //   - InboxItem is the union row shape returned to the web UI / CLI
 //   - inboxItemsForActor merges per-kind helpers under one auth boundary
 //   - Per-kind helpers each enforce their own membership rule:
@@ -20,7 +20,6 @@ package team
 //        * requestsForInbox — owner OR slug == req.From (channel-scope
 //                              filter applied above; tagged/assigned
 //                              fields land in a v1.1 follow-up)
-//        * reviewsForInbox  — owner OR slug == promotion.ReviewerSlug
 //   - SetInboxCursor / InboxCursor support per-user workflow-semantic
 //     unread tracking (flips on action, not on open).
 
@@ -37,13 +36,12 @@ type InboxItemKind string
 const (
 	InboxItemKindTask    InboxItemKind = "task"
 	InboxItemKindRequest InboxItemKind = "request"
-	InboxItemKindReview  InboxItemKind = "review"
 )
 
 // InboxItem is the unified row shape. Exactly one of TaskID /
-// RequestID / ReviewID is set per row, determined by Kind. The web
-// UI renders by switching on Kind; the never-default branch in TS
-// enforces exhaustiveness at compile time.
+// RequestID is set per row, determined by Kind. The web UI renders by
+// switching on Kind; the never-default branch in TS enforces
+// exhaustiveness at compile time.
 //
 // Fields that apply to more than one kind (Title, Channel, ElapsedMs)
 // hoist to the top level so the inbox list renderer never has to
@@ -52,13 +50,12 @@ type InboxItem struct {
 	Kind      InboxItemKind `json:"kind"`
 	TaskID    string        `json:"taskId,omitempty"`
 	RequestID string        `json:"requestId,omitempty"`
-	ReviewID  string        `json:"reviewId,omitempty"`
 	Title     string        `json:"title"`
 	Channel   string        `json:"channel,omitempty"`
 	CreatedAt string        `json:"createdAt,omitempty"`
 	// UpdatedAt is the RFC3339 timestamp of the most recent activity
 	// on the underlying artifact. Mirrors InboxRow.UpdatedAt for tasks;
-	// for requests/reviews the row falls back to the artifact's own
+	// for requests the row falls back to the artifact's own
 	// last-mutation timestamp. The unread cursor compares against this.
 	UpdatedAt string `json:"updatedAt,omitempty"`
 	ElapsedMs int64  `json:"elapsedMs,omitempty"`
@@ -75,7 +72,6 @@ type InboxItem struct {
 	// Per-kind enrichments. Populated only when Kind matches.
 	TaskRow *InboxRow    `json:"task,omitempty"`
 	Request *RequestPeek `json:"request,omitempty"`
-	Review  *ReviewPeek  `json:"review,omitempty"`
 }
 
 // RequestPeek is the trimmed request shape the inbox row needs. Full
@@ -91,14 +87,6 @@ type RequestPeek struct {
 	// to the parent Issue without losing context. Empty when the
 	// request was filed outside an Issue (e.g. CEO clarifications).
 	IssueID string `json:"issueId,omitempty"`
-}
-
-// ReviewPeek is the trimmed promotion shape the inbox row needs.
-type ReviewPeek struct {
-	State        string `json:"state"`
-	ReviewerSlug string `json:"reviewerSlug"`
-	SourceSlug   string `json:"sourceSlug"`
-	TargetPath   string `json:"targetPath"`
 }
 
 // InboxCursor records the workflow-semantic read state for one human.
@@ -169,7 +157,6 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	rows := make([]InboxItem, 0, len(taskRows)+8)
 	rows = append(rows, taskRows...)
 	rows = append(rows, b.requestsForInbox(actor)...)
-	rows = append(rows, b.reviewsForInbox(actor)...)
 
 	sort.SliceStable(rows, func(i, j int) bool {
 		// Attention-first: items the user can act on now (decision,
@@ -216,7 +203,7 @@ func inboxItemActivityTime(item InboxItem) time.Time {
 // states the user can't directly act on rank lowest.
 func inboxItemPriority(item InboxItem) int {
 	switch item.Kind {
-	case InboxItemKindRequest, InboxItemKindReview:
+	case InboxItemKindRequest:
 		return 0
 	case InboxItemKindTask:
 		if item.TaskRow == nil {
@@ -346,69 +333,6 @@ func (b *Broker) requestsForInbox(actor requestActor) []InboxItem {
 				From:     req.From,
 				Blocking: req.Blocking,
 				IssueID:  strings.TrimSpace(req.IssueID),
-			},
-		})
-	}
-	return out
-}
-
-// reviewsForInbox returns promotion rows visible to actor. Owner sees
-// every non-archived review; a human session sees only promotions
-// where ReviewerSlug == their slug. Wires through the existing
-// ReviewLog.List(scope) so the auth model stays consistent with the
-// /review/list?scope=<slug> handler.
-func (b *Broker) reviewsForInbox(actor requestActor) []InboxItem {
-	if b == nil {
-		return nil
-	}
-	rl := b.ReviewLog()
-	if rl == nil {
-		return nil
-	}
-	owner := actor.Kind == requestActorKindBroker
-	slug := normalizeReviewerSlug(actor.Slug)
-	var promotions []*Promotion
-	if owner {
-		promotions = rl.List("all")
-	} else {
-		if slug == "" {
-			return nil
-		}
-		promotions = rl.List(slug)
-	}
-	out := make([]InboxItem, 0, len(promotions))
-	for _, p := range promotions {
-		if p == nil {
-			continue
-		}
-		// Inbox is exception-only — once a review is approved /
-		// rejected / archived / expired, it stops needing the
-		// human's attention. Filter those terminal states out so
-		// they don't pad the inbox after the work is done.
-		switch p.State {
-		case PromotionApproved, PromotionRejected, PromotionArchived, PromotionExpired:
-			continue
-		}
-		title := notebookEntrySlug(p.SourcePath)
-		if t := strings.TrimSpace(p.Rationale); t != "" {
-			title = t
-		}
-		updatedAt := p.CreatedAt.UTC().Format(time.RFC3339)
-		if !p.UpdatedAt.IsZero() {
-			updatedAt = p.UpdatedAt.UTC().Format(time.RFC3339)
-		}
-		out = append(out, InboxItem{
-			Kind:      InboxItemKindReview,
-			ReviewID:  p.ID,
-			Title:     title,
-			CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339),
-			UpdatedAt: updatedAt,
-			AgentSlug: normalizeReviewerSlug(p.SourceSlug),
-			Review: &ReviewPeek{
-				State:        string(p.State),
-				ReviewerSlug: p.ReviewerSlug,
-				SourceSlug:   p.SourceSlug,
-				TargetPath:   p.TargetPath,
 			},
 		})
 	}

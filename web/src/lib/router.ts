@@ -88,7 +88,7 @@ export const legacyWorkbenchTaskRoute = createRoute({
   },
 });
 
-// Wiki, notebook, and review routes.
+// Wiki routes.
 export const wikiRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.wiki,
@@ -113,26 +113,6 @@ export const wikiLookupRoute = createRoute({
 export const wikiArticleRoute = createRoute({
   getParentRoute: () => wikiRoute,
   path: "$",
-});
-
-export const notebooksRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.notebooks,
-});
-
-export const notebookAgentRoute = createRoute({
-  getParentRoute: () => notebooksRoute,
-  path: "$agentSlug",
-});
-
-export const notebookEntryRoute = createRoute({
-  getParentRoute: () => notebookAgentRoute,
-  path: "$entrySlug",
-});
-
-export const reviewsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.reviews,
 });
 
 // /articles/$articleId — full-screen HTML article viewer.
@@ -250,10 +230,6 @@ export const routeTree = rootRoute.addChildren([
   legacyWorkbenchTaskRoute,
   appRoute,
   wikiRoute.addChildren([wikiIndexRoute, wikiLookupRoute, wikiArticleRoute]),
-  notebooksRoute.addChildren([
-    notebookAgentRoute.addChildren([notebookEntryRoute]),
-  ]),
-  reviewsRoute,
   articleRoute,
   inboxRoute,
   taskDecisionRoute,

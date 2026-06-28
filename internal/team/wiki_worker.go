@@ -79,10 +79,6 @@ type wikiWriteRequest struct {
 	Content   string
 	Mode      string
 	CommitMsg string
-	// IsNotebook routes the request to Repo.CommitNotebook instead of
-	// Repo.Commit. Same serialization primitive; different target subtree
-	// and no team-wiki index regen. See notebook_worker.go.
-	IsNotebook bool
 	// IsEntityFact routes the request to Repo.CommitEntityFact. Used for
 	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
 	// — same serialization primitive, non-.md extension, no index regen.
@@ -183,8 +179,7 @@ type wikiSectionsNotifier interface {
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent)         {}
-func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent) {}
 func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent) {
 }
 
@@ -202,6 +197,12 @@ type WikiWorker struct {
 	// extractor is the optional hook fired on successful artifact commits.
 	// nil is the default — no extraction occurs until broker wires it up.
 	extractor ExtractorHook
+	// sourceCaptureHook fires off-lock (on the drain goroutine) after a
+	// successful playbook-skill compile or team-learnings commit, so the
+	// committed markdown body can be snapshotted into the immutable source
+	// layer (kind=note). nil is the default — no capture until broker wires
+	// it up. Guarded by mu, like extractor.
+	sourceCaptureHook SourceCaptureHook
 
 	// sideGoroutines tracks async helpers (e.g. auto-recompile, backup
 	// mirror) spawned from the drain loop so Stop() and WaitForIdle() can
@@ -212,8 +213,7 @@ type WikiWorker struct {
 	// drainDone closes when the drain goroutine has fully exited (including
 	// its own sideGoroutines.Wait). Tests register `t.Cleanup(func() {
 	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
-	drainDone       chan struct{}
-	notebookCommits atomic.Int64 // PromotionSweep gate; reader: NotebookCommitCount
+	drainDone chan struct{}
 
 	// lastStandardWrite folds byte-identical consecutive standard wiki
 	// writes per path (B4 knowledge-integrity: no commit storms — "173
@@ -406,10 +406,6 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsFactLogAppend {
 		sha, n, err = w.repo.AppendFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
-	} else if req.IsNotebook {
-		// Notebook writes do NOT regen the team wiki index. Commit target is
-		// agents/{slug}/notebook/... — scoped to the author.
-		sha, n, err = w.repo.CommitNotebook(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
 	} else {
 		// B2 update-first (wiki_update_first.go): an agent create whose
 		// target directory already holds a similar-slug article is rerouted
@@ -471,6 +467,19 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// source-article commit) already published wiki:write; emitting a
 		// second event for the compiled skill would double-count in the
 		// feed for callers that don't care about the hidden directory.
+		// S2 feeder 4: snapshot the compiled playbook into the source layer
+		// (kind=note). Origin/Title = playbook slug; content-hash id versions
+		// distinct compiles while folding identical recompiles to a no-op.
+		if slug := strings.TrimSpace(req.PlaybookSlug); slug != "" {
+			w.fireSourceCaptureHook(SourceCaptureJob{
+				Kind:       SourceKindNote,
+				ID:         DeriveSourceID(SourceKindNote, "", slug, req.Content),
+				Title:      slug,
+				Origin:     slug,
+				Content:    req.Content,
+				CapturedAt: time.Now().UTC(),
+			})
+		}
 	case req.IsPlaybookExecution:
 		if pbPub, ok := w.publisher.(playbookEventPublisher); ok {
 			pbPub.PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent{
@@ -492,14 +501,17 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		if notifier, ok := w.publisher.(wikiSectionsNotifier); ok {
 			notifier.EnqueueSectionsRefresh()
 		}
-	case req.IsNotebook:
-		w.notebookCommits.Add(1)
-		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
-			nbPub.PublishNotebookEvent(notebookWriteEvent{
-				Slug:      req.Slug,
-				Path:      req.Path,
-				CommitSHA: sha,
-				Timestamp: ts,
+		// S2 feeder 4: snapshot the regenerated team-learnings page into the
+		// source layer (kind=note). The page is cumulative, so a content-hash
+		// id captures each distinct version while deduping identical writes.
+		if page := strings.TrimSpace(req.LearningPage); page != "" {
+			w.fireSourceCaptureHook(SourceCaptureJob{
+				Kind:       SourceKindNote,
+				ID:         DeriveSourceID(SourceKindNote, "", teamLearningsSourceTitle, req.LearningPage),
+				Title:      teamLearningsSourceTitle,
+				Origin:     teamLearningsSourceOrigin,
+				Content:    req.LearningPage,
+				CapturedAt: time.Now().UTC(),
 			})
 		}
 	default:
@@ -947,6 +959,36 @@ func (w *WikiWorker) SetExtractor(e ExtractorHook) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.extractor = e
+}
+
+// SourceCaptureHook is the narrow callback the worker fires after a successful
+// playbook-skill compile or team-learnings commit. The broker wires it with a
+// closure over Broker.captureSource, so the committed markdown body lands in
+// the immutable source layer (kind=note). Kept as a func value (single call
+// shape, no interface ceremony) mirroring the ExtractorHook seam.
+//
+// The hook runs on the drain goroutine and MUST NOT block — captureSource is a
+// non-blocking buffered send, so this is safe.
+type SourceCaptureHook func(job SourceCaptureJob)
+
+// SetSourceCaptureHook wires the post-commit note-capture callback. Safe to
+// call before or after Start; guarded by mu like SetExtractor. nil disables it.
+func (w *WikiWorker) SetSourceCaptureHook(h SourceCaptureHook) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.sourceCaptureHook = h
+}
+
+// fireSourceCaptureHook invokes the note-capture callback if one is wired.
+// Called from process() on the drain goroutine after the commit lands.
+func (w *WikiWorker) fireSourceCaptureHook(job SourceCaptureJob) {
+	w.mu.Lock()
+	hook := w.sourceCaptureHook
+	w.mu.Unlock()
+	if hook == nil {
+		return
+	}
+	hook(job)
 }
 
 // maybeRunExtractor fires the extractor hook in a tracked side goroutine so
