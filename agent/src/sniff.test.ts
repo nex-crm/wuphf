@@ -46,6 +46,45 @@ test("sniff strips secrets and turns auth into a named ref (A3)", () => {
 	expect(calls[0].call.query?.id).toBe("42"); // benign query kept
 });
 
+test("sniff redacts secret-looking request body fields (A3, regression: CodeRabbit sniff.ts:103)", () => {
+	const bodySecret = "hunter2-pw-must-not-leak";
+	const refresh = "rt-MUST-NOT-LEAK";
+	const har: Har = {
+		log: {
+			entries: [
+				{
+					request: {
+						method: "POST",
+						url: "https://api.acme.com/v1/login",
+						postData: {
+							mimeType: "application/json",
+							text: JSON.stringify({ email: "sam@acme.com", password: bodySecret, nested: { refresh_token: refresh } }),
+						},
+					},
+					response: { status: 200 },
+				},
+				{
+					request: {
+						method: "POST",
+						url: "https://api.acme.com/v1/form",
+						postData: { mimeType: "application/x-www-form-urlencoded", text: `password=${bodySecret}&ok=1` },
+					},
+					response: { status: 200 },
+				},
+			],
+		},
+	};
+	const calls = sniff(har);
+	const blob = JSON.stringify(calls);
+	expect(blob).not.toContain(bodySecret); // no body secret anywhere
+	expect(blob).not.toContain(refresh); // nested secret redacted too
+	const json = calls[0].call.body as Record<string, unknown>;
+	expect(json.password).toBe("<redacted>");
+	expect(json.email).toBe("sam@acme.com"); // benign field kept
+	expect((json.nested as Record<string, unknown>).refresh_token).toBe("<redacted>");
+	expect(calls[1].call.body).toBe("<redacted>"); // non-JSON body dropped wholesale
+});
+
 test("sniff classifies auth: api_key stable vs JWT rotating (A4)", () => {
 	const calls = sniff(sampleHar);
 	expect(calls[0].auth_kind).toBe("api_key");
