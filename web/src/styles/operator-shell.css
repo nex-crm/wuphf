@@ -2047,10 +2047,19 @@
 /* Live activity trace — the agent's workings (thinking + tool calls + results),
    styled close to pi's own client: muted reasoning, mono tool lines. Collapses
    to a disclosure once the build is done. */
-.opr-activity {
-  margin: var(--space-2) 0 var(--space-3);
+/* One agentic turn, woven inline in the thread (Claude-cowork layout). */
+.opr-turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-2);
 }
-.opr-activity-summary {
+/* Collapsible Thinking block: a quiet header that opens the reasoning. The
+   reasoning sits behind a hairline rule, like a quoted aside. */
+.opr-think-block {
+  margin: 0;
+}
+.opr-think-summary {
   cursor: pointer;
   color: var(--t-faint);
   font-size: 11px;
@@ -2060,19 +2069,20 @@
   user-select: none;
   padding: 2px 0;
 }
-.opr-activity-summary::-webkit-details-marker {
+.opr-think-summary::-webkit-details-marker {
   display: none;
 }
-.opr-activity-summary::before {
+.opr-think-summary::before {
   content: "›";
   display: inline-block;
   margin-right: 6px;
+  color: var(--t-faint);
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.opr-activity[open] .opr-activity-summary::before {
+.opr-think-block[open] .opr-think-summary::before {
   transform: rotate(90deg);
 }
-.opr-activity-trace {
+.opr-think-body {
   margin-top: var(--space-2);
   padding-left: var(--space-3);
   border-left: 1px solid var(--t-line);
@@ -2153,8 +2163,55 @@
   overflow: auto;
   padding-left: var(--space-3);
 }
-.opr-build-loader {
+/* Trace-native "still working" line: dots + a cycling Office gerund, in the
+   builder's own dimmed type so it reads as part of the workings, not a bubble. */
+.opr-act-working {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin-top: var(--space-2);
+  padding-left: 1px;
+  font-size: 12px;
+  color: var(--t-faint);
+}
+.opr-work-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.opr-work-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--t-accent);
+  opacity: 0.45;
+  animation: opr-think 1.1s ease-in-out infinite;
+}
+.opr-work-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.opr-work-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+.opr-work-phrase {
+  font-variant-numeric: tabular-nums;
+  animation: opr-work-fade 0.36s ease-out;
+}
+@keyframes opr-work-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .opr-work-dots span,
+  .opr-work-phrase {
+    animation: none;
+  }
+  .opr-work-dots span {
+    opacity: 0.6;
+  }
 }
 
 .opr-thinking {
