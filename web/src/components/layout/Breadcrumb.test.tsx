@@ -70,21 +70,21 @@ describe("Breadcrumb", () => {
     expect(copyBtn).toBeInTheDocument();
   });
 
-  it("renders correctly with three segments (notebook-entry)", () => {
+  it("renders correctly with three segments", () => {
     render(
       <Breadcrumb
         items={[
-          { label: "Notebooks", href: "#/notebooks" },
-          { label: "researcher", href: "#/notebooks/researcher" },
+          { label: "Wiki", href: "#/wiki" },
+          { label: "team", href: "#/wiki/team" },
           {
             label: "2026-05-01-insights",
-            href: "#/notebooks/researcher/2026-05-01-insights",
+            href: "#/wiki/team/2026-05-01-insights",
           },
         ]}
       />,
     );
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
-    expect(screen.getByText("researcher")).toBeInTheDocument();
+    expect(screen.getByText("Wiki")).toBeInTheDocument();
+    expect(screen.getByText("team")).toBeInTheDocument();
     expect(screen.getByText("2026-05-01-insights")).toBeInTheDocument();
   });
 

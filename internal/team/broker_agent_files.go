@@ -48,8 +48,8 @@ func (b *Broker) ReadOfficeUserFile() string {
 // backfillAgentFilesForRoster seeds any MISSING instruction file for every agent
 // in the roster (plus the office USER.md) with deterministic content derived
 // from the agent's current persona/role/expertise/tools. Idempotent: existing
-// files are never overwritten, so a human's edits survive. Runs alongside
-// ensureNotebookDirsForRoster so new agents and fresh offices get their files
+// files are never overwritten, so a human's edits survive. Runs on every
+// roster-ensure hook so new agents and fresh offices get their files
 // without an LLM call (which could half-initialize an agent on failure).
 func (b *Broker) backfillAgentFilesForRoster() {
 	worker := b.WikiWorker()

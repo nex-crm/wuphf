@@ -46,14 +46,6 @@ function routeIdentityKey(route: CurrentRoute): string {
       return `wiki-article:${route.articlePath}`;
     case "wiki-lookup":
       return `wiki-lookup:${route.query ?? ""}`;
-    case "notebook-catalog":
-      return "notebook-catalog";
-    case "notebook-agent":
-      return `notebook-agent:${route.agentSlug}`;
-    case "notebook-entry":
-      return `notebook-entry:${route.agentSlug}/${route.entrySlug}`;
-    case "reviews":
-      return "reviews";
     case "article":
       return `article:${route.articleId}`;
     case "inbox":

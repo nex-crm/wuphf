@@ -1,7 +1,10 @@
 const RICH_ARTIFACT_ID = "ra_[0-9a-f]{16}";
 
+// The route prefix is now the bare `/visual-artifacts/` (was
+// `/notebook/visual-artifacts/`). The legacy `notebook/` and `wiki/`
+// directory segments stay optional so links in older messages still resolve.
 const EXPLICIT_REFERENCE_PATTERN =
-  "(?:\\b(?:visual|rich|html|notebook)[\\s_-]*artifact(?:[\\s_-]*(?:ref|reference|id))?\\b\\s*[:=#-]?\\s*|#?/?(?:notebook|wiki)/visual-artifacts/)(" +
+  "(?:\\b(?:visual|rich|html|notebook)[\\s_-]*artifact(?:[\\s_-]*(?:ref|reference|id))?\\b\\s*[:=#-]?\\s*|#?/?(?:(?:notebook|wiki)/)?visual-artifacts/)(" +
   RICH_ARTIFACT_ID +
   ")(?:\\.html)?";
 

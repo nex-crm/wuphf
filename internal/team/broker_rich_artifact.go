@@ -3,17 +3,16 @@ package team
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
 
-// handleNotebookVisualArtifacts owns the collection route:
+// handleVisualArtifacts owns the collection route:
 //
-//	GET  /notebook/visual-artifacts?slug=&source_path=
-//	POST /notebook/visual-artifacts
-func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Request) {
+//	GET  /visual-artifacts?slug=&source_path=
+//	POST /visual-artifacts
+func (b *Broker) handleVisualArtifacts(w http.ResponseWriter, r *http.Request) {
 	worker := b.requireWikiWorker(w, "visual artifact")
 	if worker == nil {
 		return
@@ -79,27 +78,6 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 			writeRichArtifactError(w, err)
 			return
 		}
-		// CreateRichArtifact auto-creates a canonical notebook home for the
-		// artifact and reports it via stored.AttachedToNotebookEntry. The manual
-		// notebook-write path announces new entries with a #general chat card;
-		// mirror that here so an auto-created entry is not discovered by accident.
-		// The card emitter takes b.mu itself, and this HTTP handler holds no lock,
-		// so the call is safe. A "# Title" body makes markdownTitle resolve to the
-		// artifact title; SourceMarkdownPath is the mirrored notebook-home path.
-		//
-		// Only emit when the entry was DERIVED by the system. AttachedToNotebookEntry
-		// is also populated in companion mode (request supplied source_markdown_path),
-		// where it names a PRE-EXISTING note — firing the "new entry" card there is a
-		// false signal. Gate on an empty source path so the card announces genuinely
-		// new system-created homes only.
-		if stored.AttachedToNotebookEntry != nil && strings.TrimSpace(body.SourceMarkdownPath) == "" {
-			b.emitNewNotebookEntryCard(
-				stored.AttachedToNotebookEntry.OwnerSlug,
-				stored.SourceMarkdownPath,
-				fmt.Sprintf("# %s\n", stored.Title),
-				stored.OwnerSlug,
-			)
-		}
 		// stored carries the canonical notebook-home attachment chosen by the
 		// worker. Always pass it through DerivePromotion so the response shape
 		// matches the list/get endpoints (non-nil promotion field).
@@ -113,16 +91,16 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// handleNotebookVisualArtifactSubpath owns:
+// handleVisualArtifactSubpath owns:
 //
-//	GET  /notebook/visual-artifacts/{id}
-//	POST /notebook/visual-artifacts/{id}/promote
-func (b *Broker) handleNotebookVisualArtifactSubpath(w http.ResponseWriter, r *http.Request) {
+//	GET  /visual-artifacts/{id}
+//	POST /visual-artifacts/{id}/promote
+func (b *Broker) handleVisualArtifactSubpath(w http.ResponseWriter, r *http.Request) {
 	worker := b.requireWikiWorker(w, "visual artifact")
 	if worker == nil {
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/notebook/visual-artifacts/")
+	rest := strings.TrimPrefix(r.URL.Path, "/visual-artifacts/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "visual artifact not found"})

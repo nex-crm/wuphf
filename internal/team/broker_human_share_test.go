@@ -435,7 +435,7 @@ func TestHumanSessionAuthBlocksDMChannelList(t *testing.T) {
 	}
 }
 
-func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
+func TestHumanEventsReceiveSharedWikiEvents(t *testing.T) {
 	b := newTestBroker(t)
 	token, _, err := b.createHumanInvite()
 	if err != nil {
@@ -465,12 +465,6 @@ func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
 	}
 
 	reader := bufio.NewReader(resp.Body)
-	b.PublishNotebookEvent(notebookWriteEvent{
-		Slug:      "pm",
-		Path:      "agents/pm/notebook/private.md",
-		CommitSHA: "abc123",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	})
 	b.PublishWikiEvent(wikiWriteEvent{
 		Path:       "team/shared.md",
 		CommitSHA:  "def456",
@@ -490,9 +484,6 @@ func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
 		}
 	}
 	stream := strings.Join(lines, "")
-	if strings.Contains(stream, "notebook:write") || strings.Contains(stream, "private.md") {
-		t.Fatalf("human SSE leaked notebook metadata: %s", stream)
-	}
 	if !strings.Contains(stream, "event: wiki:write") {
 		t.Fatalf("human SSE did not receive shared wiki event: %s", stream)
 	}

@@ -176,15 +176,10 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	const job = "live-paths"
 
 	// Serve the exact routes the FE uses, behind the same auth middleware.
-	fx.broker.SetReviewerResolver(func(string) string { return "ceo" })
-	fx.broker.ensureReviewLog()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tasks", fx.broker.requireAuth(fx.broker.handleTasks))
 	mux.HandleFunc("/tasks/", fx.broker.requireAuth(fx.broker.handleTaskByID))
 	mux.HandleFunc("/task-plan", fx.broker.requireAuth(fx.broker.handleTaskPlan))
-	mux.HandleFunc("/notebook/write", fx.broker.requireAuth(fx.broker.handleNotebookWrite))
-	mux.HandleFunc("/notebook/promote", fx.broker.requireAuth(fx.broker.handleNotebookPromote))
-	mux.HandleFunc("/review/", fx.broker.requireAuth(fx.broker.handleReviewSubpath))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	client := &livePathsClient{srv: srv, token: fx.broker.Token()}
@@ -349,64 +344,6 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		reopenStatus == http.StatusOK && reopened != nil &&
 			reopened.LifecycleState == LifecycleStateRunning && reopened.CompletedAt == "" && !staleApproved,
 		fmt.Sprintf("status=%d body=%s state=%s staleApproved=%v", reopenStatus, truncate(reopenBody, 120), reopened.LifecycleState, staleApproved), "")
-
-	// ── (d) Wiki review verbs via the FE payloads ──────────────────────────
-	if _, _, err := client.postJSON("/notebook/write", map[string]any{
-		"slug": "eng", "path": "agents/eng/notebook/acme-brief.md",
-		"content": "# Acme brief\n\nLive-path probe.\n", "mode": "create", "commit_message": "seed",
-	}); err != nil {
-		return err
-	}
-	promoteStatus, promoteBody, err := client.postJSON("/notebook/promote", map[string]any{
-		"my_slug": "eng", "source_path": "agents/eng/notebook/acme-brief.md",
-		"target_wiki_path": "team/accounts/acme-brief.md", "rationale": "Ready for team wiki review.",
-	})
-	if err != nil {
-		return err
-	}
-	var promoted struct {
-		PromotionID string `json:"promotion_id"`
-	}
-	_ = json.Unmarshal([]byte(promoteBody), &promoted)
-	if promoteStatus != http.StatusOK || promoted.PromotionID == "" {
-		return fmt.Errorf("promote: status=%d body=%s", promoteStatus, promoteBody)
-	}
-	rid := promoted.PromotionID
-
-	// Empty rationale (the old FE payload) must fail LOUDLY with a JSON
-	// error — this is the 400 the v3 run swallowed three times in a row.
-	emptyStatus, emptyBody, err := client.postJSON("/review/"+rid+"/request-changes", map[string]any{
-		"actor_slug": "", "rationale": "",
-	})
-	if err != nil {
-		return err
-	}
-	r.add(job, "wiki review request-changes with empty rationale returns a structured 400",
-		emptyStatus == http.StatusBadRequest && strings.Contains(emptyBody, "rationale"),
-		fmt.Sprintf("status=%d body=%s", emptyStatus, truncate(emptyBody, 120)), "")
-
-	rcStatus, rcBody, err := client.postJSON("/review/"+rid+"/request-changes", map[string]any{
-		"actor_slug": "", "rationale": "Merge with the existing Acme brief instead of duplicating.",
-	})
-	if err != nil {
-		return err
-	}
-	r.add(job, "wiki review request-changes with a rationale succeeds via the FE payload",
-		rcStatus == http.StatusOK && strings.Contains(rcBody, "changes-requested"),
-		fmt.Sprintf("status=%d body=%s", rcStatus, truncate(rcBody, 120)), "")
-
-	if _, _, err := client.postJSON("/review/"+rid+"/resubmit", map[string]any{"actor_slug": "eng"}); err != nil {
-		return err
-	}
-	approveStatus, approveBody, err := client.postJSON("/review/"+rid+"/approve", map[string]any{
-		"actor_slug": "", "rationale": "",
-	})
-	if err != nil {
-		return err
-	}
-	r.add(job, "wiki review approve succeeds via the FE payload and lands the article",
-		approveStatus == http.StatusOK && strings.Contains(approveBody, "approved"),
-		fmt.Sprintf("status=%d body=%s", approveStatus, truncate(approveBody, 160)), "")
 
 	// ── (e) agent turn / completion for a PARKED task is refused ──────────
 	// Drafting is now reachable only through the deliberate park path (the

@@ -147,6 +147,13 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	b.runtimeProvider = "codex"
 	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
 	t.Setenv("WUPHF_OPENAI_API_KEY", "sk-test-openai")
+	// Force the gbrain CLI to be undiscoverable so "inactive without CLI
+	// installed" is deterministic regardless of whether the host running the
+	// suite has gbrain on PATH. The OpenAI key keeps the embedding side ready,
+	// so inactivity is attributable purely to the missing binary — the case
+	// this test pins.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WUPHF_GBRAIN_COMMAND", "")
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}

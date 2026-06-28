@@ -18,8 +18,8 @@ func TestCodexToolProgressDetail(t *testing.T) {
 		tool     string
 		contains string
 	}{
-		{"visual artifact", "notebook_visual_artifact_create", "drafting figure"},
-		{"visual artifact builds", "notebook_visual_artifact_create", "building visual artifact"},
+		{"visual artifact", "visual_artifact_create", "drafting figure"},
+		{"visual artifact builds", "visual_artifact_create", "building visual artifact"},
 		{"generic artifact", "rich_artifact_commit", "building artifact"},
 		{"broadcast", "team_broadcast", "sharing update with the team"},
 		{"generic tool", "team_post_message", "running team_post_message"},

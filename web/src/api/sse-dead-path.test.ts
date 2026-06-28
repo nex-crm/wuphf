@@ -1,10 +1,9 @@
 /**
  * Regression test for the SSE dead-path bug.
  *
- * Before this fix, `subscribeEditLog` and `subscribeNotebookEvents` built
- * EventSources pointed at `/wiki/stream` and `/notebooks/stream` — paths
- * that do NOT exist on the broker (only `/events` does). Every live
- * update was silently dropped.
+ * Before this fix, `subscribeEditLog` built an EventSource pointed at
+ * `/wiki/stream` — a path that does NOT exist on the broker (only
+ * `/events` does). Every live update was silently dropped.
  *
  * These tests lock in two guarantees:
  *   1. The subscriber URL ends in `/events` (not a per-surface stream).
@@ -14,7 +13,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { subscribeNotebookEvents } from "./notebook";
 import { subscribeEditLog } from "./wiki";
 
 class FakeEventSource {
@@ -90,38 +88,6 @@ describe("SSE dead-path fix", () => {
       date: "2026-04-21T10:00:00Z",
     });
     expect(handler).toHaveBeenCalledTimes(1);
-    unsub();
-    expect(src.closed).toBe(true);
-  });
-
-  it("subscribeNotebookEvents opens /events (not /notebooks/stream)", () => {
-    const unsub = subscribeNotebookEvents(() => {});
-    const { lastURL } = FakeEventSource;
-    expect(lastURL).not.toBeNull();
-    if (!lastURL) throw new Error("Expected EventSource URL to be captured");
-    expect(lastURL).not.toContain("/notebooks/stream");
-    expect(lastURL).toMatch(/\/events(\?|$)/);
-    unsub();
-  });
-
-  it("subscribeNotebookEvents wires both notebook:write and review:state_change listeners", () => {
-    const handler = vi.fn();
-    const unsub = subscribeNotebookEvents(handler);
-    const [src] = created;
-    if (!src) throw new Error("Expected EventSource to be created");
-    src.emit("notebook:write", {
-      slug: "pm",
-      path: "agents/pm/notebook/foo.md",
-    });
-    src.emit("review:state_change", {
-      id: "r1",
-      old_state: "in-review",
-      new_state: "approved",
-    });
-    expect(handler).toHaveBeenCalledTimes(2);
-    // Generic messages (heartbeats, entity events) must NOT fire the handler.
-    src.emit("entity:fact_recorded", { kind: "people", slug: "sarah" });
-    expect(handler).toHaveBeenCalledTimes(2);
     unsub();
     expect(src.closed).toBe(true);
   });

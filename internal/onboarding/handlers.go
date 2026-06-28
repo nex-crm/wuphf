@@ -13,8 +13,43 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gbrain"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
+
+// gbrainEnsureTimeout bounds the best-effort gbrain brain initialization fired
+// when onboarding completes. It mirrors the /init TUI flow's budget: brain init
+// (`gbrain init --pglite`) can take time on first run, so the call runs in a
+// detached goroutine and never blocks the HTTP response.
+const gbrainEnsureTimeout = 90 * time.Second
+
+// Test seams for the onboarding-complete gbrain wiring. They default to the real
+// gbrain implementations and are overridden in unit tests so the completion path
+// can be exercised without a live gbrain binary. ensureBrainHook is the function
+// HandleComplete launches in a goroutine after a successful completion.
+var (
+	gbrainIsInstalled = gbrain.IsInstalled
+	gbrainEnsureBrain = gbrain.EnsureBrain
+	ensureBrainHook   = ensureGBrainBrain
+)
+
+// ensureGBrainBrain initializes a gbrain brain with the best available embedder
+// when onboarding completes. It is best-effort and MUST NOT fail or block
+// onboarding: it is a no-op when gbrain is not installed, gbrain.EnsureBrain is
+// strictly idempotent (a brain that already exists is left untouched), and any
+// error is logged rather than surfaced. By the time onboarding completes the
+// user's pasted OpenAI key is already persisted to config (via /config), so
+// SelectEmbeddingModel/EnsureBrain pick the strongest embedder automatically.
+func ensureGBrainBrain() {
+	if !gbrainIsInstalled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gbrainEnsureTimeout)
+	defer cancel()
+	if _, err := gbrainEnsureBrain(ctx); err != nil {
+		log.Printf("onboarding: gbrain ensure-brain failed: %v", err)
+	}
+}
 
 // CompleteFunc is the side-effect hook invoked by HandleComplete when the
 // user finishes onboarding. The broker supplies a real implementation that
@@ -303,6 +338,13 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		http.Error(w, "failed to save state", http.StatusInternalServerError)
 		return
 	}
+
+	// Best-effort: initialize the gbrain knowledge brain with the strongest
+	// available embedder now that the OpenAI key (if any) is persisted. Runs in
+	// a detached goroutine so a slow first-run `gbrain init` never blocks the
+	// HTTP response, and never fails onboarding (no-op when gbrain is absent,
+	// idempotent when a brain already exists). See ensureGBrainBrain.
+	go ensureBrainHook()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{

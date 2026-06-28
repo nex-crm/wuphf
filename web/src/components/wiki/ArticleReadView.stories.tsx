@@ -65,3 +65,48 @@ export const PlainArticle: Story = {
       "Some prose the team wrote by hand.\n\n## Summary\n\nA prose summary that stays in the body because it is not a definition list.\n\n## Details\n\nMore prose.\n",
   },
 };
+
+/**
+ * A compiled article (Karpathy-style): YAML frontmatter is stripped, the lead
+ * H1 is dropped, standard GFM `[^n]` footnotes render natively into the
+ * relabeled "References" block, a fenced mermaid block renders as a diagram,
+ * and the warm-paper `.wiki-reader` measure applies.
+ */
+export const CompiledArticle: Story = {
+  args: {
+    title: "Reciprocal Rank Fusion",
+    articlePath: "team/concepts/reciprocal-rank-fusion.md",
+    content: `---
+title: Reciprocal Rank Fusion
+kind: concept
+categories:
+  - retrieval
+compiled: true
+updated_at: 2026-06-25T12:00:00Z
+---
+
+# Reciprocal Rank Fusion
+
+Reciprocal Rank Fusion (RRF) combines several ranked result lists into one by summing reciprocal ranks.[^rrf] The team adopted it to fuse BM25 and semantic retrieval.[^hybrid]
+
+## How it works
+
+Each document's score is the sum of \`1 / (k + rank)\` across every list it appears in.[^rrf]
+
+\`\`\`mermaid
+graph LR
+  BM25 --> Fuse
+  Semantic --> Fuse
+  Fuse --> Results
+\`\`\`
+
+## Why the team uses it
+
+Hybrid search beats pure semantic retrieval on the team's eval set.[^hybrid]
+
+[^rrf]: Cormack et al., "Reciprocal Rank Fusion outperforms Condorcet" (2009).
+[^hybrid]: Team retrieval eval, decision log decision-rrf-1.
+`,
+    fetchPreview: async () => null,
+  },
+};

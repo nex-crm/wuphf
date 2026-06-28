@@ -1309,7 +1309,7 @@ func TestBuildPromptIncludesTaskStatusAndWorktreeGuidance(t *testing.T) {
 	}
 }
 
-func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
+func TestBuildPromptIncludesMarkdownWikiAndArtifactGuidance(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
 	t.Setenv("NEX_API_KEY", "")
 
@@ -1326,16 +1326,20 @@ func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
 	for _, slug := range []string{"ceo", "builder"} {
 		prompt := l.buildPrompt(slug)
 		for _, want := range []string{
-			"notebook_write",
-			"notebook_visual_artifact_create",
-			"notebook_promote",
+			"visual_artifact_create",
 			"wuphf_wiki_lookup",
 			"self-contained HTML article",
 			"visual-artifact:ra_...",
-			"Do not bypass notebook_promote",
+			"@librarian",
 		} {
 			if !strings.Contains(prompt, want) {
 				t.Fatalf("%s prompt missing %q:\n%s", slug, want, prompt)
+			}
+		}
+		// The removed notebook/promotion tool surface must not reappear.
+		for _, banned := range []string{"notebook_write", "notebook_promote", "team_notebook_review"} {
+			if strings.Contains(prompt, banned) {
+				t.Fatalf("%s prompt still references removed tool %q", slug, banned)
 			}
 		}
 	}

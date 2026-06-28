@@ -305,8 +305,9 @@ const AttentionItemCard = memo(function AttentionItemCard({
       void router.navigate({ to: "/tasks" });
       return;
     }
-    // review → the Wiki Reviews tab, the canonical promotion-review surface.
-    void router.navigate({ to: "/reviews" });
+    // review → the Wiki, the home of promoted articles. The dedicated
+    // promotion-review surface has been retired.
+    void router.navigate({ to: "/wiki" });
   }
 
   const isRequest = item.kind === "request";

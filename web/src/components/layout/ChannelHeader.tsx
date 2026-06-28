@@ -27,12 +27,6 @@ function headerTitleAndDesc(
     case "wiki-article":
     case "wiki-lookup":
       return { title: appTitle("wiki"), desc: "" };
-    case "notebook-catalog":
-    case "notebook-agent":
-    case "notebook-entry":
-      return { title: "Notebooks", desc: "" };
-    case "reviews":
-      return { title: "Reviews", desc: "" };
     case "article":
       return { title: "Article", desc: "" };
     case "inbox":

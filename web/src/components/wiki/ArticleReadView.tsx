@@ -1,5 +1,11 @@
-import { useMemo, useRef } from "react";
-import ReactMarkdown from "react-markdown";
+import {
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+  useMemo,
+  useRef,
+} from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import type { PluggableList } from "unified";
 
 import type { RichArtifactDetail } from "../../api/richArtifacts";
@@ -20,14 +26,16 @@ import ArticleHoverPreviews, {
 import ArticleInfobox from "./ArticleInfobox";
 import { prepareArticleMarkdown } from "./articleContent";
 import Hatnote from "./Hatnote";
+import MermaidBlock from "./MermaidBlock";
+import "../../styles/wiki-reader.css";
 
 /**
  * The Wikipedia-parity article read view.
  *
  * Takes the raw markdown body and renders:
  * - a right-floating infobox lifted from B2's `## Summary` definition list
- * - `[^n]` citations as superscript `[1]` markers with a hover popover,
- *   and the footnote block relabeled "References" with backref carets
+ * - standard GFM `[^n]` footnotes (rendered natively via remark-gfm) with the
+ *   footnote block relabeled "References" and backref carets
  * - blue/red wikilinks with hover page-preview cards
  * - a hatnote (italic, muted) when the body carries a generated-article
  *   marker comment — instead of the raw HTML comment leaking or hiding
@@ -79,7 +87,7 @@ export default function ArticleReadView({
   const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), []);
   const markdownComponents = useMemo(
     () =>
-      buildMarkdownComponents({
+      buildReadViewComponents({
         resolver,
         onNavigate,
         articlePath,
@@ -113,8 +121,11 @@ export default function ArticleReadView({
 
   return (
     <div
-      className="wk-article-body"
+      className={
+        prepared.compiled ? "wk-article-body wiki-reader" : "wk-article-body"
+      }
       data-testid="wk-article-body"
+      data-compiled={prepared.compiled ? "true" : undefined}
       ref={bodyRef}
     >
       {prepared.generated ? (
@@ -162,4 +173,62 @@ export default function ArticleReadView({
       />
     </div>
   );
+}
+
+interface ReadViewComponentOptions {
+  resolver: (slug: string) => boolean;
+  onNavigate?: (slug: string) => void;
+  articlePath: string;
+  onEditSection?: () => void;
+}
+
+/**
+ * Compose the shared wiki markdown components, then layer one read-view-only
+ * override on top:
+ *  - `pre`: intercept fenced ```mermaid blocks and render them as diagrams.
+ *
+ * GFM footnotes (`[^n]`) render natively through remark-gfm in the shared
+ * pipeline, so the read view no longer wires any custom citation handling.
+ */
+function buildReadViewComponents(
+  options: ReadViewComponentOptions,
+): Partial<Components> {
+  const base = buildMarkdownComponents(options);
+  return {
+    ...base,
+    pre: (props): ReactElement => {
+      const mermaid = mermaidSourceFromPre(props.children);
+      if (mermaid !== null) return <MermaidBlock code={mermaid} />;
+      return <pre {...props} />;
+    },
+  };
+}
+
+/**
+ * Pull the raw source out of a ```mermaid fenced block. react-markdown renders
+ * a fenced block as `<pre><code class="language-mermaid">…</code></pre>`, so we
+ * inspect the single code child. Returns null for any other `<pre>` content
+ * (plain code blocks fall through to the default renderer).
+ */
+function mermaidSourceFromPre(children: ReactNode): string | null {
+  if (!isValidElement(children)) return null;
+  const codeProps = children.props as {
+    className?: string;
+    children?: ReactNode;
+  };
+  const className = codeProps.className ?? "";
+  if (!/(^|\s)language-mermaid(\s|$)/.test(className)) return null;
+  const raw = codeProps.children;
+  const text = typeof raw === "string" ? raw : extractText(raw);
+  return text.replace(/\n$/, "");
+}
+
+/** Flatten a code element's children down to its text content. */
+function extractText(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (isValidElement(node)) {
+    return extractText((node.props as { children?: ReactNode }).children);
+  }
+  return "";
 }

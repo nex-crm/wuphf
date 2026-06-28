@@ -24,8 +24,6 @@ package team
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -119,81 +117,6 @@ func TestInboxItem_RequestKind_AuthByFrom(t *testing.T) {
 	}
 }
 
-// TestInboxItem_ReviewKind_AuthByAssignedReviewer exercises the review
-// half of the fan-out auth boundary. Three pending promotions, one
-// assigned to "mira" as the reviewer. The owner-token actor sees all
-// three; mira's human-session actor sees only the one assigned to her.
-//
-// This wires the existing ReviewLog (broker.reviewLog) into the
-// fan-out — the helper must call through the same scope filter that
-// the existing /review/list?scope=<slug> handler uses.
-func TestInboxItem_ReviewKind_AuthByAssignedReviewer(t *testing.T) {
-	b := newTestBrokerForReview(t)
-	rl := b.ReviewLog()
-	if rl == nil {
-		t.Skip("ReviewLog not initialized in test broker; skipping until wiki worker harness lands")
-	}
-
-	now := time.Now().UTC()
-	seedPromotion(t, rl, &Promotion{
-		ID:           "rev-1",
-		State:        PromotionPending,
-		SourceSlug:   "ada",
-		SourcePath:   "notebook/ada/draft-1.md",
-		TargetPath:   "wiki/draft-1.md",
-		ReviewerSlug: "mira",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	})
-	seedPromotion(t, rl, &Promotion{
-		ID:           "rev-2",
-		State:        PromotionPending,
-		SourceSlug:   "ada",
-		SourcePath:   "notebook/ada/draft-2.md",
-		TargetPath:   "wiki/draft-2.md",
-		ReviewerSlug: "alex",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	})
-	seedPromotion(t, rl, &Promotion{
-		ID:           "rev-3",
-		State:        PromotionPending,
-		SourceSlug:   "ada",
-		SourcePath:   "notebook/ada/draft-3.md",
-		TargetPath:   "wiki/draft-3.md",
-		ReviewerSlug: "alex",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	})
-
-	owner := requestActor{Kind: requestActorKindBroker}
-	mira := requestActor{Kind: requestActorKindHuman, Slug: "mira", DisplayName: "Mira"}
-
-	ownerRows := b.reviewsForInbox(owner)
-	if len(ownerRows) != 3 {
-		t.Fatalf("ownerRows len = %d, want 3", len(ownerRows))
-	}
-	for _, row := range ownerRows {
-		if row.Kind != InboxItemKindReview {
-			t.Fatalf("ownerRows[%q].Kind = %q, want %q", row.ReviewID, row.Kind, InboxItemKindReview)
-		}
-		if row.Review == nil {
-			t.Fatalf("ownerRows[%q].Review peek must be populated", row.ReviewID)
-		}
-		if row.Review.ReviewerSlug == "" {
-			t.Fatalf("ownerRows[%q].Review.ReviewerSlug must be populated", row.ReviewID)
-		}
-	}
-
-	miraRows := b.reviewsForInbox(mira)
-	if len(miraRows) != 1 {
-		t.Fatalf("miraRows len = %d, want 1 (rev-1 only)", len(miraRows))
-	}
-	if miraRows[0].ReviewID != "rev-1" {
-		t.Fatalf("miraRows[0].ReviewID = %q, want %q", miraRows[0].ReviewID, "rev-1")
-	}
-}
-
 // TestInboxCursor_ReadWriteRace forces concurrent SetInboxCursor +
 // InboxCursor calls on the same slug. Run with `go test -race` — any
 // data race in the per-user cursor map surfaces as a runtime failure.
@@ -253,11 +176,9 @@ func TestInboxFanout_1000MixedItems_P95Under100ms(t *testing.T) {
 
 	const taskCount = 333
 	const requestCount = 333
-	const reviewCount = 334
 	const ceiling = 100 * time.Millisecond
 
-	b := newTestBrokerForReview(t)
-	rl := b.ReviewLog()
+	b := newTestBroker(t)
 
 	now := time.Now().UTC()
 	b.mu.Lock()
@@ -286,21 +207,6 @@ func TestInboxFanout_1000MixedItems_P95Under100ms(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	if rl != nil {
-		for i := 0; i < reviewCount; i++ {
-			seedPromotion(t, rl, &Promotion{
-				ID:           fmt.Sprintf("rev-%04d", i),
-				State:        PromotionPending,
-				SourceSlug:   "ada",
-				SourcePath:   fmt.Sprintf("notebook/ada/n-%d.md", i),
-				TargetPath:   fmt.Sprintf("wiki/n-%d.md", i),
-				ReviewerSlug: "owner",
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			})
-		}
-	}
-
 	owner := requestActor{Kind: requestActorKindBroker}
 
 	// Warm-up so the timed run measures steady-state.
@@ -318,17 +224,15 @@ func TestInboxFanout_1000MixedItems_P95Under100ms(t *testing.T) {
 			t.Fatalf("inboxItemsForActor sample %d: %v", i, err)
 		}
 		if len(rows) < taskCount+requestCount {
-			t.Fatalf("rows = %d, want at least %d (tasks+requests, reviews optional)", len(rows), taskCount+requestCount)
+			t.Fatalf("rows = %d, want at least %d (tasks+requests)", len(rows), taskCount+requestCount)
 		}
-		// Smoke: kind distribution must include all three when reviews seeded.
-		if rl != nil {
-			counts := map[InboxItemKind]int{}
-			for _, r := range rows {
-				counts[r.Kind]++
-			}
-			if counts[InboxItemKindTask] == 0 || counts[InboxItemKindRequest] == 0 || counts[InboxItemKindReview] == 0 {
-				t.Fatalf("kind distribution missing entries: %+v", counts)
-			}
+		// Smoke: both kinds present in the distribution.
+		counts := map[InboxItemKind]int{}
+		for _, r := range rows {
+			counts[r.Kind]++
+		}
+		if counts[InboxItemKindTask] == 0 || counts[InboxItemKindRequest] == 0 {
+			t.Fatalf("kind distribution missing entries: %+v", counts)
 		}
 		if elapsed > slowest {
 			slowest = elapsed
@@ -338,40 +242,4 @@ func TestInboxFanout_1000MixedItems_P95Under100ms(t *testing.T) {
 	if slowest > ceiling {
 		t.Fatalf("inboxItemsForActor P95-proxy = %s > ceiling %s", slowest, ceiling)
 	}
-}
-
-// newTestBrokerForReview returns a test broker with the ReviewLog
-// initialized so the review-kind tests can seed promotions directly.
-// Bypasses the wiki-worker dependency by constructing the ReviewLog
-// with a tmpfile path — the in-memory promotions map is the only
-// state the per-kind auth filter reads.
-func newTestBrokerForReview(t *testing.T) *Broker {
-	t.Helper()
-	b := newTestBroker(t)
-	rl, err := NewReviewLog(filepath.Join(t.TempDir(), "review-log.jsonl"), nil, nil)
-	if err != nil {
-		t.Fatalf("init review log: %v", err)
-	}
-	b.mu.Lock()
-	b.reviewLog = rl
-	b.mu.Unlock()
-	return b
-}
-
-// seedPromotion inserts a Promotion directly into the ReviewLog's
-// in-memory map for tests. Bypasses the JSONL append path because
-// the per-kind auth filter only reads the in-memory list.
-func seedPromotion(t *testing.T, rl *ReviewLog, p *Promotion) {
-	t.Helper()
-	if rl == nil {
-		return
-	}
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	if rl.promotions == nil {
-		rl.promotions = map[string]*Promotion{}
-	}
-	rl.promotions[p.ID] = p
-	// Strip any leading whitespace the test fixtures may carry.
-	p.ID = strings.TrimSpace(p.ID)
 }
