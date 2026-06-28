@@ -102,16 +102,25 @@ function BuildTurn({
   const steps = trace.filter(
     (t) => t.kind !== "thinking" && t.kind !== "status",
   );
-  if (thinking.length === 0 && steps.length === 0) return null;
-  // Claude-style settled summary: "Thinking · 12s · 10.8k tokens".
-  const summary =
-    meta && !active
+  // Render the turn even before any content has streamed, so the moment the
+  // agent starts working the operator sees a live "Thinking…" block (pi opens
+  // its thinking block on the first reasoning signal, not when text arrives).
+  if (thinking.length === 0 && steps.length === 0 && !active) return null;
+  // Header: live shows "Thinking…"; once settled it carries the telemetry,
+  // Claude-style: "Thinking · 12s · 10.8k tokens".
+  const summary = active
+    ? "Thinking…"
+    : meta
       ? `Thinking · ${meta.seconds}s${meta.tokens > 0 ? ` · ${formatTokens(meta.tokens)}` : ""}`
       : "Thinking";
+  const showThinkBlock = thinking.length > 0 || active;
   return (
     <div className="opr-turn">
-      {thinking.length > 0 ? (
-        <details className="opr-think-block" open={active}>
+      {showThinkBlock ? (
+        <details
+          className={`opr-think-block${active ? " opr-think-active" : ""}`}
+          open={active}
+        >
           <summary className="opr-think-summary">{summary}</summary>
           <div className="opr-think-body">
             {thinking.map((t) => (

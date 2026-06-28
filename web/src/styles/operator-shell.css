@@ -2069,6 +2069,26 @@
   user-select: none;
   padding: 2px 0;
 }
+/* While reasoning is live, the "Thinking…" header breathes so an empty (not yet
+   streamed) block still reads as active. */
+.opr-think-active .opr-think-summary {
+  animation: opr-think-breathe 1.6s ease-in-out infinite;
+}
+@keyframes opr-think-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .opr-think-active .opr-think-summary {
+    animation: none;
+    opacity: 0.9;
+  }
+}
 .opr-think-summary::-webkit-details-marker {
   display: none;
 }
