@@ -166,8 +166,9 @@ Each slice ships its mapped critical test: **A1/A2** (S4), **CQ1** (S2/S3), **A3
 ## 7. Wire contract (FE ↔ harness)
 
 Reuse the SSE shape already built and tested: `POST /build/stream` emits `start` →
-`turn` (the agent's reasoning/tool steps as it assembles the spec) → `result` (the
-compiled `WorkflowSpec` + the one clarifying question). `extra="forbid"` + a
+`step` (one event per `WorkflowStep` as the agent assembles the spec) → `spec` (the
+compiled `WorkflowSpec` + the one clarifying question), with an `error` event if the
+build fails mid-stream. `extra="forbid"` + a
 `schema_version` handshake (both carried from the dead stack's hardening) so a FE/harness
 drift fails loud. Secrets cross as env-var **names** only.
 
