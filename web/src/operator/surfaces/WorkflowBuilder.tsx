@@ -11,11 +11,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { ArrowRight, Check, Send, X } from "lucide-react";
+import { ArrowRight, Check, Send, Square, X } from "lucide-react";
 
 import { useCyclingPhrase } from "../../hooks/useCyclingPhrase";
 import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
-import { type BuildActivity, buildPlanSmart } from "../builder/agentClient";
+import {
+  type BuildActivity,
+  buildPlanSmart,
+  isAbortError,
+} from "../builder/agentClient";
 import {
   applyClarify,
   type ClarifyQuestion,
@@ -118,12 +122,25 @@ function BuildTurn({
   );
 }
 
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`;
+}
+
 // The live "still working" indicator, trace-native (not the chat-bubble loader):
-// soft wave dots plus a cycling Office gerund, in the builder's own type so it
-// reads as part of the workings, not a message. Decorative text is aria-hidden
-// behind a stable status label.
-function BuildingIndicator() {
+// soft wave dots, a cycling Office gerund, and Claude-Code-style telemetry
+// (elapsed seconds · cumulative tokens). Decorative text is aria-hidden behind a
+// stable status label.
+function BuildingIndicator({
+  elapsedMs,
+  tokens,
+  interruptible,
+}: {
+  elapsedMs: number;
+  tokens: number;
+  interruptible: boolean;
+}) {
   const phrase = useCyclingPhrase(OFFICE_LOADING_PHRASES, 2400, true);
+  const seconds = Math.floor(elapsedMs / 1000);
   return (
     <div
       className="opr-act-working"
@@ -140,6 +157,10 @@ function BuildingIndicator() {
           {phrase}…
         </span>
       ) : null}
+      <span className="opr-work-meta" aria-hidden={true}>
+        {seconds}s{tokens > 0 ? ` · ${formatTokens(tokens)}` : ""}
+        {interruptible ? " · esc to interrupt" : ""}
+      </span>
     </div>
   );
 }
@@ -202,10 +223,16 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     null,
   );
   const [flashStepId, setFlashStepId] = useState<string | null>(null);
+  // Live telemetry for the working indicator (elapsed seconds + cumulative
+  // tokens), Claude-Code style, plus the controller that the Stop button trips.
+  const [tokens, setTokens] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const timers = useRef<number[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
+  const startedAt = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   function track(id: number) {
     timers.current.push(id);
@@ -220,6 +247,26 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, phase]);
+
+  // Tick the elapsed counter while the agent is actively working.
+  useEffect(() => {
+    if (!ACTIVE_PHASES.has(phase)) return;
+    const id = window.setInterval(() => {
+      setElapsedMs(startedAt.current ? Date.now() - startedAt.current : 0);
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [phase]);
+
+  // Esc interrupts the live build, like pi and Claude Cowork. The composer is
+  // disabled while building, so the listener is global.
+  useEffect(() => {
+    if (phase !== "thinking") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") abortRef.current?.abort();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phase]);
 
   function nextId(prefix: string) {
     seq.current += 1;
@@ -261,6 +308,11 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
     setFlashStepId(null);
     setRevealCount(0);
     setPendingClarify(null);
+    setTokens(0);
+    setElapsedMs(0);
+    startedAt.current = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setPhase("thinking");
 
     // Anchor the agent's workings as a message in the thread so its reasoning and
@@ -271,22 +323,35 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
       ...prev,
       { id: traceId, from: "ai", body: "", trace: [] },
     ]);
-    const appendActivity = (a: BuildActivity) =>
+    const appendActivity = (a: BuildActivity) => {
+      // Usage is telemetry, not a line: it drives the token counter.
+      if (a.kind === "usage") {
+        setTokens(a.tokens ?? 0);
+        return;
+      }
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === traceId
-            ? {
-                ...m,
-                trace: [...(m.trace ?? []), { ...a, id: m.trace?.length ?? 0 }],
-              }
-            : m,
-        ),
+        prev.map((m) => {
+          if (m.id !== traceId) return m;
+          const trace = m.trace ?? [];
+          // A streaming block updates its line in place (typewriter); everything
+          // else appends a new line.
+          if (a.streamId) {
+            const at = trace.findIndex((t) => t.streamId === a.streamId);
+            if (at !== -1) {
+              const next = trace.slice();
+              next[at] = { ...next[at], ...a };
+              return { ...m, trace: next };
+            }
+          }
+          return { ...m, trace: [...trace, { ...a, id: trace.length }] };
+        }),
       );
+    };
 
     // Real pi-mono engine when the agent service is reachable; deterministic mock
-    // otherwise (frontend-first graceful degrade). The thinking phase covers the
-    // round-trip; activity streams in live; the staggered reveal below is unchanged.
-    void buildPlanSmart(text, appendActivity)
+    // otherwise (frontend-first graceful degrade). Activity streams in live; the
+    // build is interruptible via the controller's signal.
+    void buildPlanSmart(text, appendActivity, controller.signal)
       .then((built) => {
         setPlan(built);
         setTargetSteps(built.steps);
@@ -321,14 +386,23 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
         }, 720);
         track(start);
       })
-      .catch(() => {
-        // A reachable service that errored (the mock only covers unreachable).
-        // Tell the operator plainly and let them retry, rather than hang.
+      .catch((err: unknown) => {
+        // Distinguish an operator Stop from a real failure: the former is a
+        // choice, not a problem.
         pushAI(
-          "I hit a problem building that one. Give it another try, or rephrase the steps.",
+          isAbortError(err)
+            ? "Stopped. Tell me what to change, or describe it again."
+            : "I hit a problem building that one. Give it another try, or rephrase the steps.",
         );
         setPhase("intro");
+      })
+      .finally(() => {
+        if (abortRef.current === controller) abortRef.current = null;
       });
+  }
+
+  function stopBuild() {
+    abortRef.current?.abort();
   }
 
   function handleAnswer(
@@ -462,7 +536,13 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
               </div>
             ),
           )}
-          {ACTIVE_PHASES.has(phase) ? <BuildingIndicator /> : null}
+          {ACTIVE_PHASES.has(phase) ? (
+            <BuildingIndicator
+              elapsedMs={elapsedMs}
+              tokens={tokens}
+              interruptible={phase === "thinking"}
+            />
+          ) : null}
         </div>
 
         {phase === "intro" ? (
@@ -497,15 +577,27 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
               if (e.key === "Enter") send();
             }}
           />
-          <button
-            type="button"
-            className="opr-btn opr-btn-primary"
-            onClick={() => send()}
-            disabled={composerLocked}
-          >
-            <Send size={14} strokeWidth={1.9} aria-hidden={true} />
-            Send
-          </button>
+          {phase === "thinking" ? (
+            <button
+              type="button"
+              className="opr-btn opr-btn-stop"
+              onClick={stopBuild}
+              aria-label="Stop building"
+            >
+              <Square size={12} strokeWidth={2.4} aria-hidden={true} />
+              Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="opr-btn opr-btn-primary"
+              onClick={() => send()}
+              disabled={composerLocked}
+            >
+              <Send size={14} strokeWidth={1.9} aria-hidden={true} />
+              Send
+            </button>
+          )}
         </div>
       </div>
 

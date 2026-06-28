@@ -24,10 +24,22 @@ const AGENT_URL =
 export interface BuildActivity {
   // status = system line; thinking = reasoning (dimmed italic); text = the
   // model's prose; tool = a tool call; tool_result = its output; submitted =
-  // the plan was registered.
-  kind: "status" | "thinking" | "text" | "tool" | "tool_result" | "submitted";
+  // the plan was registered; usage = token telemetry (not rendered as a line).
+  kind:
+    | "status"
+    | "thinking"
+    | "text"
+    | "tool"
+    | "tool_result"
+    | "submitted"
+    | "usage";
   text: string;
   tool?: string;
+  // Stable id for a streaming block: successive partials share it so the UI
+  // updates that line in place (typewriter) instead of appending per token.
+  streamId?: string;
+  // Cumulative output tokens, for kind "usage".
+  tokens?: number;
 }
 
 export type OnActivity = (activity: BuildActivity) => void;
@@ -87,7 +99,13 @@ function handleEvent(
     } else {
       const a = data as BuildActivity;
       if (a && typeof a.text === "string")
-        onActivity?.({ kind: a.kind, text: a.text, tool: a.tool });
+        onActivity?.({
+          kind: a.kind,
+          text: a.text,
+          tool: a.tool,
+          streamId: a.streamId,
+          tokens: a.tokens,
+        });
     }
     return null;
   }
@@ -138,11 +156,13 @@ function drainSse(
 async function buildPlanViaService(
   description: string,
   onActivity?: OnActivity,
+  signal?: AbortSignal,
 ): Promise<WorkflowPlan> {
   const res = await fetch(`${AGENT_URL}/build/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ schema_version: 1, message: description }),
+    signal,
   });
   const { ok, body, status } = res;
   if (!(ok && body)) throw new Error(`agent service ${status}`);
@@ -178,14 +198,23 @@ function isServiceUnreachable(err: unknown): boolean {
   return err instanceof TypeError;
 }
 
+/** True when the operator aborted the build (Stop / Esc). */
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
 /** Real engine when the service is reachable, else the deterministic mock. */
 export async function buildPlanSmart(
   description: string,
   onActivity?: OnActivity,
+  signal?: AbortSignal,
 ): Promise<WorkflowPlan> {
   try {
-    return await buildPlanViaService(description, onActivity);
+    return await buildPlanViaService(description, onActivity, signal);
   } catch (err) {
+    // An abort is the operator's choice, not a service failure — never mask it
+    // with the mock; let the caller render a "stopped" state.
+    if (isAbortError(err)) throw err;
     if (isServiceUnreachable(err)) {
       return planWorkflow(description);
     }

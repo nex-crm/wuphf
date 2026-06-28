@@ -2206,6 +2206,14 @@
   font-variant-numeric: tabular-nums;
   animation: opr-work-fade 0.36s ease-out;
 }
+/* Claude-Code telemetry: elapsed · tokens · esc hint, quiet and mono. */
+.opr-work-meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--t-faint) 80%, transparent);
+}
 @keyframes opr-work-fade {
   from {
     opacity: 0;
@@ -2213,6 +2221,19 @@
   to {
     opacity: 1;
   }
+}
+/* Stop button: the Send button morphs into this while generating (pi / Cowork). */
+.opr-btn-stop {
+  background: transparent;
+  border: 1px solid var(--t-line);
+  color: var(--t-ink);
+}
+.opr-btn-stop:hover {
+  border-color: var(--t-faint);
+  background: color-mix(in srgb, var(--t-ink) 6%, transparent);
+}
+.opr-btn-stop svg {
+  fill: currentColor;
 }
 @media (prefers-reduced-motion: reduce) {
   .opr-work-dots span,
