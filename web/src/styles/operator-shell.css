@@ -2078,32 +2078,83 @@
   border-left: 1px solid var(--t-line);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-2);
 }
 .opr-act-line {
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--t-faint);
 }
+/* Markdown blocks (thinking + text): tighten the default paragraph rhythm so a
+   streamed thought reads as one calm block, not loose paragraphs. */
+.opr-act-think :first-child,
+.opr-act-text :first-child {
+  margin-top: 0;
+}
+.opr-act-think :last-child,
+.opr-act-text :last-child {
+  margin-bottom: 0;
+}
+.opr-act-think p,
+.opr-act-text p {
+  margin: 0 0 0.4em;
+}
+.opr-act-think ul,
+.opr-act-text ul,
+.opr-act-think ol,
+.opr-act-text ol {
+  margin: 0.2em 0;
+  padding-left: 1.1em;
+}
+.opr-act-think code,
+.opr-act-text code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+/* Reasoning: pi's dimmed, italic thinkingText. */
 .opr-act-think {
   font-style: italic;
   color: color-mix(in srgb, var(--t-ink) 52%, transparent);
+}
+/* The model's prose: normal ink. */
+.opr-act-text {
+  color: var(--t-ink);
 }
 .opr-act-tool,
 .opr-act-submitted {
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--t-ink);
+  display: flex;
+  gap: 6px;
 }
 .opr-act-submitted {
   color: var(--t-accent);
 }
+.opr-act-marker {
+  color: var(--t-faint);
+  flex: none;
+}
+.opr-act-submitted .opr-act-marker {
+  color: var(--t-accent);
+}
+/* Tool output: pi shows it mono + dimmed, newlines preserved, wrapped, with a
+   scroll cap so a long result never floods the conversation. */
 .opr-act-result {
+  margin: 0;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.5;
   color: var(--t-faint);
+  opacity: 0.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
   padding-left: var(--space-3);
-  opacity: 0.85;
+}
+.opr-build-loader {
+  margin-top: var(--space-2);
 }
 
 .opr-thinking {

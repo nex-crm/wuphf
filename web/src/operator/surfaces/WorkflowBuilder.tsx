@@ -10,8 +10,11 @@
 // before the agentic build phase exists.
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { ArrowRight, Check, Send, X } from "lucide-react";
 
+import { ThinkingLoader } from "../../components/ui/ThinkingLoader";
+import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { type BuildActivity, buildPlanSmart } from "../builder/agentClient";
 import {
   applyClarify,
@@ -40,9 +43,47 @@ const ACTIVE_PHASES: ReadonlySet<Phase> = new Set<Phase>([
   "assembling",
 ]);
 
-// The agent's live workings: its reasoning, the tools it touches, and brief
-// results, mirroring pi's own client. Open while the agent works, then collapses
-// to a disclosure so the chat history stays clean.
+// One line of the agent's workings, rendered by kind in pi's grammar:
+//  - thinking: the model's reasoning, dimmed + italic markdown (pi's thinkingText)
+//  - text:     the model's prose, as markdown
+//  - tool:     a tool call, mono, e.g. `$ ls` / `read path` (pi's tool title)
+//  - tool_result: the tool's output, mono + dimmed, newlines preserved (the BE
+//                 already caps it with a "+N more lines" note, like pi's client)
+//  - submitted/status: milestones and system lines
+function ActivityLine({ activity }: { activity: TracedActivity }) {
+  const { kind, text } = activity;
+  if (kind === "thinking") {
+    return (
+      <div className="opr-act-line opr-act-think">
+        <ReactMarkdown skipHtml={true}>{text}</ReactMarkdown>
+      </div>
+    );
+  }
+  if (kind === "text") {
+    return (
+      <div className="opr-act-line opr-act-text">
+        <ReactMarkdown skipHtml={true}>{text}</ReactMarkdown>
+      </div>
+    );
+  }
+  if (kind === "tool_result") {
+    return <pre className="opr-act-line opr-act-result">{text}</pre>;
+  }
+  if (kind === "tool" || kind === "submitted") {
+    return (
+      <div className={`opr-act-line opr-act-${kind}`}>
+        <span className="opr-act-marker" aria-hidden={true}>
+          {kind === "submitted" ? "✓" : "›"}
+        </span>
+        {text}
+      </div>
+    );
+  }
+  return <div className="opr-act-line opr-act-status">{text}</div>;
+}
+
+// The agent's live workings, mirroring pi's own client. Open while the agent
+// works, then collapses to a disclosure so the chat history stays clean.
 function ActivityTrace({
   activities,
   phase,
@@ -59,9 +100,7 @@ function ActivityTrace({
       </summary>
       <div className="opr-activity-trace" aria-live="polite">
         {activities.map((a) => (
-          <div key={a.id} className={`opr-act-line opr-act-${a.kind}`}>
-            {a.text}
-          </div>
+          <ActivityLine key={a.id} activity={a} />
         ))}
       </div>
     </details>
@@ -358,12 +397,13 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
             </div>
           ))}
           <ActivityTrace activities={activities} phase={phase} />
-          {phase === "thinking" && activities.length === 0 ? (
-            <div className="opr-msg opr-msg-ai opr-thinking" aria-live="polite">
-              <span className="opr-think-dot" />
-              <span className="opr-think-dot" />
-              <span className="opr-think-dot" />
-            </div>
+          {ACTIVE_PHASES.has(phase) ? (
+            <ThinkingLoader
+              variant="inline"
+              label="Your AI is building the workflow"
+              phrases={OFFICE_LOADING_PHRASES}
+              className="opr-build-loader"
+            />
           ) : null}
         </div>
 
