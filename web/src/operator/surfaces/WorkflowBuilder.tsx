@@ -258,12 +258,17 @@ interface WorkflowBuilderProps {
   // from inside a Work Tool to change it, rather than building from scratch. It
   // only reframes the greeting/header; the engine and flow are identical.
   scopeToolName?: string;
+  // Panel mode: render the chat alone (no attached workflow canvas), so it can
+  // dock as a side panel. The workflow it produces is shown on the tool's own
+  // Workflow screen instead, via onFinish.
+  panelMode?: boolean;
 }
 
 export function WorkflowBuilder({
   onClose,
   onFinish,
   scopeToolName,
+  panelMode,
 }: WorkflowBuilderProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
@@ -567,25 +572,27 @@ export function WorkflowBuilder({
   const lastTraceId = messages.findLast((m) => m.trace)?.id;
 
   return (
-    <div className="opr-builder">
+    <div className={`opr-builder${panelMode ? " opr-builder-panel" : ""}`}>
       <div className="opr-builder-chat">
-        <header className="opr-builder-head">
-          <div>
-            <Eyebrow>{scopeToolName ? "Ask AI" : "Build a tool"}</Eyebrow>
-            <div className="opr-builder-title">
-              {scopeToolName ? scopeToolName : "Describe it, I will build it"}
+        {panelMode ? null : (
+          <header className="opr-builder-head">
+            <div>
+              <Eyebrow>{scopeToolName ? "Ask AI" : "Build a tool"}</Eyebrow>
+              <div className="opr-builder-title">
+                {scopeToolName ? scopeToolName : "Describe it, I will build it"}
+              </div>
             </div>
-          </div>
-          <button
-            type="button"
-            className="opr-btn opr-btn-ghost opr-btn-sm"
-            onClick={onClose}
-            aria-label="Close builder"
-          >
-            <X size={13} strokeWidth={1.9} aria-hidden={true} />
-            Close
-          </button>
-        </header>
+            <button
+              type="button"
+              className="opr-btn opr-btn-ghost opr-btn-sm"
+              onClick={onClose}
+              aria-label="Close builder"
+            >
+              <X size={13} strokeWidth={1.9} aria-hidden={true} />
+              Close
+            </button>
+          </header>
+        )}
 
         <div className="opr-builder-scroll" ref={scrollRef}>
           {messages.map((m) =>
@@ -713,6 +720,7 @@ export function WorkflowBuilder({
         </div>
       </div>
 
+      {panelMode ? null : (
       <aside className="opr-builder-canvas" aria-label="Workflow preview">
         <div className="opr-canvas-head">
           <Eyebrow>{plan ? plan.name : "Your workflow"}</Eyebrow>
@@ -803,6 +811,7 @@ export function WorkflowBuilder({
           </div>
         )}
       </aside>
+      )}
     </div>
   );
 }
