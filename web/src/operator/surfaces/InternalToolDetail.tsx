@@ -16,11 +16,11 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
-  Pencil,
   Play,
   Plus,
   Power,
   Send,
+  Sparkles,
 } from "lucide-react";
 
 import { ApprovalCard } from "../components/ApprovalCard";
@@ -82,7 +82,6 @@ export function InternalToolDetail({
   const [inboundRows, setInboundRows] =
     useState<InboundRequest[]>(INBOUND_REQUESTS);
   const isInbound = tool.id === "inbound-routing";
-  const canEdit = tool.status !== "suggested";
 
   function approveInbound(req: InboundRequest) {
     setInboundRows((rs) =>
@@ -130,16 +129,14 @@ export function InternalToolDetail({
             </div>
           </div>
           <div className="opr-detail-actions">
-            {canEdit && (
-              <button
-                type="button"
-                className="opr-btn opr-btn-sm"
-                onClick={() => setChatOpen(true)}
-              >
-                <Pencil size={13} strokeWidth={1.9} aria-hidden={true} />
-                Edit with AI
-              </button>
-            )}
+            <button
+              type="button"
+              className="opr-btn opr-btn-sm"
+              onClick={() => setChatOpen(true)}
+            >
+              <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
+              Ask AI
+            </button>
             {tool.status === "enabled" && (
               <>
                 <button type="button" className="opr-btn opr-btn-sm">
@@ -251,6 +248,17 @@ export function InternalToolDetail({
           {tab === "knowledge" && <ToolKnowledgeTab />}
         </div>
       </div>
+
+      {/* Pop the tool's AI open from anywhere — on any tab. */}
+      <button
+        type="button"
+        className="opr-ask-fab"
+        onClick={() => setChatOpen(true)}
+        aria-label={`Ask AI about ${tool.name}`}
+      >
+        <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
+        Ask AI
+      </button>
     </div>
   );
 }

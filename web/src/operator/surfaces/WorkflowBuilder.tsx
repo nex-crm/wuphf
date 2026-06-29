@@ -272,7 +272,7 @@ export function WorkflowBuilder({
       id: "greet",
       from: "ai",
       body: scopeToolName
-        ? `Let's change ${scopeToolName}. Tell me what to adjust — a step, who gets routed, a threshold, the message, anything — and I will rework the workflow as you talk.`
+        ? `I'm your AI for ${scopeToolName}. Ask me anything about it, or tell me what to change — a step, a threshold, who gets routed, the message — and I'll rework it as you talk.`
         : GREETING,
     },
   ]);
@@ -571,11 +571,9 @@ export function WorkflowBuilder({
       <div className="opr-builder-chat">
         <header className="opr-builder-head">
           <div>
-            <Eyebrow>{scopeToolName ? "Edit with AI" : "Build a tool"}</Eyebrow>
+            <Eyebrow>{scopeToolName ? "Ask AI" : "Build a tool"}</Eyebrow>
             <div className="opr-builder-title">
-              {scopeToolName
-                ? `Change ${scopeToolName}`
-                : "Describe it, I will build it"}
+              {scopeToolName ? scopeToolName : "Describe it, I will build it"}
             </div>
           </div>
           <button
