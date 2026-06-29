@@ -1,7 +1,7 @@
 // Regression: buildPlanSmart must only fall back to the deterministic mock when
 // the agent service is genuinely unreachable. A reachable service that returns
 // an HTTP/schema error must surface — otherwise the UI "builds" a mock plan and
-// then fails on run, because runWorkflowViaService() still hits the live backend.
+// then fails on run, because runOperatorPlan() still hits the live broker.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -83,6 +83,42 @@ describe("buildPlanSmart fallback boundary", () => {
       ) as unknown as typeof fetch;
 
     await expect(buildPlanSmart("anything")).rejects.toThrow(/boom/i);
+  });
+
+  it("grounds the build by forwarding the operator's connected integrations", async () => {
+    // The client fetches connected integrations from WUPHF's GET /integrations
+    // and includes them in the /build/stream body so the agent's
+    // list_integrations tool can ground the plan. Only connected toolkits go.
+    const spec =
+      'event: spec\ndata: {"spec":{"name":"X","tool_id":"inbound-routing","steps":[]}}\n\n';
+    let buildBody: unknown = null;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/integrations")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            providers: [],
+            items: [
+              { provider: "composio", platform: "hubspot", name: "HubSpot", state: "connected", can_connect: false, can_disconnect: true },
+              { provider: "composio", platform: "slack", name: "Slack", state: "disconnected", can_connect: true, can_disconnect: false },
+            ],
+          }),
+        } as unknown as Response;
+      }
+      buildBody = init?.body ? JSON.parse(String(init.body)) : null;
+      return streamResponse(spec);
+    }) as unknown as typeof fetch;
+
+    await buildPlanSmart("route hot demos");
+
+    const body = buildBody as {
+      integrations?: { provider: string; name: string; connected: boolean }[];
+    };
+    expect(body.integrations).toEqual([
+      { provider: "hubspot", name: "HubSpot", connected: true },
+    ]);
   });
 
   it("forwards `step` events to onActivity and resolves the terminal spec", async () => {

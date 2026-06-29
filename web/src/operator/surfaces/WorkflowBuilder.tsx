@@ -19,7 +19,13 @@ import {
   type BuildActivity,
   buildPlanSmart,
   isAbortError,
+  type OperatorRunResult,
+  runOperatorPlan,
 } from "../builder/agentClient";
+import {
+  type ReferencedIntegration,
+  resolveReferencedIntegrations,
+} from "../builder/integrationStatus";
 import {
   applyClarify,
   type ClarifyQuestion,
@@ -27,6 +33,7 @@ import {
 } from "../builder/planWorkflow";
 import { Eyebrow, ToolStatusBadge } from "../components/primitives";
 import type { WorkflowStep } from "../mock/data";
+import { ConnectionsCard } from "./ConnectionsCard";
 
 const STEP_GLYPH: Record<WorkflowStep["kind"], string> = {
   trigger: "TR",
@@ -200,6 +207,9 @@ interface BuilderMessage {
   // Final telemetry, snapshot when the turn settles, shown on the collapsed
   // Thinking header ("Thinking · 12s · 10.8k tokens"), like Claude's summary.
   meta?: { seconds: number; tokens: number };
+  // Integrations the built tool references that the operator has not connected
+  // yet — rendered inline as a Connect card after the plan lands.
+  connections?: ReferencedIntegration[];
 }
 
 const STARTERS: readonly string[] = [
@@ -222,18 +232,49 @@ export interface BuiltWorkflow {
 
 export type FinishMode = "open" | "run";
 
+/** A one-line, honest summary of a test run for the chat thread. */
+function summarizeRun(finish: FinishCard, result: OperatorRunResult): string {
+  let ran = 0;
+  let skipped = 0;
+  for (const step of finish.steps) {
+    if (step.kind === "trigger") continue;
+    const out = result.steps?.[step.id];
+    if (!out) continue;
+    if (out.skipped) skipped += 1;
+    else ran += 1;
+  }
+  const verb = result.dry_run ? "Dry run" : "Run";
+  const skippedNote = skipped > 0 ? `, ${skipped} skipped by its rules` : "";
+  const tail = result.dry_run ? " Nothing was sent for real." : "";
+  return `${verb} complete — ${ran} step${ran === 1 ? "" : "s"} ran${skippedNote}.${tail}`;
+}
+
 interface WorkflowBuilderProps {
   onClose: () => void;
   // mode distinguishes "open the tool" from "run on test data" so the two
   // finish actions stay distinct end to end.
   onFinish: (draft: BuiltWorkflow, mode: FinishMode) => void;
+  // When set, this is the SAME build chat scoped to an existing tool — opened
+  // from inside a Work Tool to change it, rather than building from scratch. It
+  // only reframes the greeting/header; the engine and flow are identical.
+  scopeToolName?: string;
 }
 
-export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
+export function WorkflowBuilder({
+  onClose,
+  onFinish,
+  scopeToolName,
+}: WorkflowBuilderProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<BuilderMessage[]>([
-    { id: "greet", from: "ai", body: GREETING },
+    {
+      id: "greet",
+      from: "ai",
+      body: scopeToolName
+        ? `Let's change ${scopeToolName}. Tell me what to adjust — a step, who gets routed, a threshold, the message, anything — and I will rework the workflow as you talk.`
+        : GREETING,
+    },
   ]);
   const [plan, setPlan] = useState<WorkflowPlan | null>(null);
   const [targetSteps, setTargetSteps] = useState<WorkflowStep[]>([]);
@@ -309,6 +350,26 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
   // targetSteps happens to hold now.
   function draftFrom(finish: FinishCard): BuiltWorkflow {
     return { name: finish.name, toolId: finish.toolId, steps: finish.steps };
+  }
+
+  // Run the built plan through the real Composio executor (dry run) and report
+  // the outcome inline, so the operator sees build->run close in the thread.
+  async function runOnTestData(finish: FinishCard) {
+    pushAI("Running it on test data…");
+    try {
+      const result = await runOperatorPlan(
+        { name: finish.name, tool_id: finish.toolId, steps: finish.steps },
+        {},
+        true,
+      );
+      pushAI(summarizeRun(finish, result));
+    } catch (err) {
+      pushAI(
+        `That test run did not go through: ${
+          err instanceof Error ? err.message : "unknown error"
+        }`,
+      );
+    }
   }
 
   function presentFinish(finish: FinishCard) {
@@ -390,6 +451,20 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
         setMessages((prev) =>
           prev.map((m) => (m.id === traceId ? { ...m, meta } : m)),
         );
+
+        // Classify the integrations the tool references against what the
+        // operator has connected; surface a Connect card for any that are not
+        // ready. Independent of the reveal timeline — lands inline near the
+        // steps. Degrades silently (no card) if the catalog cannot be reached.
+        const connId = nextId("conn");
+        void resolveReferencedIntegrations(built.steps).then((refs) => {
+          const pending = refs.filter((r) => r.readiness !== "connected");
+          if (pending.length === 0) return;
+          setMessages((prev) => [
+            ...prev,
+            { id: connId, from: "ai", body: "", connections: pending },
+          ]);
+        });
 
         const start = window.setTimeout(() => {
           pushAI(built.narration);
@@ -496,9 +571,11 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
       <div className="opr-builder-chat">
         <header className="opr-builder-head">
           <div>
-            <Eyebrow>Build a tool</Eyebrow>
+            <Eyebrow>{scopeToolName ? "Edit with AI" : "Build a tool"}</Eyebrow>
             <div className="opr-builder-title">
-              Describe it, I will build it
+              {scopeToolName
+                ? `Change ${scopeToolName}`
+                : "Describe it, I will build it"}
             </div>
           </div>
           <button
@@ -530,6 +607,9 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                 >
                   {m.body}
                 </div>
+                {m.connections ? (
+                  <ConnectionsCard integrations={m.connections} />
+                ) : null}
                 {m.finish ? (
                   <div className="opr-finish-card">
                     <div className="opr-finish-row">
@@ -560,7 +640,7 @@ export function WorkflowBuilder({ onClose, onFinish }: WorkflowBuilderProps) {
                       <button
                         type="button"
                         className="opr-btn opr-btn-sm"
-                        onClick={() => onFinish(draftFrom(m.finish!), "run")}
+                        onClick={() => void runOnTestData(m.finish!)}
                       >
                         Run on test data
                       </button>

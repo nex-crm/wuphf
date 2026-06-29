@@ -32,7 +32,7 @@ export function InternalToolsSurface({
   return (
     <div className="opr-surface-wide">
       <SurfaceHeader
-        eyebrow="Internal tools"
+        eyebrow="Work Tools"
         title="Your tools"
         lede="Each tool watches for something, decides what to do, and acts, exactly the way you taught it. Build a new one by describing it in chat, or talk it through on a call."
         actions={

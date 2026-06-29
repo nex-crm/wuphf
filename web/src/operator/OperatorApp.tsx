@@ -10,11 +10,8 @@ import "../styles/operator-shell.css";
 import { CallModal } from "./components/CallModal";
 import { getTool } from "./mock/data";
 import { OperatorSidebar, type OperatorSurface } from "./OperatorSidebar";
-import { ChatsSurface } from "./surfaces/ChatsSurface";
-import { IntegrationsSurface } from "./surfaces/IntegrationsSurface";
 import { InternalToolDetail } from "./surfaces/InternalToolDetail";
 import { InternalToolsSurface } from "./surfaces/InternalToolsSurface";
-import { KnowledgeSurface } from "./surfaces/KnowledgeSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import {
   type BuiltWorkflow,
@@ -85,11 +82,6 @@ export function OperatorApp() {
             onClose={() => setBuilding(false)}
             onFinish={finishWorkflow}
           />
-        ) : surface === "chats" ? (
-          <ChatsSurface
-            onStartCall={() => setCallOpen(true)}
-            onBuild={() => setBuilding(true)}
-          />
         ) : (
           <div className="opr-surface">
             {surface === "tools" &&
@@ -108,8 +100,6 @@ export function OperatorApp() {
                   onBuild={() => setBuilding(true)}
                 />
               ))}
-            {surface === "knowledge" && <KnowledgeSurface />}
-            {surface === "integrations" && <IntegrationsSurface />}
             {surface === "settings" && <SettingsSurface />}
           </div>
         )}

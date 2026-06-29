@@ -8,12 +8,48 @@
 // WorkflowStep so the UI can show progress live, then a terminal `spec` event
 // carrying the WorkflowPlan (or an `error` event with { message } on failure).
 
+import { post } from "../../api/client";
+import { listIntegrations } from "../../api/integrations";
 import type { WorkflowStep } from "../mock/data";
 import {
   type ClarifyQuestion,
   planWorkflow,
   type WorkflowPlan,
 } from "./planWorkflow";
+
+/** The build-request shape for one connected integration the model can ground in. */
+interface WireIntegration {
+  provider: string;
+  name: string;
+  connected: boolean;
+}
+
+// The operator's connected integrations, fetched from WUPHF's existing
+// GET /integrations and forwarded to the build agent so plans reference real
+// authorizations (the agent surfaces them via its list_integrations tool). We
+// send ONLY connected toolkits — the high-signal set — and degrade to an empty
+// list on any failure so a build never blocks on this. pi does not talk to
+// Composio; this is the only seam.
+async function loadConnectedIntegrations(): Promise<WireIntegration[]> {
+  try {
+    const res = await listIntegrations({ connected: "true", limit: 100 });
+    const byProvider = new Map<string, WireIntegration>();
+    for (const item of res.items) {
+      if (item.state !== "connected") continue;
+      // platform is the toolkit slug ("hubspot"); provider is "composio"/"one".
+      if (!byProvider.has(item.platform)) {
+        byProvider.set(item.platform, {
+          provider: item.platform,
+          name: item.name || item.platform,
+          connected: true,
+        });
+      }
+    }
+    return [...byProvider.values()];
+  } catch {
+    return [];
+  }
+}
 
 // Vite env; defaults to the local agent service.
 const AGENT_URL =
@@ -158,10 +194,14 @@ async function buildPlanViaService(
   onActivity?: OnActivity,
   signal?: AbortSignal,
 ): Promise<WorkflowPlan> {
+  // Ground the build in the operator's real connected integrations. Fetched
+  // before the stream opens; an empty list (no connections, or fetch failed)
+  // is fine — the agent's list_integrations tool just reports none connected.
+  const integrations = await loadConnectedIntegrations();
   const res = await fetch(`${AGENT_URL}/build/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ schema_version: 1, message: description }),
+    body: JSON.stringify({ schema_version: 1, message: description, integrations }),
     signal,
   });
   const { ok, body, status } = res;
@@ -226,22 +266,39 @@ export async function buildPlanSmart(
   }
 }
 
-/** Execute a built workflow on the agent service; returns the run result JSON. */
-export async function runWorkflowViaService(
-  spec: {
-    name: string;
-    tool_id: string;
-    steps: WorkflowStep[];
-    narration?: string;
-    clarify?: unknown;
-  },
-  input: Record<string, unknown> = {},
-): Promise<unknown> {
-  const res = await fetch(`${AGENT_URL}/run`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ schema_version: 1, spec, input }),
+/** One step's outcome in a workflow run (the executor's per-step output). */
+export interface OperatorRunStep {
+  type?: string;
+  skipped?: boolean;
+  text?: string;
+  result?: unknown;
+}
+
+export interface OperatorRunResult {
+  ok: boolean;
+  workflow_key: string;
+  dry_run: boolean;
+  run_id: string;
+  status: string;
+  steps: Record<string, OperatorRunStep>;
+}
+
+/**
+ * Run a built plan through WUPHF's real Composio executor (broker
+ * /operator/run-plan). The broker binds the semantic plan to a runnable
+ * workflow and runs it — a dry run by default, so the operator previews the
+ * workflow before anything mutates an external system. This is the real
+ * build->run path; the pi service only builds plans.
+ */
+export async function runOperatorPlan(
+  plan: { name: string; tool_id: string; steps: WorkflowStep[] },
+  inputs: Record<string, unknown> = {},
+  dryRun = true,
+): Promise<OperatorRunResult> {
+  return post<OperatorRunResult>("/operator/run-plan", {
+    schema_version: 1,
+    plan,
+    inputs,
+    dry_run: dryRun,
   });
-  if (!res.ok) throw new Error(`agent service ${res.status}`);
-  return res.json();
 }

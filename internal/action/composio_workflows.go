@@ -22,9 +22,13 @@ type composioWorkflowDefinition struct {
 }
 
 type workflowStep struct {
-	ID              string         `json:"id"`
-	Type            string         `json:"type"`
-	Description     string         `json:"description,omitempty"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	// RunIf is a deterministic gate: a single comparison over the workflow scope
+	// (e.g. "steps.score.result.fit >= 80"). When it evaluates false the step is
+	// skipped. Empty means always run. See composio_workflow_runif.go.
+	RunIf           string         `json:"run_if,omitempty"`
 	Template        string         `json:"template,omitempty"`
 	Platform        string         `json:"platform,omitempty"`
 	ActionID        string         `json:"action_id,omitempty"`
@@ -94,6 +98,24 @@ func (c *ComposioREST) ExecuteWorkflow(ctx context.Context, req WorkflowExecuteR
 
 	for _, step := range spec.Steps {
 		scope := workflowScope(key, inputs, stepOutputs)
+		if step.RunIf != "" {
+			run, err := evaluateRunIf(step.RunIf, scope)
+			if err != nil {
+				return WorkflowExecuteResult{}, fmt.Errorf("workflow %s step %s run_if failed: %w", key, step.ID, err)
+			}
+			if !run {
+				skipped := map[string]any{"type": step.Type, "skipped": true, "run_if": step.RunIf}
+				stepOutputs[step.ID] = skipped
+				stepLogs[step.ID] = mustMarshalJSON(skipped)
+				events = append(events, mustMarshalJSON(map[string]any{
+					"event":   "workflow_step_skipped",
+					"step_id": step.ID,
+					"type":    step.Type,
+					"run_if":  step.RunIf,
+				}))
+				continue
+			}
+		}
 		output, err := c.executeWorkflowStep(ctx, step, scope, req.DryRun)
 		if err != nil {
 			return WorkflowExecuteResult{}, fmt.Errorf("workflow %s step %s failed: %w", key, step.ID, err)
@@ -173,6 +195,12 @@ func (c *ComposioREST) decodeWorkflowDefinition(definition json.RawMessage) (com
 		spec.Steps[i].Type = normalizeWorkflowStepType(spec.Steps[i].Type)
 		if len(spec.Steps[i].Data) == 0 && len(spec.Steps[i].Params) > 0 {
 			spec.Steps[i].Data = spec.Steps[i].Params
+		}
+		spec.Steps[i].RunIf = strings.TrimSpace(spec.Steps[i].RunIf)
+		if spec.Steps[i].RunIf != "" {
+			if _, err := parseRunIf(spec.Steps[i].RunIf); err != nil {
+				return spec, fmt.Errorf("workflow step %q has an invalid run_if: %w", spec.Steps[i].ID, err)
+			}
 		}
 		spec.Steps[i].Template = normalizeWorkflowTemplateString(spec.Steps[i].Template)
 		spec.Steps[i].QueryTemplate = normalizeWorkflowTemplateString(spec.Steps[i].QueryTemplate)

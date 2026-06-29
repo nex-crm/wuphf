@@ -1,10 +1,15 @@
-// Internal Tool detail — the core object. Three tabs:
-//   UI       — the built mini-app the operator runs (a live request table)
-//   Workflow — the deterministic spec + run history + version history
-//   Data     — the operator-owned typed tables behind the tool
+// Work Tool detail — the core object. Everything scoped to one tool lives here
+// as a tab:
+//   UI           — the built mini-app the operator runs (a live request table)
+//   Workflow     — the deterministic spec + run history + version history
+//   Data         — the operator-owned typed tables behind the tool
+//   Integrations — which integrations this tool uses + add from connected ones
+//   Knowledge    — the knowledge this tool can draw on (inherited from workspace)
 //
-// Mock data only. The UI tab demonstrates the human approval gate (CQ1) when
-// routing a hot lead to an external system.
+// Integrations and knowledge are connected/owned once for the workspace, but are
+// only ever shown scoped under the tool that uses them — there is no global
+// Integrations or Knowledge surface. "Edit with AI" opens the SAME build chat we
+// ship for new tools, scoped to this tool, as an overlay over any tab.
 
 import { useState } from "react";
 import {
@@ -37,14 +42,18 @@ import {
   type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
-import { ToolEditChat } from "./ToolEditChat";
+import { KnowledgeSurface } from "./KnowledgeSurface";
+import { ToolIntegrations } from "./ToolIntegrations";
+import { WorkflowBuilder } from "./WorkflowBuilder";
 
-type ToolTab = "ui" | "workflow" | "data";
+type ToolTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
 
 const TABS: readonly TabDef<ToolTab>[] = [
   { id: "ui", label: "UI" },
   { id: "workflow", label: "Workflow" },
   { id: "data", label: "Data" },
+  { id: "integrations", label: "Integrations" },
+  { id: "knowledge", label: "Knowledge" },
 ];
 
 interface InternalToolDetailProps {
@@ -63,12 +72,11 @@ export function InternalToolDetail({
   initialTab = "ui",
 }: InternalToolDetailProps) {
   const [tab, setTab] = useState<ToolTab>(initialTab);
-  const [editing, setEditing] = useState(false);
-  // Parent-owned version state: an edit applied in ToolEditChat lifts up here so
-  // the version meta and version history reflect the publish. Seeded from the
-  // tool prop; remounted per tool via a key at the mount site (OperatorApp).
-  const [version, setVersion] = useState(tool.version);
-  const [versions, setVersions] = useState<ToolVersion[]>(tool.versions);
+  // The chat is the SAME build chat, scoped to this tool, opened as an overlay
+  // from any tab — not a tab of its own.
+  const [chatOpen, setChatOpen] = useState(false);
+  const [version] = useState(tool.version);
+  const [versions] = useState<ToolVersion[]>(tool.versions);
   // Parent-owned inbound rows, shared by the UI and Data tabs so approving a
   // request on the UI tab is reflected in the Data tab too (no tab-local copy).
   const [inboundRows, setInboundRows] =
@@ -86,13 +94,20 @@ export function InternalToolDetail({
     );
   }
 
-  function handleApply(applied: ToolVersion) {
-    setVersion(applied.version);
-    setVersions((prev) => [applied, ...prev]);
+  // Opening the chat reuses the same build chat we ship for new tools, scoped to
+  // this tool. It takes over the detail view; closing returns to the tool.
+  if (chatOpen) {
+    return (
+      <WorkflowBuilder
+        scopeToolName={tool.name}
+        onClose={() => setChatOpen(false)}
+        onFinish={() => setChatOpen(false)}
+      />
+    );
   }
 
   return (
-    <div className={`opr-detail-wrap${editing ? " is-editing" : ""}`}>
+    <div className="opr-detail-wrap">
       <div className="opr-surface-wide">
         <button type="button" className="opr-back" onClick={onBack}>
           <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
@@ -119,7 +134,7 @@ export function InternalToolDetail({
               <button
                 type="button"
                 className="opr-btn opr-btn-sm"
-                onClick={() => setEditing(true)}
+                onClick={() => setChatOpen(true)}
               >
                 <Pencil size={13} strokeWidth={1.9} aria-hidden={true} />
                 Edit with AI
@@ -232,16 +247,10 @@ export function InternalToolDetail({
                 actionLabel="Run on test data"
               />
             ))}
+          {tab === "integrations" && <ToolIntegrationsTab tool={tool} />}
+          {tab === "knowledge" && <ToolKnowledgeTab />}
         </div>
       </div>
-
-      {editing ? (
-        <ToolEditChat
-          tool={tool}
-          onClose={() => setEditing(false)}
-          onApply={handleApply}
-        />
-      ) : null}
     </div>
   );
 }
@@ -543,6 +552,34 @@ function DataTab({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// Integrations this tool uses, derived from its workflow steps. Integrations are
+// connected once for the workspace and reused across tools; ToolIntegrations
+// renders the real catalog (logos, search, connect) in the operator's styling.
+function ToolIntegrationsTab({ tool }: { tool: InternalTool }) {
+  const usedNames = Array.from(
+    new Set(
+      (tool.steps ?? [])
+        .map((s) => s.integration?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  );
+  return <ToolIntegrations usedNames={usedNames} />;
+}
+
+// Knowledge is owned at the workspace level and inherited by every tool; this
+// tab frames the global knowledge as what THIS tool can draw on.
+function ToolKnowledgeTab() {
+  return (
+    <div className="opr-tool-scoped">
+      <p className="opr-scoped-note">
+        Knowledge is owned by your workspace and inherited here. This tool can
+        draw on everything below.
+      </p>
+      <KnowledgeSurface />
     </div>
   );
 }
