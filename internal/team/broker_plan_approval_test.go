@@ -48,6 +48,22 @@ func TestNewIssueLandsInPlanning(t *testing.T) {
 	}
 }
 
+// App-builder build/improve tasks bypass the plan gate even when a human
+// created them: the operator's "build X" description is the authorization, so a
+// build must execute immediately instead of stalling on a second plan approval.
+func TestAppBuilderBuildSkipsPlanGate(t *testing.T) {
+	b := newPlanApprovalBroker(t)
+	appBuilderTask := &teamTask{Owner: appBuilderSlug}
+	if b.issueShouldPlanFirstLocked(appBuilderTask, "ceo") {
+		t.Fatalf("app-builder build should skip the plan gate, but it would plan first")
+	}
+	// Guard: a normal owner still plans first, so the exemption is scoped.
+	normalTask := &teamTask{Owner: "eng"}
+	if !b.issueShouldPlanFirstLocked(normalTask, "ceo") {
+		t.Fatalf("a normal owner-set issue should still plan first")
+	}
+}
+
 // Approving the plan (human) transitions Planning → Running.
 func TestApprovePlanStartsExecution(t *testing.T) {
 	b := newPlanApprovalBroker(t)
