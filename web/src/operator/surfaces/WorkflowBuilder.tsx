@@ -262,6 +262,9 @@ interface WorkflowBuilderProps {
   // dock as a side panel. The workflow it produces is shown on the tool's own
   // Workflow screen instead, via onFinish.
   panelMode?: boolean;
+  // Each operator message, so a scoped chat can navigate to the screen the
+  // change is about (UI vs Workflow vs Data) before the AI even answers.
+  onUserMessage?: (text: string) => void;
 }
 
 export function WorkflowBuilder({
@@ -269,6 +272,7 @@ export function WorkflowBuilder({
   onFinish,
   scopeToolName,
   panelMode,
+  onUserMessage,
 }: WorkflowBuilderProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
@@ -545,6 +549,7 @@ export function WorkflowBuilder({
     const text = (raw ?? draft).trim();
     if (!text || phase === "thinking" || phase === "assembling") return;
     pushYou(text);
+    onUserMessage?.(text);
     setDraft("");
     if (pendingClarify && plan) {
       handleAnswer(text, pendingClarify, plan);

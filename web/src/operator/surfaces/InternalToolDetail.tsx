@@ -61,6 +61,26 @@ const TABS: readonly TabDef<ToolTab>[] = [
   { id: "knowledge", label: "Knowledge" },
 ];
 
+// Route the chat to the screen its change is about, from the operator's own
+// words, so they watch the right screen as the AI works. Workflow is the default
+// (the most common edit target). Returns null when nothing clearly matches.
+function inferToolTab(message: string): ToolTab | null {
+  const t = message.toLowerCase();
+  if (/\b(screen|ui|button|form|layout|design|how it looks|display|the page)\b/.test(t)) {
+    return "ui";
+  }
+  if (/\b(data|rows?|records?|columns?|the table|fields?)\b/.test(t)) {
+    return "data";
+  }
+  if (/\b(integration|connect|hubspot|slack|gmail|composio|app)\b/.test(t)) {
+    return "integrations";
+  }
+  if (/\b(step|workflow|threshold|route|trigger|score|branch|decision|send|post|notify|gate|approval|sequence|nurture)\b/.test(t)) {
+    return "workflow";
+  }
+  return null;
+}
+
 interface InternalToolDetailProps {
   tool: InternalTool;
   onBack: () => void;
@@ -353,6 +373,10 @@ export function InternalToolDetail({
                 scopeToolName={tool.name}
                 onClose={() => setChatOpen(false)}
                 onFinish={applyWorkflowEdit}
+                onUserMessage={(text) => {
+                  const target = inferToolTab(text);
+                  if (target) setTab(target);
+                }}
               />
             </div>
           </aside>
