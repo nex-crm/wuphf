@@ -6,13 +6,14 @@
 
 import { useState } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Sparkles } from "lucide-react";
 
 import type { CustomAppDetail } from "../../api/apps";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
 import { useOperatorApp } from "../apps/useOperatorApps";
 import { EmptyState } from "../components/EmptyState";
 import { Eyebrow, type TabDef, Tabs } from "../components/primitives";
+import { AppDeliverySchedule } from "./AppDeliverySchedule";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type AppTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
@@ -28,9 +29,15 @@ const TABS: readonly TabDef<AppTab>[] = [
 interface OperatorAppDetailProps {
   appId: string;
   onBack: () => void;
+  /** Open the app builder in edit mode against this app. */
+  onAskAI: (id: string, name: string) => void;
 }
 
-export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
+export function OperatorAppDetail({
+  appId,
+  onBack,
+  onAskAI,
+}: OperatorAppDetailProps) {
   const [tab, setTab] = useState<AppTab>("ui");
   const query = useOperatorApp(appId);
 
@@ -69,6 +76,18 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
               ) : null}
             </div>
           </div>
+          {app && !building ? (
+            <div className="opr-detail-actions">
+              <button
+                type="button"
+                className="opr-btn opr-btn-sm"
+                onClick={() => onAskAI(app.id, app.name)}
+              >
+                <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
+                Ask AI
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <Tabs tabs={TABS} active={tab} onSelect={setTab} />
@@ -92,15 +111,19 @@ function TabBody({
   tab: AppTab;
   query: UseQueryResult<CustomAppDetail>;
 }) {
+  const app = query.data?.app;
+  const ready = app && app.status !== "building" && query.data?.html;
   switch (tab) {
     case "ui":
       return <UiTab query={query} />;
     case "workflow":
-      return (
+      return ready ? (
+        <AppDeliverySchedule appName={app.name} />
+      ) : (
         <EmptyState
           glyph="⌥"
           title="No automation yet"
-          hint="Add a workflow to run this app on a schedule or trigger — the deterministic automation behind the screen. Coming to this app next."
+          hint="Schedule this app to run and post to Slack once it has finished building."
         />
       );
     case "data":

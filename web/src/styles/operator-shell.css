@@ -3164,3 +3164,54 @@
 .opr-act-marker-error {
   color: var(--t-red);
 }
+
+/* ── Deliver-to-Slack schedule (app Workflow tab) ─────────────────────────── */
+.opr-delivery {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.opr-delivery-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.opr-delivery-glyph {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r);
+  background: var(--t-figure-bg);
+  color: var(--t-ink);
+}
+.opr-delivery-title {
+  font-weight: 600;
+  color: var(--t-ink);
+  margin-bottom: 2px;
+}
+.opr-delivery-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 280px;
+}
+.opr-delivery-label {
+  font-size: 12px;
+  color: var(--t-dim);
+}
+.opr-delivery-cadence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-dim);
+}
+.opr-delivery-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

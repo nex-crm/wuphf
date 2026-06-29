@@ -53,7 +53,11 @@ describe("OperatorAppDetail", () => {
       isError: false,
     });
     const { getByText, queryByTestId } = render(
-      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
+      <OperatorAppDetail
+        appId="app_abc"
+        onBack={() => {}}
+        onAskAI={() => {}}
+      />,
     );
     expect(getByText(/building your app/i)).toBeTruthy();
     expect(queryByTestId("app-frame")).toBeNull();
@@ -65,22 +69,46 @@ describe("OperatorAppDetail", () => {
       isError: false,
     });
     const { getByTestId } = render(
-      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
+      <OperatorAppDetail
+        appId="app_abc"
+        onBack={() => {}}
+        onAskAI={() => {}}
+      />,
     );
     const frame = getByTestId("app-frame");
     expect(frame.getAttribute("data-app-id")).toBe("app_abc");
     expect(frame.textContent).toContain("<html>hi</html>");
   });
 
-  it("shows an honest empty state on the Workflow tab", () => {
+  it("offers Slack delivery scheduling on the Workflow tab of a ready app", () => {
     useOperatorAppMock.mockReturnValue({
       data: detail({ status: "ready" }, "<html>hi</html>"),
       isError: false,
     });
     const { getByText, getByRole } = render(
-      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
+      <OperatorAppDetail
+        appId="app_abc"
+        onBack={() => {}}
+        onAskAI={() => {}}
+      />,
     );
     fireEvent.click(getByRole("tab", { name: "Workflow" }));
-    expect(getByText(/no automation yet/i)).toBeTruthy();
+    expect(getByText("Deliver to Slack")).toBeTruthy();
+    expect(
+      getByRole("button", { name: /schedule daily delivery/i }),
+    ).toBeTruthy();
+  });
+
+  it("calls onAskAI with the app id and name from the header", () => {
+    const onAskAI = vi.fn();
+    useOperatorAppMock.mockReturnValue({
+      data: detail({ status: "ready" }, "<html>hi</html>"),
+      isError: false,
+    });
+    const { getByRole } = render(
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} onAskAI={onAskAI} />,
+    );
+    fireEvent.click(getByRole("button", { name: /ask ai/i }));
+    expect(onAskAI).toHaveBeenCalledWith("app_abc", "Open Tasks");
   });
 });
