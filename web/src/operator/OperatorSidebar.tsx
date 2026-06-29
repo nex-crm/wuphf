@@ -1,7 +1,7 @@
-// The operator shell's left nav — deliberately small: Work Tools and Settings,
-// a build/call CTA, and the operator's identity. No agents, channels, skills, or
+// The operator shell's left nav — deliberately small: Apps and Settings, a
+// build/call CTA, and the operator's identity. No agents, channels, skills, or
 // wiki vocabulary; this is the whole product. Everything else (chat,
-// integrations, knowledge, data) lives as tabs inside a Work Tool.
+// integrations, knowledge, data) lives as tabs inside an app.
 
 import {
   type LucideIcon,
@@ -25,7 +25,7 @@ interface NavDef {
 }
 
 const NAV: readonly NavDef[] = [
-  { id: "tools", label: "Work Tools", icon: Workflow, count: 3 },
+  { id: "tools", label: "Apps", icon: Workflow, count: 3 },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
