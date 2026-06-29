@@ -16,11 +16,16 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ChevronsLeft,
+  ChevronsRight,
+  Maximize2,
+  Minimize2,
   Play,
   Plus,
   Power,
   Send,
   Sparkles,
+  X,
 } from "lucide-react";
 
 import { ApprovalCard } from "../components/ApprovalCard";
@@ -44,7 +49,7 @@ import {
 } from "../mock/data";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
-import { WorkflowBuilder } from "./WorkflowBuilder";
+import { type BuiltWorkflow, WorkflowBuilder } from "./WorkflowBuilder";
 
 type ToolTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
 
@@ -72,11 +77,18 @@ export function InternalToolDetail({
   initialTab = "ui",
 }: InternalToolDetailProps) {
   const [tab, setTab] = useState<ToolTab>(initialTab);
-  // The chat is the SAME build chat, scoped to this tool, opened as an overlay
-  // from any tab — not a tab of its own.
+  // The chat is the SAME build chat, scoped to this tool, docked as a right-side
+  // panel (dock -> wide -> full-screen modal) over the tool's real screens. The
+  // chat acts ON the screens: a workflow change navigates to the Workflow tab
+  // and updates it there, rather than living in a canvas glued to the chat.
   const [chatOpen, setChatOpen] = useState(false);
+  const [panelSize, setPanelSize] = useState<"dock" | "wide" | "modal">("dock");
   const [version] = useState(tool.version);
   const [versions] = useState<ToolVersion[]>(tool.versions);
+  // The tool's live workflow steps — the chat edits these and they render on the
+  // Workflow tab. Changed steps flash so the edit is legible on that screen.
+  const [liveSteps, setLiveSteps] = useState<WorkflowStep[]>(tool.steps);
+  const [changedStepIds, setChangedStepIds] = useState<readonly string[]>([]);
   // Parent-owned inbound rows, shared by the UI and Data tabs so approving a
   // request on the UI tab is reflected in the Data tab too (no tab-local copy).
   const [inboundRows, setInboundRows] =
@@ -93,20 +105,26 @@ export function InternalToolDetail({
     );
   }
 
-  // Opening the chat reuses the same build chat we ship for new tools, scoped to
-  // this tool. It takes over the detail view; closing returns to the tool.
-  if (chatOpen) {
-    return (
-      <WorkflowBuilder
-        scopeToolName={tool.name}
-        onClose={() => setChatOpen(false)}
-        onFinish={() => setChatOpen(false)}
-      />
-    );
+  // When the chat reworks the workflow, show it on the Workflow screen the chat
+  // was acting on: navigate there, update the steps, and flash what changed.
+  function applyWorkflowEdit(draft: BuiltWorkflow) {
+    const changed = draft.steps
+      .filter((step) => {
+        const prev = liveSteps.find((p) => p.id === step.id);
+        return !prev || prev.title !== step.title || prev.detail !== step.detail;
+      })
+      .map((step) => step.id);
+    setLiveSteps(draft.steps);
+    setChangedStepIds(changed);
+    setTab("workflow");
   }
 
   return (
-    <div className="opr-detail-wrap">
+    <div
+      className={`opr-detail-wrap${
+        chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
+      }`}
+    >
       <div className="opr-surface-wide">
         <button type="button" className="opr-back" onClick={onBack}>
           <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
@@ -231,7 +249,11 @@ export function InternalToolDetail({
               />
             ))}
           {tab === "workflow" && (
-            <WorkflowTab tool={tool} versions={versions} />
+            <WorkflowTab
+              tool={{ ...tool, steps: liveSteps }}
+              versions={versions}
+              changedStepIds={changedStepIds}
+            />
           )}
           {tab === "data" &&
             (isInbound ? (
@@ -250,15 +272,92 @@ export function InternalToolDetail({
       </div>
 
       {/* Pop the tool's AI open from anywhere — on any tab. */}
-      <button
-        type="button"
-        className="opr-ask-fab"
-        onClick={() => setChatOpen(true)}
-        aria-label={`Ask AI about ${tool.name}`}
-      >
-        <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-        Ask AI
-      </button>
+      {chatOpen ? null : (
+        <button
+          type="button"
+          className="opr-ask-fab"
+          onClick={() => setChatOpen(true)}
+          aria-label={`Ask AI about ${tool.name}`}
+        >
+          <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
+          Ask AI
+        </button>
+      )}
+
+      {chatOpen ? (
+        <>
+          {panelSize === "modal" ? (
+            <button
+              type="button"
+              className="opr-ask-backdrop"
+              aria-label="Close chat"
+              onClick={() => setChatOpen(false)}
+            />
+          ) : null}
+          <aside
+            className={`opr-ask-panel is-${panelSize}`}
+            aria-label={`Ask AI about ${tool.name}`}
+          >
+            <div className="opr-ask-bar">
+              <span className="opr-ask-bar-title">
+                <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
+                Ask AI · {tool.name}
+              </span>
+              <div className="opr-ask-bar-controls">
+                <button
+                  type="button"
+                  className="opr-icon-btn"
+                  onClick={() =>
+                    setPanelSize((s) => (s === "wide" ? "dock" : "wide"))
+                  }
+                  aria-label={panelSize === "wide" ? "Narrow panel" : "Widen panel"}
+                  title={panelSize === "wide" ? "Narrow" : "Widen"}
+                >
+                  {panelSize === "wide" ? (
+                    <ChevronsRight size={15} strokeWidth={1.9} aria-hidden={true} />
+                  ) : (
+                    <ChevronsLeft size={15} strokeWidth={1.9} aria-hidden={true} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="opr-icon-btn"
+                  onClick={() =>
+                    setPanelSize((s) => (s === "modal" ? "dock" : "modal"))
+                  }
+                  aria-label={
+                    panelSize === "modal" ? "Exit full screen" : "Full screen"
+                  }
+                  title={panelSize === "modal" ? "Exit full screen" : "Full screen"}
+                >
+                  {panelSize === "modal" ? (
+                    <Minimize2 size={14} strokeWidth={1.9} aria-hidden={true} />
+                  ) : (
+                    <Maximize2 size={14} strokeWidth={1.9} aria-hidden={true} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="opr-icon-btn"
+                  onClick={() => setChatOpen(false)}
+                  aria-label="Close chat"
+                  title="Close"
+                >
+                  <X size={15} strokeWidth={1.9} aria-hidden={true} />
+                </button>
+              </div>
+            </div>
+            <div className="opr-ask-body">
+              <WorkflowBuilder
+                panelMode
+                scopeToolName={tool.name}
+                onClose={() => setChatOpen(false)}
+                onFinish={applyWorkflowEdit}
+              />
+            </div>
+          </aside>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -412,9 +511,11 @@ function stepNodeClass(kind: WorkflowStep["kind"]): string {
 function WorkflowTab({
   tool,
   versions,
+  changedStepIds = [],
 }: {
   tool: InternalTool;
   versions: ToolVersion[];
+  changedStepIds?: readonly string[];
 }) {
   return (
     <div className="opr-detail-cols">
@@ -422,7 +523,12 @@ function WorkflowTab({
         <Eyebrow>How it runs · every step is scripted</Eyebrow>
         <div className="opr-flow" style={{ marginTop: "var(--space-3)" }}>
           {tool.steps.map((step, i) => (
-            <div className="opr-step" key={step.id}>
+            <div
+              className={`opr-step${
+                changedStepIds.includes(step.id) ? " opr-step-flash" : ""
+              }`}
+              key={step.id}
+            >
               <div className="opr-step-rail">
                 <div className={stepNodeClass(step.kind)} aria-hidden={true}>
                   {STEP_GLYPH[step.kind]}

@@ -2959,3 +2959,141 @@
 .opr-root .eac .btn-ghost {
   color: var(--t-faint);
 }
+
+/* Ask AI — docked side panel (dock -> wide -> full-screen modal). The chat is a
+   companion to the tool's real screens; its workflow edits show on the Workflow
+   tab, so the panel is chat-only (no glued canvas). */
+.opr-builder-panel {
+  grid-template-columns: 1fr;
+}
+.opr-builder-panel .opr-builder-chat {
+  border-right: none;
+}
+
+.opr-detail-wrap.is-chat-dock,
+.opr-detail-wrap.is-chat-wide {
+  transition: padding-right 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.opr-detail-wrap.is-chat-dock {
+  padding-right: 440px;
+}
+.opr-detail-wrap.is-chat-wide {
+  padding-right: min(760px, 62vw);
+}
+
+.opr-ask-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  border: none;
+  cursor: pointer;
+  background: color-mix(in srgb, #000 55%, transparent);
+  animation: opr-fade-in 140ms ease both;
+}
+
+.opr-ask-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--t-paper);
+  border-left: 1px solid var(--t-line-2);
+  box-shadow: -14px 0 36px color-mix(in srgb, #000 42%, transparent);
+  transition: width 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation: opr-slide-in-right 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.opr-ask-panel.is-dock {
+  width: 440px;
+}
+.opr-ask-panel.is-wide {
+  width: min(760px, 62vw);
+}
+.opr-ask-panel.is-modal {
+  top: 50%;
+  right: 50%;
+  bottom: auto;
+  transform: translate(50%, -50%);
+  width: min(1080px, 92vw);
+  height: 88vh;
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r);
+  box-shadow: 0 26px 70px color-mix(in srgb, #000 58%, transparent);
+  animation: opr-pop-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.opr-ask-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2-5) var(--space-2-5) var(--space-2-5) var(--space-3-5);
+  border-bottom: 1px solid var(--t-line-2);
+  flex-shrink: 0;
+}
+.opr-ask-bar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-ink);
+}
+.opr-ask-bar-title svg {
+  color: var(--t-accent);
+}
+.opr-ask-bar-controls {
+  display: inline-flex;
+  gap: 2px;
+}
+.opr-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--t-r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--t-faint);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+.opr-icon-btn:hover {
+  color: var(--t-ink);
+  background: color-mix(in srgb, var(--t-ink) 9%, transparent);
+}
+.opr-icon-btn:focus-visible {
+  outline: 2px solid var(--t-accent);
+  outline-offset: 1px;
+}
+.opr-ask-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.opr-ask-body .opr-builder {
+  flex: 1;
+  min-height: 0;
+}
+
+@keyframes opr-slide-in-right {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+@keyframes opr-pop-in {
+  from {
+    transform: translate(50%, -50%) scale(0.985);
+    opacity: 0;
+  }
+}
+@keyframes opr-fade-in {
+  from {
+    opacity: 0;
+  }
+}
