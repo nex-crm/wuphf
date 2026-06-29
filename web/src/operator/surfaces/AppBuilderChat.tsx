@@ -41,31 +41,46 @@ const STARTERS: readonly string[] = [
 
 interface AppBuilderChatProps {
   onClose: () => void;
-  /** Called once the built app has appeared under /apps, with its id. */
+  /** Called once the built/updated app is ready, with its id. */
   onFinish: (appId: string) => void;
+  /**
+   * When set, the chat edits an existing app instead of building a new one:
+   * each message becomes an "improve" instruction to the app-builder, which
+   * re-reads the app and republishes a new version.
+   */
+  editApp?: { id: string; name: string };
 }
 
-export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
+export function AppBuilderChat({
+  onClose,
+  onFinish,
+  editApp,
+}: AppBuilderChatProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "intro",
       from: "ai",
-      body: "Tell me what this app should do. I will build it, and it will appear under Apps the moment it is ready.",
+      body: editApp
+        ? `Tell me what to change about “${editApp.name}”. I will apply it and publish a new version.`
+        : "Tell me what this app should do. I will build it, and it will appear under Apps the moment it is ready.",
     },
   ]);
-  const [appName, setAppName] = useState("");
+  const [appName, setAppName] = useState(editApp?.name ?? "");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [newAppId, setNewAppId] = useState<string | null>(null);
   const beforeIdsRef = useRef<ReadonlySet<string>>(new Set());
+  // Edit mode completes on a version bump of the known app, not a new id.
+  const startVersionRef = useRef<number>(0);
   const seqRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const build = useBuildApp();
 
-  // Poll the app list only while a build is in flight; the new app is the one
-  // whose id was not present when we started (robust to a renamed display name).
+  // Poll the app list only while a build is in flight; a new build is the app
+  // whose id was not present when we started (robust to a renamed display
+  // name); an edit is the known app once its version increments.
   const appsQuery = useQuery({
     queryKey: ["operator-apps"],
     queryFn: listApps,
@@ -75,7 +90,20 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
 
   useEffect(() => {
     if (phase !== "building") return;
-    const found = resolveNewAppId(beforeIdsRef.current, appsQuery.data ?? []);
+    const apps = appsQuery.data ?? [];
+    let found: string | null = null;
+    if (editApp) {
+      const cur = apps.find((a) => a.id === editApp.id);
+      if (
+        cur &&
+        cur.status !== "building" &&
+        cur.version > startVersionRef.current
+      ) {
+        found = editApp.id;
+      }
+    } else {
+      found = resolveNewAppId(beforeIdsRef.current, apps);
+    }
     if (found) {
       setNewAppId(found);
       setPhase("done");
@@ -84,11 +112,13 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
         {
           id: `ai-${seqRef.current++}`,
           from: "ai",
-          body: `“${appName}” is ready. Open it to use and edit it.`,
+          body: editApp
+            ? `Done — “${appName}” has a new version. Open it to see the change.`
+            : `“${appName}” is ready. Open it to use and edit it.`,
         },
       ]);
     }
-  }, [appsQuery.data, phase, appName]);
+  }, [appsQuery.data, phase, appName, editApp]);
 
   const lastMsgId = messages[messages.length - 1]?.id;
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on each new message
@@ -101,7 +131,7 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
     const description = (text ?? draft).trim();
     if (!description || phase === "building") return;
     setDraft("");
-    const name = deriveAppName(description);
+    const name = editApp ? editApp.name : deriveAppName(description);
     setAppName(name);
     setMessages((prev) => [
       ...prev,
@@ -109,15 +139,25 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
       {
         id: `ai-${seqRef.current++}`,
         from: "ai",
-        body: `On it — building “${name}”. You can watch it come together below.`,
+        body: editApp
+          ? `On it — applying that change to “${name}”. You can watch below.`
+          : `On it — building “${name}”. You can watch it come together below.`,
       },
     ]);
     setPhase("building");
     try {
-      // Snapshot the existing app ids so the new one is unambiguous on arrival.
+      // Snapshot what we need to detect completion: existing ids for a new
+      // build, or the current version for an edit (republish bumps it).
       const before = await listApps();
       beforeIdsRef.current = new Set(before.map((a) => a.id));
-      const task = await build.mutateAsync({ name, description });
+      startVersionRef.current = editApp
+        ? (before.find((a) => a.id === editApp.id)?.version ?? 0)
+        : 0;
+      const task = await build.mutateAsync(
+        editApp
+          ? { name, description, appId: editApp.id }
+          : { name, description },
+      );
       setTaskId(task.id);
     } catch {
       setPhase("intro");
@@ -137,10 +177,12 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
       <div className="opr-builder-chat">
         <header className="opr-builder-head">
           <div>
-            <Eyebrow>Build an app</Eyebrow>
+            <Eyebrow>{editApp ? "Ask AI" : "Build an app"}</Eyebrow>
             <div className="opr-builder-title">
               {phase === "intro"
-                ? "Describe it, I will build it"
+                ? editApp
+                  ? `Edit “${editApp.name}”`
+                  : "Describe it, I will build it"
                 : appName || "Building your app"}
             </div>
           </div>
@@ -179,7 +221,9 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="opr-finish-name">{appName}</div>
                   <div className="opr-finish-sub">
-                    <span>Ready to use</span>
+                    <span>
+                      {editApp ? "New version published" : "Ready to use"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -197,7 +241,7 @@ export function AppBuilderChat({ onClose, onFinish }: AppBuilderChatProps) {
           ) : null}
         </div>
 
-        {phase === "intro" ? (
+        {phase === "intro" && !editApp ? (
           <div className="opr-starters">
             <div className="opr-starters-label">Or start from one of these</div>
             {STARTERS.map((s) => (
