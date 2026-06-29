@@ -86,7 +86,7 @@ export function OperatorSidebar({
         onClick={onBuild}
       >
         <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
-        Build a tool
+        Build an app
       </button>
       <button
         type="button"
