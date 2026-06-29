@@ -640,7 +640,7 @@ export function WorkflowBuilder({
                         className="opr-btn opr-btn-primary opr-btn-sm"
                         onClick={() => onFinish(draftFrom(m.finish!), "open")}
                       >
-                        Open the tool
+                        {scopeToolName ? "Apply changes" : "Open the tool"}
                         <ArrowRight
                           size={13}
                           strokeWidth={1.9}
@@ -669,7 +669,7 @@ export function WorkflowBuilder({
           ) : null}
         </div>
 
-        {phase === "intro" ? (
+        {phase === "intro" && !scopeToolName ? (
           <div className="opr-starters">
             <div className="opr-starters-label">Or start from one of these</div>
             {STARTERS.map((s) => (
