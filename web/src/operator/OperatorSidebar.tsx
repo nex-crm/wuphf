@@ -1,24 +1,21 @@
-// The operator shell's left nav — deliberately small: five surfaces, a call
-// CTA, and the operator's identity. No agents, channels, skills, or wiki
-// vocabulary; this is the whole product.
+// The operator shell's left nav — deliberately small: Work Tools and Settings,
+// a build/call CTA, and the operator's identity. No agents, channels, skills, or
+// wiki vocabulary; this is the whole product. Everything else (chat,
+// integrations, knowledge, data) lives as tabs inside a Work Tool.
 
 import {
-  BookOpen,
-  MessageSquare,
+  type LucideIcon,
   PhoneCall,
-  Plug,
   Plus,
   Settings,
   Workflow,
-  type LucideIcon,
 } from "lucide-react";
 
-export type OperatorSurface =
-  | "chats"
-  | "tools"
-  | "knowledge"
-  | "integrations"
-  | "settings";
+// Chats, Knowledge, and Integrations are no longer top-level surfaces: they live
+// as tabs inside a Work Tool, because each is scoped to the tool that uses it
+// (an integration is connected once but shown under the tools that use it; a
+// tool's chat only affects that tool). The shell is just Work Tools + Settings.
+export type OperatorSurface = "tools" | "settings";
 
 interface NavDef {
   id: OperatorSurface;
@@ -28,10 +25,7 @@ interface NavDef {
 }
 
 const NAV: readonly NavDef[] = [
-  { id: "chats", label: "Chats", icon: MessageSquare, count: 1 },
-  { id: "tools", label: "Internal tools", icon: Workflow, count: 3 },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen },
-  { id: "integrations", label: "Integrations", icon: Plug },
+  { id: "tools", label: "Work Tools", icon: Workflow, count: 3 },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -73,7 +67,7 @@ export function OperatorSidebar({
             className={`opr-nav-item${item.id === active ? " is-active" : ""}`}
             onClick={() => onSelect(item.id)}
           >
-            <span className="opr-nav-icon" aria-hidden>
+            <span className="opr-nav-icon" aria-hidden={true}>
               <item.icon size={15} strokeWidth={1.8} />
             </span>
             {item.label}
@@ -91,7 +85,7 @@ export function OperatorSidebar({
         className="opr-btn opr-btn-primary opr-build-cta"
         onClick={onBuild}
       >
-        <Plus size={14} strokeWidth={1.9} aria-hidden />
+        <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
         Build a tool
       </button>
       <button
@@ -99,7 +93,7 @@ export function OperatorSidebar({
         className="opr-call-cta opr-call-cta-secondary"
         onClick={onStartCall}
       >
-        <PhoneCall size={14} strokeWidth={1.9} aria-hidden />
+        <PhoneCall size={14} strokeWidth={1.9} aria-hidden={true} />
         Teach your workflow to Nex
       </button>
 

@@ -2372,6 +2372,83 @@
   margin-top: var(--space-3);
 }
 
+/* Connections card — integrations the built tool needs that aren't ready yet */
+.opr-conn-card {
+  margin-top: var(--space-2-5);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  padding: var(--space-3) var(--space-3-5);
+}
+.opr-conn-lead {
+  margin: 0 0 var(--space-2-5);
+  font-size: 12px;
+  color: var(--t-faint);
+}
+.opr-conn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.opr-conn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.opr-conn-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-ink);
+}
+.opr-conn-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.opr-conn-state {
+  font-size: 11.5px;
+  color: var(--t-faint);
+}
+.opr-conn-row.is-connected .opr-conn-state {
+  color: var(--t-green);
+}
+.opr-conn-waiting {
+  font-style: italic;
+}
+.opr-conn-fallback {
+  font-size: 11.5px;
+  color: var(--t-faint);
+  font-style: italic;
+}
+.opr-conn-error {
+  font-size: 11.5px;
+  color: var(--t-red, #d2544a);
+}
+.opr-conn-fields {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.opr-conn-input {
+  font: inherit;
+  font-size: 12px;
+  padding: var(--space-1-5) var(--space-2-5);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: var(--t-paper);
+  color: var(--t-ink);
+}
+.opr-conn-input:focus-visible {
+  outline: 2px solid var(--t-accent);
+  outline-offset: 1px;
+}
+
 /* Right pane — the live workflow canvas */
 .opr-builder-canvas {
   position: relative;
@@ -2674,4 +2751,105 @@
   text-transform: uppercase;
   color: var(--t-accent-2);
   margin-right: var(--space-2);
+}
+
+/* Scoped Integrations/Knowledge tab panels inside a Work Tool */
+.opr-tool-scoped {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+.opr-scoped-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.opr-scoped-chip {
+  font-size: 12px;
+  padding: var(--space-1) var(--space-2-5);
+  border: 1px solid var(--t-line-2);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-ink);
+}
+.opr-scoped-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-faint);
+}
+
+/* Operator-native integration cards (real logos + search, operator styling) */
+.opr-int-search {
+  width: 100%;
+  margin: var(--space-1) 0 var(--space-2);
+}
+.opr-int-logo {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  /* Dark tile so colored brand marks read cleanly. */
+  background: color-mix(in srgb, #000 42%, var(--t-paper));
+  overflow: hidden;
+}
+.opr-int-logo :is(svg, img) {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+.opr-int-body {
+  flex: 1;
+  min-width: 0;
+}
+.opr-int-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.opr-int-category {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--t-faint);
+  text-transform: capitalize;
+}
+.opr-int-connected {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--t-green);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.opr-int-connected::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--t-green);
+}
+.opr-int-card {
+  transition: border-color 120ms ease;
+}
+.opr-int-card:hover {
+  border-color: color-mix(in srgb, var(--t-accent-2) 40%, var(--t-line-2));
+}
+.opr-int-card.is-connecting {
+  display: block;
+  padding: 0;
+  border: none;
+  background: transparent;
+  grid-column: 1 / -1;
+}
+.opr-int-card.is-connecting:hover {
+  border-color: transparent;
 }
