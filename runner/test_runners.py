@@ -101,5 +101,84 @@ class TestObserve(unittest.TestCase):
         self.assertEqual(snap["text_excerpt"], "Acme Robotics company record")
 
 
+class TestReplay(unittest.TestCase):
+    def test_find_element_exact_fuzzy_miss(self):
+        els = [
+            {"i": 1, "role": "Button", "label": "Search"},
+            {"i": 2, "role": "TextField", "label": "Company name"},
+        ]
+        self.assertEqual(cua_exec.find_element(els, "Button", "Search")["i"], 1)
+        self.assertEqual(cua_exec.find_element(els, "TextField", "Company")["i"], 2)
+        self.assertIsNone(cua_exec.find_element(els, "Button", "Nope"))
+
+    def test_replay_matches_without_a_model_call(self):
+        steps = [
+            {"action": "click", "role": "Button", "label": "Search"},
+            {"action": "type", "role": "TextField", "label": "Company", "text": "Acme"},
+            {"action": "press_key", "key": "Enter"},
+        ]
+        elements = [
+            {"i": 5, "role": "Button", "label": "Search"},
+            {"i": 6, "role": "TextField", "label": "Company"},
+        ]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua"),
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "goal", "Google Chrome", "key")
+        plan_mock.assert_not_called()  # deterministic — every step matched
+        actions = [e for e in events if e.get("type") == "action"]
+        self.assertEqual(len(actions), 3)
+        self.assertTrue(all(a.get("replayed") for a in actions))
+        self.assertTrue(any(e.get("type") == "trajectory" for e in events))
+
+    def test_live_run_records_a_trajectory(self):
+        # A click then done → the run emits a trajectory with the clicked element's
+        # stable identity (so a later run can replay it).
+        plan_seq = [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "click", "arguments": '{"i":5,"reason":"x"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 5, "role": "Button", "label": "Go"}], "")),
+            mock.patch.object(cua_exec, "cua"),
+            mock.patch.object(cua_exec, "plan", side_effect=plan_seq),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("do it", "Google Chrome", "key")
+        traj = next(e for e in events if e.get("type") == "trajectory")
+        self.assertEqual(traj["steps"], [{"action": "click", "role": "Button", "label": "Go"}])
+
+    def test_replay_heals_when_element_is_gone(self):
+        steps = [{"action": "click", "role": "Button", "label": "Gone"}]
+        elements = [{"i": 9, "role": "Button", "label": "Renamed"}]
+        events = []
+        heal_resp = {
+            "choices": [
+                {"message": {"tool_calls": [{"function": {"name": "click", "arguments": '{"i":9,"reason":"x"}'}}]}}
+            ]
+        }
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua"),
+            mock.patch.object(cua_exec, "plan", return_value=heal_resp),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "goal", "Google Chrome", "key")
+        actions = [e for e in events if e.get("type") == "action"]
+        self.assertEqual(len(actions), 1)
+        self.assertTrue(actions[0].get("healed"))
+        # The healed trajectory records the NEW element's stable identity.
+        traj = next(e for e in events if e.get("type") == "trajectory")
+        self.assertEqual(traj["steps"][0]["label"], "Renamed")
+
+
 if __name__ == "__main__":
     unittest.main()

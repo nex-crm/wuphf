@@ -27,7 +27,9 @@ import {
   EXEC_UNAVAILABLE,
   type RunnerEvent,
   runBrowserExec,
+  runBrowserReplay,
 } from "../exec/browserExecClient";
+import { loadTrajectory, saveTrajectory } from "../exec/trajectoryStore";
 
 interface BrowserRunModalProps {
   toolName: string;
@@ -150,6 +152,8 @@ interface LiveEntry {
   label: string;
   reasoning?: string;
   refused?: boolean;
+  replayed?: boolean;
+  healed?: boolean;
 }
 
 function errorMessage(err: unknown): string {
@@ -177,41 +181,61 @@ function LiveBrowserRun({
   const [phase, setPhase] = useState<ExecStatus>("running");
   const [result, setResult] = useState("");
   const [context, setContext] = useState("");
+  // A saved trajectory from a prior run → replay it deterministically (fast),
+  // healing only the steps whose elements moved. None → drive live + record one.
+  const saved = useMemo(() => loadTrajectory(toolName, goal), [toolName, goal]);
+  const [replaying] = useState(Boolean(saved));
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    runBrowserExec({
-      goal,
-      app,
-      windowId,
-      signal: ctrl.signal,
-      onEvent: (e: RunnerEvent) => {
-        if (e.type === "status") {
-          setThinking(e.status === "thinking");
-          if (e.detail) setContext(e.detail);
-        } else if (e.type === "action") {
-          setThinking(false);
-          setEntries((prev) => [
-            ...prev,
-            {
-              label: e.label ?? "",
-              reasoning: e.reasoning,
-              refused: e.refused,
-            },
-          ]);
-        } else if (e.type === "done") {
-          setThinking(false);
-          setPhase("done");
-          setResult(e.result ?? "Run complete.");
-        } else if (e.type === "error") {
-          setThinking(false);
-          setPhase("error");
-          setResult(e.message ?? "The run failed.");
+    const onEvent = (e: RunnerEvent) => {
+      if (e.type === "status") {
+        setThinking(e.status === "thinking");
+        if (e.detail) setContext(e.detail);
+      } else if (e.type === "action") {
+        setThinking(false);
+        setEntries((prev) => [
+          ...prev,
+          {
+            label: e.label ?? "",
+            reasoning: e.reasoning,
+            refused: e.refused,
+            replayed: e.replayed,
+            healed: e.healed,
+          },
+        ]);
+      } else if (e.type === "trajectory") {
+        // Persist the recorded (or healed) trajectory so the next run replays it.
+        if (e.steps && e.steps.length > 0) {
+          saveTrajectory(toolName, goal, {
+            goal: e.goal ?? goal,
+            app: e.app ?? app ?? "Google Chrome",
+            steps: e.steps,
+          });
         }
-      },
-    }).catch((err) => {
+      } else if (e.type === "done") {
+        setThinking(false);
+        setPhase("done");
+        setResult(e.result ?? "Run complete.");
+      } else if (e.type === "error") {
+        setThinking(false);
+        setPhase("error");
+        setResult(e.message ?? "The run failed.");
+      }
+    };
+
+    const run = saved
+      ? runBrowserReplay({
+          trajectory: saved,
+          windowId,
+          signal: ctrl.signal,
+          onEvent,
+        })
+      : runBrowserExec({ goal, app, windowId, signal: ctrl.signal, onEvent });
+
+    run.catch((err) => {
       if (ctrl.signal.aborted) return;
       if (err instanceof Error && err.message === EXEC_UNAVAILABLE) {
         onUnavailable();
@@ -221,7 +245,7 @@ function LiveBrowserRun({
       setResult(errorMessage(err));
     });
     return () => ctrl.abort();
-    // Run once for the lifetime of this live run.
+    // Run once for the lifetime of this run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -238,8 +262,13 @@ function LiveBrowserRun({
       : phase === "error"
         ? "error"
         : thinking
-          ? "thinking"
-          : "running";
+          ? replaying
+            ? "healing"
+            : "thinking"
+          : replaying
+            ? "replaying"
+            : "running";
+  const live = statusText === "running" || statusText === "replaying";
 
   function stop() {
     abortRef.current?.abort();
@@ -257,9 +286,7 @@ function LiveBrowserRun({
             <Globe size={12} strokeWidth={1.9} aria-hidden={true} />
             {context || app || "your browser"}
           </div>
-          <span
-            className={`opr-exec-live${statusText === "running" ? " is-live" : ""}`}
-          >
+          <span className={`opr-exec-live${live ? " is-live" : ""}`}>
             {statusText}
           </span>
         </div>
@@ -284,7 +311,9 @@ function LiveBrowserRun({
       <div className="opr-exec-body">
         <div className="opr-exec-head">
           <div>
-            <div className="opr-eyebrow">Running in your browser</div>
+            <div className="opr-eyebrow">
+              {replaying ? "Replaying a saved run" : "Running in your browser"}
+            </div>
             <div className="opr-exec-goal">{goal}</div>
           </div>
           <div className="opr-exec-controls">
@@ -307,10 +336,14 @@ function LiveBrowserRun({
           {entries.map((entry, i) => (
             <div
               key={i}
-              className={`opr-exec-act${entry.refused ? " is-gated" : ""}`}
+              className={`opr-exec-act${entry.refused || entry.healed ? " is-gated" : ""}`}
             >
               <span className="opr-exec-act-label">{entry.label}</span>
-              {entry.reasoning ? (
+              {entry.healed ? (
+                <span className="opr-exec-act-why">
+                  Healed — the page changed since the saved run.
+                </span>
+              ) : entry.reasoning ? (
                 <span className="opr-exec-act-why">{entry.reasoning}</span>
               ) : null}
             </div>
@@ -333,7 +366,13 @@ function LiveBrowserRun({
             <Check size={14} strokeWidth={2} aria-hidden={true} />
           ) : null}
           {result ||
-            (thinking ? "Working out the next step…" : "Driving your browser…")}
+            (thinking
+              ? replaying
+                ? "A step moved — re-finding it…"
+                : "Working out the next step…"
+              : replaying
+                ? "Replaying your saved run…"
+                : "Driving your browser…")}
         </div>
       </div>
     </RunScrim>

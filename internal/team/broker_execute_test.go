@@ -79,6 +79,46 @@ func TestHandleExecuteBrowserStreams(t *testing.T) {
 	}
 }
 
+func TestHandleExecuteReplayStreams(t *testing.T) {
+	dir := t.TempDir()
+	runner := filepath.Join(dir, "fake_replay.sh")
+	script := "#!/bin/sh\n" +
+		"echo '{\"type\":\"status\",\"status\":\"replaying\"}'\n" +
+		"echo '{\"type\":\"action\",\"label\":\"Click Search\",\"replayed\":true}'\n" +
+		"echo '{\"type\":\"done\",\"result\":\"Replayed the workflow.\"}'\n"
+	if err := os.WriteFile(runner, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WUPHF_OPENAI_API_KEY", "test-key")
+	t.Setenv("WUPHF_CUA_PYTHON", "sh")
+	t.Setenv("WUPHF_CUA_RUNNER", runner)
+
+	body := `{"trajectory":{"goal":"g","app":"Google Chrome","steps":[{"action":"click","role":"Button","label":"Search"}]}}`
+	r := httptest.NewRequest(http.MethodPost, "/execute/replay", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	(&Broker{}).handleExecuteReplay(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	out := w.Body.String()
+	for _, want := range []string{`"replayed":true`, "event: end"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in stream:\n%s", want, out)
+		}
+	}
+}
+
+func TestHandleExecuteReplayRejectsEmptyTrajectory(t *testing.T) {
+	t.Setenv("WUPHF_OPENAI_API_KEY", "test-key")
+	r := httptest.NewRequest(http.MethodPost, "/execute/replay", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	(&Broker{}).handleExecuteReplay(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for missing trajectory", w.Code)
+	}
+}
+
 func TestHandleExecuteBrowser503WithoutKey(t *testing.T) {
 	// Isolate the runtime home so config.Load() can't pick up a real key.
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
