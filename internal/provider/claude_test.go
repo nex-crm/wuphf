@@ -53,9 +53,10 @@ func TestBuildClaudeArgsIncludesResume(t *testing.T) {
 	if strings.Contains(joined, "--no-session-persistence") {
 		t.Fatalf("unexpected no-session-persistence flag: %q", joined)
 	}
-	// An agent turn keeps full tool access and many turns.
-	if !strings.Contains(joined, "--max-turns 20") {
-		t.Fatalf("expected agent turn to keep --max-turns 20, got %q", joined)
+	// An agent turn keeps full tool access and many turns. The cap was raised
+	// 20 -> 50 so complex app builds can finish and publish within one turn.
+	if !strings.Contains(joined, "--max-turns 50") {
+		t.Fatalf("expected agent turn to keep --max-turns 50, got %q", joined)
 	}
 	if strings.Contains(joined, "--allowedTools") {
 		t.Fatalf("agent turn must NOT restrict tools, got %q", joined)
