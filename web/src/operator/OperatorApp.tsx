@@ -119,7 +119,7 @@ export function OperatorApp() {
   }
 
   return (
-    <div className="opr-root">
+    <div className="opr-root" data-testid="operator-root">
       <OperatorSidebar
         active={surface}
         onSelect={go}

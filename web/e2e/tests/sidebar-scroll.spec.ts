@@ -46,7 +46,9 @@ test.describe("left sidebar scrolling", () => {
       const getErrors = collectReactErrors(page);
       await page.setViewportSize(viewport);
 
-      await page.goto("/");
+      // Operator is the index; the office left sidebar lives in the Shell,
+      // reached via a deep route rather than "/".
+      await page.goto("/#/channels/general");
       await waitForReactMount(page);
       await ensureSidebarExpanded(page);
 
@@ -80,7 +82,9 @@ test.describe("left sidebar scrolling", () => {
       const getErrors = collectReactErrors(page);
       await page.setViewportSize(viewport);
 
-      await page.goto("/");
+      // Operator is the index; the office left sidebar lives in the Shell,
+      // reached via a deep route rather than "/".
+      await page.goto("/#/channels/general");
       await waitForReactMount(page);
       await ensureSidebarExpanded(page);
 
