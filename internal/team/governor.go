@@ -51,13 +51,19 @@ const (
 	pauseTurns  pauseReason = "turns"  // ran the per-checkpoint turn count
 )
 
-// Default checkpoint thresholds. All overridable via env (loadGovernorConfig).
-// These are deliberately conservative: a soft pause is cheap (Continue is one
-// click) but an un-bounded autonomous run is not.
+// Default checkpoint thresholds, used only when automatic pausing is opted back
+// in (WUPHF_GOVERNOR_ENABLED). They are overridable via env (loadGovernorConfig).
 const (
 	defaultGovernorMaxTokens  = 150_000
 	defaultGovernorMaxCostUsd = 3.0
 	defaultGovernorMaxTurns   = 12
+
+	// defaultGovernorDisabled turns OFF automatic budget/turn pausing by default.
+	// The operator surface is single-agent, human-initiated work (describe an app,
+	// it builds); an auto-pause at 150k tokens silently froze multi-million-token
+	// builds, which read as a hang. Manual pause/stop still work; re-enable the
+	// automatic checkpoint with WUPHF_GOVERNOR_ENABLED=1.
+	defaultGovernorDisabled = true
 )
 
 type governorConfig struct {
@@ -80,6 +86,7 @@ func loadGovernorConfig() governorConfig {
 		MaxSessionTokens:  defaultGovernorMaxTokens,
 		MaxSessionCostUsd: defaultGovernorMaxCostUsd,
 		MaxTurnsPerGate:   defaultGovernorMaxTurns,
+		Disabled:          defaultGovernorDisabled,
 	}
 	if v := strings.TrimSpace(os.Getenv("WUPHF_BUDGET_MAX_TOKENS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -95,6 +102,12 @@ func loadGovernorConfig() governorConfig {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			cfg.MaxTurnsPerGate = n
 		}
+	}
+	// Automatic pausing is off by default (defaultGovernorDisabled). Opt back in
+	// with WUPHF_GOVERNOR_ENABLED; WUPHF_GOVERNOR_DISABLED still forces it off and
+	// wins if both are set.
+	if envTruthy(os.Getenv("WUPHF_GOVERNOR_ENABLED")) {
+		cfg.Disabled = false
 	}
 	if envTruthy(os.Getenv("WUPHF_GOVERNOR_DISABLED")) {
 		cfg.Disabled = true
