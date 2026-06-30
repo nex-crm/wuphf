@@ -210,15 +210,19 @@ export function AppBuilderChat({
           : `On it — building “${name}”. You can watch it come together below.`,
       },
     ]);
-    setPhase("building");
     try {
-      // Snapshot what we need to detect completion: existing ids for a new
-      // build, or the current version for a refine (republish bumps it).
+      // Snapshot completion baselines BEFORE entering the building phase. The
+      // completion effect runs on the phase->"building" re-render; if we flipped
+      // the phase first, that effect would fire while startVersionRef/beforeIds
+      // still held STALE values (e.g. version 0) and instantly declare "Done"
+      // for a refine before the edit even started. Capture first, then enter the
+      // building phase (which is also what enables the poll + the effect).
       const before = await listApps();
       beforeIdsRef.current = new Set(before.map((a) => a.id));
       startVersionRef.current = refineId
         ? (before.find((a) => a.id === refineId)?.version ?? 0)
         : 0;
+      setPhase("building");
       if (refineId) {
         // Refine through the app's edit channel so the proven task_followup
         // wake re-engages the App Builder (a new Improve task would be created
