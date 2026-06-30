@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"text/template"
@@ -159,6 +160,46 @@ func (c *ComposioREST) ExecuteWorkflow(ctx context.Context, req WorkflowExecuteR
 
 func (c *ComposioREST) ListWorkflowRuns(_ context.Context, key string) (WorkflowRunsResult, error) {
 	return listWorkflowRuns(c.Name(), key)
+}
+
+// GetWorkflow reads a persisted (frozen) workflow definition and returns its
+// steps in a UI-friendly view. This is the read side of compile-and-freeze: the
+// definition was bound and saved once (CreateWorkflow), and the operator's
+// Workflow tab renders these steps and re-runs the SAME definition every time —
+// deterministic by construction. A missing definition is reported as
+// Exists:false (not an error) so the caller can show a "not compiled yet" state.
+func (c *ComposioREST) GetWorkflow(_ context.Context, keyOrPath string) (WorkflowGetResult, error) {
+	key, definition, _, err := loadWorkflowDefinition(c.Name(), keyOrPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return WorkflowGetResult{Exists: false}, nil
+		}
+		return WorkflowGetResult{}, err
+	}
+	spec, err := c.decodeWorkflowDefinition(definition)
+	if err != nil {
+		return WorkflowGetResult{}, err
+	}
+	views := make([]WorkflowStepView, 0, len(spec.Steps))
+	for _, s := range spec.Steps {
+		views = append(views, WorkflowStepView{
+			ID:          s.ID,
+			Type:        s.Type,
+			Description: s.Description,
+			Platform:    s.Platform,
+			ActionID:    s.ActionID,
+			RunIf:       s.RunIf,
+			Template:    s.Template,
+			Gated:       actionLikelyWrites(s.ActionID),
+		})
+	}
+	return WorkflowGetResult{
+		Exists:      true,
+		Key:         key,
+		Title:       spec.Title,
+		Description: spec.Description,
+		Steps:       views,
+	}, nil
 }
 
 func (c *ComposioREST) normalizeWorkflowDefinition(definition json.RawMessage) (json.RawMessage, error) {
@@ -400,9 +441,16 @@ func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workf
 		return nil, fmt.Errorf("render connection_key: %w", err)
 	}
 	if strings.TrimSpace(connectionKey) == "" {
-		connectionKey, err = c.autoResolveWorkflowConnection(ctx, step.Platform)
-		if err != nil {
-			return nil, err
+		// An operator-chosen connection (passed as inputs.connections.<platform>)
+		// wins over auto-resolution, so a platform with multiple active accounts
+		// is disambiguated by the run instead of failing.
+		if override := workflowConnectionOverride(scope, step.Platform); override != "" {
+			connectionKey = override
+		} else {
+			connectionKey, err = c.autoResolveWorkflowConnection(ctx, step.Platform)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	data, err := renderWorkflowMap(step.Data, scope)
@@ -448,6 +496,36 @@ func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workf
 		"response":       decoded,
 		"result":         decoded,
 	}, nil
+}
+
+// workflowConnectionOverride returns an operator-chosen connection key for a
+// platform, read from the run's inputs (inputs.connections is a map of
+// platform -> connection_key). Empty when none was supplied, in which case the
+// caller falls back to auto-resolution. Platform matching is normalized so
+// "gmail" and "GMAIL" agree.
+func workflowConnectionOverride(scope map[string]any, platform string) string {
+	inputs, ok := scope["inputs"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	conns, ok := inputs["connections"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if v, ok := conns[platform]; ok {
+		if s := strings.TrimSpace(stringInput(v)); s != "" {
+			return s
+		}
+	}
+	want := normalizeComposioPlatform(platform)
+	for k, v := range conns {
+		if normalizeComposioPlatform(k) == want {
+			if s := strings.TrimSpace(stringInput(v)); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func (c *ComposioREST) autoResolveWorkflowConnection(ctx context.Context, platform string) (string, error) {

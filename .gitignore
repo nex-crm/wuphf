@@ -103,3 +103,7 @@ wuphf-dev
 # Desktop release artifacts (built/signed locally; CI uploads to Releases)
 /dist-desktop/
 /desktop/oswails/dist/
+
+# Operator orchestration spikes (LangGraph/deepagents/Inngest) — scratch only, not adopted
+/orchestrator/
+/spikes/

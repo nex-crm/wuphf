@@ -1,7 +1,6 @@
-// Apps — the list surface. Real built apps (from the shipped app-builder
-// backend) lead; the AI-suggested tools below are still mock aspiration. A live
-// hero app, then the rest, then suggestions. Selecting a real app opens
-// OperatorAppDetail; selecting a suggestion opens the mock detail.
+// Apps — the list surface. Only REAL built apps (from the shipped app-builder
+// backend): a live hero app, then the rest, building, and failed. Selecting an
+// app opens OperatorAppDetail. An empty state invites the first build.
 
 import { ArrowRight, PhoneCall, Plus, Trash2 } from "lucide-react";
 
@@ -11,13 +10,7 @@ import {
   useDeleteApp,
   useOperatorApps,
 } from "../apps/useOperatorApps";
-import {
-  Eyebrow,
-  SurfaceHeader,
-  sigil,
-  ToolStatusBadge,
-} from "../components/primitives";
-import { type InternalTool, TOOLS } from "../mock/data";
+import { Eyebrow, SurfaceHeader, sigil } from "../components/primitives";
 
 interface InternalToolsSurfaceProps {
   onOpen: (toolId: string) => void;
@@ -38,8 +31,6 @@ export function InternalToolsSurface({
   const failedApps = apps.filter((a) => appBuildState(a) === "failed");
   const hero = ready[0];
   const rest = ready.slice(1);
-
-  const suggested = TOOLS.filter((t) => t.status === "suggested");
 
   return (
     <div className="opr-surface-wide">
@@ -69,7 +60,7 @@ export function InternalToolsSurface({
         <HeroAppCard app={hero} onOpen={() => onOpen(hero.id)} />
       ) : appsQuery.isLoading ? (
         <p className="opr-scoped-note">Loading your apps…</p>
-      ) : (
+      ) : apps.length > 0 ? null : (
         <div className="opr-empty">
           <span className="opr-empty-glyph" aria-hidden={true}>
             ◧
@@ -104,7 +95,11 @@ export function InternalToolsSurface({
               <AppRow key={app.id} app={app} onOpen={() => onOpen(app.id)} />
             ))}
             {buildingApps.map((app) => (
-              <BuildingRow key={app.id} app={app} />
+              <BuildingRow
+                key={app.id}
+                app={app}
+                onOpen={() => onOpen(app.id)}
+              />
             ))}
             {failedApps.map((app) => (
               <FailedRow
@@ -113,20 +108,6 @@ export function InternalToolsSurface({
                 onRemove={() => deleteApp.mutate(app.id)}
                 removing={deleteApp.isPending}
               />
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {suggested.length > 0 ? (
-        <>
-          <div className="opr-section-label">
-            <Eyebrow>Suggested by your AI</Eyebrow>
-            <div className="opr-section-rule" />
-          </div>
-          <div className="opr-grid">
-            {suggested.map((t) => (
-              <SuggestedRow key={t.id} tool={t} onOpen={() => onOpen(t.id)} />
             ))}
           </div>
         </>
@@ -210,9 +191,22 @@ function AppRow({ app, onOpen }: { app: CustomApp; onOpen: () => void }) {
   );
 }
 
-function BuildingRow({ app }: { app: CustomApp }) {
+function BuildingRow({ app, onOpen }: { app: CustomApp; onOpen: () => void }) {
+  // Clickable while building: opening it shows the live preview of the app being
+  // built (OperatorAppDetail handles the building state), not a dead row.
   return (
-    <div className="opr-tool-row" aria-disabled={true} style={{ opacity: 0.7 }}>
+    <div
+      className="opr-tool-row"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
       <span className="opr-tool-emoji" aria-hidden={true}>
         {appGlyph(app)}
       </span>
@@ -220,7 +214,7 @@ function BuildingRow({ app }: { app: CustomApp }) {
         <div className="opr-tool-name" style={{ fontSize: "var(--text-md)" }}>
           {app.name}
         </div>
-        <p className="opr-tool-summary">Building…</p>
+        <p className="opr-tool-summary">Building… open to watch it live</p>
       </div>
       <span className="opr-pill opr-pill-muted">
         <span className="opr-led opr-led-draft" />
@@ -266,40 +260,6 @@ function FailedRow({
       >
         <Trash2 size={15} strokeWidth={1.9} aria-hidden={true} />
       </button>
-    </div>
-  );
-}
-
-function SuggestedRow({
-  tool,
-  onOpen,
-}: {
-  tool: InternalTool;
-  onOpen: () => void;
-}) {
-  return (
-    <div
-      className="opr-tool-row"
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen();
-        }
-      }}
-    >
-      <span className="opr-tool-emoji" aria-hidden={true}>
-        {sigil(tool.name)}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="opr-tool-name" style={{ fontSize: "var(--text-md)" }}>
-          {tool.name}
-        </div>
-        <p className="opr-tool-summary">{tool.summary}</p>
-      </div>
-      <ToolStatusBadge status={tool.status} />
     </div>
   );
 }

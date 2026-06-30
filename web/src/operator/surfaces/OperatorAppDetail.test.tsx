@@ -24,12 +24,26 @@ vi.mock("../../components/apps/CustomAppFrame", () => ({
     </div>
   ),
 }));
+// AppLivePreview runs a dev-server query; stub it so a building app's UI tab is
+// unit-testable without a QueryClient or a real dev server.
+vi.mock("../../components/apps/AppLivePreview", () => ({
+  AppLivePreview: ({ appId }: { appId: string }) => (
+    <div data-testid="live-preview" data-app-id={appId} />
+  ),
+}));
 vi.mock("./ToolIntegrations", () => ({
   ToolIntegrations: () => <div data-testid="tool-integrations" />,
 }));
 vi.mock("./AppBuilderChat", () => ({
   AppBuilderChat: ({ editApp }: { editApp?: { name: string } }) => (
     <div data-testid="ask-ai-chat">edit:{editApp?.name}</div>
+  ),
+}));
+// The Workflow tab fetches the frozen workflow via React Query; stub it so the
+// detail test stays unit-scoped to tab routing.
+vi.mock("./AppWorkflowTab", () => ({
+  AppWorkflowTab: ({ appId }: { appId: string }) => (
+    <div data-testid="app-workflow" data-app-id={appId} />
   ),
 }));
 
@@ -56,15 +70,19 @@ function detail(
 }
 
 describe("OperatorAppDetail", () => {
-  it("shows the building state while the first version publishes", () => {
+  it("shows the live preview (UI builds in front of you) while building", () => {
     useOperatorAppMock.mockReturnValue({
       data: detail({ status: "building" }, ""),
       isError: false,
     });
-    const { getByText, queryByTestId } = render(
+    const { getByTestId, queryByTestId } = render(
       <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
-    expect(getByText(/building your app/i)).toBeTruthy();
+    // The building app's UI tab shows the live dev-server preview, not the
+    // sealed published frame.
+    expect(getByTestId("live-preview").getAttribute("data-app-id")).toBe(
+      "app_abc",
+    );
     expect(queryByTestId("app-frame")).toBeNull();
   });
 
@@ -81,19 +99,45 @@ describe("OperatorAppDetail", () => {
     expect(frame.textContent).toContain("<html>hi</html>");
   });
 
-  it("offers Slack delivery scheduling on the Workflow tab of a ready app", () => {
+  it("routes the Workflow tab to the deterministic workflow for a ready app", () => {
     useOperatorAppMock.mockReturnValue({
       data: detail({ status: "ready" }, "<html>hi</html>"),
       isError: false,
     });
-    const { getByText, getByRole } = render(
+    const { getByRole, getByTestId } = render(
       <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
     fireEvent.click(getByRole("tab", { name: "Workflow" }));
-    expect(getByText("Deliver to Slack")).toBeTruthy();
+    expect(getByTestId("app-workflow").getAttribute("data-app-id")).toBe(
+      "app_abc",
+    );
+  });
+
+  it("shows the Ask AI header button and floating bubble for a ready app", () => {
+    useOperatorAppMock.mockReturnValue({
+      data: detail({ status: "ready" }, "<html>hi</html>"),
+      isError: false,
+    });
+    const { getByRole } = render(
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
+    );
+    // Header action button (exact name "Ask AI").
+    expect(getByRole("button", { name: /^ask ai$/i })).toBeTruthy();
+    // Floating bubble (aria-label "Ask AI about <app>").
     expect(
-      getByRole("button", { name: /schedule daily delivery/i }),
+      getByRole("button", { name: /ask ai about open tasks/i }),
     ).toBeTruthy();
+  });
+
+  it("hides the Ask AI affordances while the app is still building", () => {
+    useOperatorAppMock.mockReturnValue({
+      data: detail({ status: "building" }, ""),
+      isError: false,
+    });
+    const { queryByRole } = render(
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
+    );
+    expect(queryByRole("button", { name: /ask ai/i })).toBeNull();
   });
 
   it("opens Ask AI as a docked drawer (not full screen) when clicked", () => {
