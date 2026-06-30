@@ -4,6 +4,7 @@ import {
   EXEC_UNAVAILABLE,
   type RunnerEvent,
   runBrowserExec,
+  runBrowserReplay,
 } from "./browserExecClient";
 
 vi.mock("../../api/client", () => ({ postStream: vi.fn() }));
@@ -62,6 +63,32 @@ describe("runBrowserExec", () => {
     await expect(
       runBrowserExec({ goal: "g", onEvent: () => {} }),
     ).rejects.toThrow(EXEC_UNAVAILABLE);
+  });
+
+  it("runBrowserReplay posts the trajectory to /execute/replay and surfaces replayed actions", async () => {
+    (postStream as Mock).mockResolvedValue(
+      sseResponse([
+        'data: {"type":"action","label":"Click Search","replayed":true}\n\n',
+        'data: {"type":"done","result":"Replayed the workflow."}\n\n',
+      ]),
+    );
+    const traj = {
+      goal: "g",
+      app: "Google Chrome",
+      steps: [{ action: "click", role: "Button", label: "Search" }],
+    };
+    const events: RunnerEvent[] = [];
+    await runBrowserReplay({
+      trajectory: traj,
+      windowId: 3,
+      onEvent: (e) => events.push(e),
+    });
+    expect(postStream).toHaveBeenCalledWith(
+      "/execute/replay",
+      { trajectory: traj, window_id: 3 },
+      expect.objectContaining({}),
+    );
+    expect(events.some((e) => e.replayed)).toBe(true);
   });
 
   it("sends goal, app and window_id to the endpoint", async () => {

@@ -8,10 +8,26 @@
 import { postStream } from "../../api/client";
 import { readEventStream } from "./sse";
 
+// One recorded action, keyed by the element's STABLE identity (role + label),
+// so a later run can match + replay it. Mirrors cua_exec.py's trajectory step.
+export interface TrajectoryStep {
+  action: string;
+  role?: string;
+  label?: string;
+  text?: string;
+  key?: string;
+}
+
+export interface Trajectory {
+  goal: string;
+  app: string;
+  steps: TrajectoryStep[];
+}
+
 // One event from the runner — mirrors runner/cua_exec.py's emit() shapes.
 export interface RunnerEvent {
-  type: "status" | "action" | "done" | "error";
-  // status: running | thinking
+  type: "status" | "action" | "done" | "error" | "trajectory";
+  // status: running | thinking | replaying | healing
   status?: string;
   detail?: string;
   // action:
@@ -19,9 +35,15 @@ export interface RunnerEvent {
   reasoning?: string;
   tool?: string;
   refused?: boolean;
+  replayed?: boolean;
+  healed?: boolean;
   // done / error:
   result?: string;
   message?: string;
+  // trajectory (emitted on finish): the recorded/healed steps to persist.
+  goal?: string;
+  app?: string;
+  steps?: TrajectoryStep[];
 }
 
 // Thrown when the backend can't run (no OpenAI key or no cua runner) — the
@@ -53,6 +75,34 @@ export async function runBrowserExec(
   }
   if (!(res.ok && res.body)) {
     throw new Error(`browser exec failed: ${res.status}`);
+  }
+  await readEventStream(res, (data) => opts.onEvent(data as RunnerEvent));
+}
+
+export interface RunBrowserReplayOptions {
+  trajectory: Trajectory;
+  windowId?: number;
+  signal?: AbortSignal;
+  onEvent: (event: RunnerEvent) => void;
+}
+
+// Replay a recorded trajectory deterministically (the runner matches each step's
+// element by role+label and executes it, healing only the steps whose element is
+// gone). Same event stream as a live run, but `replayed`/`healed` flags mark each
+// action. Rejects with EXEC_UNAVAILABLE when the host can't run it.
+export async function runBrowserReplay(
+  opts: RunBrowserReplayOptions,
+): Promise<void> {
+  const res = await postStream(
+    "/execute/replay",
+    { trajectory: opts.trajectory, window_id: opts.windowId },
+    { signal: opts.signal },
+  );
+  if (res.status === 503) {
+    throw new Error(EXEC_UNAVAILABLE);
+  }
+  if (!(res.ok && res.body)) {
+    throw new Error(`browser replay failed: ${res.status}`);
   }
   await readEventStream(res, (data) => opts.onEvent(data as RunnerEvent));
 }
