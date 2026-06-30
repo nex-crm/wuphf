@@ -91,7 +91,13 @@ test.describe("PR #634 review pins", () => {
     );
   });
 
-  test("AgentPanel's per-channel toggle never renders off a conversation route", async ({
+  // QUARANTINED (#1143): this pins regression #634 (a stale per-channel
+  // toggle on a NON-lead agent). The toggle only renders for a non-built-in
+  // sub-agent, but the operator branch's single-agent roster seeds a
+  // built-in-only team (CEO/operator/founder), so the toggle is structurally
+  // absent and the test's premise no longer holds. Un-skip once the final
+  // agent model is settled (retire / rebuild / reframe — see the issue).
+  test.skip("AgentPanel's per-channel toggle never renders off a conversation route", async ({
     page,
   }) => {
     // Repro (#634): AgentPanel.AgentPanelView used `useChannelSlug() ??
