@@ -1036,6 +1036,45 @@ func TestTaskNotificationTargetsFollowOwnerAndCEOHeadStart(t *testing.T) {
 	}
 }
 
+// Regression: an app-builder build/edit is self-sufficient single-agent work.
+// The lead (CEO) must NOT be woken alongside the app-builder owner — doing so
+// spawns a redundant parallel build that wastes turns/tokens and trips the
+// budget gate. Only the app-builder owner should start.
+func TestTaskNotificationTargetsAppBuilderDoesNotWakeLead(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: appBuilderSlug, Name: "App Builder"},
+			},
+		},
+	}
+	task := teamTask{
+		ID:        "task-office-1",
+		Channel:   "task-office-1",
+		Title:     "Build app: Daily Digest Of My Email",
+		Details:   "Build a daily digest of my email.",
+		Owner:     appBuilderSlug,
+		status:    "in_progress",
+		CreatedBy: "human",
+	}
+
+	immediate, delayed := l.taskNotificationTargets(officeActionLog{
+		Kind:      "task_created",
+		Actor:     "human",
+		Channel:   "task-office-1",
+		RelatedID: "task-office-1",
+	}, task)
+
+	if containsNotificationTarget(immediate, "ceo") || containsNotificationTarget(delayed, "ceo") {
+		t.Fatalf("CEO must not be woken for an app-builder build; immediate=%+v delayed=%+v", immediate, delayed)
+	}
+	if len(immediate) != 1 || immediate[0].Slug != appBuilderSlug {
+		t.Fatalf("expected only the app-builder owner woken, got %+v", immediate)
+	}
+}
+
 func TestTaskNotificationTargetsWakeCEOWhenOwnerBlocksTask(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
