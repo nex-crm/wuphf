@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import "../styles/operator-shell.css";
 
+import { capturePromptSeed } from "./apps/demoCapture";
 import { isRealAppId } from "./apps/useOperatorApps";
 import { ApprovalPrompt } from "./components/ApprovalPrompt";
 import { CallModal } from "./components/CallModal";
@@ -46,9 +47,14 @@ export function OperatorApp() {
   // "run" handoffs land on the Workflow tab (run history); plain opens stay UI.
   const [openOnWorkflowTab, setOpenOnWorkflowTab] = useState(false);
   // Bumped to force the tool detail to remount — used when a modify call ends on
-  // the SAME tool it started from, so the detail re-opens on the Workflow tab
-  // (where the demonstrated change shows) instead of keeping its prior tab.
+  // the SAME tool it started from, so the detail re-opens with the AI already
+  // working on the demonstrated change.
   const [detailNonce, setDetailNonce] = useState(0);
+  // Seeds handed to the build engine by a "Demo workflow to Nex" call so the AI
+  // starts working from the captured context: buildSeed feeds a fresh workflow
+  // build; demoSeed feeds the chat scoped to the tool being modified.
+  const [buildSeed, setBuildSeed] = useState<string | null>(null);
+  const [demoSeed, setDemoSeed] = useState<string | null>(null);
 
   function resetSubState() {
     setSelectedId(null);
@@ -56,6 +62,8 @@ export function OperatorApp() {
     setBuilding(false);
     setBuiltDraft(null);
     setOpenOnWorkflowTab(false);
+    setBuildSeed(null);
+    setDemoSeed(null);
   }
 
   function go(next: OperatorSurface) {
@@ -123,6 +131,7 @@ export function OperatorApp() {
             })
           }
           initialTab={openOnWorkflowTab ? "workflow" : "ui"}
+          demoSeed={demoSeed ?? undefined}
         />
       );
     }
@@ -152,6 +161,7 @@ export function OperatorApp() {
           />
         ) : building ? (
           <WorkflowBuilder
+            seed={buildSeed ?? undefined}
             onClose={() => setBuilding(false)}
             onFinish={finishWorkflow}
           />
@@ -165,19 +175,30 @@ export function OperatorApp() {
 
       {call ? (
         <CallModal
-          tool={call.mode === "modify" ? { name: call.toolName } : undefined}
+          tool={
+            call.mode === "modify"
+              ? { id: call.toolId, name: call.toolName }
+              : undefined
+          }
           onClose={() => setCall(null)}
-          onBuild={() => {
-            // Build mode drafts a new tool (the inbound-routing mock); modify
-            // mode lands back on the tool whose change was just demonstrated,
-            // on its Workflow tab where the change shows.
-            const target =
-              call.mode === "modify" ? call.toolId : "inbound-routing";
+          onBuild={(capture) => {
+            // The call captured everything; hand it to the AI, which starts
+            // working at once. A modify call reopens the tool with its chat
+            // already reworking the demonstrated change; a build call opens the
+            // workflow builder, already assembling the new tool.
+            const seed = capturePromptSeed(capture);
+            resetSubState();
             setCall(null);
-            setOpenOnWorkflowTab(call.mode === "modify");
-            setSelectedId(target);
-            setSurface("tools");
-            if (call.mode === "modify") setDetailNonce((n) => n + 1);
+            if (capture.mode === "modify" && capture.toolId) {
+              setDemoSeed(seed);
+              setSelectedId(capture.toolId);
+              setSurface("tools");
+              setDetailNonce((n) => n + 1);
+            } else {
+              setBuildSeed(seed);
+              setBuilding(true);
+              setSurface("tools");
+            }
           }}
         />
       ) : null}

@@ -11,7 +11,7 @@
 // Integrations or Knowledge surface. "Edit with AI" opens the SAME build chat we
 // ship for new tools, scoped to this tool, as an overlay over any tab.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -97,6 +97,10 @@ interface InternalToolDetailProps {
   // Which tab to land on. "Run on test data" hands off to the Workflow tab
   // (where run history lives); a plain open stays on the UI tab.
   initialTab?: ToolTab;
+  // When set, a "Demo workflow to Nex" call just finished on this tool: open the
+  // Ask-AI chat and seed it so the AI starts reworking from the demonstrated
+  // change without the operator re-typing it.
+  demoSeed?: string;
 }
 
 export function InternalToolDetail({
@@ -104,14 +108,23 @@ export function InternalToolDetail({
   onBack,
   onStartCall,
   initialTab = "ui",
+  demoSeed,
 }: InternalToolDetailProps) {
   const [tab, setTab] = useState<ToolTab>(initialTab);
   // The chat is the SAME build chat, scoped to this tool, docked as a right-side
   // panel (dock -> wide -> full-screen modal) over the tool's real screens. The
   // chat acts ON the screens: a workflow change navigates to the Workflow tab
   // and updates it there, rather than living in a canvas glued to the chat.
-  const [chatOpen, setChatOpen] = useState(false);
+  // A demo handoff opens the chat straight away (seeded below).
+  const [chatOpen, setChatOpen] = useState(Boolean(demoSeed));
   const [panelSize, setPanelSize] = useState<"dock" | "wide" | "modal">("dock");
+  // The demo seed is one-shot: it kicks the chat off on mount, then is cleared
+  // so reopening the chat later does not replay the demonstrated instruction.
+  const demoSeedRef = useRef(demoSeed);
+  const [seedConsumed, setSeedConsumed] = useState(false);
+  useEffect(() => {
+    if (demoSeedRef.current) setSeedConsumed(true);
+  }, []);
   const [version] = useState(tool.version);
   const [versions] = useState<ToolVersion[]>(tool.versions);
   // The tool's live workflow steps — the chat edits these and they render on the
@@ -415,6 +428,7 @@ export function InternalToolDetail({
               <WorkflowBuilder
                 panelMode={true}
                 scopeToolName={tool.name}
+                seed={seedConsumed ? undefined : demoSeedRef.current}
                 onClose={() => setChatOpen(false)}
                 onFinish={applyWorkflowEdit}
                 onUserMessage={(text) => {

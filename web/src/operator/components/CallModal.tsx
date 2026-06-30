@@ -11,8 +11,14 @@
 // Two modes: BUILD (no tool given) demos a brand-new tool; MODIFY (a tool given)
 // demos a change to an existing one. Build is the default.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, PhoneOff, SkipForward } from "lucide-react";
+
+import {
+  assembleDemoCapture,
+  captureCounts,
+  type DemoCapture,
+} from "../apps/demoCapture";
 
 interface CallLine {
   who: "you" | "ai";
@@ -74,12 +80,19 @@ function modifyScript(toolName: string): CallLine[] {
 // How long each scripted line lingers before the next one reveals.
 const REVEAL_MS = 1400;
 
+// "1 screen" / "2 screens" — the count readout reads naturally at any number.
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 interface CallModalProps {
   onClose: () => void;
-  onBuild: () => void;
+  // Called when the operator ends the call into the build/modify handoff, with
+  // everything the screen share captured. The AI starts working from this.
+  onBuild: (capture: DemoCapture) => void;
   // When set, the call demonstrates a CHANGE to this existing tool (modify
   // mode). When omitted, it demonstrates a brand-new tool (build mode).
-  tool?: { name: string };
+  tool?: { id: string; name: string };
 }
 
 export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
@@ -88,13 +101,28 @@ export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
   const SCRIPT = isModify
     ? modifyScript(tool?.name ?? "this tool")
     : BUILD_SCRIPT;
+
+  // What the screen share captured — assembled once from the full exchange, and
+  // handed to the AI when the operator ends the call.
+  const capture = useMemo(
+    () =>
+      assembleDemoCapture({
+        mode: isModify ? "modify" : "build",
+        tool,
+        transcript: SCRIPT,
+      }),
+    [isModify, tool, SCRIPT],
+  );
+  const counts = captureCounts(capture);
   const dialogLabel = isModify
     ? `Demo a change to ${tool?.name}`
     : "Demo your workflow to Nex";
   const screenLabel = isModify
     ? `operator screen: ${tool?.name}`
     : "operator screen: inbound demo requests";
-  const ctaLabel = isModify ? "See the change" : "See the drafted tool";
+  // Ending the call hands the capture to the AI, which starts building/reworking
+  // immediately — so the CTA reads as kicking off work, not viewing a result.
+  const ctaLabel = isModify ? "Make the change" : "Build it with Nex";
 
   // a11y: close on Escape, focus the dialog on open, restore focus on close,
   // and keep Tab focus inside the dialog (a minimal focus trap).
@@ -180,6 +208,40 @@ export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
             ))}
           </div>
 
+          {done ? (
+            <div className="opr-call-capture">
+              <div className="opr-call-capture-head">
+                Captured from your screen · {plural(counts.screens, "screen")} ·{" "}
+                {plural(counts.selectors, "element")} ·{" "}
+                {plural(counts.apiCalls, "API call")} ·{" "}
+                {plural(counts.entities, "entity", "entities")}
+              </div>
+              <div className="opr-call-capture-chips">
+                {capture.apiCalls.map((c) => (
+                  <span
+                    className="opr-call-capture-chip"
+                    key={`${c.integration}-${c.endpoint}`}
+                  >
+                    {c.integration} {c.endpoint}
+                  </span>
+                ))}
+                {capture.entities.map((e) => (
+                  <span
+                    className="opr-call-capture-chip is-entity"
+                    key={`${e.kind}-${e.value}`}
+                  >
+                    {e.value}
+                  </span>
+                ))}
+              </div>
+              <div className="opr-call-capture-note">
+                {isModify
+                  ? "Nex will rework the workflow from this."
+                  : "Nex will build the workflow from this."}
+              </div>
+            </div>
+          ) : null}
+
           <div
             className="opr-detail-actions"
             style={{ justifyContent: "flex-end" }}
@@ -201,7 +263,7 @@ export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
             <button
               type="button"
               className="opr-btn opr-btn-primary"
-              onClick={onBuild}
+              onClick={() => onBuild(capture)}
               disabled={!done}
             >
               {ctaLabel}

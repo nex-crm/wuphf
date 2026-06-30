@@ -17,7 +17,7 @@ describe("CallModal reveal", () => {
       screen.getByRole("button", { name: /skip ahead/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /see the drafted tool/i }),
+      screen.getByRole("button", { name: /build it with nex/i }),
     ).toBeDisabled();
   });
 
@@ -37,7 +37,7 @@ describe("CallModal reveal", () => {
     await user.click(screen.getByRole("button", { name: /skip ahead/i }));
 
     expect(
-      screen.getByRole("button", { name: /see the drafted tool/i }),
+      screen.getByRole("button", { name: /build it with nex/i }),
     ).toBeEnabled();
     expect(
       screen.queryByRole("button", { name: /skip ahead/i }),
@@ -54,7 +54,7 @@ describe("CallModal modify mode", () => {
       <CallModal
         onClose={vi.fn()}
         onBuild={vi.fn()}
-        tool={{ name: "Inbound routing" }}
+        tool={{ id: "inbound-routing", name: "Inbound routing" }}
       />,
     );
 
@@ -63,10 +63,10 @@ describe("CallModal modify mode", () => {
     ).toBeInTheDocument();
     // The CTA is the modify label, not the build one.
     expect(
-      screen.getByRole("button", { name: /see the change/i }),
+      screen.getByRole("button", { name: /make the change/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /see the drafted tool/i }),
+      screen.queryByRole("button", { name: /build it with nex/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -77,18 +77,43 @@ describe("CallModal modify mode", () => {
       <CallModal
         onClose={vi.fn()}
         onBuild={vi.fn()}
-        tool={{ name: "Inbound routing" }}
+        tool={{ id: "inbound-routing", name: "Inbound routing" }}
       />,
     );
 
     expect(
-      screen.getByRole("button", { name: /see the change/i }),
+      screen.getByRole("button", { name: /make the change/i }),
     ).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /skip ahead/i }));
 
     expect(
-      screen.getByRole("button", { name: /see the change/i }),
+      screen.getByRole("button", { name: /make the change/i }),
     ).toBeEnabled();
+  });
+
+  it("hands a scoped capture to the AI when the call ends", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    const onBuild = vi.fn();
+    render(
+      <CallModal
+        onClose={vi.fn()}
+        onBuild={onBuild}
+        tool={{ id: "inbound-routing", name: "Inbound routing" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /skip ahead/i }));
+    // The captured-context readout is visible once the call is done.
+    expect(screen.getByText(/captured from your screen/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /make the change/i }));
+
+    expect(onBuild).toHaveBeenCalledTimes(1);
+    const capture = onBuild.mock.calls[0][0];
+    expect(capture.mode).toBe("modify");
+    expect(capture.toolId).toBe("inbound-routing");
+    expect(capture.transcript.length).toBeGreaterThan(0);
   });
 });

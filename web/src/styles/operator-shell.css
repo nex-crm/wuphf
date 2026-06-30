@@ -1362,6 +1362,49 @@
   font-weight: 700;
 }
 
+/* Captured context — shown when the call finishes, before the AI starts work.
+   It makes visible that the screen share captured rich metadata + selectors. */
+.opr-call-capture {
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-accent) 6%, transparent);
+  padding: var(--space-3) var(--space-3-5);
+  margin-bottom: var(--space-3);
+}
+.opr-call-capture-head {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--t-text-2);
+  font-weight: 600;
+}
+.opr-call-capture-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  margin-top: var(--space-2);
+}
+.opr-call-capture-chip {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  line-height: 1.4;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--t-line-2);
+  color: var(--t-text-2);
+  white-space: nowrap;
+}
+.opr-call-capture-chip.is-entity {
+  font-family: inherit;
+  color: var(--t-ink);
+  border-color: color-mix(in srgb, var(--t-accent) 40%, var(--t-line-2));
+}
+.opr-call-capture-note {
+  margin-top: var(--space-2);
+  font-size: 11.5px;
+  color: var(--t-text-2);
+}
+
 /* ───────────────────────────── Approval card */
 
 .opr-approval {

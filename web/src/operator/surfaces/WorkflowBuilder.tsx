@@ -265,6 +265,10 @@ interface WorkflowBuilderProps {
   // Each operator message, so a scoped chat can navigate to the screen the
   // change is about (UI vs Workflow vs Data) before the AI even answers.
   onUserMessage?: (text: string) => void;
+  // When set, the AI starts working immediately from this instruction — used by
+  // the "Demo workflow to Nex" call to hand off its captured context so the
+  // operator does not have to re-type what they just demonstrated.
+  seed?: string;
 }
 
 export function WorkflowBuilder({
@@ -273,6 +277,7 @@ export function WorkflowBuilder({
   scopeToolName,
   panelMode,
   onUserMessage,
+  seed,
 }: WorkflowBuilderProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
@@ -319,6 +324,17 @@ export function WorkflowBuilder({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, phase]);
+
+  // Kick off from the demo capture exactly once: the call already gathered the
+  // instruction, so the AI starts working the moment the builder mounts.
+  const seededRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: send is stable (hoisted); fire once when seed first arrives
+  useEffect(() => {
+    if (seed && !seededRef.current) {
+      seededRef.current = true;
+      send(seed);
+    }
+  }, [seed]);
 
   // Tick the elapsed counter while the agent is actively working.
   useEffect(() => {
@@ -726,96 +742,98 @@ export function WorkflowBuilder({
       </div>
 
       {panelMode ? null : (
-      <aside className="opr-builder-canvas" aria-label="Workflow preview">
-        <div className="opr-canvas-head">
-          <Eyebrow>{plan ? plan.name : "Your workflow"}</Eyebrow>
-          <span className="opr-canvas-state">
-            <span
-              className={`opr-led ${
-                phase === "done"
-                  ? "opr-led-live"
-                  : phase === "intro"
-                    ? "opr-led-draft"
-                    : "opr-led-suggested"
-              }`}
-            />
-            {canvasState}
-          </span>
-        </div>
-
-        {visibleSteps.length === 0 && !showGhost ? (
-          <div className="opr-canvas-empty">
-            <div className="opr-canvas-empty-glyph" aria-hidden={true}>
-              ◇
-            </div>
-            <div className="opr-canvas-empty-title">
-              Your workflow takes shape here
-            </div>
-            <p className="opr-canvas-empty-hint">
-              As you describe what should happen, each step appears on this
-              side, wired up and scripted, so you can see exactly what your AI
-              is building.
-            </p>
-          </div>
-        ) : (
-          <div className="opr-flow opr-flow-building">
-            {visibleSteps.map((step, i) => (
-              <div
-                className={`opr-step opr-step-reveal${
-                  flashStepId === step.id ? " opr-step-flash" : ""
+        <aside className="opr-builder-canvas" aria-label="Workflow preview">
+          <div className="opr-canvas-head">
+            <Eyebrow>{plan ? plan.name : "Your workflow"}</Eyebrow>
+            <span className="opr-canvas-state">
+              <span
+                className={`opr-led ${
+                  phase === "done"
+                    ? "opr-led-live"
+                    : phase === "intro"
+                      ? "opr-led-draft"
+                      : "opr-led-suggested"
                 }`}
-                key={step.id}
-              >
-                <div className="opr-step-rail">
-                  <div
-                    className={`opr-step-node opr-step-node-${step.kind}`}
-                    aria-hidden={true}
-                  >
-                    {STEP_GLYPH[step.kind]}
-                  </div>
-                  {i < visibleSteps.length - 1 || showGhost ? (
-                    <div className="opr-step-line" />
-                  ) : null}
-                </div>
-                <div className="opr-step-body">
-                  <div className="opr-step-kind">{step.kind}</div>
-                  <div className="opr-step-title">
-                    {step.title}
-                    {step.integration ? (
-                      <span className="opr-step-chip">{step.integration}</span>
+              />
+              {canvasState}
+            </span>
+          </div>
+
+          {visibleSteps.length === 0 && !showGhost ? (
+            <div className="opr-canvas-empty">
+              <div className="opr-canvas-empty-glyph" aria-hidden={true}>
+                ◇
+              </div>
+              <div className="opr-canvas-empty-title">
+                Your workflow takes shape here
+              </div>
+              <p className="opr-canvas-empty-hint">
+                As you describe what should happen, each step appears on this
+                side, wired up and scripted, so you can see exactly what your AI
+                is building.
+              </p>
+            </div>
+          ) : (
+            <div className="opr-flow opr-flow-building">
+              {visibleSteps.map((step, i) => (
+                <div
+                  className={`opr-step opr-step-reveal${
+                    flashStepId === step.id ? " opr-step-flash" : ""
+                  }`}
+                  key={step.id}
+                >
+                  <div className="opr-step-rail">
+                    <div
+                      className={`opr-step-node opr-step-node-${step.kind}`}
+                      aria-hidden={true}
+                    >
+                      {STEP_GLYPH[step.kind]}
+                    </div>
+                    {i < visibleSteps.length - 1 || showGhost ? (
+                      <div className="opr-step-line" />
                     ) : null}
                   </div>
-                  <div className="opr-step-detail">{step.detail}</div>
-                  {step.gated ? (
-                    <div className="opr-step-gate">
-                      Approval required before it sends
+                  <div className="opr-step-body">
+                    <div className="opr-step-kind">{step.kind}</div>
+                    <div className="opr-step-title">
+                      {step.title}
+                      {step.integration ? (
+                        <span className="opr-step-chip">
+                          {step.integration}
+                        </span>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-            {showGhost ? (
-              <div className="opr-step opr-step-ghost">
-                <div className="opr-step-rail">
-                  <div
-                    className="opr-step-node opr-step-node-ghost"
-                    aria-hidden={true}
-                  >
-                    <span className="opr-think-dot" />
-                    <span className="opr-think-dot" />
-                    <span className="opr-think-dot" />
+                    <div className="opr-step-detail">{step.detail}</div>
+                    {step.gated ? (
+                      <div className="opr-step-gate">
+                        Approval required before it sends
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-                <div className="opr-step-body">
-                  <div className="opr-step-detail">
-                    working out the next step...
+              ))}
+              {showGhost ? (
+                <div className="opr-step opr-step-ghost">
+                  <div className="opr-step-rail">
+                    <div
+                      className="opr-step-node opr-step-node-ghost"
+                      aria-hidden={true}
+                    >
+                      <span className="opr-think-dot" />
+                      <span className="opr-think-dot" />
+                      <span className="opr-think-dot" />
+                    </div>
+                  </div>
+                  <div className="opr-step-body">
+                    <div className="opr-step-detail">
+                      working out the next step...
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </aside>
+              ) : null}
+            </div>
+          )}
+        </aside>
       )}
     </div>
   );
