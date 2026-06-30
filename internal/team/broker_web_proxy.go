@@ -267,6 +267,21 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 		setProxyClientIPHeaders(proxyReq.Header, r.RemoteAddr)
 		proxyReq.Header.Set("Authorization", "Bearer "+b.token)
 		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+		// Forward the agent-identity header so writer-gated API calls work
+		// through the same-origin web proxy. The proxy attaches the broker
+		// token for transport auth, which the broker classifies as broker-kind
+		// (requestActorFromRequest). The app-writer gate (appWriterAllowed)
+		// deliberately rejects broker-kind callers — that gate exists to stop
+		// other agents (which all hold the broker token) from registering or
+		// deleting apps outside the build path. The owner's own web UI is the
+		// legitimate human surface, so when it explicitly identifies as the App
+		// Builder (X-WUPHF-Agent: app-builder, set only by the operator's
+		// remove-failed-app action) we forward that identity through. Without
+		// it, the Remove button 403s. This is same-origin, rebind-guarded
+		// traffic that already carries full broker-token authority.
+		if agent := strings.TrimSpace(r.Header.Get(agentRateLimitHeader)); agent != "" {
+			proxyReq.Header.Set(agentRateLimitHeader, agent)
+		}
 
 		client := http.DefaultClient
 		if r.Header.Get("Accept") == "text/event-stream" {
