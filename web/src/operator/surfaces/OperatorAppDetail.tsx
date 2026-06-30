@@ -6,15 +6,26 @@
 
 import { useState } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import { ArrowLeft, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronsLeft,
+  ChevronsRight,
+  Maximize2,
+  Minimize2,
+  Sparkles,
+  X,
+} from "lucide-react";
 
-import type { CustomAppDetail } from "../../api/apps";
+import type { CustomApp, CustomAppDetail } from "../../api/apps";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
 import { useOperatorApp } from "../apps/useOperatorApps";
 import { EmptyState } from "../components/EmptyState";
 import { Eyebrow, type TabDef, Tabs } from "../components/primitives";
+import { AppBuilderChat } from "./AppBuilderChat";
 import { AppDeliverySchedule } from "./AppDeliverySchedule";
 import { ToolIntegrations } from "./ToolIntegrations";
+
+type PanelSize = "dock" | "wide" | "modal";
 
 type AppTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
 
@@ -29,16 +40,12 @@ const TABS: readonly TabDef<AppTab>[] = [
 interface OperatorAppDetailProps {
   appId: string;
   onBack: () => void;
-  /** Open the app builder in edit mode against this app. */
-  onAskAI: (id: string, name: string) => void;
 }
 
-export function OperatorAppDetail({
-  appId,
-  onBack,
-  onAskAI,
-}: OperatorAppDetailProps) {
+export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
   const [tab, setTab] = useState<AppTab>("ui");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [panelSize, setPanelSize] = useState<PanelSize>("dock");
   const query = useOperatorApp(appId);
 
   const detail = query.data;
@@ -46,7 +53,11 @@ export function OperatorAppDetail({
   const building = !app || app.status === "building" || !detail?.html;
 
   return (
-    <div className="opr-detail-wrap">
+    <div
+      className={`opr-detail-wrap${
+        chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
+      }`}
+    >
       <div className="opr-surface-wide opr-app-detail">
         <button type="button" className="opr-back" onClick={onBack}>
           <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
@@ -81,7 +92,7 @@ export function OperatorAppDetail({
               <button
                 type="button"
                 className="opr-btn opr-btn-sm"
-                onClick={() => onAskAI(app.id, app.name)}
+                onClick={() => setChatOpen(true)}
               >
                 <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
                 Ask AI
@@ -100,7 +111,126 @@ export function OperatorAppDetail({
           <TabBody tab={tab} query={query} />
         </div>
       </div>
+
+      {/* Ask AI — floating bubble + docked drawer, openable from any tab. */}
+      {app && !building ? (
+        <AskAiDock
+          app={app}
+          open={chatOpen}
+          size={panelSize}
+          onOpenChange={setChatOpen}
+          onSizeChange={setPanelSize}
+          onFinish={() => {
+            // The edit republished a new version; refetch so the detail shows it.
+            void query.refetch();
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+// ── Ask AI dock: floating bubble + right-side docked drawer (dock/wide/modal) ──
+
+function AskAiDock({
+  app,
+  open,
+  size,
+  onOpenChange,
+  onSizeChange,
+  onFinish,
+}: {
+  app: CustomApp;
+  open: boolean;
+  size: PanelSize;
+  onOpenChange: (open: boolean) => void;
+  onSizeChange: (next: (s: PanelSize) => PanelSize) => void;
+  onFinish: () => void;
+}) {
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="opr-ask-fab"
+        onClick={() => onOpenChange(true)}
+        aria-label={`Ask AI about ${app.name}`}
+      >
+        <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
+        Ask AI
+      </button>
+    );
+  }
+  return (
+    <>
+      {size === "modal" ? (
+        <button
+          type="button"
+          className="opr-ask-backdrop"
+          aria-label="Close chat"
+          onClick={() => onOpenChange(false)}
+        />
+      ) : null}
+      <aside
+        className={`opr-ask-panel is-${size}`}
+        aria-label={`Ask AI about ${app.name}`}
+      >
+        <div className="opr-ask-bar">
+          <span className="opr-ask-bar-title">
+            <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
+            Ask AI · {app.name}
+          </span>
+          <div className="opr-ask-bar-controls">
+            <button
+              type="button"
+              className="opr-icon-btn"
+              onClick={() =>
+                onSizeChange((s) => (s === "wide" ? "dock" : "wide"))
+              }
+              aria-label={size === "wide" ? "Narrow panel" : "Widen panel"}
+              title={size === "wide" ? "Narrow" : "Widen"}
+            >
+              {size === "wide" ? (
+                <ChevronsRight size={15} strokeWidth={1.9} aria-hidden={true} />
+              ) : (
+                <ChevronsLeft size={15} strokeWidth={1.9} aria-hidden={true} />
+              )}
+            </button>
+            <button
+              type="button"
+              className="opr-icon-btn"
+              onClick={() =>
+                onSizeChange((s) => (s === "modal" ? "dock" : "modal"))
+              }
+              aria-label={size === "modal" ? "Exit full screen" : "Full screen"}
+              title={size === "modal" ? "Exit full screen" : "Full screen"}
+            >
+              {size === "modal" ? (
+                <Minimize2 size={14} strokeWidth={1.9} aria-hidden={true} />
+              ) : (
+                <Maximize2 size={14} strokeWidth={1.9} aria-hidden={true} />
+              )}
+            </button>
+            <button
+              type="button"
+              className="opr-icon-btn"
+              onClick={() => onOpenChange(false)}
+              aria-label="Close chat"
+              title="Close"
+            >
+              <X size={15} strokeWidth={1.9} aria-hidden={true} />
+            </button>
+          </div>
+        </div>
+        <div className="opr-ask-body">
+          <AppBuilderChat
+            panelMode={true}
+            editApp={{ id: app.id, name: app.name }}
+            onClose={() => onOpenChange(false)}
+            onFinish={onFinish}
+          />
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -118,7 +248,7 @@ function TabBody({
       return <UiTab query={query} />;
     case "workflow":
       return ready ? (
-        <AppDeliverySchedule appName={app.name} />
+        <AppDeliverySchedule appName={app.name} appId={app.id} />
       ) : (
         <EmptyState
           glyph="⌥"

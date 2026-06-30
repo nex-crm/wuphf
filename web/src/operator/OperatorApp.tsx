@@ -10,6 +10,7 @@ import { useState } from "react";
 import "../styles/operator-shell.css";
 
 import { isRealAppId } from "./apps/useOperatorApps";
+import { ApprovalPrompt } from "./components/ApprovalPrompt";
 import { CallModal } from "./components/CallModal";
 import { getTool } from "./mock/data";
 import { OperatorSidebar, type OperatorSurface } from "./OperatorSidebar";
@@ -31,12 +32,6 @@ export function OperatorApp() {
   // Two builders: the app builder (primary, real) and the legacy workflow
   // builder (kept for the workflow-tab path).
   const [appBuilding, setAppBuilding] = useState(false);
-  // When set, the app builder runs in edit mode against this existing app
-  // (Ask AI on a real app's detail) — a follow-up modification → new version.
-  const [editingApp, setEditingApp] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
   const [building, setBuilding] = useState(false);
   // The workflow just built in the builder, carried so its clarified steps
   // survive the handoff instead of falling back to the seeded mock.
@@ -47,7 +42,6 @@ export function OperatorApp() {
   function resetSubState() {
     setSelectedId(null);
     setAppBuilding(false);
-    setEditingApp(null);
     setBuilding(false);
     setBuiltDraft(null);
     setOpenOnWorkflowTab(false);
@@ -101,7 +95,6 @@ export function OperatorApp() {
           key={selectedId}
           appId={selectedId as string}
           onBack={() => setSelectedId(null)}
-          onAskAI={(id, name) => setEditingApp({ id, name })}
         />
       );
     }
@@ -140,15 +133,6 @@ export function OperatorApp() {
             onClose={() => setAppBuilding(false)}
             onFinish={finishApp}
           />
-        ) : editingApp ? (
-          <AppBuilderChat
-            editApp={editingApp}
-            onClose={() => setEditingApp(null)}
-            onFinish={(appId) => {
-              setEditingApp(null);
-              setSelectedId(appId);
-            }}
-          />
         ) : building ? (
           <WorkflowBuilder
             onClose={() => setBuilding(false)}
@@ -158,6 +142,9 @@ export function OperatorApp() {
           <div className="opr-surface">{renderSurface()}</div>
         )}
       </main>
+
+      {/* Auto-surfaced approvals (e.g. an app's Slack post) — global overlay. */}
+      <ApprovalPrompt />
 
       {callOpen ? (
         <CallModal

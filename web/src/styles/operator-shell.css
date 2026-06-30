@@ -3220,3 +3220,69 @@
   align-items: center;
   gap: var(--space-2);
 }
+
+/* ── Auto-surfaced approval prompt (human-in-the-loop for app actions) ─────── */
+/* A prominent but NON-blocking card pinned bottom-right: it asks for the human's
+   sign-off without freezing the rest of the operator behind a modal backdrop. */
+.opr-approval-prompt {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 60;
+  width: min(420px, calc(100vw - var(--space-5)));
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--t-elevated);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  animation: opr-slide-in-right 0.22s ease-out;
+}
+.opr-approval-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.opr-approval-prompt-head .opr-icon-btn {
+  margin-left: auto;
+}
+.opr-approval-prompt-glyph {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--t-r-sm);
+  background: var(--t-figure-bg);
+  color: var(--t-yellow);
+}
+.opr-approval-prompt-title {
+  font-weight: 600;
+  color: var(--t-ink);
+  line-height: 1.4;
+}
+.opr-approval-prompt-ctx {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-sm);
+  background: var(--t-figure-bg);
+}
+.opr-approval-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
