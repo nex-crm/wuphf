@@ -267,20 +267,26 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 		setProxyClientIPHeaders(proxyReq.Header, r.RemoteAddr)
 		proxyReq.Header.Set("Authorization", "Bearer "+b.token)
 		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
-		// Forward the agent-identity header so writer-gated API calls work
-		// through the same-origin web proxy. The proxy attaches the broker
-		// token for transport auth, which the broker classifies as broker-kind
-		// (requestActorFromRequest). The app-writer gate (appWriterAllowed)
-		// deliberately rejects broker-kind callers — that gate exists to stop
-		// other agents (which all hold the broker token) from registering or
-		// deleting apps outside the build path. The owner's own web UI is the
-		// legitimate human surface, so when it explicitly identifies as the App
-		// Builder (X-WUPHF-Agent: app-builder, set only by the operator's
-		// remove-failed-app action) we forward that identity through. Without
-		// it, the Remove button 403s. This is same-origin, rebind-guarded
-		// traffic that already carries full broker-token authority.
-		if agent := strings.TrimSpace(r.Header.Get(agentRateLimitHeader)); agent != "" {
-			proxyReq.Header.Set(agentRateLimitHeader, agent)
+		// The operator's own web UI sometimes acts on the App Builder writer
+		// path: removing a failed app build sends X-WUPHF-Agent: app-builder,
+		// which the app-writer gate (appWriterAllowed) honors. The proxy
+		// attaches the broker token for transport auth, which the broker
+		// classifies as broker-kind — a kind the gate deliberately rejects so
+		// other agents (all of which hold the broker token) cannot register or
+		// delete apps outside the build path.
+		//
+		// That makes the App Builder identity privileged, so it must NOT be
+		// spoofable by anything that merely reaches this loopback port. We honor
+		// it only for a GENUINE same-origin request and never trust an arbitrary
+		// client value: Sec-Fetch-Site is set by the browser and cannot be
+		// forged from script, and a cross-site page that reached this port reads
+		// "cross-site"/"same-site", not "same-origin". We also pin the value to
+		// the App Builder slug — the proxy never relays an arbitrary agent
+		// identity. Anything else is dropped (proxyReq starts with no inbound
+		// headers), leaving the broker to treat the caller as broker-kind.
+		if r.Header.Get("Sec-Fetch-Site") == "same-origin" &&
+			isAppBuilderSlug(r.Header.Get(agentRateLimitHeader)) {
+			proxyReq.Header.Set(agentRateLimitHeader, appBuilderSlug)
 		}
 
 		client := http.DefaultClient

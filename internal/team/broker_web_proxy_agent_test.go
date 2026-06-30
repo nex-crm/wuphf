@@ -1,10 +1,12 @@
 package team
 
-// broker_web_proxy_agent_test.go pins that the same-origin web proxy forwards
-// the X-WUPHF-Agent identity header to the broker. The operator's "remove a
-// failed app" action sends X-WUPHF-Agent: app-builder; the app-writer gate
-// (appWriterAllowed) only honors that identity when it survives the proxy hop.
-// Without forwarding, the Remove button 403s.
+// broker_web_proxy_agent_test.go pins how the same-origin web proxy treats the
+// X-WUPHF-Agent identity header. The operator's "remove a failed app" action
+// sends X-WUPHF-Agent: app-builder; the app-writer gate (appWriterAllowed) only
+// honors that identity, so it must reach the broker for a genuine same-origin
+// request — and must NOT be spoofable by a cross-site page or relayed for an
+// arbitrary agent slug. The proxy already attaches the broker token, so a
+// forwarded identity is privileged.
 
 import (
 	"net/http"
@@ -12,7 +14,7 @@ import (
 	"testing"
 )
 
-func TestWebUIProxyForwardsAgentHeader(t *testing.T) {
+func TestWebUIProxyAgentHeaderForwarding(t *testing.T) {
 	var gotAgent, gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAgent = r.Header.Get(agentRateLimitHeader)
@@ -24,28 +26,45 @@ func TestWebUIProxyForwardsAgentHeader(t *testing.T) {
 	b := &Broker{token: "broker-secret"}
 	h := b.webUIProxyHandler(upstream.URL, "/api")
 
-	// With the header present, it must reach the broker verbatim.
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/apps/app_x", nil)
-	req.Header.Set(agentRateLimitHeader, "app-builder")
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200", rec.Code)
+	call := func(agent, fetchSite string) string {
+		gotAgent = "sentinel"
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/apps/app_x", nil)
+		if agent != "" {
+			req.Header.Set(agentRateLimitHeader, agent)
+		}
+		if fetchSite != "" {
+			req.Header.Set("Sec-Fetch-Site", fetchSite)
+		}
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200", rec.Code)
+		}
+		return gotAgent
 	}
-	if gotAgent != "app-builder" {
-		t.Fatalf("X-WUPHF-Agent not forwarded: got %q, want %q", gotAgent, "app-builder")
+
+	// Genuine same-origin App Builder identity → forwarded; broker token attached.
+	if got := call("app-builder", "same-origin"); got != "app-builder" {
+		t.Fatalf("same-origin app-builder: got %q, want %q", got, "app-builder")
 	}
-	// The proxy still attaches the broker token for transport auth.
 	if gotAuth != "Bearer broker-secret" {
 		t.Fatalf("Authorization: got %q, want %q", gotAuth, "Bearer broker-secret")
 	}
 
-	// Without the header, the proxy must not invent one.
-	gotAgent = "sentinel"
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/api/apps", nil)
-	h.ServeHTTP(rec2, req2)
-	if gotAgent != "" {
-		t.Fatalf("X-WUPHF-Agent should be absent, got %q", gotAgent)
+	// Cross-site / same-site page (potential CSRF) → identity stripped.
+	for _, site := range []string{"cross-site", "same-site", ""} {
+		if got := call("app-builder", site); got != "" {
+			t.Fatalf("Sec-Fetch-Site=%q must strip identity, got %q", site, got)
+		}
+	}
+
+	// The proxy never relays an arbitrary agent slug, even same-origin.
+	if got := call("ceo", "same-origin"); got != "" {
+		t.Fatalf("non-app-builder slug must be dropped, got %q", got)
+	}
+
+	// No identity header at all → none invented.
+	if got := call("", "same-origin"); got != "" {
+		t.Fatalf("absent identity must stay absent, got %q", got)
 	}
 }
