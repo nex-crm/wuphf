@@ -5,18 +5,13 @@
 // its id back so the shell opens its detail. No new build pipeline — only an
 // operator-skinned front door onto the existing one.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Check, Send, X } from "lucide-react";
 
-import { listApps } from "../../api/apps";
+import { type CustomApp, listApps, submitAppEdit } from "../../api/apps";
 import {
-  extractBuildEvents,
-  reduceBuildActivity,
-} from "../../components/apps/buildActivity";
-import { useAgentStream } from "../../hooks/useAgentStream";
-import { APP_BUILDER_SLUG } from "../../lib/constants";
-import {
+  appBuildState,
   deriveAppName,
   resolveNewAppId,
   useBuildApp,
@@ -44,6 +39,12 @@ interface AppBuilderChatProps {
   /** Called once the built/updated app is ready, with its id. */
   onFinish: (appId: string) => void;
   /**
+   * Called as soon as the new app's id is known — even while it is still
+   * building — so the host can open its live preview beside the chat. Fires
+   * once per build; not used in edit mode (the app already exists).
+   */
+  onBuildingApp?: (appId: string) => void;
+  /**
    * When set, the chat edits an existing app instead of building a new one:
    * each message becomes an "improve" instruction to the app-builder, which
    * re-reads the app and republishes a new version.
@@ -59,6 +60,7 @@ interface AppBuilderChatProps {
 export function AppBuilderChat({
   onClose,
   onFinish,
+  onBuildingApp,
   editApp,
   panelMode,
 }: AppBuilderChatProps) {
@@ -74,13 +76,18 @@ export function AppBuilderChat({
     },
   ]);
   const [appName, setAppName] = useState(editApp?.name ?? "");
-  const [taskId, setTaskId] = useState<string | null>(null);
   const [newAppId, setNewAppId] = useState<string | null>(null);
   const beforeIdsRef = useRef<ReadonlySet<string>>(new Set());
   // Edit mode completes on a version bump of the known app, not a new id.
   const startVersionRef = useRef<number>(0);
   const seqRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The new app's id, reported to the host once (even while still building).
+  const reportedBuildingRef = useRef<string | null>(null);
+  // The app the in-flight message refines (an existing app, or the one this
+  // chat already built). null means it is a brand-new build. Drives completion
+  // detection so a follow-up amends instead of spawning a second build.
+  const activeRefineRef = useRef<string | null>(null);
 
   const build = useBuildApp();
 
@@ -97,34 +104,50 @@ export function AppBuilderChat({
   useEffect(() => {
     if (phase !== "building") return;
     const apps = appsQuery.data ?? [];
-    let found: string | null = null;
-    if (editApp) {
-      const cur = apps.find((a) => a.id === editApp.id);
-      if (
-        cur &&
-        cur.status !== "building" &&
-        cur.version > startVersionRef.current
-      ) {
-        found = editApp.id;
-      }
+
+    // The app-builder pre-scaffolds a "building" app the instant the task starts,
+    // so a new id appears long before the real publish. Wait for that app to
+    // reach a terminal state (ready, or failed) before declaring anything — a
+    // bare "new id appeared" is NOT done.
+    // A refine (existing app, or the one this chat already built) completes on a
+    // version bump; a brand-new build completes when its new id publishes.
+    const refineId = activeRefineRef.current;
+    let candidate: CustomApp | undefined;
+    if (refineId) {
+      const cur = apps.find((a) => a.id === refineId);
+      if (cur && cur.version > startVersionRef.current) candidate = cur;
     } else {
-      found = resolveNewAppId(beforeIdsRef.current, apps);
+      const id = resolveNewAppId(beforeIdsRef.current, apps);
+      candidate = id ? apps.find((a) => a.id === id) : undefined;
     }
-    if (found) {
-      setNewAppId(found);
-      setPhase("done");
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `ai-${seqRef.current++}`,
-          from: "ai",
-          body: editApp
-            ? `Done — “${appName}” has a new version. Open it to see the change.`
-            : `“${appName}” is ready. Open it to use and edit it.`,
-        },
-      ]);
+    if (!candidate) return;
+
+    // Tell the host the app exists the moment it is resolved (even building), so
+    // it can show the live preview beside the chat. New builds only.
+    if (!refineId && reportedBuildingRef.current !== candidate.id) {
+      reportedBuildingRef.current = candidate.id;
+      onBuildingApp?.(candidate.id);
     }
-  }, [appsQuery.data, phase, appName, editApp]);
+
+    const state = appBuildState(candidate);
+    if (state === "building") return; // still building — keep waiting
+
+    setNewAppId(candidate.id);
+    setPhase("done");
+    const failed = state === "failed";
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `ai-${seqRef.current++}`,
+        from: "ai",
+        body: failed
+          ? `“${appName}” stopped before it finished. Tell me what to change and I will try again.`
+          : refineId
+            ? `Done — I updated “${appName}”. Keep refining it, or open it.`
+            : `“${appName}” is ready. Tell me any change to refine it, or open it.`,
+      },
+    ]);
+  }, [appsQuery.data, phase, appName, onBuildingApp]);
 
   const lastMsgId = messages[messages.length - 1]?.id;
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on each new message
@@ -137,7 +160,14 @@ export function AppBuilderChat({
     const description = (text ?? draft).trim();
     if (!description || phase === "building") return;
     setDraft("");
-    const name = editApp ? editApp.name : deriveAppName(description);
+    // Once this chat has produced an app (or it opened to edit one), every
+    // follow-up REFINES that app instead of starting a brand-new build — so a
+    // second message like "also handle event signups" amends the same app.
+    const refineId = editApp?.id ?? newAppId;
+    const name = refineId
+      ? appName || deriveAppName(description)
+      : deriveAppName(description);
+    activeRefineRef.current = refineId;
     setAppName(name);
     setMessages((prev) => [
       ...prev,
@@ -145,26 +175,28 @@ export function AppBuilderChat({
       {
         id: `ai-${seqRef.current++}`,
         from: "ai",
-        body: editApp
-          ? `On it — applying that change to “${name}”. You can watch below.`
+        body: refineId
+          ? `On it — refining “${name}”. You can watch it update below.`
           : `On it — building “${name}”. You can watch it come together below.`,
       },
     ]);
     setPhase("building");
     try {
       // Snapshot what we need to detect completion: existing ids for a new
-      // build, or the current version for an edit (republish bumps it).
+      // build, or the current version for a refine (republish bumps it).
       const before = await listApps();
       beforeIdsRef.current = new Set(before.map((a) => a.id));
-      startVersionRef.current = editApp
-        ? (before.find((a) => a.id === editApp.id)?.version ?? 0)
+      startVersionRef.current = refineId
+        ? (before.find((a) => a.id === refineId)?.version ?? 0)
         : 0;
-      const task = await build.mutateAsync(
-        editApp
-          ? { name, description, appId: editApp.id }
-          : { name, description },
-      );
-      setTaskId(task.id);
+      if (refineId) {
+        // Refine through the app's edit channel so the proven task_followup
+        // wake re-engages the App Builder (a new Improve task would be created
+        // Running with no agent turn attending it, and would hang).
+        await submitAppEdit(refineId, description);
+      } else {
+        await build.mutateAsync({ name, description });
+      }
     } catch {
       setPhase("intro");
       setMessages((prev) => [
@@ -218,7 +250,18 @@ export function AppBuilderChat({
             </div>
           ))}
 
-          {phase !== "intro" && taskId ? <BuildFeed taskId={taskId} /> : null}
+          {phase === "building" ? (
+            <div className="opr-act-working" aria-label="Building your app">
+              <span className="opr-work-dots" aria-hidden={true}>
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="opr-work-phrase">
+                {editApp ? "Applying your change…" : "Building your app…"}
+              </span>
+            </div>
+          ) : null}
 
           {phase === "done" && newAppId ? (
             <div className="opr-finish-card">
@@ -288,73 +331,6 @@ export function AppBuilderChat({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * BuildFeed renders the app-builder's live tool activity as one resolving row
- * per call (running → ✓/✗), reusing the shipped reducer so there are no zombie
- * spinners. Operator-skinned with the .opr-act-* vocabulary.
- */
-function BuildFeed({ taskId }: { taskId: string }) {
-  const { lines, connected } = useAgentStream(APP_BUILDER_SLUG, taskId, {
-    keepAlive: true,
-    maxLines: 5000,
-  });
-  const items = useMemo(
-    () => reduceBuildActivity(extractBuildEvents(lines)),
-    [lines],
-  );
-  const running = items.some((i) => i.status === "running");
-
-  if (items.length === 0) {
-    return (
-      <div className="opr-act-working" aria-label="Build activity">
-        <span className="opr-work-dots" aria-hidden={true}>
-          <span />
-          <span />
-          <span />
-        </span>
-        <span className="opr-work-phrase">
-          {connected ? "Setting up the build…" : "Connecting to the build…"}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="opr-build-feed" aria-label="Build activity">
-      {items.map((item) => (
-        <div key={item.id} className="opr-act-line">
-          <span
-            className={`opr-act-marker opr-act-marker-${item.status}`}
-            aria-hidden={true}
-          >
-            {item.status === "running"
-              ? "▸"
-              : item.status === "error"
-                ? "✗"
-                : "✓"}
-          </span>
-          <span className="opr-act-tool">{item.verb}</span>
-          {item.target ? (
-            <span className="opr-act-result" title={item.target}>
-              {item.target}
-            </span>
-          ) : null}
-        </div>
-      ))}
-      {running ? (
-        <div className="opr-act-working">
-          <span className="opr-work-dots" aria-hidden={true}>
-            <span />
-            <span />
-            <span />
-          </span>
-          <span className="opr-work-phrase">Building…</span>
-        </div>
-      ) : null}
     </div>
   );
 }

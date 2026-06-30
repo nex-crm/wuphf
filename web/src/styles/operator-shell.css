@@ -3308,3 +3308,282 @@
 .opr-app-failed .opr-empty-glyph {
   color: var(--t-red);
 }
+
+/* ── App detail: real Data tab (capability map + live preview) ───────────── */
+.opr-app-data,
+.opr-app-knowledge {
+  gap: var(--space-5);
+}
+.opr-data-intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+.opr-data-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2-5);
+  padding: var(--space-3-5);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r);
+  background: var(--t-surface);
+}
+.opr-data-block-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-ink);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.opr-data-block-sub {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--t-faint);
+}
+.opr-data-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.opr-data-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2-5);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--t-line-2) 55%, transparent);
+}
+.opr-data-row:last-child {
+  border-bottom: none;
+}
+.opr-data-row-label {
+  font-size: 13px;
+  color: var(--t-ink);
+  font-weight: 500;
+  min-width: 9rem;
+}
+.opr-data-row-detail {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--t-faint);
+  word-break: break-word;
+}
+.opr-data-row-gate {
+  flex-shrink: 0;
+}
+.opr-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.opr-type-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  color: var(--t-cyan);
+  background: var(--t-paper);
+}
+.opr-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.opr-data-table th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-faint);
+  padding: var(--space-1-5) var(--space-2-5) var(--space-1-5) 0;
+  border-bottom: 1px solid var(--t-line-2);
+}
+.opr-data-table td {
+  padding: var(--space-2) var(--space-2-5) var(--space-2) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--t-line-2) 50%, transparent);
+  color: var(--t-ink);
+  vertical-align: top;
+}
+.opr-data-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── App detail: real Knowledge tab (live wiki reader) ───────────────────── */
+.opr-knowledge-split {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+.opr-kn-article {
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.opr-kn-article-title {
+  font-size: 24px;
+  margin: 0 0 var(--space-1);
+  color: var(--t-ink);
+}
+.opr-kn-markdown {
+  margin-top: var(--space-3);
+  color: var(--t-ink);
+}
+.opr-kn-markdown h1,
+.opr-kn-markdown h2,
+.opr-kn-markdown h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  line-height: 1.3;
+}
+.opr-kn-markdown h2 {
+  font-size: 18px;
+}
+.opr-kn-markdown h3 {
+  font-size: 15px;
+}
+.opr-kn-markdown p {
+  margin: 0 0 var(--space-3);
+}
+.opr-kn-markdown ul,
+.opr-kn-markdown ol {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+.opr-kn-markdown li {
+  margin-bottom: var(--space-1);
+}
+.opr-kn-markdown code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--t-surface-2);
+  padding: 1px 4px;
+  border-radius: var(--t-r-sm);
+}
+.opr-kn-markdown a {
+  color: var(--t-blue);
+}
+@media (max-width: 720px) {
+  .opr-knowledge-split {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+}
+
+/* ── App detail: deterministic Workflow tab (compile-and-freeze) ─────────── */
+.opr-app-workflow {
+  gap: var(--space-5);
+}
+.opr-workflow-frozen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.opr-workflow-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.opr-workflow-divider {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--t-line-2);
+}
+
+/* ── Workflow connection chooser (per-platform account picker) ───────────── */
+.opr-conn-chooser {
+  gap: var(--space-2);
+}
+.opr-conn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1-5) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--t-line-2) 50%, transparent);
+}
+.opr-conn-row:last-child {
+  border-bottom: none;
+}
+.opr-conn-platform {
+  font-size: 13px;
+  color: var(--t-ink);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+.opr-conn-single {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--t-faint);
+}
+.opr-conn-select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--t-ink);
+  background: var(--t-paper);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  padding: var(--space-1) var(--space-2);
+  max-width: 60%;
+}
+
+/* ── Build experience: describe chat → docked chat + live preview ────────── */
+.opr-build-exp {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+/* Describe phase: the chat fills the surface, centered like the old builder. */
+.opr-build-exp:not(.is-live) .opr-build-exp-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.opr-build-exp-chat-full {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+/* Live phase: app detail fills the main area, chat docks to the right. */
+.opr-build-exp.is-live .opr-build-exp-main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-4) var(--space-5);
+}
+.opr-build-exp.is-live .opr-build-exp-chat {
+  width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--t-line-2);
+  background: var(--t-surface);
+}
+.opr-build-exp.is-live .opr-build-exp-chat .opr-ask-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+@media (max-width: 880px) {
+  .opr-build-exp.is-live {
+    flex-direction: column;
+  }
+  .opr-build-exp.is-live .opr-build-exp-chat {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--t-line-2);
+    max-height: 45%;
+  }
+}
