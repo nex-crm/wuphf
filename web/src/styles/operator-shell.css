@@ -1408,6 +1408,21 @@
   color: var(--t-faint);
   margin-top: 1px;
 }
+/* Live-run "Thinking…" row while the planner works out the next action. */
+.opr-exec-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-faint);
+}
+.opr-exec-thinking svg {
+  animation: opr-exec-spin 0.9s linear infinite;
+}
+@keyframes opr-exec-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .opr-exec-approval {
   display: flex;
   align-items: center;

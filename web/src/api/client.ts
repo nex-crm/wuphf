@@ -325,6 +325,26 @@ export async function post<T = unknown>(
   return r.json();
 }
 
+/**
+ * POST that returns the raw streaming Response (e.g. a text/event-stream SSE
+ * body) instead of parsing JSON. The caller reads `response.body` and branches
+ * on `response.status` — used by the browser-exec live run, which streams the
+ * runner's events and falls back to the mock on a 503. Does NOT throw on a
+ * non-2xx, so the caller can detect 503 itself.
+ */
+export async function postStream(
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<Response> {
+  return fetch(baseURL() + path, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+}
+
 export async function put<T = unknown>(
   path: string,
   body?: unknown,
