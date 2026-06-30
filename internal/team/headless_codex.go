@@ -103,7 +103,12 @@ func headlessCodexTurnTimeoutEnv(name string, fallback time.Duration) time.Durat
 }
 
 var (
-	headlessCodexTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_TURN_TIMEOUT", 4*time.Minute)
+	// Default turn budget. The old 4m cap was leftover multi-agent-harness
+	// fluff that force-killed legitimate single-agent work (e.g. an app-builder
+	// build runs 5m+), causing the "signal: killed" + half-done-task flakiness.
+	// A single generous budget — not a tight default that needs per-mode
+	// overrides — is the pi-skeleton shape. Still operator-tunable.
+	headlessCodexTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_TURN_TIMEOUT", 15*time.Minute)
 	// headlessCodexOfficeTurnTimeout governs every office-mode turn that is
 	// not a one-time launch. The CEO/leader orchestration turn (decompose a
 	// request, spawn a specialist, create/assign tasks, post the synthesis)

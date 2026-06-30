@@ -1,0 +1,44 @@
+name: harness
+
+# Scoped to the operator harness package: runs only when harness/** (or this
+# workflow) changes. Fires on every PR regardless of base branch; read-only.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "harness/**"
+      - ".github/workflows/harness.yml"
+  pull_request:
+    paths:
+      - "harness/**"
+      - ".github/workflows/harness.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          # This job only needs read access; don't persist the workflow token in
+          # local git config where later install/test steps could reuse it
+          # (zizmor: artipacked).
+          persist-credentials: false
+      - name: Set up venv + install (base + dev, NOT the `agent` extra)
+        # Omit the `agent` extra (deepagents/claude-agent-sdk): it is absent in CI so
+        # the degrade-to-stub path runs here. A venv sidesteps PEP 668.
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e '.[dev]'
+      - name: pytest
+        run: .venv/bin/python -m pytest -q

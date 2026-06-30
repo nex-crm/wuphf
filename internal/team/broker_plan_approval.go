@@ -28,6 +28,11 @@ const planApprovalDedupePrefix = "plan-approval:"
 //     plan, so they execute directly.
 //   - internal recovery actors (system/broker/nex): migration / fold-in /
 //     self-heal paths must not stall on human plan approval.
+//   - app-builder build/improve tasks (owner="app-builder"): the human's
+//     description IS the authorization (they asked for "build X"), so a build
+//     must not stall on a second plan-approval step — it would break the
+//     "describe it, it builds" promise and gate every build iteration. The app
+//     builder iterates by publishing versions, not by pre-approved plans.
 //
 // Caller holds b.mu.
 func (b *Broker) issueShouldPlanFirstLocked(task *teamTask, actor string) bool {
@@ -38,6 +43,9 @@ func (b *Broker) issueShouldPlanFirstLocked(task *teamTask, actor string) bool {
 		return false
 	}
 	if isInternalTaskActor(actor) {
+		return false
+	}
+	if isAppBuilderSlug(task.Owner) {
 		return false
 	}
 	if b.disablePlanFirstDefault {

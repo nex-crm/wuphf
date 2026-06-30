@@ -195,3 +195,25 @@ func TestLoadGovernorConfigEnv(t *testing.T) {
 		t.Fatalf("unexpected config from env: %+v", cfg)
 	}
 }
+
+// Automatic pausing is OFF by default; a single-agent build must not be frozen
+// by a budget checkpoint nobody asked for. Manual pause/stop still work.
+func TestLoadGovernorConfigDisabledByDefault(t *testing.T) {
+	cfg := loadGovernorConfig()
+	if !cfg.Disabled {
+		t.Fatalf("expected automatic pausing disabled by default, got %+v", cfg)
+	}
+}
+
+// WUPHF_GOVERNOR_ENABLED opts auto-pausing back in; WUPHF_GOVERNOR_DISABLED
+// still wins when both are set.
+func TestLoadGovernorConfigEnabledOptIn(t *testing.T) {
+	t.Setenv("WUPHF_GOVERNOR_ENABLED", "1")
+	if loadGovernorConfig().Disabled {
+		t.Fatalf("WUPHF_GOVERNOR_ENABLED should re-enable automatic pausing")
+	}
+	t.Setenv("WUPHF_GOVERNOR_DISABLED", "1")
+	if !loadGovernorConfig().Disabled {
+		t.Fatalf("WUPHF_GOVERNOR_DISABLED must win over ENABLED")
+	}
+}

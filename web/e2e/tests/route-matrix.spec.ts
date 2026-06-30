@@ -25,17 +25,21 @@ async function expectCanonicalRoute(
 }
 
 test.describe("canonical route matrix", () => {
-  test("index renders the new-task home composer", async ({ page }) => {
+  test("index renders the operator surface (the product front door)", async ({
+    page,
+  }) => {
     const getErrors = collectReactErrors(page);
     await gotoRoute(page, "/");
 
-    // Tasks-as-primary landing: the index route renders the new-task home
-    // composer in place (no redirect to a subspace) so the founder can
-    // describe an outcome and file it. The composer heading rendering at the
-    // root URL is the proof it landed (a redirect would mount another
-    // surface). See indexRoute in lib/router.ts.
+    // Operator-as-index: for an onboarded user the root URL renders the
+    // operator product in place (no redirect), reached through the normal
+    // boot + onboarding gate so it has a live broker token. The office Shell
+    // is no longer the landing surface; it stays reachable via deep routes
+    // (#/channels, #/wiki, #/tasks). The operator root mounting at the root
+    // URL is the proof it landed (a redirect would mount another surface).
+    // See isHomeRoute in routes/RootRoute.tsx.
     await expect(page).toHaveURL(/localhost:\d+\/(#\/?)?$/);
-    await expect(page.getByText(/What do you want to get done/i)).toBeVisible({
+    await expect(page.getByTestId("operator-root")).toBeVisible({
       timeout: 10_000,
     });
     await expectNoReactErrors(page, getErrors, "while rendering /");

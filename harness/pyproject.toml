@@ -1,0 +1,22 @@
+[project]
+name = "wuphf-harness"
+description = "Operator harness: agentic-build / deterministic-execute. One deepagents agent turns a conversation into a deterministic WorkflowSpec; a deterministic executor runs it. No broker. (operator-harness-clean-start.md)"
+version = "0.0.1"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "sse-starlette>=2",
+    "uvicorn>=0.29",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# The real BUILD agent (LangChain deep agents). Optional so the package installs +
+# tests green without it; build_agent() degrades to the deterministic stub
+# compiler when it (or a model key) is absent. Swapped in at slice S2.
+agent = ["deepagents", "claude-agent-sdk"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -186,6 +186,14 @@ const SkillDetailRoute = lazy(() =>
   })),
 );
 
+// Operator product shell. Mounted full-bleed at /#/operator, ahead of the office
+// Shell / onboarding / broker gates so the shape is always viewable regardless of
+// backend state. The clean-start product (web/src/operator) — talks to the pi-mono
+// agent service over HTTP/SSE, not the broker. See operator-harness-clean-start.md.
+const OperatorApp = lazy(() =>
+  import("../operator/OperatorApp").then((m) => ({ default: m.OperatorApp })),
+);
+
 function LazyPanelFallback() {
   return (
     <div
@@ -800,6 +808,26 @@ export default function RootRoute() {
   const [bootError, setBootError] = useState(false);
   const [bootAttempt, setBootAttempt] = useState(0);
 
+  // Operator shell mount. The product shell lives at /#/operator and is fully
+  // self-contained, so it short-circuits the office boot/onboarding/Shell. Read
+  // the hash directly (not useRouterState) so it also works where RootRoute
+  // renders without a RouterProvider (bootstrap-fallback tests).
+  const [hashPath, setHashPath] = useState<string>(() =>
+    typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "",
+  );
+  useEffect(() => {
+    const onHash = () => setHashPath(window.location.hash.replace(/^#/, ""));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const isOperatorRoute = hashPath.startsWith("/operator");
+  // Operator is the index (the product front door). The home route ("" / "/")
+  // lands in the operator surface after boot + onboarding, instead of the legacy
+  // office chat shell. The office shell still owns its own deep routes
+  // (#/c/:channel, #/agents, …) for anyone who navigates there directly, but it
+  // is no longer what a fresh `npx wuphf` opens to.
+  const isHomeRoute = hashPath === "" || hashPath === "/";
+
   // Manual SPA pageviews (autocapture is off). We subscribe to the router
   // singleton rather than useRouterState so this works even where RootRoute is
   // rendered without a RouterProvider (the bootstrap-fallback tests). Fires the
@@ -922,6 +950,10 @@ export default function RootRoute() {
   }, [theme]);
 
   useEffect(() => {
+    // The operator shell at /#/operator is self-contained and never talks to
+    // the office broker. Skip the whole bootstrap so it does not fire initApi(),
+    // hit /onboarding/state, or arm the retry loop with failing broker traffic.
+    if (isOperatorRoute) return;
     let cancelled = false;
     let unreachable = false;
     initApi()
@@ -975,23 +1007,31 @@ export default function RootRoute() {
     return () => {
       cancelled = true;
     };
-  }, [bootAttempt, setBrokerConnected, setOnboardingComplete]);
+  }, [bootAttempt, isOperatorRoute, setBrokerConnected, setOnboardingComplete]);
 
   // Auto-retry while the broker is unreachable — the fallback copy promises
   // "retrying…", so keep that promise without requiring a click. Reads
   // bootAttempt (not a functional update) so a failed retry — which leaves
   // bootError true but bumps the attempt — re-arms the timer.
   useEffect(() => {
-    if (!bootError) return;
+    if (isOperatorRoute || !bootError) return;
     const next = bootAttempt + 1;
     const timer = setTimeout(() => {
       setBootAttempt(next);
     }, BOOT_RETRY_MS);
     return () => clearTimeout(timer);
-  }, [bootError, bootAttempt]);
+  }, [isOperatorRoute, bootError, bootAttempt]);
 
   let body: ReactNode;
-  if (bootError) {
+  if (isOperatorRoute) {
+    // Operator product shell — self-contained, full-bleed. Bypasses the office
+    // boot/onboarding/Shell so it renders regardless of backend state.
+    body = (
+      <Suspense fallback={<LazyPanelFallback />}>
+        <OperatorApp />
+      </Suspense>
+    );
+  } else if (bootError) {
     body = (
       <BrokerUnreachableScreen onRetry={() => setBootAttempt((a) => a + 1)} />
     );
@@ -1045,6 +1085,16 @@ export default function RootRoute() {
         />
       );
     }
+  } else if (isHomeRoute) {
+    // Onboarded, at the index: operator is the front door. Same self-contained
+    // OperatorApp as the explicit /#/operator deep link, but reached through the
+    // normal boot + onboarding gate so it has a live broker token and a seeded
+    // workspace.
+    body = (
+      <Suspense fallback={<LazyPanelFallback />}>
+        <OperatorApp />
+      </Suspense>
+    );
   } else {
     body = (
       <Shell>

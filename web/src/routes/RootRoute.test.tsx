@@ -67,6 +67,9 @@ vi.mock("../hooks/useBrokerEvents", () => ({ useBrokerEvents: vi.fn() }));
 vi.mock("../hooks/useKeyboardShortcuts", () => ({
   useKeyboardShortcuts: vi.fn(),
 }));
+vi.mock("../operator/OperatorApp", () => ({
+  OperatorApp: () => <div data-testid="operator-stub" />,
+}));
 
 vi.mock("../api/client", async () => {
   const actual =
@@ -79,6 +82,7 @@ vi.mock("../api/client", async () => {
 });
 
 import { ApiError, get, initApi } from "../api/client";
+import { useAppStore } from "../stores/app";
 import RootRoute from "./RootRoute";
 
 const initApiMock = vi.mocked(initApi);
@@ -101,11 +105,16 @@ function renderRoot() {
 
 beforeEach(() => {
   initApiMock.mockResolvedValue(undefined);
+  // onboardingComplete lives in a module-level zustand store that React cleanup
+  // does not reset; clear it so an onboarded-state test cannot leak into a
+  // fresh-install test that expects the onboarding gate.
+  useAppStore.setState({ onboardingComplete: false });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  window.location.hash = "";
 });
 
 describe("RootRoute bootstrap fallback", () => {
@@ -161,6 +170,43 @@ describe("RootRoute bootstrap fallback", () => {
 
     expect(await screen.findByTestId("prepick-stub")).toBeInTheDocument();
     expect(screen.queryByTestId("broker-unreachable")).not.toBeInTheDocument();
+  });
+
+  it("does not boot the office broker on the /#/operator route", async () => {
+    // The operator shell is self-contained; gating must keep the bootstrap from
+    // firing initApi()/onboarding traffic and the failing retry loop.
+    window.location.hash = "#/operator";
+
+    renderRoot();
+
+    expect(await screen.findByTestId("operator-stub")).toBeInTheDocument();
+    expect(initApiMock).not.toHaveBeenCalled();
+    expect(getMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("broker-unreachable")).not.toBeInTheDocument();
+  });
+
+  it("lands an onboarded home ('/') in the operator surface, not the office shell", async () => {
+    // Operator is the index: a fresh, onboarded user opening the root URL gets
+    // the operator product, not the legacy office chat shell.
+    window.location.hash = "";
+    getMock.mockResolvedValue({ onboarded: true });
+
+    renderRoot();
+
+    expect(await screen.findByTestId("operator-stub")).toBeInTheDocument();
+    expect(screen.queryByTestId("shell-stub")).not.toBeInTheDocument();
+  });
+
+  it("gates the operator index behind onboarding (reuses the wizard)", async () => {
+    // A not-yet-onboarded user at home sees the onboarding gate first, then
+    // lands in operator once onboarding completes.
+    window.location.hash = "";
+    getMock.mockRejectedValue(apiError(404, "not found"));
+
+    renderRoot();
+
+    expect(await screen.findByTestId("prepick-stub")).toBeInTheDocument();
+    expect(screen.queryByTestId("operator-stub")).not.toBeInTheDocument();
   });
 
   it("recovers via the retry button once the broker answers again", async () => {

@@ -72,6 +72,16 @@ func (l *Launcher) laneForTurn(slug string, turn headlessCodexTurn) headlessLane
 	return taskLane(slug, taskID)
 }
 
+// EnqueueHeadlessTurn satisfies headlessTurnEnqueuer: the broker uses it to
+// dispatch a single agent for one job (e.g. an app edit straight to the App
+// Builder) without a CEO/lead orchestration hop.
+func (l *Launcher) EnqueueHeadlessTurn(slug, prompt, channel string) {
+	if l == nil {
+		return
+	}
+	l.enqueueHeadlessCodexTurn(slug, prompt, channel)
+}
+
 func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string, channel ...string) {
 	ch := ""
 	if len(channel) > 0 {
