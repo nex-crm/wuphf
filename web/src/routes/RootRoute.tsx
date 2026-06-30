@@ -821,6 +821,12 @@ export default function RootRoute() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const isOperatorRoute = hashPath.startsWith("/operator");
+  // Operator is the index (the product front door). The home route ("" / "/")
+  // lands in the operator surface after boot + onboarding, instead of the legacy
+  // office chat shell. The office shell still owns its own deep routes
+  // (#/c/:channel, #/agents, …) for anyone who navigates there directly, but it
+  // is no longer what a fresh `npx wuphf` opens to.
+  const isHomeRoute = hashPath === "" || hashPath === "/";
 
   // Manual SPA pageviews (autocapture is off). We subscribe to the router
   // singleton rather than useRouterState so this works even where RootRoute is
@@ -1079,6 +1085,16 @@ export default function RootRoute() {
         />
       );
     }
+  } else if (isHomeRoute) {
+    // Onboarded, at the index: operator is the front door. Same self-contained
+    // OperatorApp as the explicit /#/operator deep link, but reached through the
+    // normal boot + onboarding gate so it has a live broker token and a seeded
+    // workspace.
+    body = (
+      <Suspense fallback={<LazyPanelFallback />}>
+        <OperatorApp />
+      </Suspense>
+    );
   } else {
     body = (
       <Shell>
