@@ -3171,8 +3171,12 @@
   place-items: center;
   border: 1px solid var(--t-line-2);
   border-radius: var(--t-r-sm);
-  /* Dark tile so colored brand marks read cleanly. */
-  background: color-mix(in srgb, #000 42%, var(--t-paper));
+  /* Light tile: brand marks are designed for white, so a colored or monochrome
+     logo reads on it (the old dark tile rendered dark/monochrome marks
+     invisible — dark-on-dark). The fixed dark `color` keeps currentColor SVG
+     fallbacks (ToolkitBrandLogo) readable on the light tile too. */
+  background: #fff;
+  color: #14161a;
   overflow: hidden;
 }
 .opr-int-logo :is(svg, img) {

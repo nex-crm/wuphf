@@ -29,8 +29,8 @@ import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
 import { AppBuilderChat } from "./AppBuilderChat";
 import { AppDataTab } from "./AppDataTab";
-import { AppKnowledgeTab } from "./AppKnowledgeTab";
 import { AppWorkflowTab } from "./AppWorkflowTab";
+import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type PanelSize = "dock" | "wide" | "modal";
@@ -349,7 +349,10 @@ function TabBody({
     case "integrations":
       return <ToolIntegrations usedNames={[]} />;
     case "knowledge":
-      return <AppKnowledgeTab />;
+      // The gbrain-backed, Wikipedia-style reader with cited claims and an
+      // Explain-why affordance — the same rich Knowledge surface the workspace
+      // uses, scoped into the app tab. (Replaces the plain wiki-catalog reader.)
+      return <KnowledgeSurface />;
     default:
       return null;
   }
