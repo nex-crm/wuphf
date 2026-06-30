@@ -133,8 +133,16 @@ to accomplish one step → every action streams live into the Run modal, gated.
 ## 7. Phases
 
 - **C1 — cua browser execution** (§4): the real Run, browser-first.
-- **C2 — record + deterministic replay + heal:** persist cua's concrete actions
-  per step; replay deterministically; invoke cua only to heal a changed page.
+- **C2 — record + deterministic replay + heal (DONE):** `cua_exec.py` records a
+  live run's actions as a trajectory keyed by each element's STABLE identity
+  (role + label, never the per-snapshot index), emitted as a `trajectory` event.
+  `--replay` matches each step by role+label and executes it with NO model call;
+  only a step whose element is gone HEALS (one scoped model call), and the
+  corrected step is re-recorded so the trajectory self-improves. Broker
+  `POST /execute/replay` runs it; `BrowserRunModal` replays a saved trajectory
+  (localStorage, keyed by tool+goal) on the second run instead of driving live,
+  badging healed steps. Turns a repeat run from ~12s of LLM clicking into
+  near-instant element-matched replay.
 - **C3 — beyond the browser:** the same cua-driver loop on desktop apps.
 - **C4 — desktop shell:** Electron/Wails bundles cua-driver + the runner; one-click
   install + permissions.
