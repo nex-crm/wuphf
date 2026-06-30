@@ -3167,10 +3167,15 @@
 
 /* ── Deliver-to-Slack schedule (app Workflow tab) ─────────────────────────── */
 .opr-delivery {
-  max-width: 560px;
+  max-width: 620px;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+.opr-delivery-flow {
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--t-line);
 }
 .opr-delivery-head {
   display: flex;
