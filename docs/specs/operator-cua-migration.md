@@ -157,9 +157,16 @@ to accomplish one step → every action streams live into the Run modal, gated.
   - **Latency guards:** bounded per-call timeouts that degrade to a partial
     snapshot instead of stalling; `page` reads only on browser windows; capture
     runs off the voice path and feeds the (async) handoff.
-  - **Remaining slices:** broker `/observe` SSE that runs the observer; the demo
-    call starts/stops it; the handoff (`capturePromptSeed`) folds in the
-    snapshots + navigate events + verbatim transcript for the build.
+  - **Slices 2-3 done:** broker `POST /observe/browser` (SSE) runs the observer
+    (no key; 503 → call proceeds without it); `RealCallModal` runs it alongside
+    the call off the voice path, accumulates snapshots, shows a live "N pages
+    read" count, and at Build folds the reduced screens into the capture;
+    `capturePromptSeed` renders a "Real page structure Nex read (ground truth)"
+    section before the verbatim transcript. The model's screenshot-based draft
+    is kept as its interpretation; the cua capture is the ground truth.
+  - **Remaining:** the live e2e on the operator's box (broker up + a real
+    multi-screen demo), and the optional `execute_javascript` upgrade for real
+    HTML selectors + URLs (gated on the Apple-Events-JS opt-in).
 
 ## 8. Open questions
 
