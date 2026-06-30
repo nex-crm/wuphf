@@ -249,6 +249,113 @@ export function capturePromptSeed(capture: DemoCapture): string {
   )}.)`;
 }
 
+// The argument shape the realtime model fills in via its draft_workflow tool.
+// It mirrors DemoCapture's observation fields but every list is optional, since
+// a live model may surface only some of them. Roles/kinds arrive as free strings
+// and are coerced into the typed unions on the way in.
+export interface DraftWorkflowArgs {
+  goal: string;
+  summary?: string;
+  screens?: Array<{ label?: string; url?: string; dom?: string }>;
+  selectors?: Array<{
+    label?: string;
+    role?: string;
+    selector?: string;
+    sample?: string;
+  }>;
+  apiCalls?: Array<{
+    method?: string;
+    endpoint?: string;
+    integration?: string;
+    purpose?: string;
+  }>;
+  entities?: Array<{ kind?: string; value?: string }>;
+}
+
+const SELECTOR_ROLES: ReadonlySet<CapturedSelector["role"]> = new Set([
+  "input",
+  "button",
+  "link",
+  "table",
+  "select",
+  "form",
+]);
+const API_METHODS: ReadonlySet<CapturedApiCall["method"]> = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+]);
+const ENTITY_KINDS: ReadonlySet<CapturedEntity["kind"]> = new Set([
+  "integration",
+  "channel",
+  "threshold",
+  "field",
+  "action",
+]);
+
+// Build a DemoCapture from what the realtime model reported, coercing loose
+// strings into the typed unions so the rest of the handoff is unchanged. This is
+// the REAL-call counterpart to assembleDemoCapture (the mock).
+export function demoCaptureFromDraft(
+  args: DraftWorkflowArgs,
+  opts: {
+    mode: "build" | "modify";
+    tool?: { id: string; name: string };
+    transcript: DemoCaptureLine[];
+  },
+): DemoCapture {
+  return {
+    mode: opts.mode,
+    toolId: opts.tool?.id,
+    toolName: opts.tool?.name,
+    goal: (args.goal ?? "").trim(),
+    summary: (args.summary ?? "").trim(),
+    transcript: opts.transcript,
+    screens: (args.screens ?? [])
+      .filter((s) => (s.label ?? "").trim())
+      .map((s) => ({
+        label: (s.label ?? "").trim(),
+        url: (s.url ?? "").trim(),
+        dom: (s.dom ?? "").trim(),
+      })),
+    selectors: (args.selectors ?? [])
+      .filter((s) => (s.selector ?? "").trim())
+      .map((s) => {
+        const role = (s.role ?? "").toLowerCase() as CapturedSelector["role"];
+        return {
+          label: (s.label ?? "element").trim(),
+          role: SELECTOR_ROLES.has(role) ? role : "input",
+          selector: (s.selector ?? "").trim(),
+          ...(s.sample ? { sample: s.sample.trim() } : {}),
+        };
+      }),
+    apiCalls: (args.apiCalls ?? [])
+      .filter((c) => (c.endpoint ?? "").trim())
+      .map((c) => {
+        const method = (
+          c.method ?? "GET"
+        ).toUpperCase() as CapturedApiCall["method"];
+        return {
+          method: API_METHODS.has(method) ? method : "GET",
+          endpoint: (c.endpoint ?? "").trim(),
+          integration: (c.integration ?? "").trim(),
+          purpose: (c.purpose ?? "").trim(),
+        };
+      }),
+    entities: (args.entities ?? [])
+      .filter((e) => (e.value ?? "").trim())
+      .map((e) => {
+        const kind = (e.kind ?? "").toLowerCase() as CapturedEntity["kind"];
+        return {
+          kind: ENTITY_KINDS.has(kind) ? kind : "field",
+          value: (e.value ?? "").trim(),
+        };
+      }),
+  };
+}
+
 // Small accessor for UI summaries: how much context the call captured.
 export function captureCounts(capture: DemoCapture): {
   screens: number;

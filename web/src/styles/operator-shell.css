@@ -1300,6 +1300,26 @@
   letter-spacing: 0.06em;
   color: var(--t-faint);
 }
+/* The live screen-share preview fills the call stage in the real call. */
+.opr-call-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+/* Realtime call error (key missing, handshake failed, screen-share canceled). */
+.opr-call-error {
+  margin: var(--space-3) 0 var(--space-4);
+  padding: var(--space-3) var(--space-3-5);
+  border: 1px solid color-mix(in srgb, var(--t-red) 45%, var(--t-line-2));
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-red) 8%, transparent);
+  color: var(--t-text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
 .opr-call-wave {
   position: absolute;
   bottom: 56px;
@@ -1674,6 +1694,10 @@
 .opr-set-label {
   font-weight: 700;
   font-size: 12.5px;
+}
+.opr-set-pill {
+  margin-left: var(--space-2);
+  vertical-align: middle;
 }
 .opr-set-help {
   color: var(--t-faint);

@@ -65,8 +65,12 @@ type Config struct {
 	GeminiAPIKey        string   `json:"gemini_api_key,omitempty"`
 	AnthropicAPIKey     string   `json:"anthropic_api_key,omitempty"`
 	OpenAIAPIKey        string   `json:"openai_api_key,omitempty"`
-	MinimaxAPIKey       string   `json:"minimax_api_key,omitempty"`
-	Blueprint           string   `json:"blueprint,omitempty"`
+	// RealtimeModel is the OpenAI Realtime model used by the "Demo workflow to
+	// Nex" voice call (speech-to-speech + screen vision). Empty falls back to
+	// the compiled default in ResolveRealtimeModel.
+	RealtimeModel string `json:"realtime_model,omitempty"`
+	MinimaxAPIKey string `json:"minimax_api_key,omitempty"`
+	Blueprint     string `json:"blueprint,omitempty"`
 	// Pack is retained as a legacy alias for the active operation blueprint/template.
 	Pack                string   `json:"pack,omitempty"`
 	TeamLeadSlug        string   `json:"team_lead_slug,omitempty"`
@@ -912,6 +916,23 @@ func ResolveOpenAIAPIKey() string {
 	}
 	cfg, _ := Load()
 	return strings.TrimSpace(cfg.OpenAIAPIKey)
+}
+
+// DefaultRealtimeModel is the OpenAI Realtime model used by the demo call when
+// nothing is configured. The exact GA model string can drift, so it stays a
+// single override point (env/config) rather than being hardcoded at call sites.
+const DefaultRealtimeModel = "gpt-realtime"
+
+// ResolveRealtimeModel resolves the OpenAI Realtime model for the demo call.
+// Resolution: WUPHF_REALTIME_MODEL env > config file > DefaultRealtimeModel.
+func ResolveRealtimeModel() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_REALTIME_MODEL")); v != "" {
+		return v
+	}
+	if cfg, _ := Load(); strings.TrimSpace(cfg.RealtimeModel) != "" {
+		return strings.TrimSpace(cfg.RealtimeModel)
+	}
+	return DefaultRealtimeModel
 }
 
 // ResolveMinimaxAPIKey resolves the Minimax API key.

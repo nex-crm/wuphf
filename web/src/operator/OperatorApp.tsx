@@ -11,8 +11,10 @@ import "../styles/operator-shell.css";
 
 import { capturePromptSeed } from "./apps/demoCapture";
 import { isRealAppId } from "./apps/useOperatorApps";
+import { useRealtimeConfig } from "./apps/useRealtimeConfig";
 import { ApprovalPrompt } from "./components/ApprovalPrompt";
 import { CallModal } from "./components/CallModal";
+import { RealCallModal } from "./components/RealCallModal";
 import { getTool } from "./mock/data";
 import { OperatorSidebar, type OperatorSurface } from "./OperatorSidebar";
 import { AppBuilderChat } from "./surfaces/AppBuilderChat";
@@ -34,6 +36,9 @@ type CallContext =
   | { mode: "modify"; toolId: string; toolName: string };
 
 export function OperatorApp() {
+  // The real voice call needs an OpenAI Realtime key; without one we fall back
+  // to the scripted mock so the flow is still demonstrable.
+  const realtime = useRealtimeConfig();
   const [surface, setSurface] = useState<OperatorSurface>("tools");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [call, setCall] = useState<CallContext | null>(null);
@@ -173,35 +178,42 @@ export function OperatorApp() {
       {/* Auto-surfaced approvals (e.g. an app's Slack post) — global overlay. */}
       <ApprovalPrompt />
 
-      {call ? (
-        <CallModal
-          tool={
-            call.mode === "modify"
-              ? { id: call.toolId, name: call.toolName }
-              : undefined
-          }
-          onClose={() => setCall(null)}
-          onBuild={(capture) => {
-            // The call captured everything; hand it to the AI, which starts
-            // working at once. A modify call reopens the tool with its chat
-            // already reworking the demonstrated change; a build call opens the
-            // workflow builder, already assembling the new tool.
-            const seed = capturePromptSeed(capture);
-            resetSubState();
-            setCall(null);
-            if (capture.mode === "modify" && capture.toolId) {
-              setDemoSeed(seed);
-              setSelectedId(capture.toolId);
-              setSurface("tools");
-              setDetailNonce((n) => n + 1);
-            } else {
-              setBuildSeed(seed);
-              setBuilding(true);
-              setSurface("tools");
-            }
-          }}
-        />
-      ) : null}
+      {call
+        ? (() => {
+            // Real call when a Realtime key is configured; mock otherwise. Both
+            // share the same props and the same capture → build-engine handoff.
+            const CallSurface = realtime.available ? RealCallModal : CallModal;
+            return (
+              <CallSurface
+                tool={
+                  call.mode === "modify"
+                    ? { id: call.toolId, name: call.toolName }
+                    : undefined
+                }
+                onClose={() => setCall(null)}
+                onBuild={(capture) => {
+                  // The call captured everything; hand it to the AI, which starts
+                  // working at once. A modify call reopens the tool with its chat
+                  // already reworking the demonstrated change; a build call opens the
+                  // workflow builder, already assembling the new tool.
+                  const seed = capturePromptSeed(capture);
+                  resetSubState();
+                  setCall(null);
+                  if (capture.mode === "modify" && capture.toolId) {
+                    setDemoSeed(seed);
+                    setSelectedId(capture.toolId);
+                    setSurface("tools");
+                    setDetailNonce((n) => n + 1);
+                  } else {
+                    setBuildSeed(seed);
+                    setBuilding(true);
+                    setSurface("tools");
+                  }
+                }}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }

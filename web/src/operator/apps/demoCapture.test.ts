@@ -5,6 +5,7 @@ import {
   captureCounts,
   capturePromptSeed,
   type DemoCaptureLine,
+  demoCaptureFromDraft,
 } from "./demoCapture";
 
 const BUILD_TRANSCRIPT: DemoCaptureLine[] = [
@@ -77,5 +78,53 @@ describe("capturePromptSeed", () => {
     });
     // The modify scenario has no sniffed API calls, so the seed is the bare goal.
     expect(capturePromptSeed(capture)).toBe(capture.goal);
+  });
+});
+
+describe("demoCaptureFromDraft (real-call converter)", () => {
+  it("coerces loose model output into the typed capture and drops empties", () => {
+    const capture = demoCaptureFromDraft(
+      {
+        goal: "  Route urgent tickets to the on-call engineer  ",
+        summary: "Drafted a routing tool",
+        screens: [{ label: "Zendesk" }, { label: "" }],
+        selectors: [
+          { label: "Priority field", role: "DROPDOWN", selector: "#prio" },
+          { label: "no selector", selector: "" },
+        ],
+        apiCalls: [
+          { method: "post", endpoint: "/api/v2/tickets", integration: "Zendesk" },
+          { endpoint: "" },
+        ],
+        entities: [{ kind: "Channel", value: "#oncall" }, { value: "" }],
+      },
+      { mode: "build", transcript: [] },
+    );
+
+    expect(capture.goal).toBe("Route urgent tickets to the on-call engineer");
+    // Empty-label screen, selector-less element, endpoint-less call, and
+    // value-less entity are all dropped.
+    expect(capture.screens).toHaveLength(1);
+    expect(capture.selectors).toHaveLength(1);
+    expect(capture.apiCalls).toHaveLength(1);
+    expect(capture.entities).toHaveLength(1);
+    // Unknown role/kind coerce to safe defaults; method upper-cases.
+    expect(capture.selectors[0].role).toBe("input");
+    expect(capture.apiCalls[0].method).toBe("POST");
+    expect(capture.entities[0].kind).toBe("channel");
+  });
+
+  it("carries the tool identity in modify mode", () => {
+    const capture = demoCaptureFromDraft(
+      { goal: "Archive under 40" },
+      {
+        mode: "modify",
+        tool: { id: "inbound-routing", name: "Inbound routing" },
+        transcript: [{ who: "you", text: "archive them" }],
+      },
+    );
+    expect(capture.mode).toBe("modify");
+    expect(capture.toolId).toBe("inbound-routing");
+    expect(capture.transcript).toHaveLength(1);
   });
 });
