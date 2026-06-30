@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   ChevronsLeft,
   ChevronsRight,
+  Globe,
   Maximize2,
   Minimize2,
   PhoneCall,
@@ -48,6 +49,7 @@ import {
   type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
+import { BrowserRunModal } from "./BrowserRunModal";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 import { type BuiltWorkflow, WorkflowBuilder } from "./WorkflowBuilder";
@@ -118,6 +120,8 @@ export function InternalToolDetail({
   // A demo handoff opens the chat straight away (seeded below).
   const [chatOpen, setChatOpen] = useState(Boolean(demoSeed));
   const [panelSize, setPanelSize] = useState<"dock" | "wide" | "modal">("dock");
+  // The "Run in browser" execution view (the computer-use loop).
+  const [runOpen, setRunOpen] = useState(false);
   // The demo seed is one-shot: it kicks the chat off on mount, then is cleared
   // so reopening the chat later does not replay the demonstrated instruction.
   const demoSeedRef = useRef(demoSeed);
@@ -191,6 +195,14 @@ export function InternalToolDetail({
             </div>
           </div>
           <div className="opr-detail-actions">
+            <button
+              type="button"
+              className="opr-btn opr-btn-sm"
+              onClick={() => setRunOpen(true)}
+            >
+              <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
+              Run in browser
+            </button>
             <button
               type="button"
               className="opr-btn opr-btn-sm"
@@ -439,6 +451,13 @@ export function InternalToolDetail({
             </div>
           </aside>
         </>
+      ) : null}
+
+      {runOpen ? (
+        <BrowserRunModal
+          toolName={tool.name}
+          onClose={() => setRunOpen(false)}
+        />
       ) : null}
     </div>
   );
