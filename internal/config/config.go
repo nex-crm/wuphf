@@ -921,7 +921,7 @@ func ResolveOpenAIAPIKey() string {
 // DefaultRealtimeModel is the OpenAI Realtime model used by the demo call when
 // nothing is configured. The exact GA model string can drift, so it stays a
 // single override point (env/config) rather than being hardcoded at call sites.
-const DefaultRealtimeModel = "gpt-realtime"
+const DefaultRealtimeModel = "gpt-realtime-2"
 
 // ResolveRealtimeModel resolves the OpenAI Realtime model for the demo call.
 // Resolution: WUPHF_REALTIME_MODEL env > config file > DefaultRealtimeModel.

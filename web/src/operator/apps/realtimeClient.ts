@@ -40,6 +40,8 @@ export interface StartRealtimeOptions {
   onTranscript: (line: RealtimeTranscriptLine) => void;
   onDraft: (args: DraftWorkflowArgs) => void;
   onError: (message: string) => void;
+  // Live mic + model speech levels (0..1), for the call avatars. Fires ~30/s.
+  onLevels?: (you: number, ai: number) => void;
   // <audio> element the model's voice plays through.
   audioEl: HTMLAudioElement;
   // The preview <video> the modal renders the screen share into. We sample
@@ -145,11 +147,14 @@ function instructionsFor(opts: StartRealtimeOptions): string {
   const base =
     "You are Nex, an AI that builds deterministic internal tools for a non-technical operator. " +
     "The operator is sharing their screen and will DEMONSTRATE a workflow by doing it and narrating. " +
-    "Watch the screen images and listen. Be concise and warm. Ask at most one or two sharp clarifying questions. " +
-    "Identify the trigger, the apps/integrations and the API calls you can see, the decision logic, and the actions. " +
-    "When you understand it, call the draft_workflow tool with everything you captured, then briefly say you have drafted it.";
+    "OPEN THE CALL by warmly greeting them in one short sentence and saying you are ready to watch them work and learn their workflow — for example: " +
+    "\"Hey, I'm ready when you are. Walk me through what you do, and I'll watch your screen and learn it.\" " +
+    "Then stay quiet and listen until they speak or act. Watch the screen images and listen. Be concise and warm. " +
+    "Ask at most one or two sharp clarifying questions. Identify the trigger, the apps/integrations and the API calls you can see, " +
+    "the decision logic, and the actions. When you understand it, call the draft_workflow tool with everything you captured, " +
+    "then briefly say you have drafted it.";
   if (opts.mode === "modify" && opts.tool) {
-    return `${base} The operator is CHANGING an existing tool named "${opts.tool.name}". Focus only on the change they demonstrate.`;
+    return `${base} The operator is CHANGING an existing tool named "${opts.tool.name}". Open by saying you're ready to see the change, and focus only on the change they demonstrate.`;
   }
   return base;
 }
@@ -191,50 +196,62 @@ export async function startRealtimeCall(
 
   // 3. WebRTC peer connection.
   const pc = new RTCPeerConnection();
+  // Audio level metering for the call avatars. The mic analyser is set up now;
+  // the model-voice analyser is wired when its track arrives.
+  const meter = createLevelMeter(micStream, opts.onLevels);
   pc.ontrack = (e) => {
-    opts.audioEl.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+    const remote = e.streams[0] ?? new MediaStream([e.track]);
+    opts.audioEl.srcObject = remote;
+    meter.attachRemote(remote);
   };
   for (const track of micStream.getAudioTracks()) {
     pc.addTrack(track, micStream);
   }
 
-  const aiBuffer = { text: "" };
+  // Shared event-loop state: the AI transcript buffer and a one-shot greeting
+  // guard so Nex opens the call exactly once, after the session is configured.
+  const state = { aiText: "", greeted: false };
   const dc = pc.createDataChannel("oai-events");
   dc.onopen = () => {
+    // GA session schema: session.type is REQUIRED, audio config is nested, and
+    // turn_detection (server VAD) is what makes the model reply when you speak.
     dc.send(
       JSON.stringify({
         type: "session.update",
         session: {
+          type: "realtime",
           instructions: instructionsFor(opts),
-          modalities: ["audio", "text"],
-          input_audio_transcription: { model: "whisper-1" },
+          output_modalities: ["audio"],
+          audio: {
+            input: {
+              turn_detection: { type: "server_vad" },
+              transcription: { model: "gpt-4o-mini-transcribe" },
+            },
+            output: { voice: "marin" },
+          },
           tools: [DRAFT_TOOL],
           tool_choice: "auto",
         },
       }),
     );
-    // Greet first so the operator hears Nex open the call.
-    dc.send(JSON.stringify({ type: "response.create" }));
   };
   dc.onmessage = (e) =>
-    handleEvent(e.data, aiBuffer, opts).catch((err) =>
+    handleEvent(e.data, state, dc, opts).catch((err) =>
       opts.onError(errMessage(err)),
     );
 
-  // 4. SDP offer/answer with OpenAI, authorized by the ephemeral key only.
+  // 4. SDP offer/answer with OpenAI, authorized by the ephemeral key only. The
+  // model is carried by the ephemeral token, so no query param is needed.
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  const sdpResp = await fetch(
-    `${token.sdp_url}?model=${encodeURIComponent(token.model)}`,
-    {
-      method: "POST",
-      body: offer.sdp,
-      headers: {
-        Authorization: `Bearer ${token.ephemeral_key}`,
-        "Content-Type": "application/sdp",
-      },
+  const sdpResp = await fetch(token.sdp_url, {
+    method: "POST",
+    body: offer.sdp,
+    headers: {
+      Authorization: `Bearer ${token.ephemeral_key}`,
+      "Content-Type": "application/sdp",
     },
-  );
+  });
   if (!sdpResp.ok) {
     cleanup();
     throw new Error(`Realtime handshake failed (${sdpResp.status}).`);
@@ -267,6 +284,7 @@ export async function startRealtimeCall(
 
   function cleanup(phase: RealtimeStatus["phase"] = "ended") {
     window.clearInterval(frameTimer);
+    meter.stop();
     try {
       dc.close();
     } catch {
@@ -288,7 +306,8 @@ export async function startRealtimeCall(
 
 async function handleEvent(
   raw: unknown,
-  aiBuffer: { text: string },
+  state: { aiText: string; greeted: boolean },
+  dc: RTCDataChannel,
   opts: StartRealtimeOptions,
 ): Promise<void> {
   if (typeof raw !== "string") return;
@@ -300,14 +319,22 @@ async function handleEvent(
   }
   const type = typeof ev.type === "string" ? ev.type : "";
 
+  // Once the session is configured (instructions + VAD live), have Nex open the
+  // call exactly once. Greeting before this would use default behavior.
+  if (type === "session.updated" && !state.greeted) {
+    state.greeted = true;
+    dc.send(JSON.stringify({ type: "response.create" }));
+    return;
+  }
+
   // Model speech transcript (partial → final).
   if (
     type.includes("audio_transcript.delta") ||
     type === "response.output_text.delta"
   ) {
     const delta = typeof ev.delta === "string" ? ev.delta : "";
-    aiBuffer.text += delta;
-    opts.onTranscript({ who: "ai", text: aiBuffer.text, final: false });
+    state.aiText += delta;
+    opts.onTranscript({ who: "ai", text: state.aiText, final: false });
     return;
   }
   if (
@@ -319,8 +346,8 @@ async function handleEvent(
         ? ev.transcript
         : typeof ev.text === "string"
           ? ev.text
-          : aiBuffer.text;
-    aiBuffer.text = "";
+          : state.aiText;
+    state.aiText = "";
     if (text.trim()) opts.onTranscript({ who: "ai", text, final: true });
     return;
   }
@@ -353,6 +380,73 @@ async function handleEvent(
         : "Realtime error";
     opts.onError(msg);
   }
+}
+
+interface LevelMeter {
+  attachRemote: (stream: MediaStream) => void;
+  stop: () => void;
+}
+
+// Web Audio level metering for the call avatars: RMS amplitude (0..1) of the mic
+// ("you") and the model's voice ("ai"), pushed ~per animation frame. A no-op
+// when no consumer is interested.
+function createLevelMeter(
+  micStream: MediaStream,
+  onLevels?: (you: number, ai: number) => void,
+): LevelMeter {
+  if (!onLevels) return { attachRemote: () => {}, stop: () => {} };
+
+  const ctx = new AudioContext();
+  ctx.resume().catch(() => {
+    /* best effort; the click gesture usually resumes it */
+  });
+  const youAnalyser = makeAnalyser(ctx, micStream);
+  let aiAnalyser: AnalyserNode | null = null;
+  let raf = 0;
+  let stopped = false;
+
+  const tick = () => {
+    if (stopped) return;
+    onLevels(rms(youAnalyser), aiAnalyser ? rms(aiAnalyser) : 0);
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+
+  return {
+    attachRemote(stream) {
+      try {
+        aiAnalyser = makeAnalyser(ctx, stream);
+      } catch {
+        /* remote not analyzable; avatar just stays calm */
+      }
+    },
+    stop() {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      ctx.close().catch(() => {});
+    },
+  };
+}
+
+function makeAnalyser(ctx: AudioContext, stream: MediaStream): AnalyserNode {
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 256;
+  src.connect(analyser);
+  return analyser;
+}
+
+// Root-mean-square amplitude of the analyser's current frame, scaled into a
+// lively 0..1 range for the avatar glow.
+function rms(analyser: AnalyserNode): number {
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const v = (buf[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
 }
 
 // Grab one frame from the live preview <video>, downscaled, as a JPEG data URL.

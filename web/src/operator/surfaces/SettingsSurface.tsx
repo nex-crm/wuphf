@@ -38,7 +38,7 @@ export function SettingsSurface() {
       qc.invalidateQueries({ queryKey: ["operator-config"] });
     },
   });
-  const model = modelInput || config.data?.realtime_model || "gpt-realtime";
+  const model = modelInput || config.data?.realtime_model || "gpt-realtime-2";
 
   return (
     <div className="opr-surface-wide">
@@ -88,7 +88,7 @@ export function SettingsSurface() {
             <input
               className="opr-input"
               aria-label="Realtime model"
-              placeholder="gpt-realtime"
+              placeholder="gpt-realtime-2"
               value={model}
               onChange={(e) => setModelInput(e.target.value)}
               disabled={nexHosted}

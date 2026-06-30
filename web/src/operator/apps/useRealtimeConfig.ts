@@ -24,6 +24,6 @@ export function useRealtimeConfig(): RealtimeConfig {
   });
   return {
     available: Boolean(q.data?.openai_key_set),
-    model: q.data?.realtime_model ?? "gpt-realtime",
+    model: q.data?.realtime_model ?? "gpt-realtime-2",
   };
 }

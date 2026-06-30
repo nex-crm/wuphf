@@ -38,6 +38,11 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const transcriptRef = useRef<DemoCaptureLine[]>([]);
+  // The two call avatars glow with live audio. We drive them via a CSS variable
+  // straight from the meter callback so the squares animate at 60fps without
+  // re-rendering the modal on every frame.
+  const youAvatarRef = useRef<HTMLDivElement>(null);
+  const aiAvatarRef = useRef<HTMLDivElement>(null);
 
   const [status, setStatus] = useState<RealtimeStatus>({
     phase: "requesting-screen",
@@ -82,6 +87,10 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
             transcript: transcriptRef.current,
           }),
         );
+      },
+      onLevels: (you, ai) => {
+        youAvatarRef.current?.style.setProperty("--lvl", you.toFixed(3));
+        aiAvatarRef.current?.style.setProperty("--lvl", ai.toFixed(3));
       },
       onError: (message) => !cancelled && setError(message),
     })
@@ -136,6 +145,15 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
             muted={true}
             playsInline={true}
           />
+          {/* Call avatars — each square glows with its speaker's live audio. */}
+          <div className="opr-call-avatars">
+            <div ref={youAvatarRef} className="opr-call-avatar">
+              <span className="opr-call-avatar-face">You</span>
+            </div>
+            <div ref={aiAvatarRef} className="opr-call-avatar is-ai">
+              <span className="opr-call-avatar-face">Nex</span>
+            </div>
+          </div>
           <div className="opr-call-caption">
             <b>{status.phase === "live" ? "live" : "nex"}</b>{" "}
             {liveAi || PHASE_LABEL[status.phase]}

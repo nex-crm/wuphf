@@ -1309,6 +1309,50 @@
   object-fit: contain;
   background: #000;
 }
+/* Call avatars — two squares (You + Nex) over the top of the shared screen,
+   each glowing with its speaker's live audio level (--lvl, 0..1). */
+.opr-call-avatars {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  z-index: 2;
+}
+.opr-call-avatar {
+  --lvl: 0;
+  width: 54px;
+  height: 54px;
+  border-radius: var(--t-r-sm);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #000 55%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--t-accent) calc(var(--lvl) * 90%), var(--t-line-2));
+  box-shadow: 0 0 calc(var(--lvl) * 22px)
+    color-mix(in srgb, var(--t-accent) calc(var(--lvl) * 85%), transparent);
+  transform: scale(calc(1 + var(--lvl) * 0.06));
+  transition:
+    transform 80ms linear,
+    box-shadow 80ms linear,
+    border-color 80ms linear;
+  backdrop-filter: blur(2px);
+}
+.opr-call-avatar.is-ai {
+  border-color: color-mix(
+    in srgb,
+    var(--t-accent-2) calc(var(--lvl) * 90%),
+    var(--t-line-2)
+  );
+  box-shadow: 0 0 calc(var(--lvl) * 22px)
+    color-mix(in srgb, var(--t-accent-2) calc(var(--lvl) * 85%), transparent);
+}
+.opr-call-avatar-face {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--t-ink);
+}
 /* Realtime call error (key missing, handshake failed, screen-share canceled). */
 .opr-call-error {
   margin: var(--space-3) 0 var(--space-4);
