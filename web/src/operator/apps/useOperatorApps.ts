@@ -4,7 +4,7 @@
 // its own hooks + skin. Pure resolvers live here too so the build→appear
 // correlation is unit-testable without a network.
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   type AppBuildRequest,
@@ -14,9 +14,19 @@ import {
   listApps,
   requestAppBuild,
 } from "../../api/apps";
+import { del } from "../../api/client";
 
 /** A freshly-registered app shows up within a few seconds; poll while waiting. */
 const APPS_POLL_MS = 4000;
+
+/**
+ * How long a "building" app may sit unpublished before we treat the build as
+ * FAILED rather than still in progress. A real build publishes in ~6 min (warm
+ * builds are seconds); past this it is not actually building anymore — the
+ * agent stalled — so the operator should see a failure it can clear, not a
+ * forever-spinning "building" row.
+ */
+const BUILD_STALL_MS = 10 * 60 * 1000;
 
 /** App ids carry an `app_<hex>` prefix; the operator uses it to tell a real
  * built app apart from a mock tool id. */
@@ -26,10 +36,29 @@ export function isRealAppId(id: string | null | undefined): boolean {
   return typeof id === "string" && id.startsWith(APP_ID_PREFIX);
 }
 
+export type AppBuildState = "ready" | "building" | "failed";
+
 /**
- * List the workspace's built apps. Polls while any app is still building (the
- * app-builder runs async, ~30–60s) so a freshly-published app appears without a
- * reload; settles to no polling once everything is ready.
+ * Resolve an app's effective build state. "building" only while it is plausibly
+ * still building; a building app whose pre-scaffold is older than BUILD_STALL_MS
+ * has stalled and is reported "failed".
+ */
+export function appBuildState(
+  app: CustomApp,
+  now: number = Date.now(),
+): AppBuildState {
+  if (app.status !== "building") return "ready";
+  const created = Date.parse(app.createdAt ?? "");
+  if (Number.isFinite(created) && now - created > BUILD_STALL_MS) {
+    return "failed";
+  }
+  return "building";
+}
+
+/**
+ * List the workspace's built apps. Polls while any app is GENUINELY building
+ * (not stalled/failed) so a freshly-published app appears without a reload, then
+ * settles — a failed build no longer keeps the list polling.
  */
 export function useOperatorApps() {
   return useQuery({
@@ -37,15 +66,17 @@ export function useOperatorApps() {
     queryFn: listApps,
     refetchInterval: (query) => {
       const apps = query.state.data ?? [];
-      return apps.some((a) => a.status === "building") ? APPS_POLL_MS : false;
+      return apps.some((a) => appBuildState(a) === "building")
+        ? APPS_POLL_MS
+        : false;
     },
   });
 }
 
 /**
- * Load one app's manifest + sealed HTML. Polls while the app is still building
- * (status "building" or no HTML yet) so the UI tab swaps the building state for
- * the live app the moment the first version publishes.
+ * Load one app's manifest + sealed HTML. Polls while the app is genuinely
+ * building; stops once it is ready OR has failed (a stalled build won't publish,
+ * so polling it forever is pointless).
  */
 export function useOperatorApp(id: string | null) {
   return useQuery({
@@ -55,8 +86,9 @@ export function useOperatorApp(id: string | null) {
     refetchInterval: (query) => {
       const detail = query.state.data as CustomAppDetail | undefined;
       if (!detail) return APPS_POLL_MS;
-      const building = detail.app.status === "building" || !detail.html;
-      return building ? APPS_POLL_MS : false;
+      return appBuildState(detail.app) === "building" || !detail.html
+        ? APPS_POLL_MS
+        : false;
     },
   });
 }
@@ -65,6 +97,20 @@ export function useOperatorApp(id: string | null) {
 export function useBuildApp() {
   return useMutation({
     mutationFn: (req: AppBuildRequest) => requestAppBuild(req),
+  });
+}
+
+/** Remove an app (used to clear a failed/stalled build). Authorized via the
+ * App Builder writer path — the operator removes a failed build the same way the
+ * builder that owns it would. */
+export function useDeleteApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      del(`/apps/${encodeURIComponent(id)}`, undefined, {
+        "X-WUPHF-Agent": "app-builder",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["operator-apps"] }),
   });
 }
 

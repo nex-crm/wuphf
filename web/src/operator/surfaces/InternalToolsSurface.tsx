@@ -3,10 +3,14 @@
 // hero app, then the rest, then suggestions. Selecting a real app opens
 // OperatorAppDetail; selecting a suggestion opens the mock detail.
 
-import { ArrowRight, PhoneCall, Plus } from "lucide-react";
+import { ArrowRight, PhoneCall, Plus, Trash2 } from "lucide-react";
 
 import type { CustomApp } from "../../api/apps";
-import { useOperatorApps } from "../apps/useOperatorApps";
+import {
+  appBuildState,
+  useDeleteApp,
+  useOperatorApps,
+} from "../apps/useOperatorApps";
 import {
   Eyebrow,
   SurfaceHeader,
@@ -27,9 +31,11 @@ export function InternalToolsSurface({
   onBuild,
 }: InternalToolsSurfaceProps) {
   const appsQuery = useOperatorApps();
+  const deleteApp = useDeleteApp();
   const apps = appsQuery.data ?? [];
-  const ready = apps.filter((a) => a.status !== "building");
-  const buildingApps = apps.filter((a) => a.status === "building");
+  const ready = apps.filter((a) => appBuildState(a) === "ready");
+  const buildingApps = apps.filter((a) => appBuildState(a) === "building");
+  const failedApps = apps.filter((a) => appBuildState(a) === "failed");
   const hero = ready[0];
   const rest = ready.slice(1);
 
@@ -87,7 +93,7 @@ export function InternalToolsSurface({
         </div>
       )}
 
-      {rest.length > 0 || buildingApps.length > 0 ? (
+      {rest.length > 0 || buildingApps.length > 0 || failedApps.length > 0 ? (
         <>
           <div className="opr-section-label">
             <Eyebrow>All apps</Eyebrow>
@@ -99,6 +105,14 @@ export function InternalToolsSurface({
             ))}
             {buildingApps.map((app) => (
               <BuildingRow key={app.id} app={app} />
+            ))}
+            {failedApps.map((app) => (
+              <FailedRow
+                key={app.id}
+                app={app}
+                onRemove={() => deleteApp.mutate(app.id)}
+                removing={deleteApp.isPending}
+              />
             ))}
           </div>
         </>
@@ -212,6 +226,46 @@ function BuildingRow({ app }: { app: CustomApp }) {
         <span className="opr-led opr-led-draft" />
         Building
       </span>
+    </div>
+  );
+}
+
+function FailedRow({
+  app,
+  onRemove,
+  removing,
+}: {
+  app: CustomApp;
+  onRemove: () => void;
+  removing: boolean;
+}) {
+  return (
+    <div className="opr-tool-row opr-tool-row-failed">
+      <span className="opr-tool-emoji" aria-hidden={true}>
+        {appGlyph(app)}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="opr-tool-name" style={{ fontSize: "var(--text-md)" }}>
+          {app.name}
+        </div>
+        <p className="opr-tool-summary">
+          Build failed — it stalled before publishing.
+        </p>
+      </div>
+      <span className="opr-pill opr-pill-bad">
+        <span className="opr-led opr-led-bad" />
+        Failed
+      </span>
+      <button
+        type="button"
+        className="opr-icon-btn"
+        onClick={onRemove}
+        disabled={removing}
+        aria-label={`Remove ${app.name}`}
+        title="Remove"
+      >
+        <Trash2 size={15} strokeWidth={1.9} aria-hidden={true} />
+      </button>
     </div>
   );
 }
