@@ -224,29 +224,64 @@ export function assembleDemoCapture(args: {
   };
 }
 
-// Turn the capture into the seed the build engine starts from. The narrated
-// goal leads (so the keyword planner reads it cleanly), then a compact context
-// block carries the observed integrations and APIs so the AI builds against
-// what it actually saw rather than guessing.
+// Turn the capture into the seed the build engine starts from. The narrated goal
+// leads (so a keyword planner reads it cleanly), then EVERYTHING the demo call
+// captured follows — the AI's reflect-back, the observed apps/APIs, screens,
+// elements, key details, and the FULL transcript — so the build works from the
+// real session, not a one-line summary.
 export function capturePromptSeed(capture: DemoCapture): string {
-  const integrations = Array.from(
-    new Set(capture.apiCalls.map((c) => c.integration)),
-  );
-  const context: string[] = [];
-  if (integrations.length > 0) {
-    context.push(`apps: ${integrations.join(", ")}`);
+  const lines: string[] = [capture.goal];
+
+  if (capture.summary) {
+    lines.push("", `What Nex drafted on the call: ${capture.summary}`);
+  }
+
+  const details: string[] = [];
+  if (capture.entities.length > 0) {
+    details.push(
+      `Key details: ${capture.entities
+        .map((e) => `${e.value} (${e.kind})`)
+        .join(", ")}`,
+    );
   }
   if (capture.apiCalls.length > 0) {
-    context.push(
-      `apis: ${capture.apiCalls
-        .map((c) => `${c.integration} ${c.endpoint}`)
+    details.push(
+      `Integrations & APIs observed: ${capture.apiCalls
+        .map(
+          (c) =>
+            `${c.integration} ${c.method} ${c.endpoint}${
+              c.purpose ? ` — ${c.purpose}` : ""
+            }`,
+        )
         .join("; ")}`,
     );
   }
-  if (context.length === 0) return capture.goal;
-  return `${capture.goal} (Captured from your screen share — ${context.join(
-    " · ",
-  )}.)`;
+  if (capture.screens.length > 0) {
+    details.push(
+      `Screens used: ${capture.screens
+        .map((s) => (s.url ? `${s.label} (${s.url})` : s.label))
+        .join(", ")}`,
+    );
+  }
+  if (capture.selectors.length > 0) {
+    details.push(
+      `Elements interacted with: ${capture.selectors
+        .map((s) => (s.sample ? `${s.label} = ${s.sample}` : s.label))
+        .join(", ")}`,
+    );
+  }
+  if (details.length > 0) {
+    lines.push("", "Captured from the screen share:", ...details);
+  }
+
+  if (capture.transcript.length > 0) {
+    lines.push("", "Full transcript of the demo call:");
+    for (const line of capture.transcript) {
+      lines.push(`${line.who === "ai" ? "Nex" : "Operator"}: ${line.text}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 // The argument shape the realtime model fills in via its draft_workflow tool.

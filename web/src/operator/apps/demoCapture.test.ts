@@ -64,20 +64,29 @@ describe("capturePromptSeed", () => {
     });
     const seed = capturePromptSeed(capture);
 
+    // Leads with the goal, then carries the observed apps/APIs and the FULL
+    // transcript so the build works from the real session, not a summary.
     expect(seed.startsWith(capture.goal)).toBe(true);
     expect(seed).toMatch(/HubSpot/);
     expect(seed).toMatch(/Slack/);
-    expect(seed).toMatch(/captured from your screen share/i);
+    expect(seed).toMatch(/captured from the screen share/i);
+    expect(seed).toMatch(/Full transcript of the demo call/i);
+    expect(seed).toMatch(/Operator: A request comes into this form\./);
   });
 
-  it("returns just the goal when nothing API-level was captured", () => {
+  it("carries the goal, key details, and transcript even with no API calls", () => {
     const capture = assembleDemoCapture({
       mode: "modify",
       tool: { id: "inbound-routing", name: "Inbound routing" },
       transcript: MODIFY_TRANSCRIPT,
     });
-    // The modify scenario has no sniffed API calls, so the seed is the bare goal.
-    expect(capturePromptSeed(capture)).toBe(capture.goal);
+    const seed = capturePromptSeed(capture);
+    expect(seed.startsWith(capture.goal)).toBe(true);
+    // The modify scenario has no sniffed API calls but still has entities + the
+    // transcript, so the seed is far more than the bare goal.
+    expect(seed).not.toBe(capture.goal);
+    expect(seed).toMatch(/Key details:/);
+    expect(seed).toMatch(/Operator: Archive anything under 40\./);
   });
 });
 
@@ -93,7 +102,11 @@ describe("demoCaptureFromDraft (real-call converter)", () => {
           { label: "no selector", selector: "" },
         ],
         apiCalls: [
-          { method: "post", endpoint: "/api/v2/tickets", integration: "Zendesk" },
+          {
+            method: "post",
+            endpoint: "/api/v2/tickets",
+            integration: "Zendesk",
+          },
           { endpoint: "" },
         ],
         entities: [{ kind: "Channel", value: "#oncall" }, { value: "" }],

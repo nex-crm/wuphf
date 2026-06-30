@@ -33,6 +33,44 @@ const PHASE_LABEL: Record<RealtimeStatus["phase"], string> = {
   error: "Something went wrong",
 };
 
+// Once Nex drafts the workflow (the operator confirmed they're done), give a
+// short beat for its closing line, then auto-exit the call into the build.
+const AUTO_BUILD_DELAY_MS = 1800;
+
+// A soft pulsing tone played while Nex is thinking, so the operator can hear it
+// is working and not wait wondering whether it froze. Deliberately subtle.
+function createThinkingSound(): { start: () => void; stop: () => void } {
+  let ctx: AudioContext | null = null;
+  return {
+    start() {
+      if (ctx) return;
+      ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = 220;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      // An LFO gently pulses the volume ~1.8x/s for a "processing" feel.
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 1.8;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 0.025;
+      lfo.connect(lfoGain).connect(gain.gain);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      lfo.start();
+    },
+    stop() {
+      try {
+        ctx?.close();
+      } catch {
+        /* already closed */
+      }
+      ctx = null;
+    },
+  };
+}
+
 export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   const isModify = Boolean(tool);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -51,7 +89,16 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   const [lines, setLines] = useState<DemoCaptureLine[]>([]);
   const [liveAi, setLiveAi] = useState("");
   const [draft, setDraft] = useState<DemoCapture | null>(null);
+  const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const thinkingSound = useRef<ReturnType<typeof createThinkingSound> | null>(
+    null,
+  );
+  const autoBuildTimer = useRef<number | null>(null);
+  // onBuild is read through a ref so the once-on-mount effect always calls the
+  // latest handler when it auto-builds after the draft.
+  const onBuildRef = useRef(onBuild);
+  onBuildRef.current = onBuild;
 
   useEffect(() => {
     let controller: RealtimeController | null = null;
@@ -78,15 +125,31 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
         setLines((prev) => [...prev, committed]);
         if (line.who === "ai") setLiveAi("");
       },
+      onThinking: (t) => {
+        if (cancelled) return;
+        setThinking(t);
+        if (t) {
+          if (!thinkingSound.current)
+            thinkingSound.current = createThinkingSound();
+          thinkingSound.current.start();
+        } else {
+          thinkingSound.current?.stop();
+        }
+      },
       onDraft: (args) => {
         if (cancelled) return;
-        setDraft(
-          demoCaptureFromDraft(args, {
-            mode: isModify ? "modify" : "build",
-            tool,
-            transcript: transcriptRef.current,
-          }),
-        );
+        thinkingSound.current?.stop();
+        const capture = demoCaptureFromDraft(args, {
+          mode: isModify ? "modify" : "build",
+          tool,
+          transcript: transcriptRef.current,
+        });
+        setDraft(capture);
+        // The operator confirmed — auto-exit the call into the build after a
+        // short beat for Nex's closing line. The button below is the override.
+        autoBuildTimer.current = window.setTimeout(() => {
+          onBuildRef.current(capture);
+        }, AUTO_BUILD_DELAY_MS);
       },
       onLevels: (you, ai) => {
         youAvatarRef.current?.style.setProperty("--lvl", you.toFixed(3));
@@ -111,6 +174,8 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
 
     return () => {
       cancelled = true;
+      if (autoBuildTimer.current) window.clearTimeout(autoBuildTimer.current);
+      thinkingSound.current?.stop();
       controller?.stop();
     };
     // Start exactly once on mount.
@@ -145,18 +210,33 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
             muted={true}
             playsInline={true}
           />
-          {/* Call avatars — each square glows with its speaker's live audio. */}
+          {/* Call avatars — each square glows with its speaker's live audio;
+              Nex's pulses while it is thinking. */}
           <div className="opr-call-avatars">
             <div ref={youAvatarRef} className="opr-call-avatar">
               <span className="opr-call-avatar-face">You</span>
             </div>
-            <div ref={aiAvatarRef} className="opr-call-avatar is-ai">
+            <div
+              ref={aiAvatarRef}
+              className={`opr-call-avatar is-ai${thinking ? " is-thinking" : ""}`}
+            >
               <span className="opr-call-avatar-face">Nex</span>
             </div>
           </div>
           <div className="opr-call-caption">
             <b>{status.phase === "live" ? "live" : "nex"}</b>{" "}
-            {liveAi || PHASE_LABEL[status.phase]}
+            {thinking ? (
+              <>
+                thinking
+                <span className="opr-thinking-dots" aria-hidden={true}>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </>
+            ) : (
+              liveAi || PHASE_LABEL[status.phase]
+            )}
           </div>
         </div>
 
@@ -177,6 +257,19 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
                 <div className="opr-call-line">
                   <b>Nex</b>
                   {liveAi}
+                </div>
+              ) : null}
+              {thinking && !liveAi ? (
+                <div className="opr-call-line opr-call-thinking">
+                  <b>Nex</b>
+                  <span
+                    className="opr-thinking-dots"
+                    aria-label="Nex is thinking"
+                  >
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 </div>
               ) : null}
             </div>

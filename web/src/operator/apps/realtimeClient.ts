@@ -40,6 +40,9 @@ export interface StartRealtimeOptions {
   onTranscript: (line: RealtimeTranscriptLine) => void;
   onDraft: (args: DraftWorkflowArgs) => void;
   onError: (message: string) => void;
+  // True while Nex is processing a reply but has not started speaking yet, so
+  // the UI can show (and sound) a "thinking" state instead of looking frozen.
+  onThinking?: (thinking: boolean) => void;
   // Live mic + model speech levels (0..1), for the call avatars. Fires ~30/s.
   onLevels?: (you: number, ai: number) => void;
   // <audio> element the model's voice plays through.
@@ -69,6 +72,8 @@ interface CallState {
   drafted: boolean;
   responding: boolean;
   userSpeaking: boolean;
+  // True from when Nex starts generating a reply until its first spoken word.
+  thinking: boolean;
 }
 
 // How often we push a screen frame into the conversation as vision input. Lower
@@ -171,8 +176,12 @@ function instructionsFor(opts: StartRealtimeOptions): string {
     "step touch, and what gets written where? what should happen when something is missing or ambiguous? Ask one question at a time and " +
     "keep it conversational.\n\n" +
     "Track everything you learn: the trigger, each app/integration and the API calls you can see, the decision logic and its branches, the " +
-    "actions and where they write. When you have a clear picture, call the draft_workflow tool with everything you captured, then briefly " +
-    "say you have drafted it.";
+    "actions and where they write.\n\n" +
+    "CHECK IN AT NATURAL STOPPING POINTS. When the operator seems to have finished a part, pauses for a while, or you sense the workflow is " +
+    "complete, gently check in — for example: \"Looks like that's the flow end to end. Are you done, or is there more? Want me to go ahead and " +
+    'build this?" Do not nag; only ask at real stopping points. The MOMENT the operator confirms they are done and want it built (a yes, ' +
+    '"build it", "that\'s it", "go ahead"), immediately call the draft_workflow tool with everything you captured and say one short line like ' +
+    '"On it — building that now." Calling draft_workflow ends the call and starts the build, so only call it once they have confirmed.';
   if (opts.mode === "modify" && opts.tool) {
     return `${base} The operator is CHANGING an existing tool named "${opts.tool.name}". Open by saying you're ready to see the change, narrate the change as they show it, ask what should stay the same, and focus only on the change they demonstrate.`;
   }
@@ -232,12 +241,13 @@ export async function startRealtimeCall(
   // (Nex opens the call once, after the session is configured), a one-shot draft
   // guard (draft_workflow surfaced once), and live turn flags so the observation
   // nudge never fires while Nex is already talking or the operator is speaking.
-  const state = {
+  const state: CallState = {
     aiText: "",
     greeted: false,
     drafted: false,
     responding: false,
     userSpeaking: false,
+    thinking: false,
   };
   const dc = pc.createDataChannel("oai-events");
   dc.onopen = () => {
@@ -373,11 +383,29 @@ async function handleEvent(
   }
   const type = typeof ev.type === "string" ? ev.type : "";
 
-  // Track who holds the turn so the observation nudge never talks over anyone.
-  if (type === "response.created") state.responding = true;
-  if (type === "response.done") state.responding = false;
-  if (type === "input_audio_buffer.speech_started") state.userSpeaking = true;
+  // Track who holds the turn so the observation nudge never talks over anyone,
+  // and surface a "thinking" state from when Nex starts generating a reply until
+  // its first spoken word, so the UI never looks frozen.
+  if (type === "response.created") {
+    state.responding = true;
+    setThinking(state, opts, true);
+  }
+  if (type === "response.done") {
+    state.responding = false;
+    setThinking(state, opts, false);
+  }
+  if (type === "input_audio_buffer.speech_started") {
+    state.userSpeaking = true;
+    setThinking(state, opts, false);
+  }
   if (type === "input_audio_buffer.speech_stopped") state.userSpeaking = false;
+  // Nex has started speaking — stop "thinking".
+  if (
+    type.includes("output_audio.delta") ||
+    type.includes("audio_transcript.delta")
+  ) {
+    setThinking(state, opts, false);
+  }
 
   // Once the session is configured (instructions + VAD live), have Nex open the
   // call exactly once. Greeting before this would use default behavior.
@@ -460,6 +488,17 @@ async function handleEvent(
         : "Realtime error";
     opts.onError(msg);
   }
+}
+
+// Flip the "thinking" flag at most once per transition and notify the UI.
+function setThinking(
+  state: CallState,
+  opts: StartRealtimeOptions,
+  on: boolean,
+): void {
+  if (state.thinking === on) return;
+  state.thinking = on;
+  opts.onThinking?.(on);
 }
 
 interface DraftCall {
