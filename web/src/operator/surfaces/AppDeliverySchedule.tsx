@@ -12,7 +12,7 @@ import {
   composeDeliveryPrompt,
   DAILY_9AM_CRON,
   grantSlackSend,
-  runScheduledJob,
+  runDeliveryOnce,
   scheduleRoutine,
 } from "../apps/scheduleClient";
 import { Eyebrow } from "../components/primitives";
@@ -23,28 +23,30 @@ const DELIVERY_AGENT = "executor";
 
 interface AppDeliveryScheduleProps {
   appName: string;
+  appId: string;
 }
 
 type Phase = "idle" | "scheduling" | "scheduled" | "running" | "ran";
 
-export function AppDeliverySchedule({ appName }: AppDeliveryScheduleProps) {
+export function AppDeliverySchedule({
+  appName,
+  appId,
+}: AppDeliveryScheduleProps) {
   const [channel, setChannel] = useState("#general");
   const [phase, setPhase] = useState<Phase>("idle");
-  const [slug, setSlug] = useState<string | null>(null);
 
   async function schedule(): Promise<void> {
     const target = channel.trim() || "#general";
     setPhase("scheduling");
     try {
       await grantSlackSend(DELIVERY_AGENT);
-      const jobSlug = await scheduleRoutine({
+      await scheduleRoutine({
         appName,
         agentSlug: DELIVERY_AGENT,
         slackChannel: target,
         cron: DAILY_9AM_CRON,
         prompt: composeDeliveryPrompt(appName, target),
       });
-      setSlug(jobSlug);
       setPhase("scheduled");
       showNotice(`Scheduled daily delivery to ${target} at 9:00am`, "success");
     } catch {
@@ -53,14 +55,23 @@ export function AppDeliverySchedule({ appName }: AppDeliveryScheduleProps) {
     }
   }
 
+  // Test it now: build the digest and ATTEMPT the Slack post. The post raises a
+  // human approval (the operator surfaces it) — we never auto-send.
   async function runNow(): Promise<void> {
-    if (!slug) return;
+    const target = channel.trim() || "#general";
     setPhase("running");
     try {
-      await runScheduledJob(slug);
+      const res = await runDeliveryOnce(appId, target);
+      if (res.error) {
+        setPhase("scheduled");
+        showNotice(`Could not run the digest: ${res.error}`, "error");
+        return;
+      }
       setPhase("ran");
       showNotice(
-        `Running now — ${DELIVERY_AGENT} will post the digest to ${channel.trim() || "#general"} shortly.`,
+        res.requestId
+          ? `Digest ready — approve the Slack post to ${target} to deliver it.`
+          : `Digest delivered to ${target}.`,
         "success",
       );
     } catch {
@@ -143,9 +154,8 @@ export function AppDeliverySchedule({ appName }: AppDeliveryScheduleProps) {
 
       {phase === "ran" ? (
         <p className="opr-scoped-note">
-          Test run kicked off. {DELIVERY_AGENT} is composing the digest and
-          posting it to {channel.trim() || "#general"} — check Slack in a
-          moment.
+          Digest built. An approval to post it to {channel.trim() || "#general"}{" "}
+          is waiting — approve it and it goes to Slack.
         </p>
       ) : null}
     </div>
