@@ -20,7 +20,9 @@ test.describe("wuphf web UI smoke (shell)", () => {
   }) => {
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    // Operator is the index now; the office Shell (where the React #31 crash
+    // lived) mounts on its deep routes, so enter through a channel route.
+    await page.goto("/#/channels/general");
     await waitForReactMount(page);
 
     // Sidebar appearing is our "React committed and effects ran" signal.

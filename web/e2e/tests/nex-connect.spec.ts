@@ -33,7 +33,9 @@ function stubNexRegister(page: Page, status: number, body: unknown) {
 // data-testid so it's not confused with the same-named Integrations app
 // entry in the parent sidebar.
 async function goToIntegrations(page: Page) {
-  await page.goto("/");
+  // Operator is the index now; the office Shell (which owns Settings) mounts
+  // on its deep routes, so enter through a channel route rather than "/".
+  await page.goto("/#/channels/general");
   await waitForReactMount(page);
   await page.getByLabel("Open settings").click();
   await page.getByTestId("settings-nav-integrations").click();

@@ -147,7 +147,9 @@ test.describe("PR #634 review pins", () => {
     // postMessage target) stay pinned to the originating channel.
     const getErrors = collectReactErrors(page);
     await seedTestChannel(page);
-    await gotoShell(page, "/");
+    // Operator is the index; warm the office Shell via a deep route (not "/",
+    // which now renders operator) before opening the test channel.
+    await gotoShell(page, "/#/channels/general");
     await gotoShell(page, `/#/channels/${TEST_CHANNEL}`);
 
     // Seed a thread parent the user can open. Two messages so the broker

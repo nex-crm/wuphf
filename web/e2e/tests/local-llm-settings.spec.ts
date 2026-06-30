@@ -137,7 +137,9 @@ function stubLocalProviders(page: Page) {
 // then clicks the new "Local LLMs" nav. Centralised so each test starts
 // at the same place regardless of how the shell evolves.
 async function goToSettingsLocalLLMs(page: Page) {
-  await page.goto("/");
+  // Operator is the index now; the office Shell (which owns Settings) mounts
+  // on its deep routes, so enter through a channel route rather than "/".
+  await page.goto("/#/channels/general");
   await waitForReactMount(page);
   await page.getByLabel("Open settings").click();
   await page.getByRole("button", { name: "Local LLMs" }).click();
