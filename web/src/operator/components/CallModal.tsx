@@ -1,19 +1,32 @@
-// The "magical call" — primary activation surface (mock).
+// "Demo workflow to Nex" — the teach-by-demonstration call (mock).
 //
-// In the real product this is a screen-share + free-voice session where the
-// operator narrates their process while the AI watches and asks questions,
-// then drafts a deterministic tool. Here it is a presentational mock so the
-// shape of the hero moment can be seen and reacted to. Nothing is captured.
+// In the real product (operator spec S5/S6) this is a screen-share + free-voice
+// session: the operator demonstrates their process while Nex watches the screen
+// and asks questions, then drafts (or edits) a deterministic tool. The eventual
+// mechanism is a computer-use agent (CUA) over the captured screen plus OpenAI
+// Realtime for the voice (BYOK or wuphf-hosted, see Settings). Here it is a
+// presentational mock so the shape of the hero moment can be seen and reacted
+// to. Nothing is captured yet.
+//
+// Two modes: BUILD (no tool given) demos a brand-new tool; MODIFY (a tool given)
+// demos a change to an existing one. Build is the default.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, PhoneOff, SkipForward } from "lucide-react";
+
+import {
+  assembleDemoCapture,
+  captureCounts,
+  type DemoCapture,
+} from "../apps/demoCapture";
 
 interface CallLine {
   who: "you" | "ai";
   text: string;
 }
 
-const SCRIPT: CallLine[] = [
+// BUILD: demonstrate a brand-new workflow from scratch.
+const BUILD_SCRIPT: CallLine[] = [
   {
     who: "ai",
     text: "Walk me through how you handle a new demo request. I'm watching your screen.",
@@ -41,16 +54,75 @@ const SCRIPT: CallLine[] = [
   },
 ];
 
+// MODIFY: demonstrate a change to a tool that already exists.
+function modifyScript(toolName: string): CallLine[] {
+  return [
+    {
+      who: "ai",
+      text: `Show me what you want to change about ${toolName}. I'm watching your screen.`,
+    },
+    {
+      who: "you",
+      text: "When a lead scores below 40, I don't want to nurture them anymore. Just archive them.",
+    },
+    {
+      who: "ai",
+      text: "So under 40 becomes archive instead of nurture. Anything else move?",
+    },
+    { who: "you", text: "No, just that one branch." },
+    {
+      who: "ai",
+      text: `Got it. I've drafted the change to ${toolName}: scores under 40 route to archive, not the nurture sequence. Want to see it?`,
+    },
+  ];
+}
+
 // How long each scripted line lingers before the next one reveals.
 const REVEAL_MS = 1400;
 
-interface CallModalProps {
-  onClose: () => void;
-  onBuild: () => void;
+// "1 screen" / "2 screens" — the count readout reads naturally at any number.
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
-export function CallModal({ onClose, onBuild }: CallModalProps) {
+interface CallModalProps {
+  onClose: () => void;
+  // Called when the operator ends the call into the build/modify handoff, with
+  // everything the screen share captured. The AI starts working from this.
+  onBuild: (capture: DemoCapture) => void;
+  // When set, the call demonstrates a CHANGE to this existing tool (modify
+  // mode). When omitted, it demonstrates a brand-new tool (build mode).
+  tool?: { id: string; name: string };
+}
+
+export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const isModify = Boolean(tool);
+  const SCRIPT = isModify
+    ? modifyScript(tool?.name ?? "this tool")
+    : BUILD_SCRIPT;
+
+  // What the screen share captured — assembled once from the full exchange, and
+  // handed to the AI when the operator ends the call.
+  const capture = useMemo(
+    () =>
+      assembleDemoCapture({
+        mode: isModify ? "modify" : "build",
+        tool,
+        transcript: SCRIPT,
+      }),
+    [isModify, tool, SCRIPT],
+  );
+  const counts = captureCounts(capture);
+  const dialogLabel = isModify
+    ? `Demo a change to ${tool?.name}`
+    : "Demo your workflow to Nex";
+  const screenLabel = isModify
+    ? `operator screen: ${tool?.name}`
+    : "operator screen: inbound demo requests";
+  // Ending the call hands the capture to the AI, which starts building/reworking
+  // immediately — so the CTA reads as kicking off work, not viewing a result.
+  const ctaLabel = isModify ? "Update the app" : "Build the app";
 
   // a11y: close on Escape, focus the dialog on open, restore focus on close,
   // and keep Tab focus inside the dialog (a minimal focus trap).
@@ -102,7 +174,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
       className="opr-modal-scrim"
       role="dialog"
       aria-modal="true"
-      aria-label="Build a tool on a call"
+      aria-label={dialogLabel}
       onClick={onClose}
     >
       <div
@@ -116,9 +188,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
             <span className="opr-led" />
             rec · screen share
           </div>
-          <div className="opr-call-screenshare">
-            operator screen: inbound demo requests
-          </div>
+          <div className="opr-call-screenshare">{screenLabel}</div>
           <div className="opr-call-wave" aria-hidden={true}>
             ▁▂▃▅▇▅▃▂▁ ▁▂▃▅▇▅▃▂▁ ▁▂▃▅▇▅▃▂▁
           </div>
@@ -137,6 +207,40 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
               </div>
             ))}
           </div>
+
+          {done ? (
+            <div className="opr-call-capture">
+              <div className="opr-call-capture-head">
+                Captured from your screen · {plural(counts.screens, "screen")} ·{" "}
+                {plural(counts.selectors, "element")} ·{" "}
+                {plural(counts.apiCalls, "API call")} ·{" "}
+                {plural(counts.entities, "entity", "entities")}
+              </div>
+              <div className="opr-call-capture-chips">
+                {capture.apiCalls.map((c) => (
+                  <span
+                    className="opr-call-capture-chip"
+                    key={`${c.integration}-${c.endpoint}`}
+                  >
+                    {c.integration} {c.endpoint}
+                  </span>
+                ))}
+                {capture.entities.map((e) => (
+                  <span
+                    className="opr-call-capture-chip is-entity"
+                    key={`${e.kind}-${e.value}`}
+                  >
+                    {e.value}
+                  </span>
+                ))}
+              </div>
+              <div className="opr-call-capture-note">
+                {isModify
+                  ? "Nex will update the app from this."
+                  : "Nex will build the app from this."}
+              </div>
+            </div>
+          ) : null}
 
           <div
             className="opr-detail-actions"
@@ -159,10 +263,10 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
             <button
               type="button"
               className="opr-btn opr-btn-primary"
-              onClick={onBuild}
+              onClick={() => onBuild(capture)}
               disabled={!done}
             >
-              See the drafted tool
+              {ctaLabel}
               <ArrowRight size={14} strokeWidth={1.9} aria-hidden={true} />
             </button>
           </div>

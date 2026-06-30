@@ -8,6 +8,17 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// The broker web server the dev proxy forwards /api to. Defaults to the standard
+// :7891, but is overridable so a worktree can run its own broker on dedicated
+// ports and never collide with another worktree's broker on the default ports.
+// Set WUPHF_WEB_PROXY_TARGET (e.g. http://127.0.0.1:7893) or just
+// WUPHF_WEB_PROXY_PORT (e.g. 7893).
+const proxyTarget =
+  process.env.WUPHF_WEB_PROXY_TARGET ||
+  `http://127.0.0.1:${process.env.WUPHF_WEB_PROXY_PORT || "7891"}`;
+
+const proxyEntry = { target: proxyTarget, changeOrigin: true };
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -20,18 +31,9 @@ export default defineConfig({
     port: 5273,
     strictPort: true,
     proxy: {
-      "/api": {
-        target: "http://127.0.0.1:7891",
-        changeOrigin: true,
-      },
-      "/api-token": {
-        target: "http://127.0.0.1:7891",
-        changeOrigin: true,
-      },
-      "/onboarding": {
-        target: "http://127.0.0.1:7891",
-        changeOrigin: true,
-      },
+      "/api": proxyEntry,
+      "/api-token": proxyEntry,
+      "/onboarding": proxyEntry,
     },
   },
   build: {
