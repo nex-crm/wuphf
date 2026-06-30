@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CustomApp } from "../../api/apps";
 import {
   APP_ID_PREFIX,
+  appBuildState,
   deriveAppName,
   isRealAppId,
   resolveNewAppId,
@@ -61,6 +62,25 @@ describe("resolveNewAppId", () => {
     const before = new Set(["app_a"]);
     const apps = [app({ id: "app_a", name: "Open Tasks Dashboard" })];
     expect(resolveNewAppId(before, apps)).toBeNull();
+  });
+});
+
+describe("appBuildState", () => {
+  const now = Date.parse("2026-06-29T12:00:00Z");
+
+  it("reports ready for a published app", () => {
+    expect(appBuildState(app({ status: "ready" }), now)).toBe("ready");
+    expect(appBuildState(app({ status: undefined }), now)).toBe("ready");
+  });
+
+  it("reports building for a recently-started build", () => {
+    const a = app({ status: "building", createdAt: "2026-06-29T11:58:00Z" });
+    expect(appBuildState(a, now)).toBe("building");
+  });
+
+  it("reports failed for a build stalled past the timeout", () => {
+    const a = app({ status: "building", createdAt: "2026-06-29T11:40:00Z" });
+    expect(appBuildState(a, now)).toBe("failed");
   });
 });
 

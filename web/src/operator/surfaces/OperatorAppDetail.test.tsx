@@ -9,6 +9,10 @@ import { OperatorAppDetail } from "./OperatorAppDetail";
 const useOperatorAppMock = vi.fn();
 vi.mock("../apps/useOperatorApps", () => ({
   useOperatorApp: (id: string) => useOperatorAppMock(id),
+  // Drive build state from status in tests (ignore the createdAt age heuristic).
+  appBuildState: (app: { status?: string }) =>
+    app.status === "building" ? "building" : "ready",
+  useDeleteApp: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 // Stub the sandbox frame (real iframe), the integrations tab (fetches the
