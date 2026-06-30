@@ -15,6 +15,7 @@ import {
   runScheduledJob,
   scheduleRoutine,
 } from "../apps/scheduleClient";
+import { Eyebrow } from "../components/primitives";
 
 // The agent that runs the routine and posts to Slack. Executor is the office's
 // doer; it shares the workspace's Gmail + Slack connections.
@@ -73,6 +74,11 @@ export function AppDeliverySchedule({ appName }: AppDeliveryScheduleProps) {
 
   return (
     <div className="opr-tool-scoped opr-delivery">
+      <DigestWorkflowFlow
+        channel={channel.trim() || "#general"}
+        scheduled={scheduled}
+      />
+
       <div className="opr-delivery-head">
         <span className="opr-delivery-glyph" aria-hidden={true}>
           <Send size={16} strokeWidth={1.8} />
@@ -142,6 +148,121 @@ export function AppDeliverySchedule({ appName }: AppDeliveryScheduleProps) {
           moment.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+// ── Workflow flow diagram (trigger → read → analyze → decide → branch → send) ──
+
+type FlowKind = "trigger" | "enrich" | "ai" | "decision" | "action" | "branch";
+
+const FLOW_GLYPH: Record<FlowKind, string> = {
+  trigger: "TR",
+  enrich: "EN",
+  ai: "AI",
+  decision: "IF",
+  action: "DO",
+  branch: "EL",
+};
+
+interface FlowStep {
+  id: string;
+  kind: FlowKind;
+  title: string;
+  detail: string;
+  integration?: string;
+  gated?: boolean;
+}
+
+function digestSteps(channel: string): FlowStep[] {
+  return [
+    {
+      id: "trigger",
+      kind: "trigger",
+      title: "Every day at 9:00 AM",
+      detail:
+        'Runs on a daily schedule. "Run once now" fires it immediately to test.',
+    },
+    {
+      id: "read",
+      kind: "enrich",
+      title: "Read the last 24 hours of email",
+      integration: "Gmail",
+      detail: "Fetch messages newer than 1 day, read-only, through the bridge.",
+    },
+    {
+      id: "analyze",
+      kind: "ai",
+      title: "Score and group by entity",
+      detail:
+        "AI ranks the action items per entity by urgency (0–100) from the email body, through the Nex.ai relevance lens.",
+    },
+    {
+      id: "decision",
+      kind: "decision",
+      title: "Anything urgent to send?",
+      detail: "Branch on whether the digest has action items worth delivering.",
+    },
+    {
+      id: "branch",
+      kind: "branch",
+      title: "If nothing urgent — skip",
+      detail: "No empty digests: on a quiet day, nothing is posted.",
+    },
+    {
+      id: "send",
+      kind: "action",
+      title: "Post the digest to Slack",
+      integration: "Slack",
+      detail: `Send the formatted per-entity digest to ${channel}.`,
+      gated: true,
+    },
+  ];
+}
+
+function DigestWorkflowFlow({
+  channel,
+  scheduled,
+}: {
+  channel: string;
+  scheduled: boolean;
+}) {
+  const steps = digestSteps(channel);
+  return (
+    <div className="opr-delivery-flow">
+      <Eyebrow>How it runs · trigger to delivery</Eyebrow>
+      <div className="opr-flow" style={{ marginTop: "var(--space-3)" }}>
+        {steps.map((step, i) => (
+          <div className="opr-step" key={step.id}>
+            <div className="opr-step-rail">
+              <div
+                className={`opr-step-node opr-step-node-${step.kind}`}
+                aria-hidden={true}
+              >
+                {FLOW_GLYPH[step.kind]}
+              </div>
+              {i < steps.length - 1 ? <div className="opr-step-line" /> : null}
+            </div>
+            <div className="opr-step-body">
+              <div className="opr-step-kind">{step.kind}</div>
+              <div className="opr-step-title">
+                {step.title}
+                {step.integration ? (
+                  <span className="opr-step-chip">{step.integration}</span>
+                ) : null}
+              </div>
+              <div className="opr-step-detail">{step.detail}</div>
+              {step.gated ? (
+                <div className="opr-step-gate">
+                  {scheduled
+                    ? "Scheduled — pre-authorized to send"
+                    : "Approval required before it sends"}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
