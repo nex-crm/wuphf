@@ -13,12 +13,17 @@ import {
   Maximize2,
   Minimize2,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 
 import type { CustomApp, CustomAppDetail } from "../../api/apps";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
-import { useOperatorApp } from "../apps/useOperatorApps";
+import {
+  appBuildState,
+  useDeleteApp,
+  useOperatorApp,
+} from "../apps/useOperatorApps";
 import { EmptyState } from "../components/EmptyState";
 import { Eyebrow, type TabDef, Tabs } from "../components/primitives";
 import { AppBuilderChat } from "./AppBuilderChat";
@@ -47,10 +52,18 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [panelSize, setPanelSize] = useState<PanelSize>("dock");
   const query = useOperatorApp(appId);
+  const remove = useDeleteApp();
 
   const detail = query.data;
   const app = detail?.app;
-  const building = !app || app.status === "building" || !detail?.html;
+  const state = app ? appBuildState(app) : "building";
+  const failed = state === "failed";
+  const ready = state === "ready" && !!detail?.html;
+
+  function removeAndBack() {
+    if (!app) return;
+    remove.mutate(app.id, { onSuccess: onBack });
+  }
 
   return (
     <div
@@ -74,20 +87,26 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
               <p className="opr-tool-summary">{app.summary}</p>
             ) : null}
             <div className="opr-tool-meta">
-              <span className="opr-pill opr-pill-muted">
+              <span
+                className={`opr-pill ${failed ? "opr-pill-bad" : "opr-pill-muted"}`}
+              >
                 <span
                   className={`opr-led ${
-                    building ? "opr-led-draft" : "opr-led-live"
+                    failed
+                      ? "opr-led-bad"
+                      : ready
+                        ? "opr-led-live"
+                        : "opr-led-draft"
                   }`}
                 />
-                {building ? "Building" : "Live"}
+                {failed ? "Failed" : ready ? "Live" : "Building"}
               </span>
               {app ? (
                 <span className="opr-meta-dot">v{app.version}</span>
               ) : null}
             </div>
           </div>
-          {app && !building ? (
+          {ready ? (
             <div className="opr-detail-actions">
               <button
                 type="button"
@@ -96,6 +115,18 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
               >
                 <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
                 Ask AI
+              </button>
+            </div>
+          ) : failed ? (
+            <div className="opr-detail-actions">
+              <button
+                type="button"
+                className="opr-btn opr-btn-sm"
+                onClick={removeAndBack}
+                disabled={remove.isPending}
+              >
+                <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
+                Remove
               </button>
             </div>
           ) : null}
@@ -108,12 +139,18 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
           id={`opr-panel-${tab}`}
           aria-labelledby={`opr-tab-${tab}`}
         >
-          <TabBody tab={tab} query={query} />
+          <TabBody
+            tab={tab}
+            query={query}
+            failed={failed}
+            onRemove={removeAndBack}
+            removing={remove.isPending}
+          />
         </div>
       </div>
 
       {/* Ask AI — floating bubble + docked drawer, openable from any tab. */}
-      {app && !building ? (
+      {app && ready ? (
         <AskAiDock
           app={app}
           open={chatOpen}
@@ -237,15 +274,29 @@ function AskAiDock({
 function TabBody({
   tab,
   query,
+  failed,
+  onRemove,
+  removing,
 }: {
   tab: AppTab;
   query: UseQueryResult<CustomAppDetail>;
+  failed: boolean;
+  onRemove: () => void;
+  removing: boolean;
 }) {
   const app = query.data?.app;
-  const ready = app && app.status !== "building" && query.data?.html;
+  const ready =
+    app && appBuildState(app) === "ready" && Boolean(query.data?.html);
   switch (tab) {
     case "ui":
-      return <UiTab query={query} />;
+      return (
+        <UiTab
+          query={query}
+          failed={failed}
+          onRemove={onRemove}
+          removing={removing}
+        />
+      );
     case "workflow":
       return ready ? (
         <AppDeliverySchedule appName={app.name} appId={app.id} />
@@ -281,14 +332,49 @@ function TabBody({
   }
 }
 
-function UiTab({ query }: { query: UseQueryResult<CustomAppDetail> }) {
+function UiTab({
+  query,
+  failed,
+  onRemove,
+  removing,
+}: {
+  query: UseQueryResult<CustomAppDetail>;
+  failed: boolean;
+  onRemove: () => void;
+  removing: boolean;
+}) {
   const detail = query.data;
   const app = detail?.app;
-  const ready = app && app.status !== "building" && detail?.html;
+  const ready = app && appBuildState(app) === "ready" && detail?.html;
   if (ready) {
     return (
       <div className="opr-app-frame">
         <CustomAppFrame appId={app.id} title={app.name} html={detail.html} />
+      </div>
+    );
+  }
+  if (failed) {
+    return (
+      <div className="opr-app-building opr-app-failed" role="status">
+        <span className="opr-empty-glyph" aria-hidden={true}>
+          ⚠
+        </span>
+        <div className="opr-empty-title">Build failed</div>
+        <div className="opr-empty-hint">
+          This app stalled before it published a version — it is not building
+          anymore. Remove it and rebuild, or describe it again.
+        </div>
+        <div className="opr-empty-actions">
+          <button
+            type="button"
+            className="opr-btn opr-btn-primary opr-btn-sm"
+            onClick={onRemove}
+            disabled={removing}
+          >
+            <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
+            Remove app
+          </button>
+        </div>
       </div>
     );
   }

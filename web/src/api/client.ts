@@ -386,10 +386,11 @@ export async function patch<T = unknown>(
 export async function del<T = unknown>(
   path: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   const r = await fetch(baseURL() + path, {
     method: "DELETE",
-    headers: authHeaders(),
+    headers: { ...authHeaders(), ...extraHeaders },
     body: JSON.stringify(body),
   });
   if (!r.ok) {

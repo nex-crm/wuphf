@@ -3286,3 +3286,25 @@
   gap: var(--space-2);
   margin-top: var(--space-1);
 }
+
+/* ── Failed-build state (a build that stalled and never published) ─────────── */
+.opr-pill-bad {
+  color: var(--t-red);
+  background: color-mix(in srgb, var(--t-red) 13%, transparent);
+}
+.opr-led-bad {
+  background: var(--t-red);
+}
+.opr-tool-row-failed {
+  border-color: color-mix(in srgb, var(--t-red) 28%, var(--t-line));
+}
+.opr-tool-row-failed .opr-tool-summary {
+  color: color-mix(in srgb, var(--t-red) 70%, var(--t-dim));
+}
+.opr-app-failed {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--t-red) 32%, var(--t-line));
+}
+.opr-app-failed .opr-empty-glyph {
+  color: var(--t-red);
+}
