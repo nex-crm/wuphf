@@ -279,7 +279,14 @@ func buildClaudeArgs(systemPrompt string, resumeID string, oneShot bool) []strin
 	// needs many turns and tools; a judge needs neither, and must NOT, since its
 	// prompt can carry untrusted transcript content that could otherwise steer it
 	// to execute a built-in tool (Bash/Write/…) before any human sees the output.
-	maxTurns := "20"
+	//
+	// 20 was too tight for a real app build: the App Builder spends turns
+	// exploring the scaffold, reading AI_RULES/DESIGN, and writing the app BEFORE
+	// it can `bun install` + `vite build` + register_app. A complex app (e.g. a
+	// Gmail+ai digest) exhausts 20 turns mid-build and never publishes, then the
+	// task stalls holding the single worker. 50 gives one dispatch enough headroom
+	// to reach publish.
+	maxTurns := "50"
 	if oneShot {
 		maxTurns = "1"
 	}
