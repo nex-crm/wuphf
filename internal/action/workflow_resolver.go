@@ -71,14 +71,21 @@ func (r *ComposioActionResolver) Resolve(ctx context.Context, plan Plan, step Pl
 	if r.search == nil || r.llm == nil {
 		return fallback, nil
 	}
+	// Search/LLM failures degrade to the template fallback rather than failing
+	// the whole bind: collapse an error into the empty result so the fallback
+	// decision is driven by "no usable candidate/output", never by returning a
+	// swallowed error as nil.
 	candidates, err := r.search(ctx, platform, stepQuery(step))
-	if err != nil || len(candidates) == 0 {
+	if err != nil {
+		candidates = nil
+	}
+	if len(candidates) == 0 {
 		return fallback, nil
 	}
 
 	out, err := r.llm(ctx, resolverSystemPrompt, resolverUserPrompt(plan, step, platform, candidates))
 	if err != nil {
-		return fallback, nil
+		out = ""
 	}
 	bound, ok := parseResolverOutput(out, candidates, platform)
 	if !ok {
