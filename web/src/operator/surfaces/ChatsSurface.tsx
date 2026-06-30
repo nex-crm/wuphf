@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { PhoneCall, Plus, Send } from "lucide-react";
 
 import { Eyebrow } from "../components/primitives";
-import { type ChatMessage, CHATS } from "../mock/data";
+import { CHATS, type ChatMessage } from "../mock/data";
 
 interface ChatsSurfaceProps {
   onStartCall: () => void;
@@ -49,7 +49,7 @@ export function ChatsSurface({ onStartCall, onBuild }: ChatsSurfaceProps) {
           onClick={onBuild}
           style={{ marginBottom: "var(--space-2)" }}
         >
-          <Plus size={14} strokeWidth={1.9} aria-hidden />
+          <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
           Describe a new tool
         </button>
         <button
@@ -58,8 +58,8 @@ export function ChatsSurface({ onStartCall, onBuild }: ChatsSurfaceProps) {
           onClick={onStartCall}
           style={{ marginBottom: "var(--space-3)" }}
         >
-          <PhoneCall size={14} strokeWidth={1.9} aria-hidden />
-          Teach your workflow to Nex
+          <PhoneCall size={14} strokeWidth={1.9} aria-hidden={true} />
+          Demo workflow to Nex
         </button>
         <Eyebrow>Conversations</Eyebrow>
         <div style={{ marginTop: "var(--space-2)" }}>
@@ -126,7 +126,7 @@ export function ChatsSurface({ onStartCall, onBuild }: ChatsSurfaceProps) {
             className="opr-btn opr-btn-primary"
             onClick={send}
           >
-            <Send size={14} strokeWidth={1.9} aria-hidden />
+            <Send size={14} strokeWidth={1.9} aria-hidden={true} />
             Send
           </button>
         </div>

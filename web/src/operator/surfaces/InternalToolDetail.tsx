@@ -11,7 +11,7 @@
 // Integrations or Knowledge surface. "Edit with AI" opens the SAME build chat we
 // ship for new tools, scoped to this tool, as an overlay over any tab.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,6 +20,7 @@ import {
   ChevronsRight,
   Maximize2,
   Minimize2,
+  PhoneCall,
   Play,
   Plus,
   Power,
@@ -47,6 +48,7 @@ import {
   type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
+import { BrowserRunModal } from "./BrowserRunModal";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 import { type BuiltWorkflow, WorkflowBuilder } from "./WorkflowBuilder";
@@ -66,7 +68,11 @@ const TABS: readonly TabDef<ToolTab>[] = [
 // (the most common edit target). Returns null when nothing clearly matches.
 function inferToolTab(message: string): ToolTab | null {
   const t = message.toLowerCase();
-  if (/\b(screen|ui|button|form|layout|design|how it looks|display|the page)\b/.test(t)) {
+  if (
+    /\b(screen|ui|button|form|layout|design|how it looks|display|the page)\b/.test(
+      t,
+    )
+  ) {
     return "ui";
   }
   if (/\b(data|rows?|records?|columns?|the table|fields?)\b/.test(t)) {
@@ -75,7 +81,11 @@ function inferToolTab(message: string): ToolTab | null {
   if (/\b(integration|connect|hubspot|slack|gmail|composio|app)\b/.test(t)) {
     return "integrations";
   }
-  if (/\b(step|workflow|threshold|route|trigger|score|branch|decision|send|post|notify|gate|approval|sequence|nurture)\b/.test(t)) {
+  if (
+    /\b(step|workflow|threshold|route|trigger|score|branch|decision|send|post|notify|gate|approval|sequence|nurture)\b/.test(
+      t,
+    )
+  ) {
     return "workflow";
   }
   return null;
@@ -88,6 +98,10 @@ interface InternalToolDetailProps {
   // Which tab to land on. "Run on test data" hands off to the Workflow tab
   // (where run history lives); a plain open stays on the UI tab.
   initialTab?: ToolTab;
+  // When set, a "Demo workflow to Nex" call just finished on this tool: open the
+  // Ask-AI chat and seed it so the AI starts reworking from the demonstrated
+  // change without the operator re-typing it.
+  demoSeed?: string;
 }
 
 export function InternalToolDetail({
@@ -95,14 +109,25 @@ export function InternalToolDetail({
   onBack,
   onStartCall,
   initialTab = "ui",
+  demoSeed,
 }: InternalToolDetailProps) {
   const [tab, setTab] = useState<ToolTab>(initialTab);
   // The chat is the SAME build chat, scoped to this tool, docked as a right-side
   // panel (dock -> wide -> full-screen modal) over the tool's real screens. The
   // chat acts ON the screens: a workflow change navigates to the Workflow tab
   // and updates it there, rather than living in a canvas glued to the chat.
-  const [chatOpen, setChatOpen] = useState(false);
+  // A demo handoff opens the chat straight away (seeded below).
+  const [chatOpen, setChatOpen] = useState(Boolean(demoSeed));
   const [panelSize, setPanelSize] = useState<"dock" | "wide" | "modal">("dock");
+  // The "Run in browser" execution view (the computer-use loop).
+  const [runOpen, setRunOpen] = useState(false);
+  // The demo seed is one-shot: it kicks the chat off on mount, then is cleared
+  // so reopening the chat later does not replay the demonstrated instruction.
+  const demoSeedRef = useRef(demoSeed);
+  const [seedConsumed, setSeedConsumed] = useState(false);
+  useEffect(() => {
+    if (demoSeedRef.current) setSeedConsumed(true);
+  }, []);
   const [version] = useState(tool.version);
   const [versions] = useState<ToolVersion[]>(tool.versions);
   // The tool's live workflow steps — the chat edits these and they render on the
@@ -131,7 +156,9 @@ export function InternalToolDetail({
     const changed = draft.steps
       .filter((step) => {
         const prev = liveSteps.find((p) => p.id === step.id);
-        return !prev || prev.title !== step.title || prev.detail !== step.detail;
+        return (
+          !prev || prev.title !== step.title || prev.detail !== step.detail
+        );
       })
       .map((step) => step.id);
     setLiveSteps(draft.steps);
@@ -167,6 +194,14 @@ export function InternalToolDetail({
             </div>
           </div>
           <div className="opr-detail-actions">
+            <button
+              type="button"
+              className="opr-btn opr-btn-sm"
+              onClick={onStartCall}
+            >
+              <PhoneCall size={13} strokeWidth={1.9} aria-hidden={true} />
+              Demo to Nex
+            </button>
             <button
               type="button"
               className="opr-btn opr-btn-sm"
@@ -263,8 +298,8 @@ export function InternalToolDetail({
               <EmptyState
                 glyph="◧"
                 title="No screen built yet"
-                hint="Build the screen your team will use to run this tool. Talk it through on a call and your AI assembles it."
-                actionLabel="Teach your workflow to Nex"
+                hint="Build the screen your team will use to run this tool. Demo it to Nex on a call and your AI assembles it."
+                actionLabel="Demo workflow to Nex"
                 onAction={onStartCall}
               />
             ))}
@@ -273,6 +308,7 @@ export function InternalToolDetail({
               tool={{ ...tool, steps: liveSteps }}
               versions={versions}
               changedStepIds={changedStepIds}
+              onRun={() => setRunOpen(true)}
             />
           )}
           {tab === "data" &&
@@ -291,17 +327,30 @@ export function InternalToolDetail({
         </div>
       </div>
 
-      {/* Pop the tool's AI open from anywhere — on any tab. */}
+      {/* Two peer affordances, reachable on any tab: demo a change to the tool
+          on a call, or ask its AI in chat. Hidden while the chat panel is open
+          (it would overlap them). */}
       {chatOpen ? null : (
-        <button
-          type="button"
-          className="opr-ask-fab"
-          onClick={() => setChatOpen(true)}
-          aria-label={`Ask AI about ${tool.name}`}
-        >
-          <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-          Ask AI
-        </button>
+        <div className="opr-detail-fabs">
+          <button
+            type="button"
+            className="opr-ask-fab"
+            onClick={onStartCall}
+            aria-label={`Demo a change to ${tool.name} to Nex`}
+          >
+            <PhoneCall size={16} strokeWidth={2} aria-hidden={true} />
+            Demo to Nex
+          </button>
+          <button
+            type="button"
+            className="opr-ask-fab"
+            onClick={() => setChatOpen(true)}
+            aria-label={`Ask AI about ${tool.name}`}
+          >
+            <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
+            Ask AI
+          </button>
+        </div>
       )}
 
       {chatOpen ? (
@@ -330,13 +379,23 @@ export function InternalToolDetail({
                   onClick={() =>
                     setPanelSize((s) => (s === "wide" ? "dock" : "wide"))
                   }
-                  aria-label={panelSize === "wide" ? "Narrow panel" : "Widen panel"}
+                  aria-label={
+                    panelSize === "wide" ? "Narrow panel" : "Widen panel"
+                  }
                   title={panelSize === "wide" ? "Narrow" : "Widen"}
                 >
                   {panelSize === "wide" ? (
-                    <ChevronsRight size={15} strokeWidth={1.9} aria-hidden={true} />
+                    <ChevronsRight
+                      size={15}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
                   ) : (
-                    <ChevronsLeft size={15} strokeWidth={1.9} aria-hidden={true} />
+                    <ChevronsLeft
+                      size={15}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
                   )}
                 </button>
                 <button
@@ -348,7 +407,9 @@ export function InternalToolDetail({
                   aria-label={
                     panelSize === "modal" ? "Exit full screen" : "Full screen"
                   }
-                  title={panelSize === "modal" ? "Exit full screen" : "Full screen"}
+                  title={
+                    panelSize === "modal" ? "Exit full screen" : "Full screen"
+                  }
                 >
                   {panelSize === "modal" ? (
                     <Minimize2 size={14} strokeWidth={1.9} aria-hidden={true} />
@@ -369,8 +430,9 @@ export function InternalToolDetail({
             </div>
             <div className="opr-ask-body">
               <WorkflowBuilder
-                panelMode
+                panelMode={true}
                 scopeToolName={tool.name}
+                seed={seedConsumed ? undefined : demoSeedRef.current}
                 onClose={() => setChatOpen(false)}
                 onFinish={applyWorkflowEdit}
                 onUserMessage={(text) => {
@@ -381,6 +443,13 @@ export function InternalToolDetail({
             </div>
           </aside>
         </>
+      ) : null}
+
+      {runOpen ? (
+        <BrowserRunModal
+          toolName={tool.name}
+          onClose={() => setRunOpen(false)}
+        />
       ) : null}
     </div>
   );
@@ -536,15 +605,23 @@ function WorkflowTab({
   tool,
   versions,
   changedStepIds = [],
+  onRun,
 }: {
   tool: InternalTool;
   versions: ToolVersion[];
   changedStepIds?: readonly string[];
+  onRun: () => void;
 }) {
   return (
     <div className="opr-detail-cols">
       <div>
-        <Eyebrow>How it runs · every step is scripted</Eyebrow>
+        <div className="opr-flow-head">
+          <Eyebrow>How it runs · every step is scripted</Eyebrow>
+          <button type="button" className="opr-btn opr-btn-sm" onClick={onRun}>
+            <Play size={13} strokeWidth={1.9} aria-hidden={true} />
+            Run
+          </button>
+        </div>
         <div className="opr-flow" style={{ marginTop: "var(--space-3)" }}>
           {tool.steps.map((step, i) => (
             <div
