@@ -30,22 +30,71 @@ import (
 // With no key or no runner on disk it returns 503 so the FE falls back to the
 // scripted mock. See docs/specs/operator-cua-migration.md.
 
-// cuaRunnerPath resolves runner/cua_exec.py: WUPHF_CUA_RUNNER env override, else
-// the repo cwd. Empty when not found so the handler can 503.
-func cuaRunnerPath() string {
-	if v := strings.TrimSpace(os.Getenv("WUPHF_CUA_RUNNER")); v != "" {
-		if _, err := os.Stat(v); err == nil {
-			return v
+// cuaRunnerPath resolves a runner script (runner/<scriptName>): an env override
+// first, else the repo cwd. Empty when not found so the handler can 503.
+func cuaRunnerPath(scriptName, envKey string) string {
+	if envKey != "" {
+		if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+			if _, err := os.Stat(v); err == nil {
+				return v
+			}
+			return ""
 		}
-		return ""
 	}
 	if cwd, err := os.Getwd(); err == nil {
-		p := filepath.Join(cwd, "runner", "cua_exec.py")
+		p := filepath.Join(cwd, "runner", scriptName)
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
 	return ""
+}
+
+// spawnRunnerSSE runs a Python runner (args[0] is the script path) and proxies
+// its newline-JSON stdout to the client as SSE, one frame per line. The request
+// context cancels the subprocess on disconnect/Stop, so a run never outlives the
+// connection. Shared by the execute and observe endpoints.
+func spawnRunnerSSE(w http.ResponseWriter, r *http.Request, args, extraEnv []string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	cmd := exec.CommandContext(r.Context(), cuaPython(), args...)
+	cmd.Env = append(os.Environ(), extraEnv...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner pipe failed"})
+		return
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner start failed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+			break
+		}
+		flusher.Flush()
+	}
+	_ = cmd.Wait()
+	fmt.Fprint(w, "event: end\ndata: {}\n\n")
+	flusher.Flush()
 }
 
 // cuaPython is the interpreter that runs the runner. Overridable so the test can
@@ -101,59 +150,15 @@ func (b *Broker) handleExecuteBrowser(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	runner := cuaRunnerPath()
+	runner := cuaRunnerPath("cua_exec.py", "WUPHF_CUA_RUNNER")
 	if runner == "" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "cua runner not available",
 		})
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	cmd := exec.CommandContext(r.Context(), cuaPython(), executeBrowserArgs(runner, req)...)
 	// Key ONLY via env — never argv, never the browser.
-	cmd.Env = append(os.Environ(), "OPENAI_API_KEY="+key)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner pipe failed"})
-		return
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner start failed"})
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-
-	// Each runner line is already a JSON event ({type:status|action|done|error});
-	// forward verbatim as one SSE data frame.
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
-			break
-		}
-		flusher.Flush()
-	}
-	_ = cmd.Wait()
-	// Closing boundary so the client always learns the run ended, even if the
-	// runner died without a terminal done/error line.
-	fmt.Fprint(w, "event: end\ndata: {}\n\n")
-	flusher.Flush()
+	spawnRunnerSSE(w, r, executeBrowserArgs(runner, req), []string{"OPENAI_API_KEY=" + key})
 }
 
 // executeBrowserArgs builds the runner argv. The goal/app are argv elements (no

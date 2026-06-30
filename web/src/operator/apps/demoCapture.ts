@@ -18,6 +18,7 @@
 // element metadata.
 
 import type { InternalTool } from "../mock/data";
+import type { ObservedScreen } from "./observeClient";
 
 export interface CapturedScreen {
   // Human label for the screen/app the operator demonstrated on.
@@ -75,6 +76,10 @@ export interface DemoCapture {
   selectors: CapturedSelector[];
   apiCalls: CapturedApiCall[];
   entities: CapturedEntity[];
+  // Ground truth read off the real page by cua-driver during the call (the AX
+  // component tree + visible text per distinct screen, in workflow order). This
+  // is what lets the build read the actual components, not guess from pixels.
+  observed?: ObservedScreen[];
 }
 
 // Representative observation set for the inbound demo-request scenario. This is
@@ -274,6 +279,27 @@ export function capturePromptSeed(capture: DemoCapture): string {
     lines.push("", "Captured from the screen share:", ...details);
   }
 
+  if (capture.observed && capture.observed.length > 0) {
+    lines.push(
+      "",
+      "Real page structure Nex read off the screen during the call (ground " +
+        "truth — the apps, their components, and content in the order shown):",
+    );
+    for (const screen of capture.observed) {
+      lines.push(`- ${screen.app} — ${screen.title}`);
+      if (screen.components.length > 0) {
+        lines.push(
+          `  components: ${screen.components
+            .map((c) => `${c.role}:${c.label}`)
+            .join(", ")}`,
+        );
+      }
+      if (screen.text) {
+        lines.push(`  text: ${screen.text}`);
+      }
+    }
+  }
+
   if (capture.transcript.length > 0) {
     lines.push("", "Full transcript of the demo call:");
     for (const line of capture.transcript) {
@@ -339,6 +365,7 @@ export function demoCaptureFromDraft(
     mode: "build" | "modify";
     tool?: { id: string; name: string };
     transcript: DemoCaptureLine[];
+    observed?: ObservedScreen[];
   },
 ): DemoCapture {
   return {
@@ -348,6 +375,9 @@ export function demoCaptureFromDraft(
     goal: (args.goal ?? "").trim(),
     summary: (args.summary ?? "").trim(),
     transcript: opts.transcript,
+    ...(opts.observed && opts.observed.length > 0
+      ? { observed: opts.observed }
+      : {}),
     screens: (args.screens ?? [])
       .filter((s) => (s.label ?? "").trim())
       .map((s) => ({

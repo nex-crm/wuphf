@@ -642,6 +642,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/realtime/session", b.requireAuth(b.handleRealtimeSession))
 	mux.HandleFunc("/execute/browser", b.requireAuth(b.handleExecuteBrowser))
+	mux.HandleFunc("/observe/browser", b.requireAuth(b.handleObserveBrowser))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	// Single derived-stats source: every surface-level count (header
 	// strip, board lane headers, dashboard tiles, inbox badge, wiki

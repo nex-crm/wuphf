@@ -88,6 +88,28 @@ describe("capturePromptSeed", () => {
     expect(seed).toMatch(/Key details:/);
     expect(seed).toMatch(/Operator: Archive anything under 40\./);
   });
+
+  it("includes the real page structure cua read (the ground-truth section)", () => {
+    const capture = {
+      ...assembleDemoCapture({ mode: "build", transcript: BUILD_TRANSCRIPT }),
+      observed: [
+        {
+          app: "Google Chrome",
+          title: "HubSpot — Acme Robotics",
+          components: [
+            { role: "TextField", label: "Company search" },
+            { role: "Button", label: "Search" },
+          ],
+          text: "200+ employees · Robotics",
+        },
+      ],
+    };
+    const seed = capturePromptSeed(capture);
+    expect(seed).toMatch(/Real page structure Nex read/i);
+    expect(seed).toMatch(/Google Chrome — HubSpot — Acme Robotics/);
+    expect(seed).toMatch(/TextField:Company search/);
+    expect(seed).toMatch(/200\+ employees/);
+  });
 });
 
 describe("demoCaptureFromDraft (real-call converter)", () => {

@@ -6,6 +6,7 @@
 // the scripted mock. See docs/specs/operator-cua-migration.md.
 
 import { postStream } from "../../api/client";
+import { readEventStream } from "./sse";
 
 // One event from the runner — mirrors runner/cua_exec.py's emit() shapes.
 export interface RunnerEvent {
@@ -53,37 +54,5 @@ export async function runBrowserExec(
   if (!(res.ok && res.body)) {
     throw new Error(`browser exec failed: ${res.status}`);
   }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    // SSE frames are separated by a blank line.
-    let sep: number;
-    while ((sep = buffer.indexOf("\n\n")) !== -1) {
-      const frame = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      emitFrame(frame, opts.onEvent);
-    }
-  }
-}
-
-// Parse the `data:` line(s) of one SSE frame into a RunnerEvent. The closing
-// `event: end` frame carries `data: {}` and is skipped.
-function emitFrame(frame: string, onEvent: (event: RunnerEvent) => void): void {
-  for (const line of frame.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data:")) continue;
-    const payload = trimmed.slice(5).trim();
-    if (!payload || payload === "{}") continue;
-    try {
-      onEvent(JSON.parse(payload) as RunnerEvent);
-    } catch {
-      // A malformed frame is non-fatal — skip it and keep streaming.
-    }
-  }
+  await readEventStream(res, (data) => opts.onEvent(data as RunnerEvent));
 }

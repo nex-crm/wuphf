@@ -13,6 +13,11 @@ import {
   demoCaptureFromDraft,
 } from "../apps/demoCapture";
 import {
+  type ObserveSnapshot,
+  reduceObserved,
+  runObserve,
+} from "../apps/observeClient";
+import {
   type RealtimeController,
   type RealtimeStatus,
   startRealtimeCall,
@@ -87,6 +92,10 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   const [draft, setDraft] = useState<DemoCapture | null>(null);
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // cua reads the real page in the background; we accumulate the snapshots and
+  // fold them into the build handoff when the operator taps Build.
+  const snapshotsRef = useRef<ObserveSnapshot[]>([]);
+  const [screensRead, setScreensRead] = useState(0);
   const thinkingSound = useRef<ReturnType<typeof createThinkingSound> | null>(
     null,
   );
@@ -169,6 +178,31 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
     // Start exactly once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Run the cua observe capture alongside the call. It reads the real frontmost
+  // window (component tree + text) off the voice path; we keep every snapshot so
+  // Build can hand the build the actual page structure, not just screenshots. If
+  // the host has no observer it simply does nothing and the call is unaffected.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    runObserve({
+      signal: ctrl.signal,
+      onSnapshot: (snap) => {
+        snapshotsRef.current.push(snap);
+      },
+      onNavigate: () => setScreensRead((n) => n + 1),
+    }).catch(() => {
+      // OBSERVE_UNAVAILABLE or a transport error — proceed without structured capture.
+    });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // At Build, fold the freshest observed page structure into the capture.
+  function buildWithObserved(capture: DemoCapture) {
+    const observed = reduceObserved(snapshotsRef.current);
+    onBuild(observed.length > 0 ? { ...capture, observed } : capture);
+  }
 
   const counts = draft ? captureCounts(draft) : null;
   const ctaLabel = isModify ? "Update the app" : "Build the app";
@@ -269,6 +303,7 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
                 Captured from your screen · {counts.screens} screens ·{" "}
                 {counts.selectors} elements · {counts.apiCalls} API calls ·{" "}
                 {counts.entities} entities
+                {screensRead > 0 ? ` · ${screensRead} pages read` : ""}
               </div>
               <div className="opr-call-capture-chips">
                 {draft.apiCalls.map((c) => (
@@ -319,7 +354,7 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
             <button
               type="button"
               className="opr-btn opr-btn-primary"
-              onClick={() => draft && onBuild(draft)}
+              onClick={() => draft && buildWithObserved(draft)}
               disabled={!draft}
             >
               {ctaLabel}
