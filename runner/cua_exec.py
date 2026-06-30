@@ -21,75 +21,22 @@ Standalone:
 import argparse
 import json
 import os
-import subprocess
 import sys
 import urllib.request
 
-CUA = os.path.expanduser("~/.local/bin/cua-driver")
+from cua_common import (
+    _EXCLUDED_ROLES,
+    _SENSITIVE,
+    _TEXT_ROLES,
+    cua,
+    emit,
+    find_window,
+    window_by_id,
+)
+
 MODEL = os.environ.get("WUPHF_CUA_PLANNER_MODEL", "gpt-4o")
 MAX_STEPS = int(os.environ.get("WUPHF_CUA_MAX_STEPS", "15"))
 MAX_ELEMENTS = 120  # bound the AX tree we send to the model
-
-
-def emit(obj):
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
-
-
-def cua(tool, args=None):
-    """Invoke a cua-driver tool via its `call` CLI; return parsed JSON (or text)."""
-    proc = subprocess.run(
-        [CUA, "call", tool, json.dumps(args or {})],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    out = proc.stdout.strip()
-    try:
-        return json.loads(out)
-    except Exception:
-        return out or proc.stderr.strip()
-
-
-def find_window(app_name):
-    """Find the largest on-screen window for an app — its main content window."""
-    wins = cua("list_windows")
-    wins = wins if isinstance(wins, list) else wins.get("windows", [])
-    cands = [
-        w
-        for w in wins
-        if isinstance(w, dict)
-        and w.get("app_name") == app_name
-        and w.get("is_on_screen")
-        and w.get("bounds", {}).get("height", 0) > 300
-    ]
-    if not cands:
-        return None
-    cands.sort(key=lambda w: -w["bounds"]["height"] * w["bounds"]["width"])
-    return cands[0]["pid"], cands[0]["window_id"], cands[0].get("title", "")
-
-
-# Labels matching these never cross the OpenAI boundary — they may hold or name
-# secrets. We send the role only, with a redacted placeholder.
-import re as _re
-
-_SENSITIVE = _re.compile(
-    r"password|passcode|secret|token|api[_-]?key|ssn|social security|credit|card|cvv|"
-    r"security code|otp|2fa|seed phrase|private key",
-    _re.I,
-)
-_TEXT_ROLES = ("AXTextField", "AXTextArea", "AXSearchField", "AXComboBox")
-
-# The macOS app menu bar (Chrome ▸ File ▸ …) shows up in the AX walk but is NOT
-# page content — driving it opens File/Open dialogs and the like. Exclude it so
-# the planner only ever acts on the page.
-_EXCLUDED_ROLES = {
-    "AXMenuBar",
-    "AXMenuBarItem",
-    "AXMenuItem",
-    "AXMenu",
-    "AXMenuButton",
-}
 
 
 def snapshot(pid, window_id):
@@ -231,15 +178,6 @@ def plan(api_key, messages):
     )
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())
-
-
-def window_by_id(window_id):
-    wins = cua("list_windows")
-    wins = wins if isinstance(wins, list) else wins.get("windows", [])
-    for w in wins:
-        if isinstance(w, dict) and w.get("window_id") == window_id:
-            return w.get("pid"), window_id, w.get("title", "")
-    return None
 
 
 def run(goal, app_name, api_key, dry_run=False, window_id_arg=None):

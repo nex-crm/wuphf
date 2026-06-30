@@ -138,8 +138,28 @@ to accomplish one step → every action streams live into the Run modal, gated.
 - **C3 — beyond the browser:** the same cua-driver loop on desktop apps.
 - **C4 — desktop shell:** Electron/Wails bundles cua-driver + the runner; one-click
   install + permissions.
-- **C5 (optional) — reframe OBSERVE on cua:** evaluate moving the demo-call screen
-  capture onto cua-driver too, so observe and execute share one capture layer.
+- **C5 — reframe OBSERVE on cua (IN PROGRESS):** the demo call sent only
+  `input_image` screenshots, so the AI guessed from pixels — it never read the
+  DOM/components. Replace that with cua reading the real page. **Slice 1 done:**
+  `runner/cua_observe.py` polls the FRONTMOST window every ~2.5s and captures the
+  **AX component tree** (roles + labels) + **visible text** (`page get_text` on
+  browser windows), diffing across ticks to emit `navigate` events; the broker
+  will stream these and assemble the build handoff alongside the verbatim
+  transcript. Voice path untouched → no call latency.
+  - **Finding:** `start_recording` only logs cua-driver's OWN actions, so it
+    captures nothing while a human demos. The event log therefore comes from
+    snapshot diffs, not the recorder. (The recorder is for C2 — recording cua's
+    *execution* for replay.)
+  - **Finding:** on macOS `query_dom` just re-returns the AX tree (no real HTML
+    attrs); real selectors + URL need `page execute_javascript`, which requires a
+    one-time "allow JS from Apple Events" opt-in + Chrome restart. Deferred as a
+    follow-up; AX components + text are rich enough to stitch a workflow.
+  - **Latency guards:** bounded per-call timeouts that degrade to a partial
+    snapshot instead of stalling; `page` reads only on browser windows; capture
+    runs off the voice path and feeds the (async) handoff.
+  - **Remaining slices:** broker `/observe` SSE that runs the observer; the demo
+    call starts/stops it; the handoff (`capturePromptSeed`) folds in the
+    snapshots + navigate events + verbatim transcript for the build.
 
 ## 8. Open questions
 
