@@ -94,6 +94,11 @@ export function AppBuilderChat({
   // chat already built). null means it is a brand-new build. Drives completion
   // detection so a follow-up amends instead of spawning a second build.
   const activeRefineRef = useRef<string | null>(null);
+  // App ids we have OBSERVED in a "building" state during this in-flight build.
+  // A new build only completes on a building -> terminal transition: without
+  // this, resolveNewAppId can latch onto a stale already-ready app and declare
+  // "Done" in a second without anything actually building.
+  const sawBuildingRef = useRef<Set<string>>(new Set());
 
   const build = useBuildApp();
 
@@ -140,7 +145,17 @@ export function AppBuilderChat({
     }
 
     const state = appBuildState(candidate);
-    if (state === "building") return; // still building — keep waiting
+    if (state === "building") {
+      // Record that we saw this app's build in flight, so a later ready/failed
+      // poll is a real transition, not a latch onto a stale already-ready app.
+      sawBuildingRef.current.add(candidate.id);
+      return; // still building — keep waiting
+    }
+    // A NEW build only completes on an observed building -> terminal transition.
+    // If the resolved candidate is already terminal on first sight (a stale app
+    // resolveNewAppId picked, or a race before the real pre-scaffold appears),
+    // do not declare "Done" — keep polling for the actual build.
+    if (!(refineId || sawBuildingRef.current.has(candidate.id))) return;
 
     setNewAppId(candidate.id);
     setPhase("done");
@@ -178,6 +193,8 @@ export function AppBuilderChat({
       ? appName || deriveAppName(description)
       : deriveAppName(description);
     activeRefineRef.current = refineId;
+    // Fresh build/refine: forget any building-state we observed for a prior run.
+    sawBuildingRef.current = new Set();
     // Refine: the app id is known now, so the activity feed can attach
     // immediately. New build: clear it until the pre-scaffolded app resolves.
     setBuildingAppId(refineId);
