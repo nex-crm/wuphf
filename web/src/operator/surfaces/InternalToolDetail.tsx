@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   ChevronsLeft,
   ChevronsRight,
-  Globe,
   Maximize2,
   Minimize2,
   PhoneCall,
@@ -198,14 +197,6 @@ export function InternalToolDetail({
             <button
               type="button"
               className="opr-btn opr-btn-sm"
-              onClick={() => setRunOpen(true)}
-            >
-              <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
-              Run in browser
-            </button>
-            <button
-              type="button"
-              className="opr-btn opr-btn-sm"
               onClick={onStartCall}
             >
               <PhoneCall size={13} strokeWidth={1.9} aria-hidden={true} />
@@ -317,6 +308,7 @@ export function InternalToolDetail({
               tool={{ ...tool, steps: liveSteps }}
               versions={versions}
               changedStepIds={changedStepIds}
+              onRun={() => setRunOpen(true)}
             />
           )}
           {tab === "data" &&
@@ -613,15 +605,23 @@ function WorkflowTab({
   tool,
   versions,
   changedStepIds = [],
+  onRun,
 }: {
   tool: InternalTool;
   versions: ToolVersion[];
   changedStepIds?: readonly string[];
+  onRun: () => void;
 }) {
   return (
     <div className="opr-detail-cols">
       <div>
-        <Eyebrow>How it runs · every step is scripted</Eyebrow>
+        <div className="opr-flow-head">
+          <Eyebrow>How it runs · every step is scripted</Eyebrow>
+          <button type="button" className="opr-btn opr-btn-sm" onClick={onRun}>
+            <Play size={13} strokeWidth={1.9} aria-hidden={true} />
+            Run
+          </button>
+        </div>
         <div className="opr-flow" style={{ marginTop: "var(--space-3)" }}>
           {tool.steps.map((step, i) => (
             <div

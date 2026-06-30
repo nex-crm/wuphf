@@ -190,6 +190,18 @@ export function buildMockRun(opts: {
   ];
 }
 
+// Whether an action actually drives the browser (vs. an internal read/compute).
+// The run asks for browser-control permission before the first of these.
+export function isBrowserAction(kind: ExecActionKind): boolean {
+  return (
+    kind === "navigate" ||
+    kind === "click" ||
+    kind === "type" ||
+    kind === "keypress" ||
+    kind === "scroll"
+  );
+}
+
 // Flatten steps into the ordered action timeline the run reveals.
 export function flattenRun(steps: ExecStep[]): FlatAction[] {
   const flat: FlatAction[] = [];

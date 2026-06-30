@@ -1265,6 +1265,14 @@
   box-shadow: 0 24px 80px -24px rgba(0, 0, 0, 0.7);
 }
 
+/* Workflow tab header: the "How it runs" label + the Run button. */
+.opr-flow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 /* ─────────────────────────── Browser execution (Run in browser) */
 
 .opr-exec {

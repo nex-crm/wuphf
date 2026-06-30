@@ -11,6 +11,7 @@ import {
   buildMockRun,
   type ExecStatus,
   flattenRun,
+  isBrowserAction,
 } from "../exec/browserExec";
 
 interface BrowserRunModalProps {
@@ -38,27 +39,33 @@ export function BrowserRunModal({ toolName, onClose }: BrowserRunModalProps) {
   );
   const flat = useMemo(() => flattenRun(steps), [steps]);
 
-  // How many actions have run, whether the operator paused, and which gated
-  // actions they have approved (external sends pause for approval).
+  // How many actions have run, whether the operator paused, which gated actions
+  // they have approved (external sends), and whether they have granted Nex
+  // permission to control the browser at all.
   const [ran, setRan] = useState(0);
   const [paused, setPaused] = useState(false);
   const [approved, setApproved] = useState<ReadonlySet<number>>(new Set());
+  const [browserPermitted, setBrowserPermitted] = useState(false);
 
   const next = flat[ran];
+  // The first time the run needs to actually drive the browser, ask permission.
+  const needsBrowserPermission = Boolean(
+    next && isBrowserAction(next.action.kind) && !browserPermitted,
+  );
   const awaitingApproval = Boolean(next?.action.gated && !approved.has(ran));
   const done = ran >= flat.length;
 
   const status: ExecStatus = done
     ? "done"
-    : awaitingApproval
+    : needsBrowserPermission || awaitingApproval
       ? "needs-you"
       : paused
         ? "paused"
         : "running";
 
-  // Advance the run on a timer unless it is done, paused, or waiting on the
-  // operator to approve an external send.
-  const blocked = done || paused || awaitingApproval;
+  // Advance the run on a timer unless it is done, paused, waiting on browser
+  // permission, or waiting to approve an external send.
+  const blocked = done || paused || awaitingApproval || needsBrowserPermission;
   useEffect(() => {
     if (blocked) return;
     const t = window.setTimeout(() => setRan((n) => n + 1), STEP_MS);
@@ -83,9 +90,11 @@ export function BrowserRunModal({ toolName, onClose }: BrowserRunModalProps) {
     (done ? "Run complete" : "Starting…");
   const result = done
     ? (flat.at(-1)?.action.value ?? "Run complete.")
-    : awaitingApproval
-      ? "Waiting for you to approve sending to Slack."
-      : (next?.action.reasoning ?? "Working…");
+    : needsBrowserPermission
+      ? "Nex needs your permission to control the browser."
+      : awaitingApproval
+        ? "Waiting for you to approve sending to Slack."
+        : (next?.action.reasoning ?? "Working…");
 
   function approveGate() {
     setApproved((prev) => new Set(prev).add(ran));
@@ -198,9 +207,33 @@ export function BrowserRunModal({ toolName, onClose }: BrowserRunModalProps) {
             })}
           </div>
 
-          {/* External send pauses for explicit approval — execution never
-              bypasses the human gate. */}
-          {awaitingApproval ? (
+          {/* Before Nex drives the browser at all, it asks permission. The run
+              cannot proceed until the operator grants it. */}
+          {needsBrowserPermission ? (
+            <div className="opr-exec-approval">
+              <div className="opr-exec-approval-text">
+                <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
+                Let Nex control your browser to run this?
+              </div>
+              <div className="opr-exec-approval-actions">
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-sm"
+                  onClick={onClose}
+                >
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-primary opr-btn-sm"
+                  onClick={() => setBrowserPermitted(true)}
+                >
+                  <Check size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Allow
+                </button>
+              </div>
+            </div>
+          ) : awaitingApproval ? (
             <div className="opr-exec-approval">
               <div className="opr-exec-approval-text">
                 <Send size={13} strokeWidth={1.9} aria-hidden={true} />

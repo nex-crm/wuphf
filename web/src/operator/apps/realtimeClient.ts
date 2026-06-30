@@ -89,10 +89,11 @@ const DRAFT_TOOL = {
   type: "function" as const,
   name: "draft_workflow",
   description:
-    "Call this ONLY after the operator has explicitly confirmed they are ready " +
-    "for you to leave the call and build the app. It ends the call and starts " +
-    "building the app from the demonstrated workflow, so never call it on a " +
-    "pause or your own judgment. Capture everything you observed for the build.",
+    "Call this once the operator has said yes to building the app. It does NOT " +
+    "end the call — it shows the operator a summary with a 'Build the app' " +
+    "button they tap to confirm and start the build, so they keep final " +
+    "control. Never call it on a pause, silence, or your own judgment. Capture " +
+    "everything you observed for the build.",
   parameters: {
     type: "object",
     properties: {
@@ -179,15 +180,15 @@ function instructionsFor(opts: StartRealtimeOptions): string {
     "keep it conversational.\n\n" +
     "Track everything you learn: the trigger, each app/integration and the API calls you can see, the decision logic and its branches, the " +
     "actions and where they write.\n\n" +
-    "NEVER END THE CALL ON YOUR OWN, AND NEVER DECIDE BY YOURSELF THAT YOU ARE DONE. When you think you have the whole flow, or the operator " +
-    "pauses, ASK FOR EXPLICIT CONFIRMATION before wrapping up — for example: \"I think I've got the whole flow. Are you ready for me to leave " +
-    'the call and build the app from this, or is there more you want to show me?" Then WAIT and listen. ' +
-    'ONLY when the operator gives a CLEAR yes to building it now (e.g., "yes", "build it", "go ahead", "that\'s it, build the app") do you ' +
-    'call the draft_workflow tool with everything you captured, and say one short line like "Perfect — leaving the call and building your app now." ' +
-    "Calling draft_workflow immediately ENDS the call and starts building the app — it is a one-way door. Do NOT call it on a pause, an ambiguous " +
-    "comment, silence, or your own judgment that the workflow looks complete. If they say no, not yet, or keep going, stay on the call and keep learning.";
+    "NEVER DECIDE BY YOURSELF THAT YOU ARE DONE. When you think you have the whole flow, or the operator pauses, ASK FOR EXPLICIT CONFIRMATION " +
+    '— for example: "I think I\'ve got the whole flow. Are you ready for me to build the app from this, or is there more you want to show me?" ' +
+    'Then WAIT and listen for their spoken answer. ONLY when the operator gives a CLEAR yes to building it (e.g., "yes", "build it", "go ahead", ' +
+    '"that\'s it") do you call the draft_workflow tool with everything you captured, and say one short line like "Great — I\'ve put it together, ' +
+    'tap Build when you\'re ready." Calling draft_workflow does NOT cut the call: it shows the operator a summary with a "Build the app" button ' +
+    "they tap to confirm, so THEY have the final say. Do NOT call it on a pause, an ambiguous comment, silence, mid-sentence, or your own judgment. " +
+    "If they say no, not yet, wait, or keep going, do not call it — stay on the call and keep learning.";
   if (opts.mode === "modify" && opts.tool) {
-    return `${base} The operator is CHANGING an existing app named "${opts.tool.name}". Open by saying you're ready to see the change, narrate the change as they show it, ask what should stay the same, and the same rule applies: only call draft_workflow after they explicitly confirm they're ready for you to leave the call and update the app.`;
+    return `${base} The operator is CHANGING an existing app named "${opts.tool.name}". Open by saying you're ready to see the change, narrate the change as they show it, ask what should stay the same, and the same rule applies: only call draft_workflow after they clearly say yes — and it still just shows them the Build button to tap.`;
   }
   return base;
 }

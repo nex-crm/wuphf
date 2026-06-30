@@ -33,10 +33,6 @@ const PHASE_LABEL: Record<RealtimeStatus["phase"], string> = {
   error: "Something went wrong",
 };
 
-// Once Nex drafts the workflow (the operator confirmed they're done), give a
-// short beat for its closing line, then auto-exit the call into the build.
-const AUTO_BUILD_DELAY_MS = 1800;
-
 // A soft pulsing tone played while Nex is thinking, so the operator can hear it
 // is working and not wait wondering whether it froze. Deliberately subtle.
 function createThinkingSound(): { start: () => void; stop: () => void } {
@@ -94,11 +90,6 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   const thinkingSound = useRef<ReturnType<typeof createThinkingSound> | null>(
     null,
   );
-  const autoBuildTimer = useRef<number | null>(null);
-  // onBuild is read through a ref so the once-on-mount effect always calls the
-  // latest handler when it auto-builds after the draft.
-  const onBuildRef = useRef(onBuild);
-  onBuildRef.current = onBuild;
 
   useEffect(() => {
     let controller: RealtimeController | null = null;
@@ -144,12 +135,10 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
           tool,
           transcript: transcriptRef.current,
         });
+        // Only PROPOSE the build — surface the captured context and a "Build the
+        // app" button. The call is NOT cut here; it ends only when the operator
+        // taps that button. That tap is the explicit permission to build.
         setDraft(capture);
-        // The operator confirmed — auto-exit the call into the build after a
-        // short beat for Nex's closing line. The button below is the override.
-        autoBuildTimer.current = window.setTimeout(() => {
-          onBuildRef.current(capture);
-        }, AUTO_BUILD_DELAY_MS);
       },
       onLevels: (you, ai) => {
         youAvatarRef.current?.style.setProperty("--lvl", you.toFixed(3));
@@ -174,7 +163,6 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
 
     return () => {
       cancelled = true;
-      if (autoBuildTimer.current) window.clearTimeout(autoBuildTimer.current);
       thinkingSound.current?.stop();
       controller?.stop();
     };
@@ -312,10 +300,22 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
             className="opr-detail-actions"
             style={{ justifyContent: "flex-end" }}
           >
-            <button type="button" className="opr-btn" onClick={onClose}>
-              <PhoneOff size={14} strokeWidth={1.9} aria-hidden={true} />
-              End call
-            </button>
+            {draft ? (
+              // Nex proposed the build — the operator decides. Nothing is cut
+              // until they tap Build; "Keep talking" dismisses and stays live.
+              <button
+                type="button"
+                className="opr-btn"
+                onClick={() => setDraft(null)}
+              >
+                Keep talking
+              </button>
+            ) : (
+              <button type="button" className="opr-btn" onClick={onClose}>
+                <PhoneOff size={14} strokeWidth={1.9} aria-hidden={true} />
+                End call
+              </button>
+            )}
             <button
               type="button"
               className="opr-btn opr-btn-primary"
