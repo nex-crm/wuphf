@@ -49,12 +49,18 @@ interface AppBuilderChatProps {
    * re-reads the app and republishes a new version.
    */
   editApp?: { id: string; name: string };
+  /**
+   * Render inside a docked drawer: hide the chat's own header (the drawer's
+   * Ask-AI bar provides the title + close/resize controls instead).
+   */
+  panelMode?: boolean;
 }
 
 export function AppBuilderChat({
   onClose,
   onFinish,
   editApp,
+  panelMode,
 }: AppBuilderChatProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
@@ -175,27 +181,29 @@ export function AppBuilderChat({
   return (
     <div className="opr-builder opr-builder-panel">
       <div className="opr-builder-chat">
-        <header className="opr-builder-head">
-          <div>
-            <Eyebrow>{editApp ? "Ask AI" : "Build an app"}</Eyebrow>
-            <div className="opr-builder-title">
-              {phase === "intro"
-                ? editApp
-                  ? `Edit “${editApp.name}”`
-                  : "Describe it, I will build it"
-                : appName || "Building your app"}
+        {panelMode ? null : (
+          <header className="opr-builder-head">
+            <div>
+              <Eyebrow>{editApp ? "Ask AI" : "Build an app"}</Eyebrow>
+              <div className="opr-builder-title">
+                {phase === "intro"
+                  ? editApp
+                    ? `Edit “${editApp.name}”`
+                    : "Describe it, I will build it"
+                  : appName || "Building your app"}
+              </div>
             </div>
-          </div>
-          <button
-            type="button"
-            className="opr-btn opr-btn-ghost opr-btn-sm"
-            onClick={onClose}
-            aria-label="Close builder"
-          >
-            <X size={13} strokeWidth={1.9} aria-hidden={true} />
-            Close
-          </button>
-        </header>
+            <button
+              type="button"
+              className="opr-btn opr-btn-ghost opr-btn-sm"
+              onClick={onClose}
+              aria-label="Close builder"
+            >
+              <X size={13} strokeWidth={1.9} aria-hidden={true} />
+              Close
+            </button>
+          </header>
+        )}
 
         <div className="opr-builder-scroll" ref={scrollRef}>
           {messages.map((m) => (

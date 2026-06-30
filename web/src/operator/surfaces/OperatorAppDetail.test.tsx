@@ -11,8 +11,8 @@ vi.mock("../apps/useOperatorApps", () => ({
   useOperatorApp: (id: string) => useOperatorAppMock(id),
 }));
 
-// Stub the sandbox frame (it mounts a real iframe) and the integrations tab
-// (it fetches the catalog) so the test stays unit-scoped.
+// Stub the sandbox frame (real iframe), the integrations tab (fetches the
+// catalog), and the Ask AI chat (React Query) so the test stays unit-scoped.
 vi.mock("../../components/apps/CustomAppFrame", () => ({
   CustomAppFrame: ({ appId, html }: { appId: string; html: string }) => (
     <div data-testid="app-frame" data-app-id={appId}>
@@ -22,6 +22,11 @@ vi.mock("../../components/apps/CustomAppFrame", () => ({
 }));
 vi.mock("./ToolIntegrations", () => ({
   ToolIntegrations: () => <div data-testid="tool-integrations" />,
+}));
+vi.mock("./AppBuilderChat", () => ({
+  AppBuilderChat: ({ editApp }: { editApp?: { name: string } }) => (
+    <div data-testid="ask-ai-chat">edit:{editApp?.name}</div>
+  ),
 }));
 
 function detail(
@@ -53,11 +58,7 @@ describe("OperatorAppDetail", () => {
       isError: false,
     });
     const { getByText, queryByTestId } = render(
-      <OperatorAppDetail
-        appId="app_abc"
-        onBack={() => {}}
-        onAskAI={() => {}}
-      />,
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
     expect(getByText(/building your app/i)).toBeTruthy();
     expect(queryByTestId("app-frame")).toBeNull();
@@ -69,11 +70,7 @@ describe("OperatorAppDetail", () => {
       isError: false,
     });
     const { getByTestId } = render(
-      <OperatorAppDetail
-        appId="app_abc"
-        onBack={() => {}}
-        onAskAI={() => {}}
-      />,
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
     const frame = getByTestId("app-frame");
     expect(frame.getAttribute("data-app-id")).toBe("app_abc");
@@ -86,11 +83,7 @@ describe("OperatorAppDetail", () => {
       isError: false,
     });
     const { getByText, getByRole } = render(
-      <OperatorAppDetail
-        appId="app_abc"
-        onBack={() => {}}
-        onAskAI={() => {}}
-      />,
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
     fireEvent.click(getByRole("tab", { name: "Workflow" }));
     expect(getByText("Deliver to Slack")).toBeTruthy();
@@ -99,16 +92,18 @@ describe("OperatorAppDetail", () => {
     ).toBeTruthy();
   });
 
-  it("calls onAskAI with the app id and name from the header", () => {
-    const onAskAI = vi.fn();
+  it("opens Ask AI as a docked drawer (not full screen) when clicked", () => {
     useOperatorAppMock.mockReturnValue({
       data: detail({ status: "ready" }, "<html>hi</html>"),
       isError: false,
     });
-    const { getByRole } = render(
-      <OperatorAppDetail appId="app_abc" onBack={() => {}} onAskAI={onAskAI} />,
+    const { getByRole, getByTestId, queryByTestId } = render(
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
-    fireEvent.click(getByRole("button", { name: /ask ai/i }));
-    expect(onAskAI).toHaveBeenCalledWith("app_abc", "Open Tasks");
+    // Drawer closed: only the floating bubble exists, no chat yet.
+    expect(queryByTestId("ask-ai-chat")).toBeNull();
+    fireEvent.click(getByRole("button", { name: /ask ai about open tasks/i }));
+    // Drawer open: the edit chat is mounted inside the docked panel.
+    expect(getByTestId("ask-ai-chat").textContent).toContain("edit:Open Tasks");
   });
 });
