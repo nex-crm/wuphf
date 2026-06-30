@@ -208,9 +208,10 @@ export async function startRealtimeCall(
     pc.addTrack(track, micStream);
   }
 
-  // Shared event-loop state: the AI transcript buffer and a one-shot greeting
-  // guard so Nex opens the call exactly once, after the session is configured.
-  const state = { aiText: "", greeted: false };
+  // Shared event-loop state: the AI transcript buffer, a one-shot greeting guard
+  // (Nex opens the call once, after the session is configured), and a one-shot
+  // draft guard (draft_workflow is surfaced once even if events repeat).
+  const state = { aiText: "", greeted: false, drafted: false };
   const dc = pc.createDataChannel("oai-events");
   dc.onopen = () => {
     // GA session schema: session.type is REQUIRED, audio config is nested, and
@@ -224,7 +225,10 @@ export async function startRealtimeCall(
           output_modalities: ["audio"],
           audio: {
             input: {
-              turn_detection: { type: "server_vad" },
+              // semantic_vad reads end-of-turn from meaning, so it does not cut
+              // the operator off mid-sentence while they pause to click around —
+              // the right fit for narrating a demo (OpenAI's recommended mode).
+              turn_detection: { type: "semantic_vad" },
               transcription: { model: "gpt-4o-mini-transcribe" },
             },
             output: { voice: "marin" },
@@ -306,7 +310,7 @@ export async function startRealtimeCall(
 
 async function handleEvent(
   raw: unknown,
-  state: { aiText: string; greeted: boolean },
+  state: { aiText: string; greeted: boolean; drafted: boolean },
   dc: RTCDataChannel,
   opts: StartRealtimeOptions,
 ): Promise<void> {
@@ -359,15 +363,33 @@ async function handleEvent(
     return;
   }
 
-  // The draft_workflow tool call — the end of the demo.
-  if (type === "response.function_call_arguments.done") {
-    if (ev.name !== "draft_workflow") return;
-    const argStr = typeof ev.arguments === "string" ? ev.arguments : "{}";
+  // The draft_workflow tool call — the end of the demo. The canonical signal is
+  // response.done carrying a function_call output item (with call_id); the
+  // streaming response.function_call_arguments.done event is the fallback.
+  const fc = extractDraftCall(type, ev);
+  if (fc && !state.drafted) {
+    state.drafted = true;
     try {
-      const args = JSON.parse(argStr) as DraftWorkflowArgs;
+      const args = JSON.parse(fc.arguments || "{}") as DraftWorkflowArgs;
+      // Acknowledge the tool so the model can give a short closing line instead
+      // of hanging, then surface the draft to the UI.
+      if (fc.callId) {
+        dc.send(
+          JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id: fc.callId,
+              output: JSON.stringify({ status: "drafted" }),
+            },
+          }),
+        );
+        dc.send(JSON.stringify({ type: "response.create" }));
+      }
       opts.onStatus({ phase: "drafted" });
       opts.onDraft(args);
     } catch (err) {
+      state.drafted = false;
       opts.onError(`Could not read the drafted workflow. ${errMessage(err)}`);
     }
     return;
@@ -380,6 +402,44 @@ async function handleEvent(
         : "Realtime error";
     opts.onError(msg);
   }
+}
+
+interface DraftCall {
+  callId: string;
+  arguments: string;
+}
+
+// Pull a draft_workflow function call out of whichever event carries it:
+// response.done (canonical, with the output item + call_id) or the streaming
+// function_call_arguments.done fallback.
+function extractDraftCall(
+  type: string,
+  ev: Record<string, unknown>,
+): DraftCall | null {
+  if (type === "response.done") {
+    const response = ev.response as { output?: unknown } | undefined;
+    const output = Array.isArray(response?.output) ? response.output : [];
+    for (const item of output) {
+      const o = item as Record<string, unknown>;
+      if (o.type === "function_call" && o.name === "draft_workflow") {
+        return {
+          callId: typeof o.call_id === "string" ? o.call_id : "",
+          arguments: typeof o.arguments === "string" ? o.arguments : "{}",
+        };
+      }
+    }
+    return null;
+  }
+  if (
+    type === "response.function_call_arguments.done" &&
+    ev.name === "draft_workflow"
+  ) {
+    return {
+      callId: typeof ev.call_id === "string" ? ev.call_id : "",
+      arguments: typeof ev.arguments === "string" ? ev.arguments : "{}",
+    };
+  }
+  return null;
 }
 
 interface LevelMeter {
