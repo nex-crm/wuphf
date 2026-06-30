@@ -80,6 +80,17 @@ _SENSITIVE = _re.compile(
 )
 _TEXT_ROLES = ("AXTextField", "AXTextArea", "AXSearchField", "AXComboBox")
 
+# The macOS app menu bar (Chrome ▸ File ▸ …) shows up in the AX walk but is NOT
+# page content — driving it opens File/Open dialogs and the like. Exclude it so
+# the planner only ever acts on the page.
+_EXCLUDED_ROLES = {
+    "AXMenuBar",
+    "AXMenuBarItem",
+    "AXMenuItem",
+    "AXMenu",
+    "AXMenuButton",
+}
+
 
 def snapshot(pid, window_id):
     """AX snapshot of the actionable elements (index, role, label) — NEVER values.
@@ -106,6 +117,8 @@ def snapshot(pid, window_id):
         if idx is None:
             continue
         role = e.get("role", "")
+        if role in _EXCLUDED_ROLES:
+            continue  # macOS app menu bar — never page content
         # Title/label only — deliberately NOT `value` (avoid leaking field text).
         label = str(e.get("label") or e.get("title") or "").strip()
         is_secure = role == "AXSecureTextField" or _SENSITIVE.search(label)
@@ -220,10 +233,19 @@ def plan(api_key, messages):
         return json.loads(r.read())
 
 
-def run(goal, app_name, api_key, dry_run=False):
-    found = find_window(app_name)
+def window_by_id(window_id):
+    wins = cua("list_windows")
+    wins = wins if isinstance(wins, list) else wins.get("windows", [])
+    for w in wins:
+        if isinstance(w, dict) and w.get("window_id") == window_id:
+            return w.get("pid"), window_id, w.get("title", "")
+    return None
+
+
+def run(goal, app_name, api_key, dry_run=False, window_id_arg=None):
+    found = window_by_id(window_id_arg) if window_id_arg else find_window(app_name)
     if not found:
-        emit({"type": "error", "message": f"No on-screen window for {app_name}"})
+        emit({"type": "error", "message": f"No window for {app_name}/{window_id_arg}"})
         return
     pid, window_id, title = found
     emit({"type": "status", "status": "running", "detail": f"{app_name}: {title}"})
@@ -339,6 +361,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--goal", required=True)
     ap.add_argument("--app", default="Google Chrome")
+    ap.add_argument("--window-id", type=int, default=None)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     # The key comes ONLY from the environment — the broker resolves it
@@ -350,7 +373,7 @@ def main():
         emit({"type": "error", "message": "OPENAI_API_KEY not set in environment"})
         sys.exit(1)
     try:
-        run(args.goal, args.app, key, dry_run=args.dry_run)
+        run(args.goal, args.app, key, dry_run=args.dry_run, window_id_arg=args.window_id)
     except Exception as e:
         emit({"type": "error", "message": str(e)})
         sys.exit(1)
