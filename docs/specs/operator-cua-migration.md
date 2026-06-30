@@ -38,7 +38,10 @@ top of cua ourselves, which was always the spec's plan.
 - **cua agent SDK** — the computer-use loop (screenshot → model → action →
   execute), model-agnostic (Claude, OpenAI `computer-use-preview`, others), with
   **custom computer handlers** so the loop can drive any "computer" — including
-  cua-driver on the real machine.
+  cua-driver on the real machine. cua has **no default model**; you pass one
+  explicitly. **We use OpenAI `computer-use-preview`** — confirmed accessible on
+  the operator key, same account as the realtime call, purpose-built for browser
+  actions. The model string stays config-swappable so we can A/B Claude later.
 - **cua sandboxes / Lume** — isolated VM desktops. Not the operator's machine;
   kept in reserve for safe/headless runs, not the primary path.
 
@@ -82,7 +85,8 @@ to accomplish one step → every action streams live into the Run modal, gated.
 1. **Install + smoke-test cua-driver** locally; confirm it drives the real Chrome
    (screenshot + a click) outside the product first.
 2. **cua runner** (`runner/cua_exec.py`): a `ComputerAgent` loop over a goal +
-   start URL, computer = cua-driver, model = the chosen computer-use model. Emits
+   start URL, computer = cua-driver, **model = OpenAI `computer-use-preview`**
+   (config-swappable). Emits
    one JSON line per step: `{type:"action"|"status"|"done"|"error", ...}` with the
    screenshot and the action label/reasoning — the **same ExecSession shape** the
    mock already uses, so the FE is unchanged.
@@ -139,9 +143,9 @@ to accomplish one step → every action streams live into the Run modal, gated.
 
 ## 8. Open questions
 
-1. **Model for the loop:** Claude computer-use vs OpenAI `computer-use-preview`
-   (confirmed accessible on the operator key) vs cua's default. Pick at C1; keep
-   it config so it stays swappable.
+1. **Model for the loop:** ✅ DECIDED — OpenAI `computer-use-preview` (confirmed
+   accessible on the operator key; cua has no default). Kept config-swappable so
+   Claude computer-use can be A/B'd later.
 2. **Runner transport:** the broker spawns the Python runner and reads its stdout
    (newline-JSON) → SSE. Confirm packaging (uv/venv) and how the desktop shell
    ships Python (or a frozen binary).
