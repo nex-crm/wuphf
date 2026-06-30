@@ -27,10 +27,11 @@ const appTheme = createTheme({
 // of this entry file by the App Builder and never ships in the sealed build.
 //
 // Provider setup — keep this shape:
-//   - MantineProvider forceColorScheme="light": apps render on white inside
-//     WUPHF. Pinning the scheme also sidesteps Mantine's localStorage color
-//     manager, which the sealed sandbox (opaque origin) blocks. Mantine guards
-//     that access, so it degrades safely either way.
+//   - MantineProvider forceColorScheme="dark": apps render on the operator's
+//     muted-dark surface so they BLEND into the WUPHF shell instead of being a
+//     white card on a dark surface. Pinning the scheme also sidesteps Mantine's
+//     localStorage color manager, which the sealed sandbox (opaque origin)
+//     blocks. Mantine guards that access, so it degrades safely either way.
 //   - <Refine dataProvider={bridgeDataProvider}>: routes every refine data hook
 //     through the WUPHF bridge. NO routerProvider (no app-owned URL in the
 //     sandbox), NO authProvider (the bridge runs as the signed-in user), NO
@@ -39,7 +40,7 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <MantineProvider theme={appTheme} forceColorScheme="light">
+      <MantineProvider theme={appTheme} forceColorScheme="dark">
         <Refine
           dataProvider={bridgeDataProvider}
           resources={[

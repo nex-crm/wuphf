@@ -37,7 +37,7 @@ import { MantineProvider } from "@mantine/core";
 import { Refine } from "@refinedev/core";
 import { bridgeDataProvider } from "./bridgeDataProvider";
 
-<MantineProvider forceColorScheme="light">       // apps render on white
+<MantineProvider forceColorScheme="dark">        // apps render on the dark operator surface
   <Refine
     dataProvider={bridgeDataProvider}            // routes data through the bridge
     resources={[{ name: "tasks" }, { name: "members" }, { name: "emails" }]}
@@ -48,8 +48,18 @@ import { bridgeDataProvider } from "./bridgeDataProvider";
 </MantineProvider>
 ```
 
-- **`forceColorScheme="light"`** is required — the sealed sandbox blocks
-  `localStorage`, and apps render on a white surface. Don't remove it.
+- **`forceColorScheme="dark"`** is required — the app renders on the operator's
+  muted-dark surface so it blends into the WUPHF shell (not a white card on a
+  dark surface). Pinning the scheme also sidesteps Mantine's `localStorage`
+  color manager, which the sealed sandbox blocks. Don't remove it, don't switch
+  it to light.
+- **Use REAL data through the bridge** — the data hooks (`useList`/`useTable` on
+  `tasks`/`members`/`emails`, or `getEmails`/`getTasks`/`getOfficeMembers`) read
+  the signed-in user's actual office data. Do NOT hardcode mock/sample/fixture
+  rows when a real bridge source exists for what you are building. If the app
+  needs a data source that has NO bridge resource (e.g. "expenses"), surface a
+  short empty state naming what to connect rather than silently inventing fake
+  data.
 - **NO `routerProvider`** — the sandbox has no app-owned URL. A WUPHF App is one
   screen; you don't need a router. `useTable` defaults to `syncWithLocation:
   false`, so table state lives in React, not the URL.
