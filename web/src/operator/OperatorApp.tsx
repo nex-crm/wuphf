@@ -17,10 +17,10 @@ import { CallModal } from "./components/CallModal";
 import { RealCallModal } from "./components/RealCallModal";
 import { getTool } from "./mock/data";
 import { OperatorSidebar, type OperatorSurface } from "./OperatorSidebar";
-import { AppBuilderChat } from "./surfaces/AppBuilderChat";
 import { InternalToolDetail } from "./surfaces/InternalToolDetail";
 import { InternalToolsSurface } from "./surfaces/InternalToolsSurface";
 import { OperatorAppDetail } from "./surfaces/OperatorAppDetail";
+import { OperatorBuildExperience } from "./surfaces/OperatorBuildExperience";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import {
   type BuiltWorkflow,
@@ -160,7 +160,7 @@ export function OperatorApp() {
 
       <main className="opr-main">
         {appBuilding ? (
-          <AppBuilderChat
+          <OperatorBuildExperience
             onClose={() => setAppBuilding(false)}
             onFinish={finishApp}
           />

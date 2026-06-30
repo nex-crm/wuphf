@@ -235,6 +235,14 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 }
 
 func shouldWakeLeadForTaskAction(action officeActionLog, task teamTask) bool {
+	// App-builder work is self-sufficient single-agent work: the builder owns the
+	// whole describe -> build -> verify -> publish loop and needs no lead (CEO)
+	// coordination. Waking the lead here only spawns a redundant parallel build
+	// that duplicates the work, burns turns and tokens, and can trip the budget
+	// gate. Keep the lead out of app-builder builds and edits entirely.
+	if isAppBuilderSlug(strings.TrimSpace(task.Owner)) {
+		return false
+	}
 	if strings.TrimSpace(action.Kind) != "task_updated" {
 		return true
 	}

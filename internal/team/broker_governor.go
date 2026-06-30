@@ -37,6 +37,23 @@ func (b *Broker) SetHeadlessDispatchController(c headlessDispatchController) {
 	b.governor.setController(c)
 }
 
+// dispatchAgentTurn enqueues a single agent turn directly — one agent, one job,
+// no CEO/lead orchestration hop. Returns false when no enqueuer is wired (unit
+// tests, or before the launcher attaches). This is the pi-skeleton dispatch the
+// App Builder edit path uses so a human change reaches the builder without
+// bouncing through the lead (which can hit its own turn cap and drop the work).
+func (b *Broker) dispatchAgentTurn(slug, prompt, channel string) bool {
+	if b == nil || b.governor == nil {
+		return false
+	}
+	e, ok := b.governor.enqueuer()
+	if !ok {
+		return false
+	}
+	e.EnqueueHeadlessTurn(slug, prompt, channel)
+	return true
+}
+
 // initGovernor creates the session governor and baselines it to any usage
 // restored from the state file, so a new session doesn't trip an instant budget
 // pause on its first turn. Called once from NewBrokerAt after state load.

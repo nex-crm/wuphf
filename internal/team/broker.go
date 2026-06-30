@@ -727,6 +727,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
 	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
 	mux.HandleFunc("/operator/run-plan", b.requireAuth(b.handleOperatorRunPlan))
+	// App-scoped deterministic workflow: compile once + freeze, then run the
+	// same frozen plan every time (compile-and-freeze). See broker_operator_workflow.go.
+	mux.HandleFunc("/operator/apps/", b.requireAuth(b.handleOperatorAppWorkflow))
 	mux.HandleFunc("/approval-audit", b.requireAuth(b.handleApprovalAudit))
 	mux.HandleFunc("/integrations", b.requireAuth(b.handleIntegrations))
 	mux.HandleFunc("/integrations/connect", b.requireAuth(b.handleIntegrationConnect))

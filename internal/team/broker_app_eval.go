@@ -81,12 +81,23 @@ func (b *Broker) sweepStalledAppBuildsLocked() []string {
 	return due
 }
 
+// appAcceptanceGateEnabled toggles the post-done acceptance gate. DISABLED as
+// pi-skeleton cleanup: the gate was old multi-agent-harness fluff — a second
+// LLM/deterministic re-grader that REOPENED a completed build task when its
+// (flaky) judge was unavailable or found "gaps", leaving the task stuck
+// in_progress. That stuck state then broke the edit-channel follow-up wake
+// (which needs a settled task). A build that published a ready, versioned bundle
+// IS done; the app store + the FE's build-state already surface a non-published
+// build. Flip back on only for a deliberate acceptance need, not ambient
+// harness overhead.
+const appAcceptanceGateEnabled = false
+
 // queueAppAcceptanceEval fires the post-done acceptance gate for an App Builder
-// build task. No-op unless detection is enabled (the production web path turns it
-// on), so the unit suite — which completes many tasks — never makes a live judge
-// call. The owner filter inside the worker keeps it to App Builder build tasks.
+// build task. No-op unless the gate is enabled AND detection is on (the
+// production web path turns the latter on). The owner filter inside the worker
+// keeps it to App Builder build tasks.
 func (b *Broker) queueAppAcceptanceEval(taskID string) {
-	if b == nil || !b.workflowDetectionEnabled {
+	if !appAcceptanceGateEnabled || b == nil || !b.workflowDetectionEnabled {
 		return
 	}
 	taskID = strings.TrimSpace(taskID)
