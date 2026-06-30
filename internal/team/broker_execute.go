@@ -161,6 +161,63 @@ func (b *Broker) handleExecuteBrowser(w http.ResponseWriter, r *http.Request) {
 	spawnRunnerSSE(w, r, executeBrowserArgs(runner, req), []string{"OPENAI_API_KEY=" + key})
 }
 
+type executeReplayRequest struct {
+	// The recorded trajectory ({goal, app, steps}) from a prior run, forwarded
+	// verbatim to the runner's --replay. Raw so we don't re-encode it.
+	Trajectory json.RawMessage `json:"trajectory"`
+	WindowID   int             `json:"window_id,omitempty"`
+}
+
+// handleExecuteReplay deterministically replays a recorded trajectory: the runner
+// matches each step's element by its stable role+label and executes it, healing
+// (one model call) only for steps whose element is gone. Needs the key because a
+// heal calls the model. The trajectory carries no secrets (the original run's
+// model never had credentials); we still write it to a private temp file and
+// remove it after.
+func (b *Broker) handleExecuteReplay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req executeReplayRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if len(req.Trajectory) == 0 {
+		http.Error(w, "missing trajectory", http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(config.ResolveOpenAIAPIKey())
+	if key == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no OpenAI key configured"})
+		return
+	}
+	runner := cuaRunnerPath("cua_exec.py", "WUPHF_CUA_RUNNER")
+	if runner == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cua runner not available"})
+		return
+	}
+	f, err := os.CreateTemp("", "cua-traj-*.json")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "temp file failed"})
+		return
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(req.Trajectory); err != nil {
+		f.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "temp write failed"})
+		return
+	}
+	f.Close()
+
+	args := []string{runner, "--replay", f.Name()}
+	if req.WindowID > 0 {
+		args = append(args, "--window-id", strconv.Itoa(req.WindowID))
+	}
+	spawnRunnerSSE(w, r, args, []string{"OPENAI_API_KEY=" + key})
+}
+
 // executeBrowserArgs builds the runner argv. The goal/app are argv elements (no
 // shell) and window_id is an int, so none of them can inject a command.
 func executeBrowserArgs(runner string, req executeBrowserRequest) []string {
