@@ -59,7 +59,7 @@ export function InternalToolsSurface({
             </button>
             <button type="button" className="opr-btn" onClick={onStartCall}>
               <PhoneCall size={14} strokeWidth={1.9} aria-hidden={true} />
-              Teach your workflow to Nex
+              Demo workflow to Nex
             </button>
           </div>
         }

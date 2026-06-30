@@ -2889,6 +2889,20 @@
   color: var(--t-accent);
 }
 
+/* Bottom-right cluster holding the two peer affordances (Demo to Nex + Ask AI).
+   The container owns the fixed position; the fabs inside lay out in a row. */
+.opr-detail-fabs {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 40;
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.opr-detail-fabs .opr-ask-fab {
+  position: static;
+}
+
 /* Port the shared ConnectIntegrationCard (eac-*, defined in global.css with
    main-app tokens) to the operator look. Scoped under .opr-root so the main app
    keeps its own styling; here the card adopts operator tokens. */

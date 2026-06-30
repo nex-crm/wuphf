@@ -25,10 +25,17 @@ import {
   WorkflowBuilder,
 } from "./surfaces/WorkflowBuilder";
 
+// The "Demo workflow to Nex" call runs in one of two modes: BUILD a new tool
+// (the entry points in the sidebar / tools list / chats) or MODIFY an existing
+// one (the peer-to-Ask-AI affordance on a tool detail, which carries the tool).
+type CallContext =
+  | { mode: "build" }
+  | { mode: "modify"; toolId: string; toolName: string };
+
 export function OperatorApp() {
   const [surface, setSurface] = useState<OperatorSurface>("tools");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [callOpen, setCallOpen] = useState(false);
+  const [call, setCall] = useState<CallContext | null>(null);
   // Two builders: the app builder (primary, real) and the legacy workflow
   // builder (kept for the workflow-tab path).
   const [appBuilding, setAppBuilding] = useState(false);
@@ -38,6 +45,10 @@ export function OperatorApp() {
   const [builtDraft, setBuiltDraft] = useState<BuiltWorkflow | null>(null);
   // "run" handoffs land on the Workflow tab (run history); plain opens stay UI.
   const [openOnWorkflowTab, setOpenOnWorkflowTab] = useState(false);
+  // Bumped to force the tool detail to remount — used when a modify call ends on
+  // the SAME tool it started from, so the detail re-opens on the Workflow tab
+  // (where the demonstrated change shows) instead of keeping its prior tab.
+  const [detailNonce, setDetailNonce] = useState(0);
 
   function resetSubState() {
     setSelectedId(null);
@@ -101,10 +112,16 @@ export function OperatorApp() {
     if (selectedTool) {
       return (
         <InternalToolDetail
-          key={selectedTool.id}
+          key={`${selectedTool.id}:${detailNonce}`}
           tool={selectedTool}
           onBack={() => setSelectedId(null)}
-          onStartCall={() => setCallOpen(true)}
+          onStartCall={() =>
+            setCall({
+              mode: "modify",
+              toolId: selectedTool.id,
+              toolName: selectedTool.name,
+            })
+          }
           initialTab={openOnWorkflowTab ? "workflow" : "ui"}
         />
       );
@@ -112,7 +129,7 @@ export function OperatorApp() {
     return (
       <InternalToolsSurface
         onOpen={openTool}
-        onStartCall={() => setCallOpen(true)}
+        onStartCall={() => setCall({ mode: "build" })}
         onBuild={() => setAppBuilding(true)}
       />
     );
@@ -123,7 +140,7 @@ export function OperatorApp() {
       <OperatorSidebar
         active={surface}
         onSelect={go}
-        onStartCall={() => setCallOpen(true)}
+        onStartCall={() => setCall({ mode: "build" })}
         onBuild={() => setAppBuilding(true)}
       />
 
@@ -146,12 +163,21 @@ export function OperatorApp() {
       {/* Auto-surfaced approvals (e.g. an app's Slack post) — global overlay. */}
       <ApprovalPrompt />
 
-      {callOpen ? (
+      {call ? (
         <CallModal
-          onClose={() => setCallOpen(false)}
+          tool={call.mode === "modify" ? { name: call.toolName } : undefined}
+          onClose={() => setCall(null)}
           onBuild={() => {
-            setCallOpen(false);
-            openTool("inbound-routing");
+            // Build mode drafts a new tool (the inbound-routing mock); modify
+            // mode lands back on the tool whose change was just demonstrated,
+            // on its Workflow tab where the change shows.
+            const target =
+              call.mode === "modify" ? call.toolId : "inbound-routing";
+            setCall(null);
+            setOpenOnWorkflowTab(call.mode === "modify");
+            setSelectedId(target);
+            setSurface("tools");
+            if (call.mode === "modify") setDetailNonce((n) => n + 1);
           }}
         />
       ) : null}

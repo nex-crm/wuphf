@@ -1,9 +1,15 @@
-// The "magical call" — primary activation surface (mock).
+// "Demo workflow to Nex" — the teach-by-demonstration call (mock).
 //
-// In the real product this is a screen-share + free-voice session where the
-// operator narrates their process while the AI watches and asks questions,
-// then drafts a deterministic tool. Here it is a presentational mock so the
-// shape of the hero moment can be seen and reacted to. Nothing is captured.
+// In the real product (operator spec S5/S6) this is a screen-share + free-voice
+// session: the operator demonstrates their process while Nex watches the screen
+// and asks questions, then drafts (or edits) a deterministic tool. The eventual
+// mechanism is a computer-use agent (CUA) over the captured screen plus OpenAI
+// Realtime for the voice (BYOK or wuphf-hosted, see Settings). Here it is a
+// presentational mock so the shape of the hero moment can be seen and reacted
+// to. Nothing is captured yet.
+//
+// Two modes: BUILD (no tool given) demos a brand-new tool; MODIFY (a tool given)
+// demos a change to an existing one. Build is the default.
 
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, PhoneOff, SkipForward } from "lucide-react";
@@ -13,7 +19,8 @@ interface CallLine {
   text: string;
 }
 
-const SCRIPT: CallLine[] = [
+// BUILD: demonstrate a brand-new workflow from scratch.
+const BUILD_SCRIPT: CallLine[] = [
   {
     who: "ai",
     text: "Walk me through how you handle a new demo request. I'm watching your screen.",
@@ -41,16 +48,53 @@ const SCRIPT: CallLine[] = [
   },
 ];
 
+// MODIFY: demonstrate a change to a tool that already exists.
+function modifyScript(toolName: string): CallLine[] {
+  return [
+    {
+      who: "ai",
+      text: `Show me what you want to change about ${toolName}. I'm watching your screen.`,
+    },
+    {
+      who: "you",
+      text: "When a lead scores below 40, I don't want to nurture them anymore. Just archive them.",
+    },
+    {
+      who: "ai",
+      text: "So under 40 becomes archive instead of nurture. Anything else move?",
+    },
+    { who: "you", text: "No, just that one branch." },
+    {
+      who: "ai",
+      text: `Got it. I've drafted the change to ${toolName}: scores under 40 route to archive, not the nurture sequence. Want to see it?`,
+    },
+  ];
+}
+
 // How long each scripted line lingers before the next one reveals.
 const REVEAL_MS = 1400;
 
 interface CallModalProps {
   onClose: () => void;
   onBuild: () => void;
+  // When set, the call demonstrates a CHANGE to this existing tool (modify
+  // mode). When omitted, it demonstrates a brand-new tool (build mode).
+  tool?: { name: string };
 }
 
-export function CallModal({ onClose, onBuild }: CallModalProps) {
+export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const isModify = Boolean(tool);
+  const SCRIPT = isModify
+    ? modifyScript(tool?.name ?? "this tool")
+    : BUILD_SCRIPT;
+  const dialogLabel = isModify
+    ? `Demo a change to ${tool?.name}`
+    : "Demo your workflow to Nex";
+  const screenLabel = isModify
+    ? `operator screen: ${tool?.name}`
+    : "operator screen: inbound demo requests";
+  const ctaLabel = isModify ? "See the change" : "See the drafted tool";
 
   // a11y: close on Escape, focus the dialog on open, restore focus on close,
   // and keep Tab focus inside the dialog (a minimal focus trap).
@@ -102,7 +146,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
       className="opr-modal-scrim"
       role="dialog"
       aria-modal="true"
-      aria-label="Build a tool on a call"
+      aria-label={dialogLabel}
       onClick={onClose}
     >
       <div
@@ -116,9 +160,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
             <span className="opr-led" />
             rec · screen share
           </div>
-          <div className="opr-call-screenshare">
-            operator screen: inbound demo requests
-          </div>
+          <div className="opr-call-screenshare">{screenLabel}</div>
           <div className="opr-call-wave" aria-hidden={true}>
             ▁▂▃▅▇▅▃▂▁ ▁▂▃▅▇▅▃▂▁ ▁▂▃▅▇▅▃▂▁
           </div>
@@ -162,7 +204,7 @@ export function CallModal({ onClose, onBuild }: CallModalProps) {
               onClick={onBuild}
               disabled={!done}
             >
-              See the drafted tool
+              {ctaLabel}
               <ArrowRight size={14} strokeWidth={1.9} aria-hidden={true} />
             </button>
           </div>

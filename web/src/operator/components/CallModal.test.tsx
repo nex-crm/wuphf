@@ -44,3 +44,51 @@ describe("CallModal reveal", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+// Modify mode: passing a `tool` reframes the call as demonstrating a CHANGE to an
+// existing tool — different dialog label, scoped script, and a "See the change"
+// CTA — instead of drafting a brand-new tool.
+describe("CallModal modify mode", () => {
+  it("frames the call around the existing tool", () => {
+    render(
+      <CallModal
+        onClose={vi.fn()}
+        onBuild={vi.fn()}
+        tool={{ name: "Inbound routing" }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: /demo a change to inbound routing/i }),
+    ).toBeInTheDocument();
+    // The CTA is the modify label, not the build one.
+    expect(
+      screen.getByRole("button", { name: /see the change/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /see the drafted tool/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("enables the change CTA after Skip ahead", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    render(
+      <CallModal
+        onClose={vi.fn()}
+        onBuild={vi.fn()}
+        tool={{ name: "Inbound routing" }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /see the change/i }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: /skip ahead/i }));
+
+    expect(
+      screen.getByRole("button", { name: /see the change/i }),
+    ).toBeEnabled();
+  });
+});

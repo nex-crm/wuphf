@@ -20,6 +20,7 @@ import {
   ChevronsRight,
   Maximize2,
   Minimize2,
+  PhoneCall,
   Play,
   Plus,
   Power,
@@ -66,7 +67,11 @@ const TABS: readonly TabDef<ToolTab>[] = [
 // (the most common edit target). Returns null when nothing clearly matches.
 function inferToolTab(message: string): ToolTab | null {
   const t = message.toLowerCase();
-  if (/\b(screen|ui|button|form|layout|design|how it looks|display|the page)\b/.test(t)) {
+  if (
+    /\b(screen|ui|button|form|layout|design|how it looks|display|the page)\b/.test(
+      t,
+    )
+  ) {
     return "ui";
   }
   if (/\b(data|rows?|records?|columns?|the table|fields?)\b/.test(t)) {
@@ -75,7 +80,11 @@ function inferToolTab(message: string): ToolTab | null {
   if (/\b(integration|connect|hubspot|slack|gmail|composio|app)\b/.test(t)) {
     return "integrations";
   }
-  if (/\b(step|workflow|threshold|route|trigger|score|branch|decision|send|post|notify|gate|approval|sequence|nurture)\b/.test(t)) {
+  if (
+    /\b(step|workflow|threshold|route|trigger|score|branch|decision|send|post|notify|gate|approval|sequence|nurture)\b/.test(
+      t,
+    )
+  ) {
     return "workflow";
   }
   return null;
@@ -131,7 +140,9 @@ export function InternalToolDetail({
     const changed = draft.steps
       .filter((step) => {
         const prev = liveSteps.find((p) => p.id === step.id);
-        return !prev || prev.title !== step.title || prev.detail !== step.detail;
+        return (
+          !prev || prev.title !== step.title || prev.detail !== step.detail
+        );
       })
       .map((step) => step.id);
     setLiveSteps(draft.steps);
@@ -167,6 +178,14 @@ export function InternalToolDetail({
             </div>
           </div>
           <div className="opr-detail-actions">
+            <button
+              type="button"
+              className="opr-btn opr-btn-sm"
+              onClick={onStartCall}
+            >
+              <PhoneCall size={13} strokeWidth={1.9} aria-hidden={true} />
+              Demo to Nex
+            </button>
             <button
               type="button"
               className="opr-btn opr-btn-sm"
@@ -263,8 +282,8 @@ export function InternalToolDetail({
               <EmptyState
                 glyph="◧"
                 title="No screen built yet"
-                hint="Build the screen your team will use to run this tool. Talk it through on a call and your AI assembles it."
-                actionLabel="Teach your workflow to Nex"
+                hint="Build the screen your team will use to run this tool. Demo it to Nex on a call and your AI assembles it."
+                actionLabel="Demo workflow to Nex"
                 onAction={onStartCall}
               />
             ))}
@@ -291,17 +310,30 @@ export function InternalToolDetail({
         </div>
       </div>
 
-      {/* Pop the tool's AI open from anywhere — on any tab. */}
+      {/* Two peer affordances, reachable on any tab: demo a change to the tool
+          on a call, or ask its AI in chat. Hidden while the chat panel is open
+          (it would overlap them). */}
       {chatOpen ? null : (
-        <button
-          type="button"
-          className="opr-ask-fab"
-          onClick={() => setChatOpen(true)}
-          aria-label={`Ask AI about ${tool.name}`}
-        >
-          <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-          Ask AI
-        </button>
+        <div className="opr-detail-fabs">
+          <button
+            type="button"
+            className="opr-ask-fab"
+            onClick={onStartCall}
+            aria-label={`Demo a change to ${tool.name} to Nex`}
+          >
+            <PhoneCall size={16} strokeWidth={2} aria-hidden={true} />
+            Demo to Nex
+          </button>
+          <button
+            type="button"
+            className="opr-ask-fab"
+            onClick={() => setChatOpen(true)}
+            aria-label={`Ask AI about ${tool.name}`}
+          >
+            <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
+            Ask AI
+          </button>
+        </div>
       )}
 
       {chatOpen ? (
@@ -330,13 +362,23 @@ export function InternalToolDetail({
                   onClick={() =>
                     setPanelSize((s) => (s === "wide" ? "dock" : "wide"))
                   }
-                  aria-label={panelSize === "wide" ? "Narrow panel" : "Widen panel"}
+                  aria-label={
+                    panelSize === "wide" ? "Narrow panel" : "Widen panel"
+                  }
                   title={panelSize === "wide" ? "Narrow" : "Widen"}
                 >
                   {panelSize === "wide" ? (
-                    <ChevronsRight size={15} strokeWidth={1.9} aria-hidden={true} />
+                    <ChevronsRight
+                      size={15}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
                   ) : (
-                    <ChevronsLeft size={15} strokeWidth={1.9} aria-hidden={true} />
+                    <ChevronsLeft
+                      size={15}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
                   )}
                 </button>
                 <button
@@ -348,7 +390,9 @@ export function InternalToolDetail({
                   aria-label={
                     panelSize === "modal" ? "Exit full screen" : "Full screen"
                   }
-                  title={panelSize === "modal" ? "Exit full screen" : "Full screen"}
+                  title={
+                    panelSize === "modal" ? "Exit full screen" : "Full screen"
+                  }
                 >
                   {panelSize === "modal" ? (
                     <Minimize2 size={14} strokeWidth={1.9} aria-hidden={true} />
@@ -369,7 +413,7 @@ export function InternalToolDetail({
             </div>
             <div className="opr-ask-body">
               <WorkflowBuilder
-                panelMode
+                panelMode={true}
                 scopeToolName={tool.name}
                 onClose={() => setChatOpen(false)}
                 onFinish={applyWorkflowEdit}
