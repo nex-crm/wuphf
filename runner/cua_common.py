@@ -66,6 +66,31 @@ _EXCLUDED_ROLES = {
 }
 
 
+# Actions that SEND something externally (Slack/Gmail/posts/tweets) must NEVER
+# auto-fire — they pause for the operator's approval (the confidential-send rule).
+# Heuristic on the element label; over-asking is far safer than auto-sending.
+_SEND_PATTERN = re.compile(
+    r"\b(send|post|publish|share|reply|tweet|deliver|broadcast)\b", re.I
+)
+
+
+def needs_approval(label):
+    """True when an action on this label would send something externally."""
+    return bool(_SEND_PATTERN.search(label or ""))
+
+
+def await_approval(label):
+    """Pause for an external send: emit an approval_request and BLOCK on stdin
+    until the broker forwards the operator's decision. Returns True on approve;
+    any other line, EOF, or error means do NOT send."""
+    emit({"type": "approval_request", "label": label})
+    try:
+        line = sys.stdin.readline()
+    except Exception:
+        return False
+    return line.strip().lower() == "approve"
+
+
 def redact_label(role, raw_label):
     """Return (label, is_secure). Secret-named or secure fields get a placeholder
     so no field text crosses to the model — only structure does."""

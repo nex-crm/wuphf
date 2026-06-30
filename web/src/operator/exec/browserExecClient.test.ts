@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import {
+  approveExec,
   EXEC_UNAVAILABLE,
   type RunnerEvent,
   runBrowserExec,
   runBrowserReplay,
 } from "./browserExecClient";
 
-vi.mock("../../api/client", () => ({ postStream: vi.fn() }));
+vi.mock("../../api/client", () => ({ postStream: vi.fn(), post: vi.fn() }));
 
-import { postStream } from "../../api/client";
+import { post, postStream } from "../../api/client";
 
 function sseResponse(chunks: string[], status = 200): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -89,6 +90,14 @@ describe("runBrowserExec", () => {
       expect.objectContaining({}),
     );
     expect(events.some((e) => e.replayed)).toBe(true);
+  });
+
+  it("approveExec forwards the decision to /execute/approve for the run", async () => {
+    await approveExec("run-9", "approve");
+    expect(post).toHaveBeenCalledWith("/execute/approve", {
+      run_id: "run-9",
+      decision: "approve",
+    });
   });
 
   it("sends goal, app and window_id to the endpoint", async () => {
