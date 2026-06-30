@@ -167,13 +167,28 @@ export function OperatorAppDetail({
           id={`opr-panel-${tab}`}
           aria-labelledby={`opr-tab-${tab}`}
         >
-          <TabBody
-            tab={tab}
-            query={query}
-            failed={failed}
-            onRemove={removeAndBack}
-            removing={remove.isPending}
-          />
+          {/* The UI tab's app frame stays MOUNTED across tab switches — hidden,
+              not unmounted, when another tab is active — so returning to the UI
+              tab does NOT reload the iframe and re-run the app (re-fetching
+              Gmail, re-summarizing, re-rendering) every single time. The other
+              tabs mount only while active. */}
+          <div style={tab === "ui" ? undefined : { display: "none" }}>
+            <UiTab
+              query={query}
+              failed={failed}
+              onRemove={removeAndBack}
+              removing={remove.isPending}
+            />
+          </div>
+          {tab !== "ui" ? (
+            <TabBody
+              tab={tab}
+              query={query}
+              failed={failed}
+              onRemove={removeAndBack}
+              removing={remove.isPending}
+            />
+          ) : null}
         </div>
       </div>
 
