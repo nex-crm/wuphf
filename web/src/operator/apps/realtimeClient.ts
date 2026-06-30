@@ -62,8 +62,21 @@ interface RealtimeSessionToken {
   expires_at?: number;
 }
 
-// How often we push a screen frame into the conversation as vision input.
-const FRAME_INTERVAL_MS = 4000;
+// Live call state shared between the data-channel event loop and the frame timer.
+interface CallState {
+  aiText: string;
+  greeted: boolean;
+  drafted: boolean;
+  responding: boolean;
+  userSpeaking: boolean;
+}
+
+// How often we push a screen frame into the conversation as vision input. Lower
+// is more responsive to on-screen changes (less lag) at more vision token cost.
+const FRAME_INTERVAL_MS = 1500;
+// Every Nth frame, if Nex is idle and the operator is not speaking, invite it to
+// note any NEW step it sees — so it narrates the demo even during silent clicks.
+const NUDGE_EVERY_FRAMES = 5;
 // Downscale frames to bound vision token cost.
 const FRAME_MAX_WIDTH = 1024;
 
@@ -149,12 +162,19 @@ function instructionsFor(opts: StartRealtimeOptions): string {
     "The operator is sharing their screen and will DEMONSTRATE a workflow by doing it and narrating. " +
     "OPEN THE CALL by warmly greeting them in one short sentence and saying you are ready to watch them work and learn their workflow — for example: " +
     "\"Hey, I'm ready when you are. Walk me through what you do, and I'll watch your screen and learn it.\" " +
-    "Then stay quiet and listen until they speak or act. Watch the screen images and listen. Be concise and warm. " +
-    "Ask at most one or two sharp clarifying questions. Identify the trigger, the apps/integrations and the API calls you can see, " +
-    "the decision logic, and the actions. When you understand it, call the draft_workflow tool with everything you captured, " +
-    "then briefly say you have drafted it.";
+    "\n\nAs they work, WATCH THE SCREEN CLOSELY and NARRATE WHAT YOU SEE. When a meaningful step happens — they open an app, search a record, " +
+    "copy a value, click a button, send a message — briefly confirm it out loud in one short sentence so they know you caught it " +
+    '(e.g., "Got it, you looked up the company in HubSpot," or "Okay, you posted that to #ae-handoffs"). Keep confirmations short and ' +
+    "natural, not a play-by-play of every pixel.\n\n" +
+    "BE GENUINELY CURIOUS. Ask sharp questions to capture what the tool will need when we build it: what triggers this? what decides one " +
+    "path versus another (thresholds, fields, conditions)? what happens to the cases that do not qualify? which app or channel does each " +
+    "step touch, and what gets written where? what should happen when something is missing or ambiguous? Ask one question at a time and " +
+    "keep it conversational.\n\n" +
+    "Track everything you learn: the trigger, each app/integration and the API calls you can see, the decision logic and its branches, the " +
+    "actions and where they write. When you have a clear picture, call the draft_workflow tool with everything you captured, then briefly " +
+    "say you have drafted it.";
   if (opts.mode === "modify" && opts.tool) {
-    return `${base} The operator is CHANGING an existing tool named "${opts.tool.name}". Open by saying you're ready to see the change, and focus only on the change they demonstrate.`;
+    return `${base} The operator is CHANGING an existing tool named "${opts.tool.name}". Open by saying you're ready to see the change, narrate the change as they show it, ask what should stay the same, and focus only on the change they demonstrate.`;
   }
   return base;
 }
@@ -209,9 +229,16 @@ export async function startRealtimeCall(
   }
 
   // Shared event-loop state: the AI transcript buffer, a one-shot greeting guard
-  // (Nex opens the call once, after the session is configured), and a one-shot
-  // draft guard (draft_workflow is surfaced once even if events repeat).
-  const state = { aiText: "", greeted: false, drafted: false };
+  // (Nex opens the call once, after the session is configured), a one-shot draft
+  // guard (draft_workflow surfaced once), and live turn flags so the observation
+  // nudge never fires while Nex is already talking or the operator is speaking.
+  const state = {
+    aiText: "",
+    greeted: false,
+    drafted: false,
+    responding: false,
+    userSpeaking: false,
+  };
   const dc = pc.createDataChannel("oai-events");
   dc.onopen = () => {
     // GA session schema: session.type is REQUIRED, audio config is nested, and
@@ -228,7 +255,8 @@ export async function startRealtimeCall(
               // semantic_vad reads end-of-turn from meaning, so it does not cut
               // the operator off mid-sentence while they pause to click around —
               // the right fit for narrating a demo (OpenAI's recommended mode).
-              turn_detection: { type: "semantic_vad" },
+              // High eagerness keeps Nex's replies snappy rather than laggy.
+              turn_detection: { type: "semantic_vad", eagerness: "high" },
               transcription: { model: "gpt-4o-mini-transcribe" },
             },
             output: { voice: "marin" },
@@ -264,17 +292,39 @@ export async function startRealtimeCall(
 
   opts.onStatus({ phase: "live" });
 
-  // 5. Vision: push a downscaled screen frame on an interval.
+  // 5. Vision: push a downscaled screen frame on an interval so Nex sees what is
+  // happening with little lag. Periodically, when Nex is idle and the operator
+  // is not speaking, invite it to note a new step — so it narrates silent clicks
+  // without ever talking over anyone.
+  let frameTick = 0;
   const frameTimer = window.setInterval(() => {
     const frame = opts.videoEl ? grabFrame(opts.videoEl) : null;
-    if (frame && dc.readyState === "open") {
+    if (!frame || dc.readyState !== "open") return;
+    dc.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_image", image_url: frame }],
+        },
+      }),
+    );
+    frameTick++;
+    if (
+      frameTick % NUDGE_EVERY_FRAMES === 0 &&
+      state.greeted &&
+      !state.responding &&
+      !state.userSpeaking &&
+      !state.drafted
+    ) {
+      state.responding = true;
       dc.send(
         JSON.stringify({
-          type: "conversation.item.create",
-          item: {
-            type: "message",
-            role: "user",
-            content: [{ type: "input_image", image_url: frame }],
+          type: "response.create",
+          response: {
+            instructions:
+              "If you see a NEW meaningful step on screen since you last spoke, confirm it in one short sentence and, if helpful, ask one curious question about it. If nothing new is happening, stay silent and do not speak.",
           },
         }),
       );
@@ -310,7 +360,7 @@ export async function startRealtimeCall(
 
 async function handleEvent(
   raw: unknown,
-  state: { aiText: string; greeted: boolean; drafted: boolean },
+  state: CallState,
   dc: RTCDataChannel,
   opts: StartRealtimeOptions,
 ): Promise<void> {
@@ -323,10 +373,17 @@ async function handleEvent(
   }
   const type = typeof ev.type === "string" ? ev.type : "";
 
+  // Track who holds the turn so the observation nudge never talks over anyone.
+  if (type === "response.created") state.responding = true;
+  if (type === "response.done") state.responding = false;
+  if (type === "input_audio_buffer.speech_started") state.userSpeaking = true;
+  if (type === "input_audio_buffer.speech_stopped") state.userSpeaking = false;
+
   // Once the session is configured (instructions + VAD live), have Nex open the
   // call exactly once. Greeting before this would use default behavior.
   if (type === "session.updated" && !state.greeted) {
     state.greeted = true;
+    state.responding = true;
     dc.send(JSON.stringify({ type: "response.create" }));
     return;
   }
@@ -384,6 +441,7 @@ async function handleEvent(
             },
           }),
         );
+        state.responding = true;
         dc.send(JSON.stringify({ type: "response.create" }));
       }
       opts.onStatus({ phase: "drafted" });
