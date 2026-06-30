@@ -104,6 +104,16 @@ func operatorResolver(prov action.Provider) action.WorkflowActionResolver {
 	if os.Getenv("WUPHF_OPERATOR_REAL_BINDING") != "1" {
 		return action.NewStubWorkflowResolver()
 	}
+	return operatorComposioResolver(prov)
+}
+
+// operatorComposioResolver builds the REAL Composio action resolver (catalog
+// search + LLM binding) with no env gate — the operator app Workflow tab always
+// compiles against the real engine. It falls back to the stub only when the
+// provider is not the Composio REST client; the resolver itself fails safe per
+// step (it narrates a step as a template if the catalog or model is briefly
+// unavailable), so binding never breaks and nothing is sent on a guess.
+func operatorComposioResolver(prov action.Provider) action.WorkflowActionResolver {
 	composio, ok := prov.(*action.ComposioREST)
 	if !ok {
 		return action.NewStubWorkflowResolver()
@@ -112,6 +122,15 @@ func operatorResolver(prov action.Provider) action.WorkflowActionResolver {
 		res, err := composio.SearchActions(ctx, platform, query, "")
 		if err != nil {
 			return nil, err
+		}
+		// A natural-language query can match nothing in the catalog search; fall
+		// back to the toolkit's full action list so the LLM always has real
+		// candidates to bind to instead of degrading the step to narration.
+		if len(res.Actions) == 0 {
+			res, err = composio.SearchActions(ctx, platform, "", "")
+			if err != nil {
+				return nil, err
+			}
 		}
 		return res.Actions, nil
 	}

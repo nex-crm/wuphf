@@ -39,6 +39,32 @@ export interface CustomAppDetail {
   html: string;
 }
 
+/**
+ * One external platform the app touches and the action ids it calls on it.
+ * Mirrors the Go AppIntegrationUsage shape (custom_app_introspect.go).
+ */
+export interface AppIntegrationUsage {
+  platform: string;
+  actions?: string[];
+}
+
+/**
+ * AppCapabilities is the deterministic, source-derived description of what an
+ * app ACTUALLY reads and writes — not a guess. The broker computes it by
+ * statically scanning the app's persisted source (introspectAppSource), so it
+ * is ground truth, not prose. Mirrors the Go AppCapabilities shape. Every field
+ * is optional because an html-only app has no scannable source.
+ */
+export interface AppCapabilities {
+  bridge_apis?: string[];
+  integrations?: AppIntegrationUsage[];
+  resources?: string[];
+  data_types?: string[];
+  ui_components?: string[];
+  office_writes?: string[];
+  source_files?: string[];
+}
+
 export async function listApps(): Promise<CustomApp[]> {
   const res = await get<{ apps: CustomApp[] }>("/apps");
   return res.apps ?? [];
@@ -46,6 +72,20 @@ export async function listApps(): Promise<CustomApp[]> {
 
 export async function getApp(id: string): Promise<CustomAppDetail> {
   return get<CustomAppDetail>(`/apps/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Read an app's deterministic capability map (what data it reads, which
+ * integrations + actions it calls, the data types it defines, and any office
+ * writes). The broker only attaches `capabilities` when asked for the source
+ * (`?source=1`); this is the real, non-mock basis for the app's Data tab.
+ * Returns an empty object for an html-only app with no scannable source.
+ */
+export async function getAppCapabilities(id: string): Promise<AppCapabilities> {
+  const res = await get<{ capabilities?: AppCapabilities }>(
+    `/apps/${encodeURIComponent(id)}?source=1`,
+  );
+  return res.capabilities ?? {};
 }
 
 export async function deleteApp(id: string): Promise<void> {
@@ -148,6 +188,29 @@ export async function openAppEditSession(id: string): Promise<string> {
   const res = await post<{ channel: string }>(
     `/apps/${encodeURIComponent(id)}/edit-session`,
     { actor: "human" },
+  );
+  return res.channel;
+}
+
+/**
+ * submitAppEdit applies a change to an EXISTING app via the broker's explicit
+ * improve endpoint (POST /apps/{id}/improve). The broker ensures the app's
+ * settled edit channel and posts the change there, which drives the App
+ * Builder's proven `task_followup` wake to re-engage on its OWN task (read
+ * get_app → apply → republish). This is deliberately NOT a new "Improve app"
+ * task — a fresh task is created already Running but with no agent turn
+ * attending it, so a follow-up note has nothing to ride and hangs. Completion is
+ * observed by the app's version bump, not by parsing the agent's narration.
+ *
+ * Returns the edit channel slug so the caller can stream the agent's narration.
+ */
+export async function submitAppEdit(
+  appId: string,
+  change: string,
+): Promise<string> {
+  const res = await post<{ channel: string }>(
+    `/apps/${encodeURIComponent(appId)}/improve`,
+    { change },
   );
   return res.channel;
 }

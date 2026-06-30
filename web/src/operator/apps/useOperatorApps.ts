@@ -8,9 +8,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   type AppBuildRequest,
+  type AppCapabilities,
   type CustomApp,
   type CustomAppDetail,
   getApp,
+  getAppCapabilities,
   listApps,
   requestAppBuild,
 } from "../../api/apps";
@@ -90,6 +92,19 @@ export function useOperatorApp(id: string | null) {
         ? APPS_POLL_MS
         : false;
     },
+  });
+}
+
+/**
+ * Read the app's deterministic capability map (what it reads/writes), the real
+ * basis for its Data tab. Only meaningful once the app is ready (an html-only or
+ * still-building app returns an empty map), so it is gated on a real app id.
+ */
+export function useAppCapabilities(id: string | null) {
+  return useQuery({
+    queryKey: ["operator-app-capabilities", id],
+    queryFn: () => getAppCapabilities(id ?? ""),
+    enabled: isRealAppId(id),
   });
 }
 

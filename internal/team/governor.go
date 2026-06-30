@@ -157,6 +157,24 @@ func (g *governor) cancelInFlight(slug string) {
 	}
 }
 
+// headlessTurnEnqueuer is the optional capability to enqueue a fresh agent turn
+// directly (the Launcher implements it). The broker uses it to dispatch a single
+// agent for a specific job — e.g. an app edit straight to the App Builder —
+// WITHOUT routing through the CEO/lead orchestration, which is the pi-skeleton
+// shape: one agent, one job, no multi-agent hop.
+type headlessTurnEnqueuer interface {
+	EnqueueHeadlessTurn(slug, prompt, channel string)
+}
+
+// enqueuer returns the wired controller as a turn enqueuer when it supports it.
+func (g *governor) enqueuer() (headlessTurnEnqueuer, bool) {
+	g.mu.Lock()
+	ctl := g.ctl
+	g.mu.Unlock()
+	e, ok := ctl.(headlessTurnEnqueuer)
+	return e, ok
+}
+
 func newGovernor(cfg governorConfig, baseTokens int, baseCost float64) *governor {
 	return &governor{
 		cfg:        cfg,

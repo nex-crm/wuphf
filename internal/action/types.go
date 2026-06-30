@@ -292,6 +292,32 @@ type WorkflowRunsResult struct {
 	Raw  json.RawMessage   `json:"raw,omitempty"`
 }
 
+// WorkflowStepView is one step of a persisted (frozen) workflow definition,
+// shaped for rendering. It carries the deterministic mechanics (type, platform,
+// action, run_if gate) plus a precomputed Gated flag (the action mutates an
+// external system, so a real run holds it for human approval).
+type WorkflowStepView struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Platform    string `json:"platform,omitempty"`
+	ActionID    string `json:"action_id,omitempty"`
+	RunIf       string `json:"run_if,omitempty"`
+	Template    string `json:"template,omitempty"`
+	Gated       bool   `json:"gated"`
+}
+
+// WorkflowGetResult is the read side of a frozen workflow: the persisted
+// definition decoded into steps. Exists is false when nothing has been compiled
+// for the key yet (not an error — a "compile it" affordance, not a failure).
+type WorkflowGetResult struct {
+	Exists      bool               `json:"exists"`
+	Key         string             `json:"key,omitempty"`
+	Title       string             `json:"title,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Steps       []WorkflowStepView `json:"steps,omitempty"`
+}
+
 type ListRelaysOptions struct {
 	Limit int
 	Page  int

@@ -14,6 +14,7 @@ package team
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -117,6 +118,8 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		b.handleAppRollback(w, r, id)
 	case "edit-session":
 		b.handleAppEditSession(w, r, id)
+	case "improve":
+		b.handleAppImprove(w, r, id)
 	case "dev":
 		b.handleAppDev(w, r, id, parts)
 	default:
@@ -305,15 +308,25 @@ func (b *Broker) handleAppEditSession(w http.ResponseWriter, r *http.Request, id
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a human or the App Builder may open an edit session"})
 		return
 	}
-	app, _, err := b.appStore().Get(id)
+	ch, err := b.ensureAppEditChannel(id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	// Idempotent: already bound → return the existing thread, no new task.
+	writeJSON(w, http.StatusOK, map[string]any{"channel": ch})
+}
+
+// ensureAppEditChannel returns the app's persistent edit channel (`task-<id>`),
+// creating the App Builder "Edit app" task that owns it if the app is not bound
+// yet. Idempotent: an already-bound app returns its channel without spawning a
+// task. Shared by the edit-session and improve handlers.
+func (b *Broker) ensureAppEditChannel(id string) (string, error) {
+	app, _, err := b.appStore().Get(id)
+	if err != nil {
+		return "", err
+	}
 	if ch := strings.TrimSpace(app.EditChannel); ch != "" {
-		writeJSON(w, http.StatusOK, map[string]any{"channel": ch})
-		return
+		return ch, nil
 	}
 	// Ground the edit thread in the app's REAL shape (data model, APIs, writes,
 	// UI), derived from its source, so the agent never invents capabilities.
@@ -322,8 +335,8 @@ func (b *Broker) handleAppEditSession(w http.ResponseWriter, r *http.Request, id
 		capsSummary = renderAppCapabilities(introspectAppSource(source))
 	}
 	title, details := appEditSessionBrief(app, capsSummary)
-	// MutateTask locks internally; this handler holds no broker lock (same
-	// pattern as maybeSpawnAppBuilderTaskFromProposal).
+	// MutateTask locks internally; callers hold no broker lock (same pattern as
+	// maybeSpawnAppBuilderTaskFromProposal).
 	if _, err := b.MutateTask(TaskPostRequest{
 		Action:    "create",
 		Channel:   "general",
@@ -333,22 +346,96 @@ func (b *Broker) handleAppEditSession(w http.ResponseWriter, r *http.Request, id
 		CreatedBy: "human",
 		TaskType:  "issue",
 	}); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return "", err
 	}
 	// The create hook stamped the new task-<id> channel onto the app
 	// synchronously; re-read the manifest to return the bound channel.
 	updated, _, err := b.appStore().Get(id)
 	if err != nil {
-		writeAppError(w, err)
-		return
+		return "", err
 	}
 	ch := strings.TrimSpace(updated.EditChannel)
 	if ch == "" {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "edit session created but no channel was bound"})
+		return "", fmt.Errorf("edit session created but no channel was bound")
+	}
+	return ch, nil
+}
+
+// handleAppImprove applies a human-requested change to an existing app:
+//
+//	POST /apps/{id}/improve  { "change": "add a CSV export button" }  -> { channel }
+//
+// It is the robust, explicit edit path. Rather than minting a NEW "Improve app"
+// task (which is created already Running but with no agent turn attending it —
+// so the change has nothing to ride and hangs), it ensures the app's settled
+// edit-channel and posts the change there as a human message. That post drives
+// the proven task_followup wake, which re-engages the App Builder on its OWN
+// task (read get_app -> apply -> republish a new version). Completion is observed
+// by the app's version bump, not by parsing the agent's narration.
+func (b *Broker) handleAppImprove(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"channel": ch})
+	actor, status, err := richArtifactAuthenticatedSlug(r, "", "actor")
+	if err != nil {
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	if !b.appWriterAllowed(r, actor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a human or the App Builder may improve an app"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, studioRequestMaxBodyBytes)
+	defer r.Body.Close()
+	var body struct {
+		Change string `json:"change"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	change := strings.TrimSpace(body.Change)
+	if change == "" {
+		http.Error(w, "change is required", http.StatusBadRequest)
+		return
+	}
+	app, _, err := b.appStore().Get(id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	channel, err := b.ensureAppEditChannel(id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	// Dispatch the App Builder DIRECTLY for this edit — one agent, one job, no
+	// CEO/lead hop. The lead route (a human post that wakes the orchestrator) can
+	// hit the lead's own turn cap and drop the edit, leaving it silently undone.
+	// If no direct enqueuer is wired (e.g. unit tests), fall back to the
+	// message-wake path.
+	if !b.dispatchAgentTurn(appBuilderSlug, buildAppImprovePrompt(app, change), channel) {
+		if _, err := b.PostMessage("human", channel, change, nil, ""); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"channel": channel})
+}
+
+// buildAppImprovePrompt is the self-contained turn input for a direct App Builder
+// edit: it names the app + change and the exact in-place flow (get_app -> apply
+// -> verify -> republish onto the same id), so the builder needs no task brief.
+func buildAppImprovePrompt(app CustomApp, change string) string {
+	return fmt.Sprintf(
+		"A human asked to change the app %q (`%s`). Their request:\n\n%s\n\n"+
+			"Apply it IN PLACE: call get_app(%q) to read the current source and "+
+			"capabilities, make the change, run the verify gate (`bun run verify`), "+
+			"then republish with register_app(app_id=%q). Narrate briefly as you go "+
+			"and confirm what changed once it is live. Do NOT create a new app.",
+		app.Name, app.ID, change, app.ID, app.ID,
+	)
 }
 
 // appWriterAllowed reports whether the request may write/delete app bytes:

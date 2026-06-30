@@ -4,7 +4,7 @@
 // hardened sandbox (CustomAppFrame + Bridge v2). The other tabs are honest
 // empty states for this slice — the workflow/data/knowledge wiring lands next.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import type { CustomApp, CustomAppDetail } from "../../api/apps";
+import { AppLivePreview } from "../../components/apps/AppLivePreview";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
 import {
   appBuildState,
@@ -25,9 +26,11 @@ import {
   useOperatorApp,
 } from "../apps/useOperatorApps";
 import { EmptyState } from "../components/EmptyState";
-import { Eyebrow, type TabDef, Tabs } from "../components/primitives";
+import { type TabDef, Tabs } from "../components/primitives";
 import { AppBuilderChat } from "./AppBuilderChat";
-import { AppDeliverySchedule } from "./AppDeliverySchedule";
+import { AppDataTab } from "./AppDataTab";
+import { AppKnowledgeTab } from "./AppKnowledgeTab";
+import { AppWorkflowTab } from "./AppWorkflowTab";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type PanelSize = "dock" | "wide" | "modal";
@@ -45,9 +48,19 @@ const TABS: readonly TabDef<AppTab>[] = [
 interface OperatorAppDetailProps {
   appId: string;
   onBack: () => void;
+  /**
+   * Build mode: once the app publishes, walk the tabs UI → Workflow → Data →
+   * Knowledge so the operator sees each part get hooked up, then settle back on
+   * the UI. Used by the build experience; a manual tab click cancels the walk.
+   */
+  buildWalk?: boolean;
 }
 
-export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
+export function OperatorAppDetail({
+  appId,
+  onBack,
+  buildWalk,
+}: OperatorAppDetailProps) {
   const [tab, setTab] = useState<AppTab>("ui");
   const [chatOpen, setChatOpen] = useState(false);
   const [panelSize, setPanelSize] = useState<PanelSize>("dock");
@@ -59,6 +72,21 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
   const state = app ? appBuildState(app) : "building";
   const failed = state === "failed";
   const ready = state === "ready" && !!detail?.html;
+
+  // Guided reveal: when the app finishes building, walk through the tabs once so
+  // the operator sees the workflow, data, and knowledge get hooked up.
+  const walkedRef = useRef(false);
+  useEffect(() => {
+    if (!(buildWalk && ready) || walkedRef.current) return;
+    walkedRef.current = true;
+    const timers = [
+      window.setTimeout(() => setTab("workflow"), 900),
+      window.setTimeout(() => setTab("data"), 3200),
+      window.setTimeout(() => setTab("knowledge"), 5500),
+      window.setTimeout(() => setTab("ui"), 8000),
+    ];
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [buildWalk, ready]);
 
   function removeAndBack() {
     if (!app) return;
@@ -149,8 +177,9 @@ export function OperatorAppDetail({ appId, onBack }: OperatorAppDetailProps) {
         </div>
       </div>
 
-      {/* Ask AI — floating bubble + docked drawer, openable from any tab. */}
-      {app && ready ? (
+      {/* Ask AI — floating bubble + docked drawer, openable from any tab. During
+          the build experience the build chat is already docked, so suppress it. */}
+      {app && ready && !buildWalk ? (
         <AskAiDock
           app={app}
           open={chatOpen}
@@ -299,34 +328,28 @@ function TabBody({
       );
     case "workflow":
       return ready ? (
-        <AppDeliverySchedule appName={app.name} appId={app.id} />
+        <AppWorkflowTab appId={app.id} appName={app.name} />
       ) : (
         <EmptyState
           glyph="⌥"
           title="No automation yet"
-          hint="Schedule this app to run and post to Slack once it has finished building."
+          hint="Once this app finishes building, compile it into a deterministic workflow and run it on a schedule."
         />
       );
     case "data":
-      return (
+      return app ? (
+        <AppDataTab appId={app.id} />
+      ) : (
         <EmptyState
           glyph="▦"
-          title="No data table yet"
-          hint="Apps that capture or store rows show them here as a typed table you own. This app does not define one yet."
+          title="No data yet"
+          hint="The data this app reads and writes appears here once it has finished building."
         />
       );
     case "integrations":
       return <ToolIntegrations usedNames={[]} />;
     case "knowledge":
-      return (
-        <div className="opr-tool-scoped">
-          <Eyebrow>Workspace knowledge</Eyebrow>
-          <p className="opr-scoped-note">
-            Knowledge is owned by your workspace and inherited by every app.
-            Connect it here in a later step.
-          </p>
-        </div>
-      );
+      return <AppKnowledgeTab />;
     default:
       return null;
   }
@@ -350,6 +373,16 @@ function UiTab({
     return (
       <div className="opr-app-frame">
         <CustomAppFrame appId={app.id} title={app.name} html={detail.html} />
+      </div>
+    );
+  }
+  // Still building, but the app exists: show the LIVE dev-server preview so the
+  // UI builds in front of you (HMR reflects the agent's edits) instead of a
+  // static placeholder. Reuses the shipped AppLivePreview.
+  if (app && !failed) {
+    return (
+      <div className="opr-app-frame">
+        <AppLivePreview appId={app.id} title={app.name} />
       </div>
     );
   }
