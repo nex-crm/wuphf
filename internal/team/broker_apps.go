@@ -67,6 +67,12 @@ func (b *Broker) handleApps(w http.ResponseWriter, r *http.Request) {
 			writeAppError(w, err)
 			return
 		}
+		// The app's deterministic workflow is a PART of the app, not an
+		// afterthought — so figure it out at publish time: precompile + freeze it
+		// off the request path so the Workflow tab opens already-compiled instead
+		// of compiling on demand while the operator watches. Fail-safe; the
+		// on-demand compile remains as the fallback.
+		go b.precompileAppWorkflowAsync(app.ID)
 		// A republish rewrites the source and may change the dependency set, so
 		// any running live-preview server is now stale. Stop it and pre-warm a
 		// fresh one in the background: the new deps (e.g. the refine stack)
@@ -122,9 +128,59 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		b.handleAppImprove(w, r, id)
 	case "dev":
 		b.handleAppDev(w, r, id, parts)
+	case "activity":
+		b.handleAppActivity(w, r, id)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
+}
+
+// handleAppActivity streams the app's live build/edit activity (the App
+// Builder's thinking + tool calls) as SSE, scoped to THIS app. It resolves the
+// app's backing app-builder run from its EditChannel and delegates to the shared
+// agent-stream writer, so the operator surface subscribes by app id alone and
+// never threads a task id. An app whose run has not started yet streams an empty
+// (replay-end + heartbeat) connection rather than erroring, so the FE can attach
+// the feed the instant a build begins.
+//
+//	GET /apps/{id}/activity  -> text/event-stream of the app's build/edit run
+func (b *Broker) handleAppActivity(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	app, _, err := b.appStore().Get(id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	// Scope by the backing run's task id. When no run exists yet, scope by the
+	// app id instead: no task event carries that tag, so the client gets an
+	// empty stream that fills once the run starts — never the global app-builder
+	// feed (which would leak other apps' activity).
+	scope := b.appBuilderRunTaskID(app.EditChannel)
+	if scope == "" {
+		scope = id
+	}
+	b.streamAgentTaskSSE(w, r, appBuilderSlug, scope)
+}
+
+// appBuilderRunTaskID resolves an app's persistent edit channel to the id of the
+// app-builder task that backs it (the build/improve run whose events feed the
+// activity stream). Returns "" when no such task exists yet.
+func (b *Broker) appBuilderRunTaskID(editChannel string) string {
+	editChannel = strings.TrimSpace(editChannel)
+	if editChannel == "" {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].Channel == editChannel && b.tasks[i].Owner == appBuilderSlug {
+			return b.tasks[i].ID
+		}
+	}
+	return ""
 }
 
 // appDevManager lazily constructs the live-preview dev-server manager on first

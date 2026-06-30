@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Check, Send, X } from "lucide-react";
 
 import { type CustomApp, listApps, submitAppEdit } from "../../api/apps";
+import { AppActivity } from "../../components/apps/AppActivity";
 import {
   appBuildState,
   deriveAppName,
@@ -77,6 +78,11 @@ export function AppBuilderChat({
   ]);
   const [appName, setAppName] = useState(editApp?.name ?? "");
   const [newAppId, setNewAppId] = useState<string | null>(null);
+  // The app currently building/refining, used to stream its live activity
+  // (thinking + tool calls) by APP ID alone via <AppActivity/>. Known
+  // immediately for a refine; resolved from the pre-scaffolded app for a new
+  // build. No task id is ever threaded through the operator surface.
+  const [buildingAppId, setBuildingAppId] = useState<string | null>(null);
   const beforeIdsRef = useRef<ReadonlySet<string>>(new Set());
   // Edit mode completes on a version bump of the known app, not a new id.
   const startVersionRef = useRef<number>(0);
@@ -121,6 +127,10 @@ export function AppBuilderChat({
       candidate = id ? apps.find((a) => a.id === id) : undefined;
     }
     if (!candidate) return;
+
+    // Scope the live activity feed to the resolved app the moment it appears
+    // (new build) — a refine already set this in send().
+    setBuildingAppId(candidate.id);
 
     // Tell the host the app exists the moment it is resolved (even building), so
     // it can show the live preview beside the chat. New builds only.
@@ -168,6 +178,9 @@ export function AppBuilderChat({
       ? appName || deriveAppName(description)
       : deriveAppName(description);
     activeRefineRef.current = refineId;
+    // Refine: the app id is known now, so the activity feed can attach
+    // immediately. New build: clear it until the pre-scaffolded app resolves.
+    setBuildingAppId(refineId);
     setAppName(name);
     setMessages((prev) => [
       ...prev,
@@ -251,15 +264,21 @@ export function AppBuilderChat({
           ))}
 
           {phase === "building" ? (
-            <div className="opr-act-working" aria-label="Building your app">
-              <span className="opr-work-dots" aria-hidden={true}>
-                <span />
-                <span />
-                <span />
-              </span>
-              <span className="opr-work-phrase">
-                {editApp ? "Applying your change…" : "Building your app…"}
-              </span>
+            <div className="opr-build-activity">
+              {/* Live thinking + tool-call chain, scoped to the app. Renders
+                  nothing until the first event arrives, so the working
+                  indicator below carries the initial seconds. */}
+              <AppActivity appId={buildingAppId} />
+              <div className="opr-act-working" aria-label="Building your app">
+                <span className="opr-work-dots" aria-hidden={true}>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span className="opr-work-phrase">
+                  {editApp ? "Applying your change…" : "Building your app…"}
+                </span>
+              </div>
             </div>
           ) : null}
 

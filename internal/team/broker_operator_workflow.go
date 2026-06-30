@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/provider"
@@ -346,6 +348,73 @@ func (b *Broker) operatorWorkflowProvider(w http.ResponseWriter) (action.Provide
 		return nil, false
 	}
 	return prov, true
+}
+
+// operatorWorkflowProviderOrNil is the context-only twin of
+// operatorWorkflowProvider: it returns the Composio workflow provider, or nil
+// when unavailable, so headless callers (the publish-time precompile) fail safe
+// instead of writing an HTTP error.
+func (b *Broker) operatorWorkflowProviderOrNil() action.Provider {
+	prov, err := action.NewRegistryFromEnv().ProviderNamed("composio", action.CapabilityWorkflowExecute)
+	if err != nil {
+		return nil
+	}
+	return prov
+}
+
+// compileAndFreezeAppWorkflow is the headless twin of compileOperatorAppWorkflow
+// (the on-demand HTTP path): it derives the app's deterministic workflow from
+// its real capabilities, authors the plan from the app's purpose, binds it
+// against the real Composio catalog, and freezes it under operatorAppWorkflowKey.
+// The broker calls it the moment an app publishes so the workflow is figured out
+// AS PART OF the build — the Workflow tab opens already-compiled rather than
+// compiling on demand while the operator watches. Fail-safe: returns an error
+// (logged and dropped by the async wrapper) on no-provider / nothing-to-automate
+// / offline model, and the on-demand compile path stays as the fallback.
+func (b *Broker) compileAndFreezeAppWorkflow(ctx context.Context, appID string) error {
+	app, _, err := b.appStore().Get(appID)
+	if err != nil {
+		return err
+	}
+	source, err := b.appStore().Source(appID)
+	if err != nil {
+		return err
+	}
+	caps := introspectAppSource(source)
+	if len(planFromAppCapabilities(app, caps).Steps) <= 1 {
+		return nil // nothing the app reads or writes — no automation to compile
+	}
+	plan := b.authoredAppWorkflowPlan(ctx, app, caps)
+	prov := b.operatorWorkflowProviderOrNil()
+	if prov == nil {
+		return fmt.Errorf("composio workflow provider unavailable")
+	}
+	def, err := action.BindWorkflowPlan(ctx, plan, operatorComposioResolver(prov))
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(def)
+	if err != nil {
+		return err
+	}
+	if !prov.Supports(action.CapabilityWorkflowCreate) {
+		return fmt.Errorf("workflow provider cannot persist definitions")
+	}
+	if _, err := prov.CreateWorkflow(ctx, action.WorkflowCreateRequest{Key: operatorAppWorkflowKey(appID), Definition: raw}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// precompileAppWorkflowAsync runs compileAndFreezeAppWorkflow off the publish
+// request path so a freshly-published app already has its frozen workflow by the
+// time the operator opens the Workflow tab.
+func (b *Broker) precompileAppWorkflowAsync(appID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if err := b.compileAndFreezeAppWorkflow(ctx, appID); err != nil {
+		log.Printf("operator workflow: precompile for %s skipped: %v", appID, err)
+	}
 }
 
 const workflowAuthorSystemPrompt = `You design a DETERMINISTIC automation that runs an internal app on a schedule.

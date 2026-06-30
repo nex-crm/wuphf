@@ -4014,3 +4014,32 @@
     max-height: 45%;
   }
 }
+
+/* ── App-build activity feed (the live build log in the build chat) ──────────
+   AppActivity reuses the office .app-build-activity markup, which is themed via
+   office tokens (--border/--bg-card/--text/--accent…) that do not exist in the
+   operator surface — so it fell back to a stark white-on-black. Remap those
+   tokens to the operator palette within the .opr-build-activity wrapper so the
+   thinking + tool-call trace blends into the terminal-muted surface. Scoped to
+   the wrapper, so the office feed is untouched. */
+.opr-build-activity .app-build-activity {
+  --border: var(--t-line);
+  --bg-card: var(--t-surface);
+  --text: var(--t-ink);
+  --text-secondary: var(--t-dim);
+  --accent: var(--t-accent);
+  --green: var(--t-green);
+  --red: var(--t-red);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  margin-bottom: 8px;
+  max-height: 46%;
+}
+.opr-build-activity .app-build-activity__title {
+  color: var(--t-ink);
+  letter-spacing: 0.01em;
+}
+.opr-build-activity .app-build-activity__row {
+  font-family: var(--font-mono);
+}
