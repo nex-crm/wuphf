@@ -122,7 +122,7 @@ export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
     : "operator screen: inbound demo requests";
   // Ending the call hands the capture to the AI, which starts building/reworking
   // immediately — so the CTA reads as kicking off work, not viewing a result.
-  const ctaLabel = isModify ? "Make the change" : "Build it with Nex";
+  const ctaLabel = isModify ? "Update the app" : "Build the app";
 
   // a11y: close on Escape, focus the dialog on open, restore focus on close,
   // and keep Tab focus inside the dialog (a minimal focus trap).
@@ -236,8 +236,8 @@ export function CallModal({ onClose, onBuild, tool }: CallModalProps) {
               </div>
               <div className="opr-call-capture-note">
                 {isModify
-                  ? "Nex will rework the workflow from this."
-                  : "Nex will build the workflow from this."}
+                  ? "Nex will update the app from this."
+                  : "Nex will build the app from this."}
               </div>
             </div>
           ) : null}

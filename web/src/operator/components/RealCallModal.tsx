@@ -183,7 +183,7 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   }, []);
 
   const counts = draft ? captureCounts(draft) : null;
-  const ctaLabel = isModify ? "Make the change" : "Build it with Nex";
+  const ctaLabel = isModify ? "Update the app" : "Build the app";
   const dialogLabel = isModify
     ? `Demo a change to ${tool?.name}`
     : "Demo your workflow to Nex";
@@ -302,8 +302,8 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
               </div>
               <div className="opr-call-capture-note">
                 {isModify
-                  ? "Nex will rework the workflow from this."
-                  : "Nex will build the workflow from this."}
+                  ? "Nex will update the app from this."
+                  : "Nex will build the app from this."}
               </div>
             </div>
           ) : null}

@@ -17,7 +17,7 @@ describe("CallModal reveal", () => {
       screen.getByRole("button", { name: /skip ahead/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /build it with nex/i }),
+      screen.getByRole("button", { name: /build the app/i }),
     ).toBeDisabled();
   });
 
@@ -37,7 +37,7 @@ describe("CallModal reveal", () => {
     await user.click(screen.getByRole("button", { name: /skip ahead/i }));
 
     expect(
-      screen.getByRole("button", { name: /build it with nex/i }),
+      screen.getByRole("button", { name: /build the app/i }),
     ).toBeEnabled();
     expect(
       screen.queryByRole("button", { name: /skip ahead/i }),
@@ -63,10 +63,10 @@ describe("CallModal modify mode", () => {
     ).toBeInTheDocument();
     // The CTA is the modify label, not the build one.
     expect(
-      screen.getByRole("button", { name: /make the change/i }),
+      screen.getByRole("button", { name: /update the app/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /build it with nex/i }),
+      screen.queryByRole("button", { name: /build the app/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -82,13 +82,13 @@ describe("CallModal modify mode", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: /make the change/i }),
+      screen.getByRole("button", { name: /update the app/i }),
     ).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /skip ahead/i }));
 
     expect(
-      screen.getByRole("button", { name: /make the change/i }),
+      screen.getByRole("button", { name: /update the app/i }),
     ).toBeEnabled();
   });
 
@@ -108,7 +108,7 @@ describe("CallModal modify mode", () => {
     // The captured-context readout is visible once the call is done.
     expect(screen.getByText(/captured from your screen/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /make the change/i }));
+    await user.click(screen.getByRole("button", { name: /update the app/i }));
 
     expect(onBuild).toHaveBeenCalledTimes(1);
     const capture = onBuild.mock.calls[0][0];
