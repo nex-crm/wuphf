@@ -34,7 +34,7 @@ from cua_common import (
     redact_label,
 )
 
-INTERVAL = float(os.environ.get("WUPHF_OBSERVE_INTERVAL", "2.5"))
+INTERVAL = float(os.environ.get("WUPHF_OBSERVE_INTERVAL", "1.8"))
 MAX_COMPONENTS = 60
 TEXT_EXCERPT = 800
 # Short, bounded timeouts so a slow window never stalls a tick (latency guard).

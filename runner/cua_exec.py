@@ -36,7 +36,10 @@ from cua_common import (
 
 MODEL = os.environ.get("WUPHF_CUA_PLANNER_MODEL", "gpt-4o")
 MAX_STEPS = int(os.environ.get("WUPHF_CUA_MAX_STEPS", "15"))
-MAX_ELEMENTS = 120  # bound the AX tree we send to the model
+# Bound the AX tree we send to the model. Smaller = faster get_window_state AND a
+# smaller prompt = lower per-step latency. Env-tunable for the demo.
+MAX_ELEMENTS = int(os.environ.get("WUPHF_CUA_MAX_ELEMENTS", "60"))
+AX_MAX_ELEMENTS = int(os.environ.get("WUPHF_CUA_AX_MAX_ELEMENTS", "200"))
 
 
 def snapshot(pid, window_id):
@@ -52,7 +55,7 @@ def snapshot(pid, window_id):
             "pid": pid,
             "window_id": window_id,
             "capture_mode": "ax",
-            "max_elements": 400,
+            "max_elements": AX_MAX_ELEMENTS,
         },
     )
     if not isinstance(state, dict):
