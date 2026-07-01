@@ -91,6 +91,32 @@ export interface ToolBuildResult {
 	narration: string; // the agent's reflect-back line
 }
 
+// The app's chat CALLS a saved tool (POST /tools/call). approved=true is the
+// human's answer to the approval card — gated capabilities default-deny (CQ1).
+export interface ToolCallRequest {
+	schema_version?: number;
+	tool: Tool;
+	args?: Record<string, string>;
+	approved?: boolean;
+}
+
+export interface ToolCallGate {
+	capability: string; // e.g. "crm.assign"
+	detail: string; // human-readable: "assign Acme to Priya (AE)"
+}
+
+// JSON-plain projection of toolRuntime's ToolRunResult union:
+//   ok             -> { status, result, actions }
+//   needs_approval -> { status, gate, actions }
+//   error          -> { status, detail, actions }
+export interface ToolCallResult {
+	status: "ok" | "needs_approval" | "error";
+	result?: string;
+	detail?: string;
+	gate?: ToolCallGate;
+	actions: string[]; // every capability call the tool made, e.g. crm.deals({"since":"7d"})
+}
+
 export interface RunResult {
 	status: "done" | "needs_approval" | "error";
 	steps: RunStep[];

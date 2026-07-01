@@ -79,3 +79,63 @@ export async function buildToolFromChat(
     return { tool, narration: `Built ${tool.title}.`, offline: true };
   }
 }
+
+// --- Calling a tool (POST /tools/call) --------------------------------------
+// Mirrors agent/src/wire.ts ToolCallRequest/ToolCallResult. Executing is the
+// AGENT's job: there is no mock execution fallback — offline is an error.
+
+export interface ToolCallGate {
+  capability: string;
+  detail: string;
+}
+
+export interface ToolCallOutcome {
+  status: "ok" | "needs_approval" | "error";
+  result?: string;
+  detail?: string;
+  gate?: ToolCallGate;
+  /** Every capability call the tool made, e.g. crm.deals({"since":"7d"}). */
+  actions: string[];
+}
+
+/**
+ * The app's chat calls a saved tool via the agent. `approved` carries the
+ * human's answer to the approval card (gated capabilities default-deny).
+ */
+export async function callToolViaAgent(
+  tool: Tool,
+  args: Record<string, string>,
+  approved = false,
+): Promise<ToolCallOutcome> {
+  try {
+    const res = await fetch("/agent/tools/call", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        // FE Tool stores the code as `script`; the wire field is `code`.
+        tool: {
+          name: tool.name,
+          title: tool.title,
+          purpose: tool.purpose,
+          inputs: tool.inputs,
+          code: tool.script,
+        },
+        args,
+        approved,
+      }),
+    });
+    if (!res.ok) throw new Error(`agent ${res.status}`);
+    const data = (await res.json()) as ToolCallOutcome;
+    return {
+      ...data,
+      actions: Array.isArray(data.actions) ? data.actions : [],
+    };
+  } catch {
+    return {
+      status: "error",
+      detail: "agent offline — start the agent service",
+      actions: [],
+    };
+  }
+}

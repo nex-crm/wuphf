@@ -1,5 +1,5 @@
 import { fireEvent, render, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ToolsProvider } from "../tools/toolsContext";
 import { AppToolsChat } from "./AppToolsChat";
@@ -61,5 +61,125 @@ describe("AppToolsChat + Tools tab (slice 2)", () => {
     // (dedup by name). The chat, however, shows a call each time.
     const cards = await findAllByText("Score & route a lead");
     expect(cards).toHaveLength(1);
+  });
+});
+
+// Slice 5: the chat CALLS existing tools via the agent's /tools/call (no Run
+// button anywhere); a gated result pauses on an inline approval card.
+describe("AppToolsChat calls tools (slice 5)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function jsonResponse(data: unknown) {
+    return { ok: true, json: async () => data };
+  }
+
+  it('"run the weekly summary" calls the tool, shows the result, and logs the call', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        status: "ok",
+        result: "4 items — Globex, Acme (simulated recap)",
+        actions: ['crm.deals({"since":"7d"})', "nex.ai.summarize([…])"],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getByLabelText, findByText, findAllByText } = renderApp();
+    const input = getByLabelText(
+      "Describe a task for Nex to build a tool for",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "run the weekly summary" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The chat renders the tool call and what the tool did…
+    const call = await findByText(/weeklyPipelineSummary\(\)/);
+    expect(call).toBeTruthy();
+    expect(await findByText('crm.deals({"since":"7d"})')).toBeTruthy();
+
+    // …the result shows in the chat AND as the tab's read-only "Last run".
+    const results = await findAllByText(
+      "4 items — Globex, Acme (simulated recap)",
+    );
+    expect(results).toHaveLength(2);
+    expect(await findByText(/Last run/)).toBeTruthy();
+
+    // It called the agent, and did not fall back to any mock execution.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.tool.name).toBe("weeklyPipelineSummary");
+    expect(body.approved).toBe(false);
+  });
+
+  it("a gated result pauses on the approval card; Approve completes the call", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "needs_approval",
+          gate: {
+            capability: "crm.assign",
+            detail: "assign Acme to Priya (AE)",
+          },
+          actions: ['nex.ai.score("Acme")'],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "ok",
+          result: "Fit 82 → routed to Priya (AE)",
+          actions: ['nex.ai.score("Acme")', 'crm.assign("Acme", …)'],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getByLabelText, findByText, findAllByText } = renderApp();
+    const input = getByLabelText(
+      "Describe a task for Nex to build a tool for",
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { value: 'use Score & route a lead on "Acme"' },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Paused: the inline approval card renders with the gate detail.
+    expect(
+      await findByText(/This will assign Acme to Priya \(AE\)\. Send it\?/),
+    ).toBeTruthy();
+
+    // Approve re-calls with approved: true and renders the completed call.
+    fireEvent.click(await findByText("Approve"));
+    const done = await findAllByText("Fit 82 → routed to Priya (AE)");
+    expect(done.length).toBeGreaterThanOrEqual(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(second.approved).toBe(true);
+    expect(second.args).toEqual({ lead: "Acme" });
+  });
+
+  it('"Not now" skips the gated call without re-calling the agent', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        status: "needs_approval",
+        gate: { capability: "nex.send", detail: "send it to #sales" },
+        actions: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getByLabelText, findByText } = renderApp();
+    const input = getByLabelText(
+      "Describe a task for Nex to build a tool for",
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { value: "run the weekly summary" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(await findByText("Not now"));
+    expect(
+      await findByText("Okay — I didn't send it. Nothing left this app."),
+    ).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
