@@ -11,14 +11,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import { get, post } from "../../api/client";
 import type { Task } from "../../api/tasks";
-import {
-  type CapabilityRow,
-  deriveCapabilityRows,
-  hasAnyCapability,
-} from "../apps/appCapabilities";
+import { hasAnyCapability } from "../apps/appCapabilities";
 import { useAppCapabilities } from "../apps/useOperatorApps";
 import { EmptyState } from "../components/EmptyState";
-import { Eyebrow } from "../components/primitives";
 
 interface AppDataTabProps {
   appId: string;
@@ -51,74 +46,25 @@ export function AppDataTab({ appId }: AppDataTabProps) {
     );
   }
 
-  const { reads, writes } = deriveCapabilityRows(caps);
   const bridgeApis = caps.bridge_apis ?? [];
-  const readsTasks = bridgeApis.includes("getTasks");
   const readsEmails = bridgeApis.includes("getEmails");
+  const readsTasks = bridgeApis.includes("getTasks");
 
+  // Just the data — a table of the real rows this app reads. No capability map,
+  // no chips, no prose: the Data tab IS the table.
   return (
     <div className="opr-tool-scoped opr-app-data">
-      <div className="opr-data-intro">
-        <Eyebrow>Data this app touches</Eyebrow>
-        <p className="opr-scoped-note">
-          Read from this app's actual code, not a guess. Apps do not keep a
-          private database — they read your workspace data and write only with
-          your approval.
-        </p>
-      </div>
-
-      {reads.length > 0 ? (
-        <CapabilitySection title="Reads" rows={reads} />
-      ) : null}
-      {writes.length > 0 ? (
-        <CapabilitySection title="Writes" rows={writes} />
-      ) : null}
-
-      {caps.data_types && caps.data_types.length > 0 ? (
-        <div className="opr-data-block">
-          <div className="opr-data-block-head">Data model</div>
-          <div className="opr-chip-row">
-            {caps.data_types.map((t) => (
-              <span className="opr-type-chip" key={t}>
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {readsTasks ? <TasksPreview /> : null}
-      {readsEmails ? <EmailsPreview appId={appId} /> : null}
-    </div>
-  );
-}
-
-function CapabilitySection({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: CapabilityRow[];
-}) {
-  return (
-    <div className="opr-data-block">
-      <div className="opr-data-block-head">{title}</div>
-      <ul className="opr-data-list">
-        {rows.map((row) => (
-          <li
-            className="opr-data-row"
-            key={`${row.label}|${row.detail}|${row.gated ? "w" : "r"}`}
-          >
-            <span className="opr-data-row-label">{row.label}</span>
-            <span className="opr-data-row-detail">{row.detail}</span>
-            {row.gated ? (
-              <span className="opr-pill opr-pill-muted opr-data-row-gate">
-                approval
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+      {readsEmails ? (
+        <EmailsPreview appId={appId} />
+      ) : readsTasks ? (
+        <TasksPreview />
+      ) : (
+        <EmptyState
+          glyph="▦"
+          title="No table yet"
+          hint="This app does not read a workspace collection (email or tasks) yet. When it does, the rows it reads show here as a table."
+        />
+      )}
     </div>
   );
 }
