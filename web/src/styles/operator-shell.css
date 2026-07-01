@@ -4015,9 +4015,9 @@
 }
 
 
-/* ── App Tools tab: tools Nex builds from taught workflows (spike) ─────────── */
-/* Additive to the app tab model (Workflow tab unchanged). A tool is AI-authored,
-   workflow-specific, and callable by the app's chat. Tokens only. See
+/* ── App Tools tab: plain-language tools + the built-in create-a-tool tool ──── */
+/* Non-technical first: a readable title + what it does; code behind a toggle.
+   Additive to the app tab model (Workflow tab unchanged). Tokens only. See
    docs/specs/operator-workflows-as-tools.md. */
 .opr-app-tools {
   display: flex;
@@ -4030,12 +4030,16 @@
   gap: var(--space-3);
 }
 
-/* One tool: signature + call, explanation, last call, collapsible script. */
 .opr-tool-card {
   border: 1px solid var(--t-line);
   border-radius: var(--t-r-md);
   background: var(--t-elevated);
   padding: var(--space-3);
+}
+/* The create-a-tool tool reads as the special, always-there builder tool. */
+.opr-tool-card-meta {
+  border-color: color-mix(in srgb, var(--t-accent) 34%, transparent);
+  background: color-mix(in srgb, var(--t-accent) 6%, transparent);
 }
 .opr-tool-card-head {
   display: flex;
@@ -4046,24 +4050,36 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--t-cyan);
+  color: var(--t-accent);
 }
-.opr-tool-sig {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 600;
+/* Plain-language title — the primary, non-technical heading of a tool. */
+.opr-tool-title {
+  font-size: 14px;
+  font-weight: 650;
   color: var(--t-text);
+  letter-spacing: -0.01em;
+}
+.opr-tool-builtin {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--t-accent);
+  background: color-mix(in srgb, var(--t-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent) 32%, transparent);
+  border-radius: var(--t-r-sm);
+  padding: 1px 6px;
 }
 .opr-tool-runs {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--t-cyan);
-  background: color-mix(in srgb, var(--t-cyan) 12%, transparent);
-  border-radius: 999px;
-  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--t-text-2);
 }
-.opr-tool-call-btn {
+.opr-tool-run-btn {
+  margin-left: auto;
+}
+/* On the meta card the count sits before the composer, so push nothing. */
+.opr-tool-card-meta .opr-tool-runs {
   margin-left: auto;
 }
 .opr-tool-purpose {
@@ -4072,14 +4088,17 @@
   line-height: 1.5;
   color: var(--t-text-2);
 }
-.opr-tool-taught {
+.opr-tool-needs {
   margin: var(--space-1-5) 0 0;
-  font-size: 11px;
-  font-style: italic;
+  font-size: 11.5px;
   color: var(--t-faint);
 }
+.opr-tool-needs span {
+  font-family: var(--font-mono);
+  color: var(--t-text-2);
+}
 
-/* A tool-call block: the agent invoking a tool + its result. */
+/* Last-run readout (plain). */
 .opr-toolcall {
   border-left: 2px solid var(--t-cyan);
   background: color-mix(in srgb, var(--t-cyan) 6%, transparent);
@@ -4088,21 +4107,25 @@
   margin-top: var(--space-2);
 }
 .opr-toolcall-line {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--t-cyan);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--t-faint);
 }
 .opr-toolcall-result {
-  margin-top: var(--space-1-5);
+  margin-top: 2px;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--t-text);
 }
 
-.opr-tool-script-toggle {
+.opr-tool-teach-composer {
+  margin-top: var(--space-3);
+}
+
+/* Code view — hidden by default; for whoever wants the technical detail. */
+.opr-tool-code-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
@@ -4115,14 +4138,25 @@
   font-weight: 600;
   color: var(--t-text-2);
 }
-.opr-tool-script-toggle:hover {
+.opr-tool-code-toggle:hover {
   color: var(--t-text);
 }
-.opr-tool-script-toggle .is-open {
+.opr-tool-code-toggle .is-open {
   transform: rotate(180deg);
 }
+.opr-tool-code {
+  margin-top: var(--space-2);
+}
+.opr-tool-sig {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-text-2);
+  margin-bottom: var(--space-1-5);
+}
 .opr-tool-script {
-  margin: var(--space-2) 0 0;
+  margin: 0;
   padding: var(--space-2) var(--space-3);
   background: var(--t-surface);
   border: 1px solid var(--t-line-2);
@@ -4133,20 +4167,4 @@
   line-height: 1.55;
   color: var(--t-text-2);
   white-space: pre;
-}
-
-/* Teach-a-tool composer: build a tool from a described workflow. */
-.opr-tool-teach {
-  border-top: 1px solid var(--t-line-2);
-  padding-top: var(--space-3);
-}
-.opr-tool-teach-label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  margin-bottom: var(--space-2);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--t-text-2);
 }

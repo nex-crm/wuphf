@@ -3,19 +3,29 @@ import { describe, expect, it } from "vitest";
 import {
   authorToolFromDescription,
   callTool,
+  createToolMetaTool,
   sampleArgsFor,
   seedToolsForApp,
 } from "./mockTools";
 
 describe("authorToolFromDescription", () => {
-  it("recognizes the score-and-route workflow", () => {
+  it("recognizes the score-and-route workflow with a plain title", () => {
     const t = authorToolFromDescription(
       "When a new lead comes in, score its fit and route hot ones to the AE",
     );
     expect(t.name).toBe("scoreAndRouteLead");
+    expect(t.title).toBe("Score & route a lead");
     expect(t.inputs.map((i) => i.name)).toEqual(["lead"]);
     expect(t.script).toContain("async function scoreAndRouteLead(lead)");
     expect(t.createdFrom).toContain("score its fit");
+  });
+
+  it("derives a plain-language title for an unknown workflow", () => {
+    // Leading "When … ," trigger is dropped so the title names the action.
+    const t = authorToolFromDescription(
+      "When an invoice arrives, file it in the folder",
+    );
+    expect(t.title).toBe("File it in the folder");
   });
 
   it("recognizes the weekly summary workflow (no inputs)", () => {
@@ -62,12 +72,24 @@ describe("callTool", () => {
   });
 });
 
+describe("createToolMetaTool", () => {
+  it("is a built-in tool that makes tools", () => {
+    const meta = createToolMetaTool();
+    expect(meta.name).toBe("createTool");
+    expect(meta.builtin).toBe(true);
+    expect(meta.title).toBe("Create a tool");
+    expect(meta.inputs.map((i) => i.name)).toEqual(["workflow"]);
+  });
+});
+
 describe("seedToolsForApp", () => {
-  it("seeds the app's Tools tab with a couple of illustrative tools", () => {
+  it("leads with the built-in create-a-tool tool, then illustrative tools", () => {
     const seeded = seedToolsForApp("Pipeline");
     expect(seeded.map((t) => t.name)).toEqual([
+      "createTool",
       "weeklyPipelineSummary",
       "scoreAndRouteLead",
     ]);
+    expect(seeded[0].builtin).toBe(true);
   });
 });

@@ -18,6 +18,8 @@ export interface ToolCall {
 
 export interface Tool {
   id: string;
+  /** Plain-language title for a non-technical reader, e.g. "Score & route a lead". */
+  title: string;
   /** Callable identifier the agent invokes, e.g. scoreAndRouteLead. */
   name: string;
   /** One line: what running this tool does. */
@@ -28,6 +30,8 @@ export interface Tool {
   /** The operator's own words that Nex turned into this tool. */
   createdFrom: string;
   calls: ToolCall[];
+  /** Built-in tools (e.g. the create-a-tool tool) can't be deleted. */
+  builtin?: boolean;
 }
 
 // A tiny keyword → shape table so a described workflow yields a plausible,
@@ -35,6 +39,7 @@ export interface Tool {
 const SHAPES: ReadonlyArray<{
   test: RegExp;
   name: string;
+  title: string;
   purpose: string;
   inputs: ToolInput[];
   body: string;
@@ -44,6 +49,7 @@ const SHAPES: ReadonlyArray<{
   {
     test: /\b(score|fit|route|lead|assign)\b/i,
     name: "scoreAndRouteLead",
+    title: "Score & route a lead",
     purpose: "Score a lead's fit and route hot ones to the right AE.",
     inputs: [{ name: "lead", type: "string" }],
     body: [
@@ -61,6 +67,7 @@ const SHAPES: ReadonlyArray<{
   {
     test: /\b(summary|summar|pipeline|digest|weekly|report|recap)\b/i,
     name: "weeklyPipelineSummary",
+    title: "Weekly pipeline summary",
     purpose: "Summarize last week's pipeline movement into a glanceable recap.",
     inputs: [],
     body: [
@@ -75,6 +82,7 @@ const SHAPES: ReadonlyArray<{
   {
     test: /\b(draft|follow.?up|email|reply|outreach|nudge|stall)\b/i,
     name: "draftFollowup",
+    title: "Draft a follow-up email",
     purpose: "Draft a follow-up email for a stalled deal in the rep's voice.",
     inputs: [{ name: "deal", type: "string" }],
     body: [
@@ -94,6 +102,17 @@ let seq = 0;
 function nextId(prefix: string): string {
   seq += 1;
   return `${prefix}_${seq.toString(36)}`;
+}
+
+// Derive a plain-language title (for a non-technical reader) from a description:
+// trim to a short phrase, drop a leading trigger clause, sentence-case it.
+function humanTitle(description: string): string {
+  let d = description.trim().replace(/\s+/g, " ");
+  // Drop a leading "When … ," trigger so the title names the action.
+  d = d.replace(/^when\b[^,]*,\s*/i, "");
+  const words = d.split(" ").slice(0, 6).join(" ");
+  const title = words.charAt(0).toUpperCase() + words.slice(1);
+  return title.replace(/[.,;:]+$/, "");
 }
 
 // Derive a camelCase tool name from a free-text description when no shape matches,
@@ -160,6 +179,7 @@ export function authorToolFromDescription(description: string): Tool {
   if (shape) {
     return {
       id: nextId("tool"),
+      title: shape.title,
       name: shape.name,
       purpose: shape.purpose,
       inputs: shape.inputs,
@@ -173,12 +193,40 @@ export function authorToolFromDescription(description: string): Tool {
   const name = deriveName(desc);
   return {
     id: nextId("tool"),
+    title: humanTitle(desc),
     name,
     purpose: desc.charAt(0).toUpperCase() + desc.slice(1),
     inputs: [{ name: "input", type: "string" }],
     script: `async function ${name}(input) {\n  // Nex scripted this from: "${desc}"\n  const result = await nex.run(input);\n  return result;\n}`,
     createdFrom: desc,
     calls: [],
+  };
+}
+
+/**
+ * The built-in **create-a-tool tool** — the tool the app's builder chat uses to
+ * make new tools. It is always present, can't be deleted, and its "runs" are the
+ * tools it has created. A stable id so it stays put across renders.
+ */
+export function createToolMetaTool(): Tool {
+  return {
+    id: "tool_create",
+    title: "Create a tool",
+    name: "createTool",
+    purpose:
+      "Describe a workflow in plain words and I'll build a tool your app's chat can call.",
+    inputs: [{ name: "workflow", type: "string" }],
+    script: [
+      "async function createTool(workflow) {",
+      "  const spec = await nex.ai.designTool(workflow);",
+      "  const tool = await nex.tools.write(spec);   // Nex writes the code",
+      "  await app.tools.add(tool);                  // and adds it to this app",
+      "  return `Built ${tool.title}`;",
+      "}",
+    ].join("\n"),
+    createdFrom: "built in",
+    calls: [],
+    builtin: true,
   };
 }
 
@@ -206,6 +254,7 @@ export function sampleArgsFor(tool: Tool): Record<string, string> {
  */
 export function seedToolsForApp(_appName?: string): Tool[] {
   return [
+    createToolMetaTool(),
     authorToolFromDescription("Every Monday, summarize last week's pipeline"),
     authorToolFromDescription(
       "When a new lead comes in, score its fit and route hot ones to the right AE",
