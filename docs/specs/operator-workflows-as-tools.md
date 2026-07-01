@@ -32,33 +32,39 @@ A Tool: `{ id, name (callable, camelCase), purpose, inputs[], script, createdFro
 Tools are authored by the **chat agent's own `create_tool` tool**, not a
 build-a-tool UI. The operator teaches a workflow in the app's chat; the agent
 calls `create_tool(name, title, purpose, inputs, code)` to make it callable and
-register it, so a later turn can call it. Implemented in the harness (the PyBase
-chat agent): `harness/src/harness/tools.py` (`ToolStore` + `make_create_tool`),
-wired into the deep agent's tool list next to `submit_workflow`
-(`build_agent.py`), with the `Tool`/`ToolInput` wire shape in `wire.py` mirroring
-the FE. This is the only way tools are made.
+register it, so a later turn can call it. Implemented on **pi-mono** (the only
+operator backend — the Python/deepagents harness is removed): `agent/src/tools.ts`
+(`authorTool` + `buildTool`) behind `POST /tools/build` (`agent/src/service.ts`),
+with the `Tool`/`ToolInput` wire shapes in `agent/src/wire.ts` mirroring the FE.
+This is the only way tools are made.
 
-## Slice 1 — the clickable shape (mock) — DONE
+These are **agent tools**: they take input params and return agent-shaped output,
+so only the app's chat calls them — a human never runs one by hand.
+
+## Slice 1 — the Tools tab (DONE)
 A new **Tools tab** on the app detail (`AppToolsTab`), added to both the real
 (`OperatorAppDetail`) and mock (`InternalToolDetail`) tab models — after Workflow,
 before Data. The Workflow tab and everything else are unchanged. The tab only
-**shows** tools; it has NO build-a-tool UI (that lives in the chat agent).
+**shows** tools; it has NO build-a-tool UI and NO Run button (agent-only).
 - **Lists the app's tools** in PLAIN LANGUAGE for a non-technical operator: a
-  readable title, what it does, a friendly "Needs: …", a Run button, and the last
-  run result. The code (signature + script) is tucked behind a **"View code"**
-  toggle — nothing technical shown by default.
-- **Run**: each tool has a Run button that logs a mock invocation (stands in for
-  the app's chat calling the tool).
-- All mock on the FE: `seedToolsForApp` lists the app's built tools; `callTool`
-  returns a canned result. No backend. (`web/src/operator/tools/mockTools.ts`,
-  `web/src/operator/surfaces/AppToolsTab.tsx`.)
+  readable title, what it does, a friendly "Needs: …", and "the chat calls this".
+  The code (signature + script) is behind a **"View code"** toggle — nothing
+  technical shown by default. (`web/src/operator/tools/mockTools.ts`,
+  `web/src/operator/surfaces/AppToolsTab.tsx`, shared state in `toolsContext.tsx`.)
 
-## Later slices (after the shape is validated)
-2. **Wire the chat → create_tool end to end.** The app's Ask-AI chat calls the
-   harness `create_tool`; the new tool appears in the Tools tab; the chat renders
-   the tool-call. (The tool + store exist; wiring the FE chat to the harness is
-   next.)
-3. **Real tool authoring** — the agent writes actual callable code (fills `code`).
-4. **Real execution** — the chat calls the Tool (sandboxed), against real
+## Slice 2+3 — chat → create_tool, wired to pi-mono (DONE)
+The app's Ask-AI chat (`AppToolsChat`) POSTs the taught workflow to the pi-mono
+agent's `/tools/build` (vite proxy `/agent` → :8820, `WUPHF_AGENT_PORT`); the
+agent's `create_tool` authors the tool; the chat renders the `create_tool(...)`
+call and the tool lands in the Tools tab. Falls back to the local FE mock when the
+agent is unreachable (`web/src/operator/tools/toolAgentClient.ts`). Authoring is
+deterministic S0 (keyword → shape, shared with the FE mock) so it runs key-free;
+the pi-model authoring path mirrors `buildAgent.ts`'s staging.
+
+## Later slices
+4. **Real tool authoring** — the agent writes actual callable code (fills `code`)
+   via pi-ai, same staging as the build agent's model path.
+5. **Real execution** — the chat calls the Tool (sandboxed), against real
    integrations / the browser-step engine, with the existing send-gate.
-5. Persistence + versioning of Tools; edit-a-tool in chat.
+6. Persistence + versioning of Tools; edit-a-tool in chat; restore app-edit-via-AI
+   alongside tool-teaching in the Ask-AI dock.

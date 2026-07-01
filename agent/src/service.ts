@@ -1,5 +1,5 @@
 // Thin HTTP/SSE service the operator FE talks to (no broker). Bun.serve, no
-// framework. Mirrors the Python harness contract so the FE is unchanged:
+// framework:
 //   GET  /health        liveness
 //   GET  /providers     which inference paths are available (subscription/BYOK/local)
 //   POST /build/stream  description -> the pi-mono agent assembles a WorkflowSpec (SSE)

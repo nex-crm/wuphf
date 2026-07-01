@@ -69,8 +69,8 @@ export async function buildWorkflow(message: string, opts: BuildOptions = {}): P
 	}
 }
 
-/** Stream the assembled steps (FE staggered reveal), then the full spec. Mirrors
- * the Python harness /build/stream event contract. */
+/** Stream the assembled steps (FE staggered reveal), then the full spec — the
+ * /build/stream event contract. */
 export async function* streamWorkflow(
 	message: string,
 	opts: BuildOptions = {},

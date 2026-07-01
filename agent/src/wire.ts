@@ -1,6 +1,6 @@
-// FE <-> agent contract. Mirrors web/src/operator/mock/data.ts (WorkflowStep) and
-// the Python harness wire.py, so the operator FE and either backend speak the same
-// WorkflowSpec. Keep these shapes in sync across the three.
+// FE <-> agent contract. Mirrors web/src/operator/mock/data.ts (WorkflowStep) so
+// the operator FE and the agent speak the same WorkflowSpec. Keep these shapes in
+// sync across the two.
 
 export type WorkflowStepKind = "trigger" | "enrich" | "ai" | "decision" | "action" | "branch";
 const STEP_KINDS: readonly WorkflowStepKind[] = ["trigger", "enrich", "ai", "decision", "action", "branch"];
@@ -98,8 +98,7 @@ export interface RunResult {
 	pending_approval: { step_id: string; title: string; integration?: string; detail: string } | null;
 }
 
-// The BUILD brief: identical intent to the Python harness so any engine produces
-// the same shape. The agent must output ONLY this JSON object.
+// The BUILD brief. The agent must output ONLY this JSON object.
 export const SCHEMA_PROMPT = `You are the BUILD agent for an operator tool-builder. The operator describes an internal workflow. FIGURE OUT a small deterministic pipeline and OUTPUT ONLY a single JSON object (no prose, no code fence) of this shape:
 
 {"name": str, "tool_id": str, "narration": str,
