@@ -51,7 +51,7 @@ export function StepShip({ active }: OnboardingWizardStepProps) {
             src="/media/onboarding/work-ships.gif"
             width={1000}
             height={760}
-            alt="An issue filed in the #revops channel: @revops is asked to dedupe accounts and backfill missing deal owners, then the work fans out into tasks (merge 142 duplicate accounts, backfill 38 missing deal owners, flag 12 stale opportunities), landing back in #revops."
+            alt="An issue filed in the #general channel: a human asks for a CRM audit, @ceo claims it and cuts it into tasks (duplicate scan, owner gaps, 30-day stale), and the finished cleanup plan lands back in #general."
             loading="lazy"
             decoding="async"
           />

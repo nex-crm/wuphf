@@ -166,6 +166,92 @@
   background: color-mix(in srgb, var(--onb-surface) 82%, var(--onb-paper));
 }
 
+/* ── Control metrics: the shell's buttons are compact chrome (12px/600 at
+   4px radius, .opr-btn), not hero CTAs. The kbd-labelled variant carries
+   its padding on the inner .btn-label / .kbd-hint instead. ── */
+.pre-pick-screen .btn,
+.onboarding-wizard .btn {
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--onb-line-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pre-pick-screen .btn-primary,
+.onboarding-wizard .btn-primary {
+  border-color: var(--onb-ink);
+}
+
+.pre-pick-screen .btn:has(.btn-label),
+.onboarding-wizard .btn:has(.btn-label) {
+  padding: 0;
+}
+
+.pre-pick-screen .btn .btn-label,
+.onboarding-wizard .btn .btn-label {
+  padding: var(--space-2) var(--space-3);
+}
+
+.pre-pick-screen .btn .kbd-hint,
+.onboarding-wizard .btn .kbd-hint {
+  padding: var(--space-2);
+}
+
+/* Compact buttons keep a 44px hit target on touch devices — the extra
+   area is invisible padding, mirroring the sheets' own coarse rules. */
+@media (pointer: coarse) {
+  .pre-pick-screen .btn,
+  .onboarding-wizard .btn {
+    min-height: 44px;
+  }
+}
+
+/* ── Type scale: match the operator surfaces exactly — 25px/800 titles
+   (.opr-surface-title), 13px dim ledes at 1.65 (.opr-surface-lede),
+   small mono caps for form labels, mono for real data. ── */
+.pre-pick-headline,
+.onboarding-wizard .office-tour-slide-headline,
+.onboarding-wizard .office-tour-slide-headline--serif {
+  font-size: 25px;
+  line-height: 1.25;
+}
+
+.pre-pick-subhead,
+.onboarding-wizard .office-tour-slide-body {
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 62ch;
+}
+
+.onboarding-wizard .office-tour-slide-caption {
+  font-size: 12px;
+}
+
+.pre-pick-screen .label,
+.onboarding-wizard .onboarding-team-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--onb-faint);
+}
+
+.onboarding-wizard .onboarding-team-input,
+.onboarding-wizard .onboarding-team-textarea {
+  font-size: 13px;
+  border-radius: var(--radius-md);
+}
+
+/* Version strings and sign-in state are data — they read in mono, like
+   every readout in the shell. */
+.pre-pick-screen .pre-pick-card-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 /* ── Cards: operator chrome radius (6px) instead of the 12px pill cards,
    and a dark-appropriate hover shadow (the light 4% black lift vanishes
    on paper-dark). ── */
