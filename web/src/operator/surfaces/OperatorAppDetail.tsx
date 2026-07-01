@@ -22,6 +22,7 @@ import { AppLivePreview } from "../../components/apps/AppLivePreview";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
 import { AgentName } from "../agents/AgentName";
 import { AgentPurpose } from "../agents/AgentPurpose";
+import { AgentSessions } from "../agents/AgentSessions";
 import {
   appBuildState,
   useDeleteApp,
@@ -31,11 +32,10 @@ import { ArtifactsTab } from "../artifacts/ArtifactsTab";
 import type { Artifact } from "../artifacts/artifacts";
 import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
+import { RoutinesTab } from "../routines/RoutinesTab";
 import { ToolsProvider } from "../tools/toolsContext";
 import { AppDataTab } from "./AppDataTab";
-import { AppToolsChat } from "./AppToolsChat";
 import { AppToolsTab } from "./AppToolsTab";
-import { AppWorkflowTab } from "./AppWorkflowTab";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
@@ -51,7 +51,7 @@ type AppTab =
 
 const TABS: readonly TabDef<AppTab>[] = [
   { id: "artifacts", label: "Artifacts" },
-  { id: "workflow", label: "Workflow" },
+  { id: "workflow", label: "Routines" },
   // Tools: the callable tools Nex builds from taught workflows; the app's chat
   // calls them. Additive — the Workflow tab is unchanged.
   { id: "tools", label: "Tools" },
@@ -78,6 +78,8 @@ export function OperatorAppDetail({
 }: OperatorAppDetailProps) {
   const [tab, setTab] = useState<AppTab>("artifacts");
   const [chatOpen, setChatOpen] = useState(false);
+  // A routine's "Open its chat" jumps the Ask Agent dock to that session.
+  const [requestedSession, setRequestedSession] = useState<string | null>(null);
   const [panelSize, setPanelSize] = useState<PanelSize>("dock");
   const query = useOperatorApp(appId);
   const remove = useDeleteApp();
@@ -218,9 +220,10 @@ export function OperatorAppDetail({
               <TabBody
                 tab={tab}
                 query={query}
-                failed={failed}
-                onRemove={removeAndBack}
-                removing={remove.isPending}
+                onOpenRoutineSession={(sessionId) => {
+                  setRequestedSession(sessionId);
+                  setChatOpen(true);
+                }}
               />
             ) : null}
           </div>
@@ -235,6 +238,7 @@ export function OperatorAppDetail({
             size={panelSize}
             onOpenChange={setChatOpen}
             onSizeChange={setPanelSize}
+            requestedSessionId={requestedSession}
           />
         ) : null}
       </div>
@@ -250,12 +254,14 @@ function AskAiDock({
   size,
   onOpenChange,
   onSizeChange,
+  requestedSessionId,
 }: {
   app: CustomApp;
   open: boolean;
   size: PanelSize;
   onOpenChange: (open: boolean) => void;
   onSizeChange: (next: (s: PanelSize) => PanelSize) => void;
+  requestedSessionId?: string | null;
 }) {
   if (!open) {
     return (
@@ -332,7 +338,10 @@ function AskAiDock({
           </div>
         </div>
         <div className="opr-ask-body">
-          <AppToolsChat appName={app.name} />
+          <AgentSessions
+            agentName={app.name}
+            requestedSessionId={requestedSessionId}
+          />
         </div>
       </aside>
     </>
@@ -342,28 +351,19 @@ function AskAiDock({
 function TabBody({
   tab,
   query,
-  failed,
-  onRemove,
-  removing,
+  onOpenRoutineSession,
 }: {
   tab: AppTab;
   query: UseQueryResult<CustomAppDetail>;
-  failed: boolean;
-  onRemove: () => void;
-  removing: boolean;
+  onOpenRoutineSession?: (sessionId: string) => void;
 }) {
   const app = query.data?.app;
-  const ready =
-    app && appBuildState(app) === "ready" && Boolean(query.data?.html);
   switch (tab) {
     case "workflow":
-      return ready ? (
-        <AppWorkflowTab appId={app.id} />
-      ) : (
-        <EmptyState
-          glyph="⌥"
-          title="No automation yet"
-          hint="Once this agent finishes building, compile it into a deterministic workflow and run it on a schedule."
+      return (
+        <RoutinesTab
+          agentName={app?.name ?? "This agent"}
+          onOpenSession={(sessionId) => onOpenRoutineSession?.(sessionId)}
         />
       );
     case "tools":

@@ -25,6 +25,9 @@ interface AppToolsChatProps {
   appName: string;
   /** Optional first instruction (e.g. from a demo hand-off), sent on mount. */
   seed?: string;
+  /** Pre-existing transcript (e.g. a routine session's run) shown instead of
+   * the greeting. */
+  initialTranscript?: { from: "you" | "nex"; body: string }[];
 }
 
 type ChatItem =
@@ -120,16 +123,29 @@ function extractArgs(text: string, tool: Tool): Record<string, string> {
   return args;
 }
 
-export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
+export function AppToolsChat({
+  appName,
+  seed,
+  initialTranscript,
+}: AppToolsChatProps) {
   const { tools, addTool, logCall } = useAppTools();
-  const [items, setItems] = useState<ChatItem[]>(() => [
-    {
-      kind: "text",
-      id: nextId(),
-      from: "nex",
-      body: `Tell me a repeatable task you do in ${appName} and I'll build it a tool you can call. Anything I make shows up under Tools — ask me to run one any time.`,
-    },
-  ]);
+  const [items, setItems] = useState<ChatItem[]>(() =>
+    initialTranscript
+      ? initialTranscript.map((m) => ({
+          kind: "text" as const,
+          id: nextId(),
+          from: m.from,
+          body: m.body,
+        }))
+      : [
+          {
+            kind: "text",
+            id: nextId(),
+            from: "nex",
+            body: `Tell me a repeatable task you do in ${appName} and I'll build it a tool you can call. Anything I make shows up under Tools — ask me to run one any time.`,
+          },
+        ],
+  );
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingApproval | null>(null);

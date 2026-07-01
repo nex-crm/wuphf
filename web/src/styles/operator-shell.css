@@ -4529,3 +4529,140 @@
   font-weight: 600;
   color: var(--t-cyan);
 }
+
+/* ── Routines: scheduled prompts run in the agent's chat ────────────────────── */
+/* Disable / Publish belong to each routine, not the agent. Tokens only. See
+   docs/specs/operator-agent-routines.md. */
+.opr-routines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.opr-routine-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.opr-routine {
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-elevated);
+  padding: var(--space-3);
+}
+.opr-routine.is-disabled {
+  opacity: 0.62;
+}
+.opr-routine-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.opr-routine-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--t-text);
+}
+.opr-routine-version {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--t-faint);
+}
+.opr-routine-schedule {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t-cyan);
+}
+.opr-routine-lastrun {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--t-faint);
+}
+.opr-routine-prompt {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--t-surface);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  color: var(--t-text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.opr-routine-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.opr-routine-new {
+  border-top: 1px solid var(--t-line-2);
+  padding-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.opr-routine-new-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: var(--space-2);
+}
+
+/* ── Agent chat sessions: strip atop the Ask Agent dock ─────────────────────── */
+.opr-agent-sessions {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.opr-session-strip {
+  display: flex;
+  gap: var(--space-1-5);
+  overflow-x: auto;
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  border-bottom: 1px solid var(--t-line-2);
+  flex-shrink: 0;
+}
+.opr-session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: 3px 9px;
+  border: 1px solid var(--t-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.opr-session-chip:hover {
+  color: var(--t-text);
+  border-color: var(--t-line-2);
+}
+.opr-session-chip.is-active {
+  color: var(--t-text);
+  border-color: color-mix(in srgb, var(--t-cyan) 45%, transparent);
+  background: color-mix(in srgb, var(--t-cyan) 8%, transparent);
+}
+.opr-session-chip-title {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.opr-session-new {
+  border-style: dashed;
+}
+.opr-session-panes {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.opr-session-panes > div {
+  height: 100%;
+}

@@ -39,13 +39,6 @@ vi.mock("./AppToolsChat", () => ({
     <div data-testid="ask-ai-chat">tools:{appName}</div>
   ),
 }));
-// The Workflow tab fetches the frozen workflow via React Query; stub it so the
-// detail test stays unit-scoped to tab routing.
-vi.mock("./AppWorkflowTab", () => ({
-  AppWorkflowTab: ({ appId }: { appId: string }) => (
-    <div data-testid="app-workflow" data-app-id={appId} />
-  ),
-}));
 
 function detail(
   over: Partial<CustomAppDetail["app"]>,
@@ -99,18 +92,18 @@ describe("OperatorAppDetail", () => {
     expect(frame.textContent).toContain("<html>hi</html>");
   });
 
-  it("routes the Workflow tab to the deterministic workflow for a ready app", () => {
+  it("routes the Routines tab to the agent's scheduled routines", () => {
     useOperatorAppMock.mockReturnValue({
       data: detail({ status: "ready" }, "<html>hi</html>"),
       isError: false,
     });
-    const { getByRole, getByTestId } = render(
+    const { getByRole, getByText, getAllByText } = render(
       <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
-    fireEvent.click(getByRole("tab", { name: "Workflow" }));
-    expect(getByTestId("app-workflow").getAttribute("data-app-id")).toBe(
-      "app_abc",
-    );
+    fireEvent.click(getByRole("tab", { name: "Routines" }));
+    // A routine is a scheduled prompt with its own lifecycle controls.
+    expect(getByText("Monday pipeline recap")).toBeTruthy();
+    expect(getAllByText("Publish new version").length).toBeGreaterThan(0);
   });
 
   it("shows the Ask AI header button and floating bubble for a ready app", () => {

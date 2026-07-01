@@ -31,6 +31,7 @@ import {
 
 import { AgentName } from "../agents/AgentName";
 import { AgentPurpose } from "../agents/AgentPurpose";
+import { AgentSessions } from "../agents/AgentSessions";
 import { ArtifactsTab } from "../artifacts/ArtifactsTab";
 import { seedArtifacts } from "../artifacts/artifacts";
 import { ApprovalCard } from "../components/ApprovalCard";
@@ -52,8 +53,8 @@ import {
   type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
+import { RoutinesTab } from "../routines/RoutinesTab";
 import { ToolsProvider } from "../tools/toolsContext";
-import { AppToolsChat } from "./AppToolsChat";
 import { AppToolsTab } from "./AppToolsTab";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
@@ -68,7 +69,7 @@ type ToolTab =
 
 const TABS: readonly TabDef<ToolTab>[] = [
   { id: "artifacts", label: "Artifacts" },
-  { id: "workflow", label: "Workflow" },
+  { id: "workflow", label: "Routines" },
   // Tools Nex builds from taught workflows; the app's chat calls them. Additive.
   { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
@@ -103,6 +104,8 @@ export function InternalToolDetail({
   // and updates it there, rather than living in a canvas glued to the chat.
   // A demo handoff opens the chat straight away (seeded below).
   const [chatOpen, setChatOpen] = useState(Boolean(demoSeed));
+  // A routine's "Open its chat" jumps the Ask Agent dock to that session.
+  const [requestedSession, setRequestedSession] = useState<string | null>(null);
   const [panelSize, setPanelSize] = useState<"dock" | "wide" | "modal">("dock");
   // The demo seed is one-shot: it kicks the chat off on mount, then is cleared
   // so reopening the chat later does not replay the demonstrated instruction.
@@ -112,11 +115,6 @@ export function InternalToolDetail({
     if (demoSeedRef.current) setSeedConsumed(true);
   }, []);
   const [version] = useState(tool.version);
-  const [versions] = useState<ToolVersion[]>(tool.versions);
-  // The tool's live workflow steps — the chat edits these and they render on the
-  // Workflow tab. Changed steps flash so the edit is legible on that screen.
-  const [liveSteps] = useState<WorkflowStep[]>(tool.steps);
-  const [changedStepIds] = useState<readonly string[]>([]);
   // Parent-owned inbound rows, shared by the UI and Data tabs so approving a
   // request on the UI tab is reflected in the Data tab too (no tab-local copy).
   const [inboundRows, setInboundRows] =
@@ -181,63 +179,7 @@ export function InternalToolDetail({
                 <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
                 Ask Agent
               </button>
-              {tool.status === "enabled" && (
-                <>
-                  <button type="button" className="opr-btn opr-btn-sm">
-                    <Power size={13} strokeWidth={1.9} aria-hidden={true} />
-                    Disable
-                  </button>
-                  <button
-                    type="button"
-                    className="opr-btn opr-btn-primary opr-btn-sm"
-                  >
-                    <CheckCircle2
-                      size={13}
-                      strokeWidth={1.9}
-                      aria-hidden={true}
-                    />
-                    Publish new version
-                  </button>
-                </>
-              )}
-              {tool.status === "disabled" && (
-                <>
-                  <button
-                    type="button"
-                    className="opr-btn opr-btn-primary opr-btn-sm"
-                  >
-                    <Power size={13} strokeWidth={1.9} aria-hidden={true} />
-                    Enable
-                  </button>
-                  <button type="button" className="opr-btn opr-btn-sm">
-                    <CheckCircle2
-                      size={13}
-                      strokeWidth={1.9}
-                      aria-hidden={true}
-                    />
-                    Publish new version
-                  </button>
-                </>
-              )}
-              {tool.status === "draft" && (
-                <>
-                  <button type="button" className="opr-btn opr-btn-sm">
-                    <Play size={13} strokeWidth={1.9} aria-hidden={true} />
-                    Run on test data
-                  </button>
-                  <button
-                    type="button"
-                    className="opr-btn opr-btn-primary opr-btn-sm"
-                  >
-                    <CheckCircle2
-                      size={13}
-                      strokeWidth={1.9}
-                      aria-hidden={true}
-                    />
-                    Publish
-                  </button>
-                </>
-              )}
+
               {tool.status === "suggested" && (
                 <button
                   type="button"
@@ -293,10 +235,12 @@ export function InternalToolDetail({
               />
             )}
             {tab === "workflow" && (
-              <WorkflowTab
-                tool={{ ...tool, steps: liveSteps }}
-                versions={versions}
-                changedStepIds={changedStepIds}
+              <RoutinesTab
+                agentName={tool.name}
+                onOpenSession={(sessionId) => {
+                  setRequestedSession(sessionId);
+                  setChatOpen(true);
+                }}
               />
             )}
             {tab === "tools" && <AppToolsTab appName={tool.name} />}
@@ -426,8 +370,9 @@ export function InternalToolDetail({
                 </div>
               </div>
               <div className="opr-ask-body">
-                <AppToolsChat
-                  appName={tool.name}
+                <AgentSessions
+                  agentName={tool.name}
+                  requestedSessionId={requestedSession}
                   seed={seedConsumed ? undefined : demoSeedRef.current}
                 />
               </div>
@@ -571,129 +516,6 @@ function UITab({
 }
 
 // ── Workflow tab: the deterministic spec ────────────────────────────────
-
-const STEP_GLYPH: Record<WorkflowStep["kind"], string> = {
-  trigger: "TR",
-  enrich: "EN",
-  ai: "AI",
-  decision: "IF",
-  action: "DO",
-  branch: "EL",
-};
-
-function stepNodeClass(kind: WorkflowStep["kind"]): string {
-  return `opr-step-node opr-step-node-${kind}`;
-}
-
-function WorkflowTab({
-  tool,
-  versions,
-  changedStepIds = [],
-}: {
-  tool: InternalTool;
-  versions: ToolVersion[];
-  changedStepIds?: readonly string[];
-}) {
-  return (
-    <div className="opr-detail-cols">
-      <div>
-        <div className="opr-flow-head">
-          <Eyebrow>How it runs · every step is scripted</Eyebrow>
-        </div>
-        <div className="opr-flow" style={{ marginTop: "var(--space-3)" }}>
-          {tool.steps.map((step, i) => (
-            <div
-              className={`opr-step${
-                changedStepIds.includes(step.id) ? " opr-step-flash" : ""
-              }`}
-              key={step.id}
-            >
-              <div className="opr-step-rail">
-                <div className={stepNodeClass(step.kind)} aria-hidden={true}>
-                  {STEP_GLYPH[step.kind]}
-                </div>
-                {i < tool.steps.length - 1 ? (
-                  <div className="opr-step-line" />
-                ) : null}
-              </div>
-              <div className="opr-step-body">
-                <div className="opr-step-kind">{step.kind}</div>
-                <div className="opr-step-title">
-                  {step.title}
-                  {step.integration ? (
-                    <span className="opr-step-chip">{step.integration}</span>
-                  ) : null}
-                </div>
-                <div className="opr-step-detail">{step.detail}</div>
-                {step.gated ? (
-                  <div className="opr-step-gate">
-                    Approval required before it sends
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="opr-rail-card">
-          <Eyebrow>Recent runs</Eyebrow>
-          {tool.runs.length === 0 ? (
-            <div className="opr-step-detail" style={{ marginTop: 8 }}>
-              No runs yet.
-            </div>
-          ) : (
-            <div style={{ marginTop: "var(--space-2)" }}>
-              {tool.runs.map((run) => (
-                <div className="opr-run-row" key={run.id}>
-                  <span
-                    className={`opr-led ${
-                      run.outcome === "routed"
-                        ? "opr-led-live"
-                        : run.outcome === "needs-you"
-                          ? "opr-led-warn"
-                          : "opr-led-draft"
-                    }`}
-                    style={{ marginTop: 5 }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 550 }}>{run.trigger}</div>
-                    <div className="opr-cell-sub">{run.summary}</div>
-                  </div>
-                  <div className="opr-cell-sub">{run.ranAt}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="opr-rail-card">
-          <Eyebrow>Version history</Eyebrow>
-          <div style={{ marginTop: "var(--space-2)" }}>
-            {versions.map((v) => (
-              <div className="opr-version-row" key={v.version}>
-                <span className="opr-version-num">v{v.version}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 550 }}>{v.label}</div>
-                  <div className="opr-cell-sub">
-                    {v.author} · {v.at}
-                  </div>
-                  <div
-                    className="opr-step-detail"
-                    style={{ marginTop: 2, fontStyle: "italic" }}
-                  >
-                    {v.note}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Data tab: operator-owned typed tables ───────────────────────────────
 
