@@ -180,6 +180,72 @@ loudly — apps are read-mostly by design. Don't try to work around this.
   the host saves the bytes from its own trusted origin. Wire it to a button,
   never fire it on load. For binary, base64-encode and pass `encoding:"base64"`.
 
+## The app's database — own your data model
+
+Every WUPHF App has a small, real, PERSISTED database of its own (per app,
+server-side, via `db` in `wuphf-bridge.ts`). This is how an app OWNS the model it
+manages instead of recomputing it from scratch on every mount — and it is exactly
+what the **Data tab** shows. Reach for it the moment your app DERIVES or CURATES
+something from a source read: an urgency score, a one-line summary, a group + its
+count, an action item, a normalized row. The pattern is **derive ONCE, persist,
+render from the DB**:
+
+1. **Define your tables** — the entities the app manages and their typed columns,
+   INCLUDING the computed fields, not just the raw source fields.
+2. **On first load, derive once and persist** — fetch the real source
+   (`getEmails` / `getTasks` / `callIntegration`), compute your model, and write it
+   with `db.defineTable` + `db.upsert`. Pass a stable `key` column so a re-run
+   REPLACES rows instead of duplicating them.
+3. **Render from the DB** — read with `db.query(name)` / `db.all()` and render
+   that. On later mounts read the DB FIRST; only re-derive when it is empty or the
+   human hits Refresh. This is also how you satisfy hard rule 8 (don't recompute
+   on every mount) — the DB is your cache of record.
+
+```tsx
+import { db, getEmails, ai } from "./wuphf-bridge";
+
+const TABLE = "Emails";
+
+async function ensureModel() {
+  // Already derived? Render straight from the DB — do NOT recompute.
+  const existing = await db.query(TABLE).catch(() => null);
+  if (existing?.table.rows.length) return existing.table;
+
+  await db.defineTable(TABLE, [
+    { name: "id", type: "string" },
+    { name: "sender", type: "string" },
+    { name: "subject", type: "string" },
+    { name: "urgency", type: "number" }, // COMPUTED — not in the raw source
+    { name: "summary", type: "string" }, // COMPUTED via ai()
+  ]);
+
+  const { connected, emails } = await getEmails({ limit: 25 });
+  if (!connected) return null; // render a connect-state; nothing to persist yet
+
+  const rows = await Promise.all(
+    emails.map(async (e) => ({
+      id: e.id,
+      sender: e.fromName || e.from,
+      subject: e.subject,
+      urgency: 0, // compute from labels/snippet
+      summary: (await ai(`One line: ${e.snippet}`).catch(() => ({}))).text ?? "",
+    })),
+  );
+  const { table } = await db.upsert(TABLE, rows, "id"); // key "id" = dedup on re-run
+  return table;
+}
+```
+
+- The DB is DETERMINISTIC storage, not a query engine — v1 is tables, typed
+  columns, upsert-by-key, and read. No server-side joins or filters; filter and
+  sort in React after `db.query`.
+- Writes are gated + bounded server-side (table / column / row caps). Every `db.*`
+  call REJECTS on a transport failure, so await in try/catch, exactly like the
+  other bridge helpers.
+- A pure pass-through app with NO derived data (it lists a live source verbatim)
+  does not need the DB — read the source and render. Use the DB the moment you
+  COMPUTE or CURATE something worth keeping and showing in the Data tab.
+
 ## Hard rules
 
 1. **Self-contained output.** `bun run build` must emit ONE `dist/index.html`
@@ -198,9 +264,9 @@ loudly — apps are read-mostly by design. Don't try to work around this.
 5. **Protected files — use, don't rewrite.**
    - `src/wuphf-bridge.ts` — the only channel out of the sandbox. Its helpers
      (`callBroker`, `getTasks`, `getOfficeMembers`, `createTask`,
-     `callIntegration`, `listIntegrations`, `ai`, `getEmails`, `download`) are already
-     correct (e.g. `getTasks()` returns ALL channels, not just "general"). Import
-     and call them as-is.
+     `callIntegration`, `listIntegrations`, `ai`, `getEmails`, `download`, and the
+     `db` store) are already correct (e.g. `getTasks()` returns ALL channels, not
+     just "general"). Import and call them as-is.
    - `src/bridgeDataProvider.ts` — refine's `DataProvider` over the bridge. Import
      `bridgeDataProvider`; do NOT reimplement it. Add a resource by extending its
      `readers` map or passing `meta:{platform,action}` for an integration.
@@ -262,7 +328,7 @@ or rows instead). In short:
 1. **Set a real theme.** Override Mantine once in `main.tsx` via `createTheme` —
    `primaryColor`, one `defaultRadius`, a heading scale, a tightened `spacing`
    scale. Never ship default-themed Mantine; it is the #1 AI tell. (Keep
-   `forceColorScheme="light"` and the provider shape above — only `theme` is yours.)
+   `forceColorScheme="dark"` and the provider shape above — only `theme` is yours.)
 2. **Hierarchy is type, not boxes.** One real `<Title>`, then `fw`/`size`/`c="dimmed"`
    for rank — three tiers, not five font sizes. Monospace numbers and IDs.
 3. **Earn the card.** A pile of identical `<Card>`s is a tell — use a `<Table>` or

@@ -164,5 +164,8 @@ connect-state, not a red error. Every guarded bridge call gets a designed fallba
       region, not a reflexive centered column.
 - [ ] Real, specific copy — no "Dashboard"/"Welcome"/"Items" placeholders.
 - [ ] Empty / loading / error / not-connected states are all present and designed.
+- [ ] If the app COMPUTES or CURATES anything, its model is persisted to the app
+      `db` (defineTable + upsert) and rendered from `db.query` — not recomputed on
+      every mount. See "The app's database" in AI_RULES.md.
 - [ ] Could a teammate tell a human designed this? If "AI made that" is undeniable,
       it failed — fix the direction before publishing.
