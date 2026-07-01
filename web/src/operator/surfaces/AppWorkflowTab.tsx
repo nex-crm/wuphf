@@ -10,9 +10,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock, Play, Plug, ShieldCheck, Sparkles } from "lucide-react";
+import { Globe, Lock, Play, Plug, ShieldCheck, Sparkles } from "lucide-react";
 
 import { showNotice } from "../../components/ui/Toast";
+import {
+  type BrowserApproval,
+  browserApprovalPrompt,
+  getBrowserApprovals,
+  resolveBrowserApproval,
+} from "../apps/browserApprovals";
 import {
   type AppWorkflow,
   type ConnectionChoice,
@@ -28,7 +34,8 @@ import { EmptyState } from "../components/EmptyState";
 import { Eyebrow } from "../components/primitives";
 import { AppDeliverySchedule } from "./AppDeliverySchedule";
 
-// A short node label per frozen step type, so the flow reads at a glance.
+// A short node label per frozen step type, so the flow reads at a glance. A
+// `browser` step renders the Globe icon instead (handled in WorkflowStep).
 const STEP_GLYPH: Record<string, string> = {
   action: "DO",
   template: "··",
@@ -98,6 +105,39 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
     },
   });
 
+  // A LIVE run (not a dry preview) actually executes — so a step with no
+  // integration drives the browser, and the run PAUSES to ask permission in
+  // chat (the cards below). Errors surface, but a pause is normal, not a failure.
+  const runLive = useMutation({
+    mutationFn: () => runAppWorkflow(appId, false, effectiveConnections()),
+    onSuccess: () => showNotice("Live run finished.", "success"),
+    onError: (err) => {
+      showNotice(
+        err instanceof Error ? err.message : "Could not run this workflow.",
+        "error",
+      );
+    },
+  });
+
+  // While a live run is in flight it may pause on a browser step; poll the app's
+  // chat asks so the operator can allow/skip. Idle otherwise (no polling).
+  const approvalsQuery = useQuery({
+    queryKey: ["operator-app-browser-approvals", appId],
+    queryFn: () => getBrowserApprovals(appId),
+    enabled: runLive.isPending,
+    refetchInterval: runLive.isPending ? 1200 : false,
+  });
+  const resolveApproval = useMutation({
+    mutationFn: ({
+      id,
+      decision,
+    }: {
+      id: string;
+      decision: "approve" | "deny";
+    }) => resolveBrowserApproval(appId, id, decision),
+    onSuccess: () => approvalsQuery.refetch(),
+  });
+
   // The workflow is intrinsic to the app, so it compiles automatically the first
   // time the tab is opened — no button. Fire once per app, only after the query
   // settles and only if nothing is compiled yet.
@@ -139,15 +179,19 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
           }
           onRun={() => run.mutate()}
           running={run.isPending}
+          onRunLive={() => runLive.mutate()}
+          runningLive={runLive.isPending}
+          approvals={approvalsQuery.data ?? []}
+          onResolveApproval={(id, decision) =>
+            resolveApproval.mutate({ id, decision })
+          }
+          resolvingApproval={resolveApproval.isPending}
           lastRun={run.data}
           onRecompile={() => compile.mutate()}
           recompiling={compile.isPending}
         />
       ) : (
-        <Compiling
-          failed={compile.isError}
-          onRetry={() => compile.mutate()}
-        />
+        <Compiling failed={compile.isError} onRetry={() => compile.mutate()} />
       )}
 
       <div className="opr-workflow-divider">
@@ -201,6 +245,11 @@ function CompiledWorkflow({
   onChoose,
   onRun,
   running,
+  onRunLive,
+  runningLive,
+  approvals,
+  onResolveApproval,
+  resolvingApproval,
   lastRun,
   onRecompile,
   recompiling,
@@ -211,6 +260,11 @@ function CompiledWorkflow({
   onChoose: (platform: string, key: string) => void;
   onRun: () => void;
   running: boolean;
+  onRunLive: () => void;
+  runningLive: boolean;
+  approvals: BrowserApproval[];
+  onResolveApproval: (id: string, decision: "approve" | "deny") => void;
+  resolvingApproval: boolean;
   lastRun?: WorkflowRunResult;
   onRecompile: () => void;
   recompiling: boolean;
@@ -253,10 +307,20 @@ function CompiledWorkflow({
           type="button"
           className="opr-btn opr-btn-primary opr-btn-sm"
           onClick={onRun}
-          disabled={running}
+          disabled={running || runningLive}
         >
           <Play size={13} strokeWidth={1.9} aria-hidden={true} />
           {running ? "Running…" : "Run once (preview)"}
+        </button>
+        <button
+          type="button"
+          className="opr-btn opr-btn-sm"
+          onClick={onRunLive}
+          disabled={running || runningLive}
+          title="Runs for real — a step with no integration asks to control your browser first."
+        >
+          <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
+          {runningLive ? "Running live…" : "Run live"}
         </button>
         <button
           type="button"
@@ -268,6 +332,43 @@ function CompiledWorkflow({
           {recompiling ? "Recompiling…" : "Recompile"}
         </button>
       </div>
+
+      {approvals.length > 0 ? (
+        <section
+          className="opr-browser-asks"
+          aria-label="Browser step approvals"
+        >
+          {approvals.map((a) => (
+            <div className="opr-browser-ask" key={a.id}>
+              <div className="opr-browser-ask-head">
+                <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
+                {a.kind === "send"
+                  ? "Confirm this send"
+                  : "Control your browser?"}
+              </div>
+              <p className="opr-browser-ask-body">{browserApprovalPrompt(a)}</p>
+              <div className="opr-browser-ask-actions">
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-primary opr-btn-sm"
+                  onClick={() => onResolveApproval(a.id, "approve")}
+                  disabled={resolvingApproval}
+                >
+                  {a.kind === "send" ? "Send it" : "Allow"}
+                </button>
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-ghost opr-btn-sm"
+                  onClick={() => onResolveApproval(a.id, "deny")}
+                  disabled={resolvingApproval}
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {lastRun ? (
         <p className="opr-scoped-note">
@@ -343,19 +444,28 @@ function WorkflowStep({
   last: boolean;
 }) {
   const title = step.description || step.template || step.action_id || step.id;
+  const isBrowser = step.type === "browser";
+  // A browser step has no integration — Nex drives the operator's own browser
+  // for it — so it reads as its own kind: the Globe node + a "runs in your
+  // browser" line, distinct from an API action step.
+  const nodeVariant = isBrowser ? "browser" : step.gated ? "action" : "enrich";
   return (
     <div className="opr-step">
       <div className="opr-step-rail">
         <div
-          className={`opr-step-node opr-step-node-${step.gated ? "action" : "enrich"}`}
+          className={`opr-step-node opr-step-node-${nodeVariant}`}
           aria-hidden={true}
         >
-          {STEP_GLYPH[step.type] ?? "··"}
+          {isBrowser ? (
+            <Globe size={13} strokeWidth={2} />
+          ) : (
+            (STEP_GLYPH[step.type] ?? "··")
+          )}
         </div>
         {last ? null : <div className="opr-step-line" />}
       </div>
       <div className="opr-step-body">
-        <div className="opr-step-kind">{step.type}</div>
+        <div className="opr-step-kind">{isBrowser ? "browser" : step.type}</div>
         <div className="opr-step-title">
           {title}
           {step.platform ? (
@@ -365,7 +475,13 @@ function WorkflowStep({
         {step.run_if ? (
           <div className="opr-step-detail">Only when {step.run_if}</div>
         ) : null}
-        {step.gated ? (
+        {isBrowser ? (
+          <div className="opr-step-browser">
+            <Globe size={11} strokeWidth={2} aria-hidden={true} />
+            Runs in your browser — Nex drives it, and asks before it sends
+          </div>
+        ) : null}
+        {step.gated && !isBrowser ? (
           <div className="opr-step-gate">
             <Lock size={11} strokeWidth={2} aria-hidden={true} />
             Held for your approval before it sends

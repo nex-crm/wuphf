@@ -965,6 +965,11 @@
   border-color: var(--t-faint);
   color: var(--t-faint);
 }
+/* A browser step (no integration — Nex drives the operator's browser). */
+.opr-step-node-browser {
+  border-color: var(--t-cyan);
+  color: var(--t-cyan);
+}
 .opr-step-line {
   width: 1px;
   flex: 1;
@@ -1025,6 +1030,20 @@
   color: var(--t-yellow);
   background: color-mix(in srgb, var(--t-yellow) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--t-yellow) 30%, transparent);
+  border-radius: var(--t-r-sm);
+  padding: 1px 7px;
+}
+/* "Runs in your browser" affordance on a browser step (slice 6). */
+.opr-step-browser {
+  margin-top: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--t-cyan);
+  background: color-mix(in srgb, var(--t-cyan) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-cyan) 30%, transparent);
   border-radius: var(--t-r-sm);
   padding: 1px 7px;
 }
@@ -1264,6 +1283,200 @@
   overflow: hidden;
   box-shadow: 0 24px 80px -24px rgba(0, 0, 0, 0.7);
 }
+
+/* Workflow tab header: the "How it runs" label + the Run button. */
+.opr-flow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ─────────────────────────── Browser execution (Run in browser) */
+
+.opr-exec {
+  width: min(780px, 94vw);
+  background: var(--t-surface);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r);
+  overflow: hidden;
+  box-shadow: 0 24px 80px -24px rgba(0, 0, 0, 0.7);
+}
+.opr-exec-stage {
+  background: hsl(210 12% 5%);
+  border-bottom: 1px dotted var(--t-line-2);
+}
+.opr-exec-chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2-5) var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--t-line-2) 60%, transparent);
+}
+.opr-exec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--t-faint) 50%, transparent);
+}
+.opr-exec-omnibox {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #fff 5%, transparent);
+  color: var(--t-text-2);
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.opr-exec-omnibox svg {
+  color: var(--t-faint);
+  flex-shrink: 0;
+}
+.opr-exec-live {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t-faint);
+}
+.opr-exec-live.is-live {
+  color: var(--t-green);
+}
+.opr-exec-screen {
+  aspect-ratio: 16 / 7;
+  display: grid;
+  place-content: center;
+  gap: var(--space-2);
+  text-align: center;
+  background:
+    linear-gradient(var(--t-figure-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--t-figure-grid) 1px, transparent 1px),
+    transparent;
+  background-size: 14px 14px;
+}
+.opr-exec-screen-name {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--t-faint);
+}
+.opr-exec-screen-action {
+  font-size: 15px;
+  font-weight: 550;
+  color: var(--t-ink);
+}
+.opr-exec-body {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+.opr-exec-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.opr-exec-goal {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.opr-exec-controls {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.opr-exec-timeline {
+  margin: var(--space-3) 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.opr-exec-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2-5) 0 var(--space-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--t-text-2);
+}
+.opr-exec-act {
+  padding: 5px 0 5px var(--space-4);
+  border-left: 2px solid var(--t-line-2);
+  margin-left: 11px;
+}
+.opr-exec-act.is-gated {
+  border-left-color: var(--t-yellow);
+}
+.opr-exec-act-label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--t-ink);
+}
+.opr-exec-act-why {
+  display: block;
+  font-size: 11px;
+  color: var(--t-faint);
+  margin-top: 1px;
+}
+/* Live-run "Thinking…" row while the planner works out the next action. */
+.opr-exec-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-faint);
+}
+.opr-exec-thinking svg {
+  animation: opr-exec-spin 0.9s linear infinite;
+}
+@keyframes opr-exec-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.opr-exec-approval {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3-5);
+  border: 1px solid color-mix(in srgb, var(--t-yellow) 45%, var(--t-line-2));
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-yellow) 9%, transparent);
+}
+.opr-exec-approval-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.opr-exec-approval-text svg {
+  color: var(--t-yellow);
+}
+.opr-exec-approval-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.opr-exec-result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12.5px;
+  color: var(--t-text-2);
+}
+.opr-exec-result.is-done {
+  color: var(--t-green);
+  font-weight: 550;
+}
 .opr-call-stage {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -1299,6 +1512,121 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--t-faint);
+}
+/* The live screen-share preview fills the call stage in the real call. */
+.opr-call-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+/* Call avatars — two squares (You + Nex) over the top of the shared screen,
+   each glowing with its speaker's live audio level (--lvl, 0..1). */
+.opr-call-avatars {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  z-index: 2;
+}
+.opr-call-avatar {
+  --lvl: 0;
+  width: 54px;
+  height: 54px;
+  border-radius: var(--t-r-sm);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #000 55%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--t-accent) calc(var(--lvl) * 90%), var(--t-line-2));
+  box-shadow: 0 0 calc(var(--lvl) * 22px)
+    color-mix(in srgb, var(--t-accent) calc(var(--lvl) * 85%), transparent);
+  transform: scale(calc(1 + var(--lvl) * 0.06));
+  transition:
+    transform 80ms linear,
+    box-shadow 80ms linear,
+    border-color 80ms linear;
+  backdrop-filter: blur(2px);
+}
+.opr-call-avatar.is-ai {
+  border-color: color-mix(
+    in srgb,
+    var(--t-accent-2) calc(var(--lvl) * 90%),
+    var(--t-line-2)
+  );
+  box-shadow: 0 0 calc(var(--lvl) * 22px)
+    color-mix(in srgb, var(--t-accent-2) calc(var(--lvl) * 85%), transparent);
+}
+.opr-call-avatar-face {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--t-ink);
+}
+/* Nex's avatar breathes while it is thinking, so it never looks frozen. */
+.opr-call-avatar.is-thinking {
+  animation: opr-think-pulse 1.1s ease-in-out infinite;
+  border-color: color-mix(in srgb, var(--t-accent-2) 70%, var(--t-line-2));
+}
+@keyframes opr-think-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 4px color-mix(in srgb, var(--t-accent-2) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 18px color-mix(in srgb, var(--t-accent-2) 80%, transparent);
+  }
+}
+/* Animated "thinking…" dots, used in the caption and transcript. */
+.opr-thinking-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  margin-left: 2px;
+}
+.opr-thinking-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--t-accent-2);
+  display: inline-block;
+  animation: opr-think-dot 1.2s ease-in-out infinite;
+}
+.opr-thinking-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.opr-thinking-dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes opr-think-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+.opr-call-thinking {
+  display: flex;
+  align-items: center;
+}
+/* Realtime call error (key missing, handshake failed, screen-share canceled). */
+.opr-call-error {
+  margin: var(--space-3) 0 var(--space-4);
+  padding: var(--space-3) var(--space-3-5);
+  border: 1px solid color-mix(in srgb, var(--t-red) 45%, var(--t-line-2));
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-red) 8%, transparent);
+  color: var(--t-text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 .opr-call-wave {
   position: absolute;
@@ -1360,6 +1688,49 @@
   display: block;
   margin-bottom: 1px;
   font-weight: 700;
+}
+
+/* Captured context — shown when the call finishes, before the AI starts work.
+   It makes visible that the screen share captured rich metadata + selectors. */
+.opr-call-capture {
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-accent) 6%, transparent);
+  padding: var(--space-3) var(--space-3-5);
+  margin-bottom: var(--space-3);
+}
+.opr-call-capture-head {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--t-text-2);
+  font-weight: 600;
+}
+.opr-call-capture-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  margin-top: var(--space-2);
+}
+.opr-call-capture-chip {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  line-height: 1.4;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--t-line-2);
+  color: var(--t-text-2);
+  white-space: nowrap;
+}
+.opr-call-capture-chip.is-entity {
+  font-family: inherit;
+  color: var(--t-ink);
+  border-color: color-mix(in srgb, var(--t-accent) 40%, var(--t-line-2));
+}
+.opr-call-capture-note {
+  margin-top: var(--space-2);
+  font-size: 11.5px;
+  color: var(--t-text-2);
 }
 
 /* ───────────────────────────── Approval card */
@@ -1631,6 +2002,10 @@
 .opr-set-label {
   font-weight: 700;
   font-size: 12.5px;
+}
+.opr-set-pill {
+  margin-left: var(--space-2);
+  vertical-align: middle;
 }
 .opr-set-help {
   color: var(--t-faint);
@@ -2889,6 +3264,20 @@
   color: var(--t-accent);
 }
 
+/* Bottom-right cluster holding the two peer affordances (Demo to Nex + Ask AI).
+   The container owns the fixed position; the fabs inside lay out in a row. */
+.opr-detail-fabs {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 40;
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.opr-detail-fabs .opr-ask-fab {
+  position: static;
+}
+
 /* Port the shared ConnectIntegrationCard (eac-*, defined in global.css with
    main-app tokens) to the operator look. Scoped under .opr-root so the main app
    keeps its own styling; here the card adopts operator tokens. */
@@ -3216,6 +3605,43 @@
   color: var(--t-dim);
 }
 .opr-delivery-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Browser-step in-chat asks (slice 3b) ─────────────────────────────────── */
+/* A live run pauses on a step with no integration and asks, conversationally,
+   to control the browser — then again before any external send. Rendered inline
+   under the run actions so the ask reads as part of the run's own thread. */
+.opr-browser-asks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.opr-browser-ask {
+  border: 1px solid color-mix(in srgb, var(--t-cyan) 32%, transparent);
+  background: color-mix(in srgb, var(--t-cyan) 8%, transparent);
+  border-radius: var(--t-r-md);
+  padding: var(--space-3);
+}
+.opr-browser-ask-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--t-cyan);
+}
+.opr-browser-ask-body {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-text);
+}
+.opr-browser-ask-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);

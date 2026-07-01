@@ -188,6 +188,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			// Integrations — secret fields as booleans
 			"api_key_set":          config.ResolveAPIKey("") != "",
 			"openai_key_set":       config.ResolveOpenAIAPIKey() != "",
+			"realtime_model":       config.ResolveRealtimeModel(),
 			"anthropic_key_set":    config.ResolveAnthropicAPIKey() != "",
 			"gemini_key_set":       config.ResolveGeminiAPIKey() != "",
 			"minimax_key_set":      config.ResolveMinimaxAPIKey() != "",
@@ -235,6 +236,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			// Secret fields
 			APIKey          *string `json:"api_key,omitempty"`
 			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
+			RealtimeModel   *string `json:"realtime_model,omitempty"`
 			AnthropicAPIKey *string `json:"anthropic_api_key,omitempty"`
 			GeminiAPIKey    *string `json:"gemini_api_key,omitempty"`
 			MinimaxAPIKey   *string `json:"minimax_api_key,omitempty"`
@@ -448,6 +450,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.OpenAIAPIKey != nil {
 			cfg.OpenAIAPIKey = strings.TrimSpace(*body.OpenAIAPIKey)
+			changed = true
+		}
+		if body.RealtimeModel != nil {
+			cfg.RealtimeModel = strings.TrimSpace(*body.RealtimeModel)
 			changed = true
 		}
 		if body.AnthropicAPIKey != nil {
