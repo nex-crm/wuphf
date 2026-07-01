@@ -111,7 +111,10 @@ export function OperatorAppDetail({
   }
 
   return (
-    <ToolsProvider appName={app?.name ?? "This app"}>
+    // Key the provider on the loaded identity: it mounts before the app query
+    // resolves, so remount once the real agent arrives instead of keeping
+    // tools/purpose state seeded from the "This app" placeholder.
+    <ToolsProvider key={app?.id ?? "loading"} appName={app?.name ?? "This app"}>
       <div
         className={`opr-detail-wrap${
           chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""

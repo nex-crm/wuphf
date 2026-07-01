@@ -19,7 +19,7 @@
 // `nex.browser`) halt the run with status="needs_approval" unless the run carries
 // approved=true — the FE renders the human approval card in the chat.
 
-import { buildCapabilities } from "./capabilities.js";
+import { buildCapabilities, GATED_CAPABILITIES } from "./capabilities.js";
 import type { Tool, ToolCallGate } from "./wire.js";
 
 /** One callable capability (e.g. crm.deals). Args/return are untyped on purpose:
@@ -47,10 +47,10 @@ export type ToolRunResult =
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
-// Capabilities that mutate the outside world (or seize the operator's browser):
-// halt for the approval card unless the run is approved. Keyed by dotted path so
-// injected runtimes stay gated too.
-const GATED = new Set(["crm.assign", "nex.send", "nex.browser"]);
+// Capabilities that mutate the outside world (or seize the operator's browser)
+// halt for the approval card unless the run is approved. The allow-list lives
+// with the capability definitions (capabilities.GATED_CAPABILITIES); it is keyed
+// by dotted path so injected runtimes stay gated too.
 
 // Globals shadowed as unused strict-mode parameters inside the worker compile.
 // `eval`/`arguments` are not legal strict-mode parameter names and `import` is a
@@ -142,7 +142,7 @@ function hostCaps(tree: CapabilityTree, ctx: { actions: string[]; approved: bool
 			ctx.actions.push(`${path}(${args.map(preview).join(", ")})`);
 			// Default deny: a gated capability halts the run for the human approval
 			// card unless this run carries approved=true.
-			if (GATED.has(path) && !ctx.approved) throw new GateError(path, gateDetail(path, args));
+			if (GATED_CAPABILITIES.has(path) && !ctx.approved) throw new GateError(path, gateDetail(path, args));
 			return await fn(...args);
 		},
 	};
@@ -232,6 +232,9 @@ export async function runTool(tool: Tool, args: Record<string, string> = {}, opt
 			} else if (msg.t === "err") {
 				finish({ status: "error", detail: msg.detail, actions: ctx.actions });
 			} else if (msg.t === "cap") {
+				// A settled run (timed out / done / errored) must not START new
+				// capability work — the worker is already dead or dying.
+				if (settled) return;
 				void caps
 					.invoke(msg.path, msg.args)
 					.then((value) => {

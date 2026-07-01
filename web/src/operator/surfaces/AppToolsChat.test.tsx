@@ -157,6 +157,46 @@ describe("AppToolsChat calls tools (slice 5)", () => {
     expect(second.args).toEqual({ lead: "Acme" });
   });
 
+  it("a bare mention of a tool teaches — it does not auto-invoke — and re-teaching keeps run history", async () => {
+    const fetchMock = vi
+      .fn()
+      // 1st message runs the tool (explicit cue) so it has history…
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "ok",
+          result: "4 items — Globex, Acme (simulated recap)",
+          actions: [],
+        }),
+      )
+      // …2nd message teaches; the build call fails over to the offline mock.
+      .mockRejectedValueOnce(new Error("agent offline"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getByLabelText, findByText } = renderApp();
+    const input = getByLabelText(
+      "Describe a task for Nex to build a tool for",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "run the weekly summary" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await findByText(/Last run/)).toBeTruthy();
+
+    // A modify hand-off that MENTIONS the tool's title but has no run/call/use
+    // cue must TEACH (create_tool), never re-run the tool.
+    fireEvent.change(input, {
+      target: {
+        value: "Update the weekly pipeline summary to include churned deals",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const call = await findByText(/create_tool\(/);
+    expect(call.textContent).toContain('name: "weeklyPipelineSummary"');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("/agent/tools/build");
+
+    // Re-teaching replaced the tool by name but kept its run history.
+    expect(await findByText(/Last run/)).toBeTruthy();
+  });
+
   it('"Not now" skips the gated call without re-calling the agent', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({

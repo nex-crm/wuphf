@@ -63,6 +63,48 @@ describe("ArtifactsTab", () => {
     expect(getByText(/182 KB/)).toBeTruthy();
   });
 
+  it("renders agent-authored html in a fully locked-down sandbox", () => {
+    const html: Artifact = {
+      id: "h1",
+      type: "html",
+      title: "lead-scores.html",
+      producedBy: "scoreAndRouteLead",
+      at: "yesterday",
+      content: "<p>scores</p>",
+    };
+    const { container, getByText } = render(
+      <ArtifactsTab
+        agentName="Pipeline Agent"
+        artifacts={[...ARTIFACTS, html]}
+      />,
+    );
+    fireEvent.click(getByText("lead-scores.html"));
+    const iframe = container.querySelector("iframe");
+    expect(iframe).toBeTruthy();
+    // The EMPTY sandbox attribute is the security boundary for agent-authored
+    // HTML: no scripts, no navigation, no same-origin. Never loosen silently.
+    expect(iframe?.getAttribute("sandbox")).toBe("");
+  });
+
+  it("disables the pdf download until the artifact has a url", () => {
+    const { container, getByText, rerender } = render(
+      <ArtifactsTab agentName="Pipeline Agent" artifacts={ARTIFACTS} />,
+    );
+    fireEvent.click(getByText("brief.pdf"));
+    // No url yet (honest mock): the button is disabled and says why.
+    const button = getByText("Download").closest("button");
+    expect(button?.disabled).toBe(true);
+    expect(button?.title).toBe("Not exported yet");
+
+    // With a url the download is a real link.
+    const exported = ARTIFACTS.map((a) =>
+      a.id === "p1" ? { ...a, url: "/artifacts/brief.pdf" } : a,
+    );
+    rerender(<ArtifactsTab agentName="Pipeline Agent" artifacts={exported} />);
+    const anchor = container.querySelector("a[download]");
+    expect(anchor?.getAttribute("href")).toBe("/artifacts/brief.pdf");
+  });
+
   it("shows the honest empty state when nothing was produced yet", () => {
     const { getByText } = render(
       <ArtifactsTab agentName="Pipeline Agent" artifacts={[]} />,

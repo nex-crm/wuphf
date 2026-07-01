@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildCapabilities, type CapabilityConfig, capabilityConfigFromEnv } from "./capabilities.js";
+import { buildCapabilities, type CapabilityConfig, capabilityConfigFromEnv, GATED_CAPABILITIES } from "./capabilities.js";
 import type { CapabilityFn, CapabilityTree } from "./toolRuntime.js";
 
 function cap(tree: CapabilityTree, path: string): CapabilityFn {
@@ -44,6 +44,23 @@ test("capabilityConfigFromEnv reads the broker seam + model gate", () => {
 	expect(cfg.brokerUrl).toBe("http://127.0.0.1:7893");
 	expect(cfg.brokerToken).toBe("tok");
 	expect(cfg.aiModel).toBeUndefined(); // TOOL_RUNTIME_MODEL unset -> simulated ai
+	expect(cfg.callTimeoutMs).toBeUndefined(); // TOOL_CALL_TIMEOUT_MS unset -> default cap
+});
+
+test("capabilityConfigFromEnv threads TOOL_CALL_TIMEOUT_MS into callTimeoutMs", () => {
+	expect(capabilityConfigFromEnv({ TOOL_CALL_TIMEOUT_MS: "120000" }).callTimeoutMs).toBe(120_000);
+	// Garbage / non-positive values fall back to the default (unset).
+	expect(capabilityConfigFromEnv({ TOOL_CALL_TIMEOUT_MS: "soon" }).callTimeoutMs).toBeUndefined();
+	expect(capabilityConfigFromEnv({ TOOL_CALL_TIMEOUT_MS: "0" }).callTimeoutMs).toBeUndefined();
+	expect(capabilityConfigFromEnv({ TOOL_CALL_TIMEOUT_MS: "-5" }).callTimeoutMs).toBeUndefined();
+});
+
+test("GATED_CAPABILITIES lists every mutating capability the send-gate must hold", () => {
+	// toolRuntime.ts default-allows anything NOT in this set — these three paths
+	// disappearing from it would silently un-gate external mutations.
+	expect(GATED_CAPABILITIES.has("crm.assign")).toBe(true);
+	expect(GATED_CAPABILITIES.has("nex.send")).toBe(true);
+	expect(GATED_CAPABILITIES.has("nex.browser")).toBe(true);
 });
 
 // --- real nex.ai (stubbed complete) ---------------------------------------------
