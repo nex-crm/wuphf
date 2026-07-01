@@ -47,7 +47,12 @@ top of cua ourselves, which was always the spec's plan.
 
 ## 3. Architecture
 
-```
+> **Superseded (Slice 5):** the standalone `BrowserRunModal` FE island has since
+> been retired — browser execution is a workflow step now (run via the Workflow
+> tab, gated in chat). See `docs/specs/operator-browser-step.md`. The diagram and
+> keep-list below describe the pre-Slice-5 design and are kept for history.
+
+```text
 ┌─ Operator FE — BrowserRunModal (already built, mock) ─────────────────┐
 │  live viewport (cua screenshots) · narrated actions · permission +    │
 │  external-send gates · Pause/Stop — consumes an ExecSession over SSE   │

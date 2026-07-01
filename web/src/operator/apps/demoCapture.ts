@@ -356,6 +356,15 @@ const ENTITY_KINDS: ReadonlySet<CapturedEntity["kind"]> = new Set([
   "action",
 ]);
 
+// Strip query strings and fragments from a model-reported URL/endpoint so
+// secrets carried in the query (e.g. a shared-screen `...?token=...`) never
+// cross the handoff boundary. Enforces the "no query secrets" contract.
+function stripQueryAndFragment(value: string): string {
+  const trimmed = value.trim();
+  const cut = trimmed.search(/[?#]/);
+  return cut >= 0 ? trimmed.slice(0, cut) : trimmed;
+}
+
 // Build a DemoCapture from what the realtime model reported, coercing loose
 // strings into the typed unions so the rest of the handoff is unchanged. This is
 // the REAL-call counterpart to assembleDemoCapture (the mock).
@@ -382,7 +391,7 @@ export function demoCaptureFromDraft(
       .filter((s) => (s.label ?? "").trim())
       .map((s) => ({
         label: (s.label ?? "").trim(),
-        url: (s.url ?? "").trim(),
+        url: stripQueryAndFragment(s.url ?? ""),
         dom: (s.dom ?? "").trim(),
       })),
     selectors: (args.selectors ?? [])
@@ -404,7 +413,7 @@ export function demoCaptureFromDraft(
         ).toUpperCase() as CapturedApiCall["method"];
         return {
           method: API_METHODS.has(method) ? method : "GET",
-          endpoint: (c.endpoint ?? "").trim(),
+          endpoint: stripQueryAndFragment(c.endpoint ?? ""),
           integration: (c.integration ?? "").trim(),
           purpose: (c.purpose ?? "").trim(),
         };

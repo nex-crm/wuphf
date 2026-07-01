@@ -76,6 +76,7 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
   const isModify = Boolean(tool);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<DemoCaptureLine[]>([]);
   // The two call avatars glow with live audio. We drive them via a CSS variable
   // straight from the meter callback so the squares animate at 60fps without
@@ -100,6 +101,42 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
     null,
   );
 
+  // a11y: close on Escape, focus the dialog on open, restore focus on close,
+  // and keep Tab focus inside the dialog (a minimal focus trap). Mirrors
+  // CallModal so keyboard-only operators can dismiss and stay scoped.
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      prev?.focus();
+    };
+  }, [onClose]);
+
+  // Start the realtime call exactly once on mount. `isModify`/`tool` are read at
+  // start and must not restart a live call, so the empty dep list is deliberate.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional one-time call start
   useEffect(() => {
     let controller: RealtimeController | null = null;
     let cancelled = false;
@@ -175,8 +212,6 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
       thinkingSound.current?.stop();
       controller?.stop();
     };
-    // Start exactly once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Run the cua observe capture alongside the call. It reads the real frontmost
@@ -195,7 +230,7 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
       // OBSERVE_UNAVAILABLE or a transport error — proceed without structured capture.
     });
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Start the observe capture exactly once on mount.
   }, []);
 
   // At Build, fold the freshest observed page structure into the capture.
@@ -218,7 +253,12 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
       aria-label={dialogLabel}
       onClick={onClose}
     >
-      <div className="opr-call" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="opr-call"
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="opr-call-stage">
           <div className="opr-call-rec">
             <span className="opr-led" />

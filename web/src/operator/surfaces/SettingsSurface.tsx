@@ -38,7 +38,11 @@ export function SettingsSurface() {
       qc.invalidateQueries({ queryKey: ["operator-config"] });
     },
   });
-  const model = modelInput || config.data?.realtime_model || "gpt-realtime-2";
+  const saveError = save.isError
+    ? save.error instanceof Error
+      ? save.error.message
+      : "Could not save voice settings. Check the key and try again."
+    : null;
 
   return (
     <div className="opr-surface-wide">
@@ -88,8 +92,8 @@ export function SettingsSurface() {
             <input
               className="opr-input"
               aria-label="Realtime model"
-              placeholder="gpt-realtime-2"
-              value={model}
+              placeholder={config.data?.realtime_model || "gpt-realtime-2"}
+              value={modelInput}
               onChange={(e) => setModelInput(e.target.value)}
               disabled={nexHosted}
             />
@@ -104,13 +108,18 @@ export function SettingsSurface() {
               onClick={() =>
                 save.mutate({
                   ...(keyInput ? { openai_api_key: keyInput } : {}),
-                  realtime_model: model,
+                  ...(modelInput ? { realtime_model: modelInput } : {}),
                 })
               }
             >
               {save.isPending ? "Saving…" : "Save voice settings"}
             </button>
           </div>
+          {saveError ? (
+            <div className="opr-set-row" role="alert">
+              <div className="opr-set-help opr-danger">{saveError}</div>
+            </div>
+          ) : null}
           <div className="opr-set-row">
             <div>
               <div className="opr-set-label">Let wuphf host voice for me</div>

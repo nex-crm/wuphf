@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -124,6 +126,54 @@ func TestBrowserPendingAndApproveEndpoints(t *testing.T) {
 	}
 }
 
+// TestBrowserApprovalResolveForAppScopes proves an approval raised by one app
+// cannot be resolved through another app's endpoint: resolveForApp refuses a
+// mismatched app id (leaving the ask pending) and only the owning app resolves.
+func TestBrowserApprovalResolveForAppScopes(t *testing.T) {
+	const app = "app_owner"
+	got := make(chan bool, 1)
+	go func() { got <- browserApprovals.ask(context.Background(), app, browserApprovalControl, "drive it") }()
+	p := waitForPending(t, app, 1)
+
+	// A different app must not resolve this app's approval id.
+	if browserApprovals.resolveForApp("app_intruder", p[0].ID, true) {
+		t.Fatal("resolveForApp must refuse an id owned by a different app")
+	}
+	if len(browserApprovals.pendingFor(app)) != 1 {
+		t.Fatal("a cross-app resolve attempt must leave the ask pending")
+	}
+	// The owning app resolves it.
+	if !browserApprovals.resolveForApp(app, p[0].ID, true) {
+		t.Fatal("the owning app should resolve its own approval")
+	}
+	if allow := <-got; !allow {
+		t.Fatal("ask should return true after the owning app approves")
+	}
+}
+
+// TestBrowserApproveEndpointRejectsForeignApp proves the HTTP approve endpoint is
+// app-scoped: posting a valid approval id to a DIFFERENT app's URL is a 404 and
+// does not resume the paused step.
+func TestBrowserApproveEndpointRejectsForeignApp(t *testing.T) {
+	const app = "app_real"
+	b := &Broker{}
+	go func() { _ = browserApprovals.ask(context.Background(), app, browserApprovalControl, "x") }()
+	p := waitForPending(t, app, 1)
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"approval_id":"` + p[0].ID + `","decision":"approve"}`)
+	req := httptest.NewRequest(http.MethodPost, "/operator/apps/app_other/workflow/browser/approve", body)
+	b.handleOperatorAppWorkflow(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign-app approve should be 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(browserApprovals.pendingFor(app)) != 1 {
+		t.Fatal("a foreign-app approve must leave the real app's ask pending")
+	}
+	// Clean up the still-pending ask so it does not leak into other tests.
+	browserApprovals.resolve(p[0].ID, false)
+}
+
 // TestBrowserStepHeadlessSkips proves a run with no operator app id (scheduler/
 // cron/headless) never seizes the browser — it skips without asking or spawning.
 func TestBrowserStepHeadlessSkips(t *testing.T) {
@@ -154,6 +204,91 @@ func TestBrowserStepControlDenyDoesNotDrive(t *testing.T) {
 	out := <-res
 	if out["skipped"] != "browser control not approved" {
 		t.Fatalf("denied control should skip, got %#v", out)
+	}
+}
+
+// writeFakeCuaRunner writes a shell script that stands in for the Python cua
+// runner and points the step at it (WUPHF_CUA_PYTHON=sh). The key envs are set so
+// the availability gate passes and the step actually spawns the fake.
+func writeFakeCuaRunner(t *testing.T, script string) {
+	t.Helper()
+	runner := filepath.Join(t.TempDir(), "fake_cua.sh")
+	if err := os.WriteFile(runner, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WUPHF_OPENAI_API_KEY", "test-key")
+	t.Setenv("WUPHF_CUA_PYTHON", "sh")
+	t.Setenv("WUPHF_CUA_RUNNER", runner)
+}
+
+// resolveNextPending waits for the app's next single pending ask and resolves it.
+func resolveNextPending(t *testing.T, app string, allow bool) browserApproval {
+	t.Helper()
+	p := waitForPending(t, app, 1)
+	browserApprovals.resolve(p[0].ID, allow)
+	return p[0]
+}
+
+// TestBrowserStepDrivesAndAggregates exercises the full happy path through the
+// fake runner: control approval passes the gate, an in-step send is gated in chat
+// (its decision is forwarded to the runner's stdin), and the action/done events
+// are aggregated into the result.
+func TestBrowserStepDrivesAndAggregates(t *testing.T) {
+	// Emits an action, then requests a send and echoes back the stdin decision as
+	// the run result, so the test can prove the send-gate forwarded "approve".
+	writeFakeCuaRunner(t, strings.Join([]string{
+		`echo '{"type":"action","label":"Opened portal"}'`,
+		`echo '{"type":"approval_request","label":"Submit refund"}'`,
+		`read decision`,
+		`echo "{\"type\":\"done\",\"result\":\"$decision\"}"`,
+	}, "\n")+"\n")
+
+	const app = "app_drive"
+	ctx := context.WithValue(context.Background(), browserStepAppIDKey, app)
+	res := make(chan map[string]any, 1)
+	go func() {
+		out, _ := runBrowserStepViaCua(ctx, "submit the refund")
+		res <- out
+	}()
+
+	if a := resolveNextPending(t, app, true); a.Kind != browserApprovalControl {
+		t.Fatalf("first ask should be control, got %q", a.Kind)
+	}
+	if a := resolveNextPending(t, app, true); a.Kind != browserApprovalSend {
+		t.Fatalf("second ask should be send, got %q", a.Kind)
+	}
+
+	out := <-res
+	if out["error"] != nil {
+		t.Fatalf("clean run should carry no error, got %#v", out["error"])
+	}
+	if out["actions_count"] != 1 || out["result"] != "approve" {
+		t.Fatalf("expected one action and the forwarded send decision, got %#v", out)
+	}
+	if acts, _ := out["actions"].([]string); len(acts) != 1 || acts[0] != "Opened portal" {
+		t.Fatalf("actions not aggregated, got %#v", out["actions"])
+	}
+}
+
+// TestBrowserStepSurfacesRunnerCrash proves an abnormal runner exit that emits no
+// "done"/"error" event is surfaced as an error in the result rather than looking
+// like a clean, empty success.
+func TestBrowserStepSurfacesRunnerCrash(t *testing.T) {
+	writeFakeCuaRunner(t, "echo '{\"type\":\"action\",\"label\":\"Started\"}'\nexit 3\n")
+
+	const app = "app_crash"
+	ctx := context.WithValue(context.Background(), browserStepAppIDKey, app)
+	res := make(chan map[string]any, 1)
+	go func() {
+		out, _ := runBrowserStepViaCua(ctx, "do the thing")
+		res <- out
+	}()
+	resolveNextPending(t, app, true) // approve control
+
+	out := <-res
+	msg, _ := out["error"].(string)
+	if !strings.Contains(msg, "runner exited abnormally") {
+		t.Fatalf("abnormal exit should surface an error, got %#v", out)
 	}
 }
 

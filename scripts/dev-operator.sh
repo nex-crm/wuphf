@@ -21,7 +21,7 @@ BROKER_PORT="${WUPHF_BROKER_PORT:-7892}"
 WEB_PORT="${WUPHF_WEB_PORT:-7893}"
 VITE_PORT="${WUPHF_VITE_PORT:-5280}"
 HOME_DIR="${WUPHF_RUNTIME_HOME:-/private/tmp/wuphf-operator-home}"
-COMPOSIO_USER_ID="${WUPHF_COMPOSIO_USER_ID:-najmuzzaman@nex.ai}"
+COMPOSIO_USER_ID="${WUPHF_COMPOSIO_USER_ID:?set WUPHF_COMPOSIO_USER_ID to your Composio user id}"
 LOG_DIR="${TMPDIR:-/tmp}"
 
 free_port() {

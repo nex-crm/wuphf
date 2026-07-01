@@ -3,10 +3,11 @@
 
 While the operator demonstrates a workflow (narrating over the realtime voice
 call), this polls the FRONTMOST window every few seconds and captures its REAL
-structure — the component tree (AX), the HTML-level selectors (DOM via the page
-tool), and the visible text — diffing across ticks to infer the workflow steps.
-This is how the build AI reads the actual page instead of guessing from
-screenshots.
+structure — the component tree (AX) and, on browser windows, the visible text —
+diffing across ticks to infer the workflow steps. HTML-level DOM selectors
+(id/name/href) are NOT captured here: they would need the page tool's
+execute_javascript opt-in (see the NOTE below), so that is a follow-up. This is
+how the build AI reads the actual page instead of guessing from screenshots.
 
 The recorder (start_recording) is deliberately NOT used: it only logs
 cua-driver's OWN action calls, but here the human acts manually, so the event
@@ -135,7 +136,11 @@ def run(interval, max_ticks, duration):
             break
         if duration and (time.time() - started) >= duration:
             break
-        snap = snapshot(tick)
+        try:
+            snap = snapshot(tick)
+        except Exception as exc:  # one bad tick must not kill the whole capture
+            emit({"type": "error", "tick": tick, "error": str(exc)})
+            snap = None
         if snap:
             if prev is None or snap["app"] != prev["app"] or snap["title"] != prev["title"]:
                 ev = {"tick": tick, "type": "navigate", "app": snap["app"], "title": snap["title"]}

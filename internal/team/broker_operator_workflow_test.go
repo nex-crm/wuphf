@@ -133,8 +133,8 @@ func TestParseAuthoredWorkflowPlanBrowserStep(t *testing.T) {
 	if post.Kind != "browser" || post.Integration != "" || !post.Gated {
 		t.Fatalf("post step should be a gated browser step, got %+v", post)
 	}
-	if post.Detail == "" {
-		t.Fatal("browser step must carry the goal in detail")
+	if post.Detail != "Open the vendor portal and submit the refund" {
+		t.Fatalf("browser step must preserve the authored goal, got %q", post.Detail)
 	}
 	// An explicitly-authored browser step is preserved.
 	if plan.Steps[2].Kind != "browser" {

@@ -126,6 +126,9 @@ class TestReplay(unittest.TestCase):
             mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
             mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
             mock.patch.object(cua_exec, "cua"),
+            # The Enter submits the field we just typed into, so it is gated like a
+            # send; the operator approves it here so replay stays deterministic.
+            mock.patch.object(cua_exec, "await_approval", return_value=True),
             mock.patch.object(cua_exec, "plan") as plan_mock,
             mock.patch.object(cua_exec, "emit", side_effect=events.append),
         ):
@@ -242,6 +245,92 @@ class TestSendGating(unittest.TestCase):
             cua_exec.run("send it", "Google Chrome", "key")
         clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
         self.assertEqual(len(clicks), 1)  # approved → executed
+
+    def _type_then_enter(self):
+        # type into a field, then press Enter (which could submit a composer), then done
+        return [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "type_text", "arguments": '{"i":6,"text":"hi team","reason":"draft"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "press_key", "arguments": '{"key":"Enter","reason":"send"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "3", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+
+    def test_run_gates_enter_after_typing_when_not_approved(self):
+        # Regression: Enter after typing could submit a focused composer and send
+        # externally without approval. It must be gated like a Send click.
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 6, "role": "TextArea", "label": "Message"}], "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", side_effect=self._type_then_enter()),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("message the team", "Google Chrome", "key")
+        presses = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "press_key"]
+        self.assertEqual(len(presses), 0)  # Enter submit was gated + denied → not fired
+        self.assertTrue(any(e.get("skipped") and e.get("tool") == "press_key" for e in events if e.get("type") == "action"))
+
+    def test_run_allows_enter_when_no_prior_typing(self):
+        # An Enter with no composer typed into (e.g. activating a focused control)
+        # is not a send, so it must NOT require approval.
+        seq = [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "press_key", "arguments": '{"key":"Enter","reason":"activate"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 6, "role": "Button", "label": "Go"}], "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False) as approval,
+            mock.patch.object(cua_exec, "plan", side_effect=seq),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("open it", "Google Chrome", "key")
+        presses = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "press_key"]
+        self.assertEqual(len(presses), 1)  # no prior typing → fired without approval
+        approval.assert_not_called()
+
+    def test_replay_gates_enter_after_typing_when_not_approved(self):
+        # Same protection on the replay path: a recorded type + Enter must gate the
+        # Enter so replay can't silently re-send.
+        steps = [
+            {"action": "type", "role": "TextArea", "label": "Message", "text": "hi"},
+            {"action": "press_key", "key": "Enter"},
+        ]
+        elements = [{"i": 6, "role": "TextArea", "label": "Message"}]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        plan_mock.assert_not_called()
+        presses = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "press_key"]
+        self.assertEqual(len(presses), 0)  # Enter submit gated + denied → not fired
+        self.assertTrue(any(e.get("skipped") and e.get("tool") == "press_key" for e in events if e.get("type") == "action"))
+
+
+class TestObserveTickResilience(unittest.TestCase):
+    def test_bad_tick_does_not_kill_capture(self):
+        # A transient snapshot failure on one tick must emit an error and let the
+        # loop continue capturing the next tick + the record summary, not tear the
+        # whole session down.
+        good = {"tick": 1, "ts": 1.0, "app": "Slack", "title": "t", "components": []}
+        events = []
+        with (
+            mock.patch.object(cua_observe, "snapshot", side_effect=[RuntimeError("AX hiccup"), good]),
+            mock.patch.object(cua_observe, "emit", side_effect=events.append),
+        ):
+            cua_observe.run(interval=0, max_ticks=1, duration=0)
+        self.assertTrue(any(e.get("type") == "error" for e in events))  # bad tick reported
+        self.assertTrue(any(e.get("type") == "snapshot" for e in events))  # next tick captured
+        self.assertTrue(any(e.get("type") == "record" for e in events))  # summary still emitted
 
 
 if __name__ == "__main__":

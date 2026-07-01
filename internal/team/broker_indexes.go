@@ -87,6 +87,15 @@ func (b *Broker) findMemberLocked(slug string) *officeMember {
 	if i, ok := b.memberIndex[slug]; ok && i < len(b.members) && b.members[i].Slug == slug {
 		return &b.members[i]
 	}
+	// A miss may be genuine OR a stale index left by a same-length slice
+	// replacement (snapshot rollback / state load) that the length check can't
+	// detect. Rebuild once and retry so we never return a false negative for a
+	// member that actually exists, mirroring findChannelLocked. Hits never reach
+	// here, so the hot lookup path stays O(1).
+	b.rebuildMemberIndexLocked()
+	if i, ok := b.memberIndex[slug]; ok && i < len(b.members) && b.members[i].Slug == slug {
+		return &b.members[i]
+	}
 	return nil
 }
 
@@ -103,9 +112,8 @@ func (b *Broker) hasMember(slug string) bool {
 }
 
 // rebuildMemberIndexLocked rebuilds memberIndex from b.members. Callers must
-// hold b.mu. Called on load and after any structural mutation (remove, reorder)
-// to keep the map in sync with the slice. Appends and in-place updates are
-// handled by findMemberLocked's length-check lazy rebuild.
+// hold b.mu. findMemberLocked's length-check + rebuild-on-miss keep the map in
+// sync with the slice across appends, removes, and same-length replacements.
 func (b *Broker) rebuildMemberIndexLocked() {
 	b.memberIndex = make(map[string]int, len(b.members))
 	for i, m := range b.members {

@@ -49,12 +49,13 @@ const browserApprovalTimeout = 3 * time.Minute
 // browserApproval is one pending in-chat ask. The channel is buffered so resolve
 // never blocks even if the waiting step has already given up (timeout/cancel).
 type browserApproval struct {
-	ID    string `json:"id"`
-	AppID string `json:"app_id"`
-	Kind  string `json:"kind"`
-	Goal  string `json:"goal"`
-	seq   uint64
-	ch    chan bool
+	ID      string `json:"id"`
+	AppID   string `json:"app_id"`
+	Kind    string `json:"kind"`
+	Goal    string `json:"goal"`
+	seq     uint64
+	ch      chan bool
+	settled bool // guarded by browserApprovalRegistry.mu: exactly one of {expire, resolve} wins
 }
 
 type browserApprovalRegistry struct {
@@ -92,27 +93,51 @@ func (g *browserApprovalRegistry) ask(ctx context.Context, appID, kind, goal str
 	case allow := <-a.ch:
 		return allow
 	case <-ctx.Done():
-		return false
+		return g.expire(a)
 	case <-timer.C:
-		return false
+		return g.expire(a)
 	}
 }
 
+// expire claims the approval for the timeout/cancel path and denies. If resolve
+// already claimed it first (a narrow window where the operator replied just as
+// the step gave up), drain the decision it delivered instead of overriding it,
+// so exactly one of {expire, resolve} wins.
+func (g *browserApprovalRegistry) expire(a *browserApproval) bool {
+	g.mu.Lock()
+	if a.settled {
+		g.mu.Unlock()
+		return <-a.ch
+	}
+	a.settled = true
+	delete(g.m, a.ID)
+	g.mu.Unlock()
+	return false
+}
+
 // resolve delivers the operator's decision to a waiting step. False when the id
-// is unknown (already resolved, timed out, or from another run).
+// is unknown (already resolved, timed out, expired, or from another run).
 func (g *browserApprovalRegistry) resolve(id string, allow bool) bool {
+	return g.resolveForApp("", id, allow)
+}
+
+// resolveForApp is resolve scoped to an app: it refuses an approval that belongs
+// to a different app so one app's endpoint cannot resolve another app's ask. An
+// empty appID skips the ownership check (in-process callers that already trust
+// the id). It claims the approval under the lock (settle-once), then delivers
+// the decision into the buffered channel.
+func (g *browserApprovalRegistry) resolveForApp(appID, id string, allow bool) bool {
 	g.mu.Lock()
 	a, ok := g.m[id]
-	g.mu.Unlock()
-	if !ok {
+	if !ok || a.settled || (appID != "" && a.AppID != appID) {
+		g.mu.Unlock()
 		return false
 	}
-	select {
-	case a.ch <- allow:
-		return true
-	default:
-		return false // already resolved
-	}
+	a.settled = true
+	delete(g.m, a.ID)
+	g.mu.Unlock()
+	a.ch <- allow // buffered (cap 1); the waiting step or expire drains it
+	return true
 }
 
 // pendingFor returns the app's currently paused asks, oldest first, so the chat
@@ -145,7 +170,7 @@ type browserApproveRequest struct {
 // resolveOperatorAppBrowserApproval forwards the operator's in-chat decision to
 // the paused browser step. 404 when the ask is unknown (already resolved or the
 // run moved on), so the UI can drop a stale card.
-func (b *Broker) resolveOperatorAppBrowserApproval(w http.ResponseWriter, r *http.Request, _ string) {
+func (b *Broker) resolveOperatorAppBrowserApproval(w http.ResponseWriter, r *http.Request, appID string) {
 	var req browserApproveRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -155,7 +180,9 @@ func (b *Broker) resolveOperatorAppBrowserApproval(w http.ResponseWriter, r *htt
 		http.Error(w, "missing approval_id", http.StatusBadRequest)
 		return
 	}
-	if !browserApprovals.resolve(req.ApprovalID, req.Decision == "approve") {
+	// Scope the resolve to the app in the URL: an approval id from another app
+	// must not be resolvable through this app's endpoint.
+	if !browserApprovals.resolveForApp(appID, req.ApprovalID, req.Decision == "approve") {
 		http.Error(w, "approval not found", http.StatusNotFound)
 		return
 	}

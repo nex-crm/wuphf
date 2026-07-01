@@ -98,7 +98,17 @@ func runBrowserStepViaCua(ctx context.Context, goal string) (map[string]any, err
 		}
 	}
 	_ = stdin.Close()
-	_ = cmd.Wait()
+	waitErr := cmd.Wait()
+	// Surface a crash / kill / truncated-scan as an error so the caller does not
+	// treat an aborted step as a clean success. A runner-emitted "error" event
+	// wins (it is more specific); ctx cancellation is an intentional stop, not a
+	// failure.
+	if scanErr := scanner.Err(); errMsg == "" && scanErr != nil {
+		errMsg = "runner output error: " + scanErr.Error()
+	}
+	if errMsg == "" && waitErr != nil && ctx.Err() == nil {
+		errMsg = "runner exited abnormally: " + waitErr.Error()
+	}
 
 	out := map[string]any{"actions": actions, "actions_count": len(actions)}
 	if result != "" {

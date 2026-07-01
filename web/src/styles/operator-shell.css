@@ -1534,6 +1534,7 @@
 }
 .opr-call-avatar {
   --lvl: 0;
+
   width: 54px;
   height: 54px;
   border-radius: var(--t-r-sm);

@@ -99,6 +99,12 @@ ALLOWED_KEYS = {
     "home", "end", "pageup", "pagedown",
 }
 
+# Enter/Return can SUBMIT a focused composer (Slack/Gmail/comment box), so a bare
+# keypress could fire an external send without passing the confidential-send gate.
+# When we've typed into a field this run, these keys are gated exactly like a
+# "Send" click — over-ask rather than auto-send.
+SEND_KEYS = {"enter", "return"}
+
 
 def safe_key(k):
     norm = str(k).strip().lower()
@@ -212,6 +218,9 @@ def run(goal, app_name, api_key, dry_run=False, window_id_arg=None):
     # deterministically (C2). We store the STABLE identity (role + label), never
     # the per-snapshot element_index. Emitted as a `trajectory` event on finish.
     trajectory = []
+    # True once we've typed into a field this run — a following Enter/Return could
+    # submit that composer, so we gate the submit-key send until it clears.
+    typed_into_field = False
 
     def finish(result):
         if not dry_run and trajectory:
@@ -290,6 +299,7 @@ def run(goal, app_name, api_key, dry_run=False, window_id_arg=None):
                         "text": a["text"],
                     }
                 )
+                typed_into_field = True
         elif name == "press_key":
             key = safe_key(a["key"])
             if key is None:
@@ -312,8 +322,30 @@ def run(goal, app_name, api_key, dry_run=False, window_id_arg=None):
                 continue
             label = f"Press {key}"
             if not dry_run:
+                # A submit key after typing is an external send — gate it like a
+                # Send click so a keypress can't bypass the confidential-send rule.
+                is_submit = key.strip().lower() in SEND_KEYS
+                if is_submit and typed_into_field and not await_approval(label):
+                    emit(
+                        {
+                            "type": "action",
+                            "label": f"Skipped (not approved): {label}",
+                            "tool": "press_key",
+                            "skipped": True,
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": "skipped: submit key not approved by the operator",
+                        }
+                    )
+                    continue
                 cua("press_key", {"pid": pid, "key": key})
                 trajectory.append({"action": "press_key", "key": key})
+                if is_submit:
+                    typed_into_field = False
         else:
             label = name
 
@@ -400,15 +432,31 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
     pid, window_id, title = found
     emit({"type": "status", "status": "replaying", "detail": f"{app_name}: {title}"})
     healed_steps = []
+    # A replayed Enter/Return after a replayed type could submit a composer, so
+    # gate the submit-key send just like the live run does.
+    typed_into_field = False
 
     for step in steps:
         action = step.get("action")
         if action == "press_key":
             key = safe_key(step.get("key", ""))
             if key:
+                is_submit = key.strip().lower() in SEND_KEYS
+                if is_submit and typed_into_field and not await_approval(f"Press {key}"):
+                    emit(
+                        {
+                            "type": "action",
+                            "label": f"Skipped (not approved): Press {key}",
+                            "tool": "press_key",
+                            "skipped": True,
+                        }
+                    )
+                    continue
                 cua("press_key", {"pid": pid, "key": key})
                 emit({"type": "action", "label": f"Press {key}", "tool": "press_key", "replayed": True})
                 healed_steps.append(step)
+                if is_submit:
+                    typed_into_field = False
             continue
 
         elements, err = snapshot(pid, window_id)
@@ -437,6 +485,7 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
                     {"pid": pid, "window_id": window_id, "element_index": idx, "text": step.get("text", "")},
                 )
                 emit({"type": "action", "label": f'Type “{step.get("text", "")}”', "tool": "type", "replayed": True})
+                typed_into_field = True
             else:
                 emit({"type": "action", "label": f'Click {el["role"]} “{el["label"]}”', "tool": "click", "replayed": True})
             healed_steps.append(step)
@@ -478,6 +527,7 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
                 )
                 emit({"type": "action", "label": f'Healed → type “{ha.get("text", "")}”', "tool": "type", "healed": True})
                 healed_steps.append({"action": "type", "role": tgt.get("role"), "label": tgt.get("label"), "text": ha.get("text", "")})
+                typed_into_field = True
             else:
                 emit({"type": "action", "label": f'Healed → click {tgt.get("role", "")} “{tgt.get("label", "")}”', "tool": "click", "healed": True})
                 healed_steps.append({"action": "click", "role": tgt.get("role"), "label": tgt.get("label")})

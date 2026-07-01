@@ -34,7 +34,9 @@ function connectable(name: string): ReferencedIntegration {
 describe("ConnectionsCard", () => {
   it("renders nothing when no integration needs attention", () => {
     const { container } = render(
-      <ConnectionsCard integrations={[{ name: "Slack", readiness: "connected" }]} />,
+      <ConnectionsCard
+        integrations={[{ name: "Slack", readiness: "connected" }]}
+      />,
     );
     expect(container.firstChild).toBeNull();
   });

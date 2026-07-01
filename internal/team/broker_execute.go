@@ -97,19 +97,35 @@ func spawnRunnerSSE(w http.ResponseWriter, r *http.Request, args, extraEnv []str
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	streamBroken := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+			streamBroken = true
 			break
 		}
 		flusher.Flush()
 	}
-	_ = cmd.Wait()
-	_, _ = fmt.Fprint(w, "event: end\ndata: {}\n\n")
-	flusher.Flush()
+	waitErr := cmd.Wait()
+	// Surface a scan failure or a non-zero exit that the runner did not report
+	// itself, so the client never mistakes an aborted run for a clean one. A
+	// cancelled request context is an intentional stop, not a failure.
+	errText := ""
+	if scanErr := scanner.Err(); scanErr != nil {
+		errText = "runner output error: " + scanErr.Error()
+	} else if waitErr != nil && r.Context().Err() == nil {
+		errText = "runner exited abnormally: " + waitErr.Error()
+	}
+	if !streamBroken && r.Context().Err() == nil {
+		if errText != "" {
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":%q}\n\n", errText)
+		}
+		_, _ = fmt.Fprint(w, "event: end\ndata: {}\n\n")
+		flusher.Flush()
+	}
 }
 
 // cuaPython is the interpreter that runs the runner. Overridable so the test can
@@ -127,8 +143,9 @@ type executeBrowserRequest struct {
 	WindowID int    `json:"window_id,omitempty"`
 }
 
-// decodeExecuteBrowserRequest parses + validates the body. The goal is required;
-// it is capped so a runaway prompt cannot bloat the argv.
+// decodeExecuteBrowserRequest parses + validates the body. The goal is required
+// and bounded: an over-long goal is REJECTED (not silently truncated) because a
+// mid-word cut could steer the browser toward something the operator never meant.
 func decodeExecuteBrowserRequest(r *http.Request) (executeBrowserRequest, error) {
 	var req executeBrowserRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
@@ -139,7 +156,7 @@ func decodeExecuteBrowserRequest(r *http.Request) (executeBrowserRequest, error)
 		return req, fmt.Errorf("missing goal")
 	}
 	if len(req.Goal) > 2000 {
-		req.Goal = req.Goal[:2000]
+		return req, fmt.Errorf("goal too long (max 2000 chars)")
 	}
 	req.App = strings.TrimSpace(req.App)
 	return req, nil

@@ -233,10 +233,13 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TaskFollowUp        *int      `json:"task_follow_up_minutes,omitempty"`
 			TaskReminder        *int      `json:"task_reminder_minutes,omitempty"`
 			TaskRecheck         *int      `json:"task_recheck_minutes,omitempty"`
+			// RealtimeModel is a plain model identifier, not a secret (it is
+			// returned verbatim in the GET response), so it sits outside the
+			// secret block below.
+			RealtimeModel *string `json:"realtime_model,omitempty"`
 			// Secret fields
 			APIKey          *string `json:"api_key,omitempty"`
 			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
-			RealtimeModel   *string `json:"realtime_model,omitempty"`
 			AnthropicAPIKey *string `json:"anthropic_api_key,omitempty"`
 			GeminiAPIKey    *string `json:"gemini_api_key,omitempty"`
 			MinimaxAPIKey   *string `json:"minimax_api_key,omitempty"`

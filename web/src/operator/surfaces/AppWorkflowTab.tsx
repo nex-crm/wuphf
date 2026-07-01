@@ -110,6 +110,10 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
   // chat (the cards below). Errors surface, but a pause is normal, not a failure.
   const runLive = useMutation({
     mutationFn: () => runAppWorkflow(appId, false, effectiveConnections()),
+    // Drop any approval cards left cached from a previous run so stale asks
+    // can't flash before the first poll of the new run returns.
+    onMutate: () =>
+      qc.setQueryData(["operator-app-browser-approvals", appId], []),
     onSuccess: () => showNotice("Live run finished.", "success"),
     onError: (err) => {
       showNotice(
@@ -136,6 +140,14 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
       decision: "approve" | "deny";
     }) => resolveBrowserApproval(appId, id, decision),
     onSuccess: () => approvalsQuery.refetch(),
+    onError: (err) => {
+      showNotice(
+        err instanceof Error
+          ? err.message
+          : "Could not update this browser approval.",
+        "error",
+      );
+    },
   });
 
   // The workflow is intrinsic to the app, so it compiles automatically the first
@@ -181,7 +193,7 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
           running={run.isPending}
           onRunLive={() => runLive.mutate()}
           runningLive={runLive.isPending}
-          approvals={approvalsQuery.data ?? []}
+          approvals={runLive.isPending ? (approvalsQuery.data ?? []) : []}
           onResolveApproval={(id, decision) =>
             resolveApproval.mutate({ id, decision })
           }
