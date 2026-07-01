@@ -297,10 +297,11 @@ const (
 // the rendered frontmatter (the same shape renderKnowledgePageForGBrain emits),
 // so ListPages-by-tag and GetPage behave like the real brain.
 type fakeBrain struct {
-	mu     sync.Mutex
-	pages  map[string]gbrain.Page
-	links  map[string][]gbrain.Link
-	putErr error // injected PutPage failure
+	mu      sync.Mutex
+	pages   map[string]gbrain.Page
+	links   map[string][]gbrain.Link
+	putErr  error // injected PutPage failure
+	listErr error // injected ListPages failure (unreachable brain)
 }
 
 func newFakeBrain() *fakeBrain {
@@ -335,6 +336,9 @@ func (f *fakeBrain) GetPage(_ context.Context, slug string) (gbrain.Page, error)
 func (f *fakeBrain) ListPages(_ context.Context, opts gbrain.ListOptions) ([]gbrain.PageMeta, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var out []gbrain.PageMeta
 	for _, p := range f.pages {
 		if opts.Tag != "" && !slices.Contains(p.Tags, opts.Tag) {
@@ -485,5 +489,126 @@ func TestKnowledgeSharedPageRetagFailureSurfaces(t *testing.T) {
 	err = b.writeAppKnowledgeToGBrain(ctx, brain, testKnowledgeAppX, []appKnowledgePage{knowledgeTestPage("px", "Shared Topic")})
 	if err == nil {
 		t.Fatal("re-tag failure was swallowed, want error")
+	}
+}
+
+// TestAppKnowledgeGBrainReadFailureServesCache locks the fallback contract for
+// an UNREACHABLE brain (dead serve, PGLite lock contention, missing binary): a
+// prior synthesis whose gbrain write failed lives on in the per-app file cache
+// (stamped by the marker write), and the handler must serve it rather than tell
+// the user "no knowledge yet" and burn a fresh LLM pass whose result could not
+// persist anyway.
+func TestAppKnowledgeGBrainReadFailureServesCache(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	brain := newFakeBrain()
+	b.knowledgeBrainOverride = brain
+	var synthCalls atomic.Int32
+	withFakeAppsLLM(t, func(context.Context, string, string) (string, error) {
+		synthCalls.Add(1)
+		return `{"pages": []}`, nil
+	})
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	regBody, _ := json.Marshal(map[string]any{
+		"name": "Cached App", "description": "An app with a cached operating guide.",
+		"html": validAppHTML,
+	})
+	created := postAppsAsAgent(t, base+"/apps", b.Token(), appBuilderSlug, regBody)
+	app, _ := created["app"].(map[string]any)
+	id, _ := app["id"].(string)
+	if id == "" {
+		t.Fatalf("no app id: %v", created)
+	}
+	if err := b.appStore().WriteAppKnowledge(id, []appKnowledgePage{knowledgeTestPage("p1", "Operating Guide")}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	brain.mu.Lock()
+	brain.listErr = fmt.Errorf("connect gbrain mcp: context deadline exceeded")
+	brain.mu.Unlock()
+
+	status, out := getAppsJSON(t, base+"/apps/"+id+"/knowledge", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("GET knowledge: %d", status)
+	}
+	pages, _ := out["pages"].([]any)
+	if len(pages) != 1 {
+		t.Fatalf("pages = %v, want the one cached page", out["pages"])
+	}
+	first, _ := pages[0].(map[string]any)
+	if got, _ := first["title"].(string); got != "Operating Guide" {
+		t.Fatalf("title = %q, want cached \"Operating Guide\"", got)
+	}
+	if errStr, _ := out["error"].(string); errStr != "" {
+		t.Fatalf("error = %q, want none (a cache serve is a good response)", errStr)
+	}
+	if got := synthCalls.Load(); got != 0 {
+		t.Fatalf("synthesis ran %d times, want 0 (the cache must satisfy the read)", got)
+	}
+
+	// The empty MARKER also survives an unreachable brain: an app whose last
+	// synthesis was genuinely empty serves empty without a fresh LLM pass.
+	if err := b.appStore().WriteAppKnowledge(id, nil); err != nil {
+		t.Fatalf("seed empty marker: %v", err)
+	}
+	status, out = getAppsJSON(t, base+"/apps/"+id+"/knowledge", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("GET knowledge (empty marker): %d", status)
+	}
+	if pages, _ := out["pages"].([]any); len(pages) != 0 {
+		t.Fatalf("pages = %v, want empty from the marker", out["pages"])
+	}
+	if got := synthCalls.Load(); got != 0 {
+		t.Fatalf("synthesis ran %d times, want 0 (the empty marker must satisfy the read)", got)
+	}
+}
+
+// TestAppKnowledgeGBrainEmptyStaysAuthoritative locks the OTHER side of the
+// fallback boundary: when the brain is REACHABLE and simply holds no pages, a
+// stale non-empty file cache must NOT be served — pages deleted from the brain
+// stay deleted, and the handler re-synthesizes instead.
+func TestAppKnowledgeGBrainEmptyStaysAuthoritative(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	b.knowledgeBrainOverride = newFakeBrain()
+	var synthCalls atomic.Int32
+	withFakeAppsLLM(t, func(context.Context, string, string) (string, error) {
+		synthCalls.Add(1)
+		return `{"pages": []}`, nil
+	})
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	regBody, _ := json.Marshal(map[string]any{
+		"name": "Stale Cache App", "description": "An app whose brain pages were deleted.",
+		"html": validAppHTML,
+	})
+	created := postAppsAsAgent(t, base+"/apps", b.Token(), appBuilderSlug, regBody)
+	app, _ := created["app"].(map[string]any)
+	id, _ := app["id"].(string)
+	if id == "" {
+		t.Fatalf("no app id: %v", created)
+	}
+	if err := b.appStore().WriteAppKnowledge(id, []appKnowledgePage{knowledgeTestPage("p1", "Stale Page")}); err != nil {
+		t.Fatalf("seed stale cache: %v", err)
+	}
+
+	status, out := getAppsJSON(t, base+"/apps/"+id+"/knowledge", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("GET knowledge: %d", status)
+	}
+	if pages, _ := out["pages"].([]any); len(pages) != 0 {
+		t.Fatalf("pages = %v, want empty (stale cache must not mask a reachable brain)", out["pages"])
+	}
+	if got := synthCalls.Load(); got != 1 {
+		t.Fatalf("synthesis ran %d times, want 1 (reachable-but-empty brain re-synthesizes)", got)
 	}
 }
