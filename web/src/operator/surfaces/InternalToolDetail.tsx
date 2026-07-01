@@ -29,6 +29,10 @@ import {
   X,
 } from "lucide-react";
 
+import { AgentName } from "../agents/AgentName";
+import { AgentPurpose } from "../agents/AgentPurpose";
+import { ArtifactsTab } from "../artifacts/ArtifactsTab";
+import { seedArtifacts } from "../artifacts/artifacts";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { EmptyState } from "../components/EmptyState";
 import {
@@ -48,47 +52,29 @@ import {
   type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
+import { ToolsProvider } from "../tools/toolsContext";
+import { AppToolsChat } from "./AppToolsChat";
+import { AppToolsTab } from "./AppToolsTab";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
-import { type BuiltWorkflow, WorkflowBuilder } from "./WorkflowBuilder";
 
-type ToolTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
+type ToolTab =
+  | "artifacts"
+  | "workflow"
+  | "tools"
+  | "data"
+  | "integrations"
+  | "knowledge";
 
 const TABS: readonly TabDef<ToolTab>[] = [
-  { id: "ui", label: "UI" },
+  { id: "artifacts", label: "Artifacts" },
   { id: "workflow", label: "Workflow" },
+  // Tools Nex builds from taught workflows; the app's chat calls them. Additive.
+  { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
   { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge" },
 ];
-
-// Route the chat to the screen its change is about, from the operator's own
-// words, so they watch the right screen as the AI works. Workflow is the default
-// (the most common edit target). Returns null when nothing clearly matches.
-function inferToolTab(message: string): ToolTab | null {
-  const t = message.toLowerCase();
-  if (
-    /\b(screen|ui|button|form|layout|design|how it looks|display|the page)\b/.test(
-      t,
-    )
-  ) {
-    return "ui";
-  }
-  if (/\b(data|rows?|records?|columns?|the table|fields?)\b/.test(t)) {
-    return "data";
-  }
-  if (/\b(integration|connect|hubspot|slack|gmail|composio|app)\b/.test(t)) {
-    return "integrations";
-  }
-  if (
-    /\b(step|workflow|threshold|route|trigger|score|branch|decision|send|post|notify|gate|approval|sequence|nurture)\b/.test(
-      t,
-    )
-  ) {
-    return "workflow";
-  }
-  return null;
-}
 
 interface InternalToolDetailProps {
   tool: InternalTool;
@@ -107,7 +93,7 @@ export function InternalToolDetail({
   tool,
   onBack,
   onStartCall,
-  initialTab = "ui",
+  initialTab = "artifacts",
   demoSeed,
 }: InternalToolDetailProps) {
   const [tab, setTab] = useState<ToolTab>(initialTab);
@@ -129,8 +115,8 @@ export function InternalToolDetail({
   const [versions] = useState<ToolVersion[]>(tool.versions);
   // The tool's live workflow steps — the chat edits these and they render on the
   // Workflow tab. Changed steps flash so the edit is legible on that screen.
-  const [liveSteps, setLiveSteps] = useState<WorkflowStep[]>(tool.steps);
-  const [changedStepIds, setChangedStepIds] = useState<readonly string[]>([]);
+  const [liveSteps] = useState<WorkflowStep[]>(tool.steps);
+  const [changedStepIds] = useState<readonly string[]>([]);
   // Parent-owned inbound rows, shared by the UI and Data tabs so approving a
   // request on the UI tab is reflected in the Data tab too (no tab-local copy).
   const [inboundRows, setInboundRows] =
@@ -147,300 +133,309 @@ export function InternalToolDetail({
     );
   }
 
-  // When the chat reworks the workflow, show it on the Workflow screen the chat
-  // was acting on: navigate there, update the steps, and flash what changed.
-  function applyWorkflowEdit(draft: BuiltWorkflow) {
-    const changed = draft.steps
-      .filter((step) => {
-        const prev = liveSteps.find((p) => p.id === step.id);
-        return (
-          !prev || prev.title !== step.title || prev.detail !== step.detail
-        );
-      })
-      .map((step) => step.id);
-    setLiveSteps(draft.steps);
-    setChangedStepIds(changed);
-    setTab("workflow");
-  }
-
   return (
-    <div
-      className={`opr-detail-wrap${
-        chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
-      }`}
-    >
-      <div className="opr-surface-wide">
-        <button type="button" className="opr-back" onClick={onBack}>
-          <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
-          All tools
-        </button>
+    <ToolsProvider appName={tool.name}>
+      <div
+        className={`opr-detail-wrap${
+          chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
+        }`}
+      >
+        <div className="opr-surface-wide">
+          <button type="button" className="opr-back" onClick={onBack}>
+            <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
+            All agents
+          </button>
 
-        <div className="opr-detail-head">
-          <span className="opr-tool-emoji" aria-hidden={true}>
-            {sigil(tool.name)}
-          </span>
-          <div className="opr-detail-titles">
-            <div className="opr-detail-name">{tool.name}</div>
-            <p className="opr-tool-summary">{tool.summary}</p>
-            <div className="opr-tool-meta">
-              <ToolStatusBadge status={tool.status} />
-              <span className="opr-meta-dot">
-                v{version} · built from {tool.builtFrom}
-              </span>
-              <span className="opr-meta-dot">{tool.runsToday} runs today</span>
+          <div className="opr-detail-head">
+            <span className="opr-tool-emoji" aria-hidden={true}>
+              {sigil(tool.name)}
+            </span>
+            <div className="opr-detail-titles">
+              <div className="opr-detail-name">
+                <AgentName id={tool.id} fallback={tool.name} />
+              </div>
+              <div className="opr-tool-meta">
+                <ToolStatusBadge status={tool.status} />
+                <span className="opr-meta-dot">
+                  v{version} · built from {tool.builtFrom}
+                </span>
+                <span className="opr-meta-dot">
+                  {tool.runsToday} runs today
+                </span>
+              </div>
+            </div>
+            <div className="opr-detail-actions">
+              <button
+                type="button"
+                className="opr-btn opr-btn-sm"
+                onClick={onStartCall}
+              >
+                <PhoneCall size={13} strokeWidth={1.9} aria-hidden={true} />
+                Demo to Nex
+              </button>
+              <button
+                type="button"
+                className="opr-btn opr-btn-sm"
+                onClick={() => setChatOpen(true)}
+              >
+                <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
+                Ask Agent
+              </button>
+              {tool.status === "enabled" && (
+                <>
+                  <button type="button" className="opr-btn opr-btn-sm">
+                    <Power size={13} strokeWidth={1.9} aria-hidden={true} />
+                    Disable
+                  </button>
+                  <button
+                    type="button"
+                    className="opr-btn opr-btn-primary opr-btn-sm"
+                  >
+                    <CheckCircle2
+                      size={13}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
+                    Publish new version
+                  </button>
+                </>
+              )}
+              {tool.status === "disabled" && (
+                <>
+                  <button
+                    type="button"
+                    className="opr-btn opr-btn-primary opr-btn-sm"
+                  >
+                    <Power size={13} strokeWidth={1.9} aria-hidden={true} />
+                    Enable
+                  </button>
+                  <button type="button" className="opr-btn opr-btn-sm">
+                    <CheckCircle2
+                      size={13}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
+                    Publish new version
+                  </button>
+                </>
+              )}
+              {tool.status === "draft" && (
+                <>
+                  <button type="button" className="opr-btn opr-btn-sm">
+                    <Play size={13} strokeWidth={1.9} aria-hidden={true} />
+                    Run on test data
+                  </button>
+                  <button
+                    type="button"
+                    className="opr-btn opr-btn-primary opr-btn-sm"
+                  >
+                    <CheckCircle2
+                      size={13}
+                      strokeWidth={1.9}
+                      aria-hidden={true}
+                    />
+                    Publish
+                  </button>
+                </>
+              )}
+              {tool.status === "suggested" && (
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-primary opr-btn-sm"
+                >
+                  <Plus size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Build it
+                </button>
+              )}
             </div>
           </div>
-          <div className="opr-detail-actions">
+
+          <AgentPurpose summary={tool.summary} />
+
+          <Tabs
+            tabs={TABS}
+            active={tab}
+            onSelect={setTab}
+            hint={tab === "workflow" ? "deterministic · audited" : undefined}
+          />
+
+          <div
+            role="tabpanel"
+            id={`opr-panel-${tab}`}
+            aria-labelledby={`opr-tab-${tab}`}
+          >
+            {tab === "artifacts" && (
+              <ArtifactsTab
+                agentName={tool.name}
+                artifacts={[
+                  {
+                    id: "app",
+                    type: "app",
+                    title: tool.name,
+                    producedBy: "built by Nex",
+                    at: `v${version}`,
+                  },
+                  ...seedArtifacts(),
+                ]}
+                renderApp={() =>
+                  isInbound ? (
+                    <UITab rows={inboundRows} onApprove={approveInbound} />
+                  ) : (
+                    <EmptyState
+                      glyph="◧"
+                      title="No screen built yet"
+                      hint="Build the screen your team will use to run this agent. Demo it to Nex on a call and your AI assembles it."
+                      actionLabel="Demo workflow to Nex"
+                      onAction={onStartCall}
+                    />
+                  )
+                }
+              />
+            )}
+            {tab === "workflow" && (
+              <WorkflowTab
+                tool={{ ...tool, steps: liveSteps }}
+                versions={versions}
+                changedStepIds={changedStepIds}
+              />
+            )}
+            {tab === "tools" && <AppToolsTab appName={tool.name} />}
+            {tab === "data" &&
+              (isInbound ? (
+                <DataTab tool={tool} rows={inboundRows} />
+              ) : (
+                <EmptyState
+                  glyph="▦"
+                  title="No data yet"
+                  hint="Run this tool on test data. The rows it produces, with their statuses, show up here as a table you own."
+                  actionLabel="Run on test data"
+                />
+              ))}
+            {tab === "integrations" && <ToolIntegrationsTab tool={tool} />}
+            {tab === "knowledge" && <ToolKnowledgeTab />}
+          </div>
+        </div>
+
+        {/* Two peer affordances, reachable on any tab: demo a change to the tool
+          on a call, or ask its AI in chat. Hidden while the chat panel is open
+          (it would overlap them). */}
+        {chatOpen ? null : (
+          <div className="opr-detail-fabs">
             <button
               type="button"
-              className="opr-btn opr-btn-sm"
+              className="opr-ask-fab"
               onClick={onStartCall}
+              aria-label={`Demo a change to ${tool.name} to Nex`}
             >
-              <PhoneCall size={13} strokeWidth={1.9} aria-hidden={true} />
+              <PhoneCall size={16} strokeWidth={2} aria-hidden={true} />
               Demo to Nex
             </button>
             <button
               type="button"
-              className="opr-btn opr-btn-sm"
+              className="opr-ask-fab"
               onClick={() => setChatOpen(true)}
+              aria-label={`Ask Agent about ${tool.name}`}
             >
-              <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
-              Ask AI
+              <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
+              Ask Agent
             </button>
-            {tool.status === "enabled" && (
-              <>
-                <button type="button" className="opr-btn opr-btn-sm">
-                  <Power size={13} strokeWidth={1.9} aria-hidden={true} />
-                  Disable
-                </button>
-                <button
-                  type="button"
-                  className="opr-btn opr-btn-primary opr-btn-sm"
-                >
-                  <CheckCircle2
-                    size={13}
-                    strokeWidth={1.9}
-                    aria-hidden={true}
-                  />
-                  Publish new version
-                </button>
-              </>
-            )}
-            {tool.status === "disabled" && (
-              <>
-                <button
-                  type="button"
-                  className="opr-btn opr-btn-primary opr-btn-sm"
-                >
-                  <Power size={13} strokeWidth={1.9} aria-hidden={true} />
-                  Enable
-                </button>
-                <button type="button" className="opr-btn opr-btn-sm">
-                  <CheckCircle2
-                    size={13}
-                    strokeWidth={1.9}
-                    aria-hidden={true}
-                  />
-                  Publish new version
-                </button>
-              </>
-            )}
-            {tool.status === "draft" && (
-              <>
-                <button type="button" className="opr-btn opr-btn-sm">
-                  <Play size={13} strokeWidth={1.9} aria-hidden={true} />
-                  Run on test data
-                </button>
-                <button
-                  type="button"
-                  className="opr-btn opr-btn-primary opr-btn-sm"
-                >
-                  <CheckCircle2
-                    size={13}
-                    strokeWidth={1.9}
-                    aria-hidden={true}
-                  />
-                  Publish
-                </button>
-              </>
-            )}
-            {tool.status === "suggested" && (
+          </div>
+        )}
+
+        {chatOpen ? (
+          <>
+            {panelSize === "modal" ? (
               <button
                 type="button"
-                className="opr-btn opr-btn-primary opr-btn-sm"
-              >
-                <Plus size={13} strokeWidth={1.9} aria-hidden={true} />
-                Build it
-              </button>
-            )}
-          </div>
-        </div>
-
-        <Tabs
-          tabs={TABS}
-          active={tab}
-          onSelect={setTab}
-          hint={tab === "workflow" ? "deterministic · audited" : undefined}
-        />
-
-        <div
-          role="tabpanel"
-          id={`opr-panel-${tab}`}
-          aria-labelledby={`opr-tab-${tab}`}
-        >
-          {tab === "ui" &&
-            (isInbound ? (
-              <UITab rows={inboundRows} onApprove={approveInbound} />
-            ) : (
-              <EmptyState
-                glyph="◧"
-                title="No screen built yet"
-                hint="Build the screen your team will use to run this tool. Demo it to Nex on a call and your AI assembles it."
-                actionLabel="Demo workflow to Nex"
-                onAction={onStartCall}
+                className="opr-ask-backdrop"
+                aria-label="Close chat"
+                onClick={() => setChatOpen(false)}
               />
-            ))}
-          {tab === "workflow" && (
-            <WorkflowTab
-              tool={{ ...tool, steps: liveSteps }}
-              versions={versions}
-              changedStepIds={changedStepIds}
-            />
-          )}
-          {tab === "data" &&
-            (isInbound ? (
-              <DataTab tool={tool} rows={inboundRows} />
-            ) : (
-              <EmptyState
-                glyph="▦"
-                title="No data yet"
-                hint="Run this tool on test data. The rows it produces, with their statuses, show up here as a table you own."
-                actionLabel="Run on test data"
-              />
-            ))}
-          {tab === "integrations" && <ToolIntegrationsTab tool={tool} />}
-          {tab === "knowledge" && <ToolKnowledgeTab />}
-        </div>
-      </div>
-
-      {/* Two peer affordances, reachable on any tab: demo a change to the tool
-          on a call, or ask its AI in chat. Hidden while the chat panel is open
-          (it would overlap them). */}
-      {chatOpen ? null : (
-        <div className="opr-detail-fabs">
-          <button
-            type="button"
-            className="opr-ask-fab"
-            onClick={onStartCall}
-            aria-label={`Demo a change to ${tool.name} to Nex`}
-          >
-            <PhoneCall size={16} strokeWidth={2} aria-hidden={true} />
-            Demo to Nex
-          </button>
-          <button
-            type="button"
-            className="opr-ask-fab"
-            onClick={() => setChatOpen(true)}
-            aria-label={`Ask AI about ${tool.name}`}
-          >
-            <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-            Ask AI
-          </button>
-        </div>
-      )}
-
-      {chatOpen ? (
-        <>
-          {panelSize === "modal" ? (
-            <button
-              type="button"
-              className="opr-ask-backdrop"
-              aria-label="Close chat"
-              onClick={() => setChatOpen(false)}
-            />
-          ) : null}
-          <aside
-            className={`opr-ask-panel is-${panelSize}`}
-            aria-label={`Ask AI about ${tool.name}`}
-          >
-            <div className="opr-ask-bar">
-              <span className="opr-ask-bar-title">
-                <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
-                Ask AI · {tool.name}
-              </span>
-              <div className="opr-ask-bar-controls">
-                <button
-                  type="button"
-                  className="opr-icon-btn"
-                  onClick={() =>
-                    setPanelSize((s) => (s === "wide" ? "dock" : "wide"))
-                  }
-                  aria-label={
-                    panelSize === "wide" ? "Narrow panel" : "Widen panel"
-                  }
-                  title={panelSize === "wide" ? "Narrow" : "Widen"}
-                >
-                  {panelSize === "wide" ? (
-                    <ChevronsRight
-                      size={15}
-                      strokeWidth={1.9}
-                      aria-hidden={true}
-                    />
-                  ) : (
-                    <ChevronsLeft
-                      size={15}
-                      strokeWidth={1.9}
-                      aria-hidden={true}
-                    />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="opr-icon-btn"
-                  onClick={() =>
-                    setPanelSize((s) => (s === "modal" ? "dock" : "modal"))
-                  }
-                  aria-label={
-                    panelSize === "modal" ? "Exit full screen" : "Full screen"
-                  }
-                  title={
-                    panelSize === "modal" ? "Exit full screen" : "Full screen"
-                  }
-                >
-                  {panelSize === "modal" ? (
-                    <Minimize2 size={14} strokeWidth={1.9} aria-hidden={true} />
-                  ) : (
-                    <Maximize2 size={14} strokeWidth={1.9} aria-hidden={true} />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="opr-icon-btn"
-                  onClick={() => setChatOpen(false)}
-                  aria-label="Close chat"
-                  title="Close"
-                >
-                  <X size={15} strokeWidth={1.9} aria-hidden={true} />
-                </button>
+            ) : null}
+            <aside
+              className={`opr-ask-panel is-${panelSize}`}
+              aria-label={`Ask Agent about ${tool.name}`}
+            >
+              <div className="opr-ask-bar">
+                <span className="opr-ask-bar-title">
+                  <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
+                  Ask Agent · {tool.name}
+                </span>
+                <div className="opr-ask-bar-controls">
+                  <button
+                    type="button"
+                    className="opr-icon-btn"
+                    onClick={() =>
+                      setPanelSize((s) => (s === "wide" ? "dock" : "wide"))
+                    }
+                    aria-label={
+                      panelSize === "wide" ? "Narrow panel" : "Widen panel"
+                    }
+                    title={panelSize === "wide" ? "Narrow" : "Widen"}
+                  >
+                    {panelSize === "wide" ? (
+                      <ChevronsRight
+                        size={15}
+                        strokeWidth={1.9}
+                        aria-hidden={true}
+                      />
+                    ) : (
+                      <ChevronsLeft
+                        size={15}
+                        strokeWidth={1.9}
+                        aria-hidden={true}
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="opr-icon-btn"
+                    onClick={() =>
+                      setPanelSize((s) => (s === "modal" ? "dock" : "modal"))
+                    }
+                    aria-label={
+                      panelSize === "modal" ? "Exit full screen" : "Full screen"
+                    }
+                    title={
+                      panelSize === "modal" ? "Exit full screen" : "Full screen"
+                    }
+                  >
+                    {panelSize === "modal" ? (
+                      <Minimize2
+                        size={14}
+                        strokeWidth={1.9}
+                        aria-hidden={true}
+                      />
+                    ) : (
+                      <Maximize2
+                        size={14}
+                        strokeWidth={1.9}
+                        aria-hidden={true}
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="opr-icon-btn"
+                    onClick={() => setChatOpen(false)}
+                    aria-label="Close chat"
+                    title="Close"
+                  >
+                    <X size={15} strokeWidth={1.9} aria-hidden={true} />
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="opr-ask-body">
-              <WorkflowBuilder
-                panelMode={true}
-                scopeToolName={tool.name}
-                seed={seedConsumed ? undefined : demoSeedRef.current}
-                onClose={() => setChatOpen(false)}
-                onFinish={applyWorkflowEdit}
-                onUserMessage={(text) => {
-                  const target = inferToolTab(text);
-                  if (target) setTab(target);
-                }}
-              />
-            </div>
-          </aside>
-        </>
-      ) : null}
-    </div>
+              <div className="opr-ask-body">
+                <AppToolsChat
+                  appName={tool.name}
+                  seed={seedConsumed ? undefined : demoSeedRef.current}
+                />
+              </div>
+            </aside>
+          </>
+        ) : null}
+      </div>
+    </ToolsProvider>
   );
 }
 

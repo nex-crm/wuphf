@@ -98,8 +98,8 @@ export function AppDataTab({ appId }: AppDataTabProps) {
     return (
       <EmptyState
         glyph="▦"
-        title="Could not read this app’s data"
-        hint="The workspace could not load this app’s database right now. Try again in a moment."
+        title="Could not read this agent’s data"
+        hint="The workspace could not load this agent’s database right now. Try again in a moment."
       />
     );
   }
@@ -110,7 +110,7 @@ export function AppDataTab({ appId }: AppDataTabProps) {
       <EmptyState
         glyph="▦"
         title="No data yet"
-        hint="This app has not written to its database yet. As it derives and saves its data model — the tables that power it — they appear here."
+        hint="This agent has not written to its database yet. As it derives and saves its data model — the tables that power it — they appear here."
       />
     );
   }
@@ -145,8 +145,8 @@ function ModelTableView({ table }: { table: ModelTable }) {
       </div>
       {table.rows.length === 0 ? (
         <div className="opr-data-empty">
-          Defined, no rows yet — the app has declared this table but not written
-          to it.
+          Defined, no rows yet — the agent has declared this table but not
+          written to it.
         </div>
       ) : (
         <table className="opr-data-table">

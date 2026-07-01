@@ -3,12 +3,13 @@
 The BUILD half of the operator harness, on the **pi-mono** stack (`@mariozechner/pi-ai`):
 plain-language description → a deterministic `WorkflowSpec`. **Key-free, multi-provider.**
 
-This is the chosen engine (see `docs/specs/operator-harness-clean-start.md` §Engine
-decision). It replaces driving `claude -p`/`codex` via stdout: pi-ai is an embeddable
-TypeScript SDK over one abstraction for **subscription OAuth** (Claude Pro/Max, ChatGPT/
-Codex, Copilot — `/login`, no API key), **BYOK** (env keys), and **local/open-weight**
-(Ollama → e.g. Hermes). Same `WorkflowSpec` contract as the FE (`web/src/operator/mock/
-data.ts`) and the Python harness, so it drops in behind the same `/build/stream` shape.
+This is the engine — the operator backend is fully pi-mono (see
+`docs/specs/operator-harness-clean-start.md` §Engine decision; the Python/deepagents
+`harness/` fallback has been removed). It replaces driving `claude -p`/`codex` via
+stdout: pi-ai is an embeddable TypeScript SDK over one abstraction for **subscription
+OAuth** (Claude Pro/Max, ChatGPT/Codex, Copilot — `/login`, no API key), **BYOK** (env
+keys), and **local/open-weight** (Ollama → e.g. Hermes). Same `WorkflowSpec` contract
+as the FE (`web/src/operator/mock/data.ts`), behind the `/build/stream` shape.
 
 ## Layout
 
@@ -54,8 +55,7 @@ bun run smoke     # boots it + exercises /health /providers /run /build/stream (
 ```
 
 The FE points its build/run calls here (same `WorkflowSpec` contract as the mock). This
-replaces the Python `harness/` as the operator backend; the Python build agents remain a
-fallback until removed.
+is the only operator backend — the Python `harness/` (deepagents) has been removed.
 
 ## Status
 

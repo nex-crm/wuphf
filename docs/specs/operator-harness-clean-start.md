@@ -88,8 +88,10 @@ token), and Anthropic now meters third-party subscription use as per-token extra
 (badlogic/pi-mono#3372) — so ChatGPT/Codex/Copilot subscriptions or BYOK are the cost-neutral
 paths. The engine sits behind the `WorkflowSpec` contract, so it stays swappable.
 
-`agent/` (TS) is the chosen build engine; the Python `harness/` build agents (CLI / deepagents
-/ stub) remain as a fallback backend until the service layer is re-platformed onto pi-mono.
+`agent/` (TS) is the build engine, and the operator backend is **fully pi-mono**: the
+Python `harness/` fallback (CLI / deepagents / stub) has been REMOVED (founder decision,
+2026-07-01 — "we stay fully pi mono"). Sections below that describe the Python/FastAPI
+harness are historical context for the clean-start decision, not a living backend.
 
 ## 4. Salvage / delete
 

@@ -19,6 +19,19 @@ const proxyTarget =
 
 const proxyEntry = { target: proxyTarget, changeOrigin: true };
 
+// The pi-mono build agent (agent/ service). Its /tools/build endpoint authors the
+// tools the app's chat calls. Overridable so a worktree can point at its own
+// agent; defaults to the agent dev port (8820). The /agent prefix is stripped so
+// the service sees /tools/build.
+const agentTarget =
+  process.env.WUPHF_AGENT_TARGET ||
+  `http://127.0.0.1:${process.env.WUPHF_AGENT_PORT || "8820"}`;
+const agentEntry = {
+  target: agentTarget,
+  changeOrigin: true,
+  rewrite: (p: string) => p.replace(/^\/agent/, ""),
+};
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -34,6 +47,7 @@ export default defineConfig({
       "/api": proxyEntry,
       "/api-token": proxyEntry,
       "/onboarding": proxyEntry,
+      "/agent": agentEntry,
     },
   },
   build: {

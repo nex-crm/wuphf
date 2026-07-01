@@ -65,7 +65,7 @@ export function AppKnowledgeTab() {
       <EmptyState
         glyph="✦"
         title="No knowledge yet"
-        hint="As your team works, the company brain fills with pages your apps can draw on. None have been written yet."
+        hint="As your team works, the company brain fills with pages your agents can draw on. None have been written yet."
       />
     );
   }

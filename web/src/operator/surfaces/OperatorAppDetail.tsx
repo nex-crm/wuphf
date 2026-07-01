@@ -20,26 +20,41 @@ import {
 import type { CustomApp, CustomAppDetail } from "../../api/apps";
 import { AppLivePreview } from "../../components/apps/AppLivePreview";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
+import { AgentName } from "../agents/AgentName";
+import { AgentPurpose } from "../agents/AgentPurpose";
 import {
   appBuildState,
   useDeleteApp,
   useOperatorApp,
 } from "../apps/useOperatorApps";
+import { ArtifactsTab } from "../artifacts/ArtifactsTab";
+import type { Artifact } from "../artifacts/artifacts";
 import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
-import { AppBuilderChat } from "./AppBuilderChat";
+import { ToolsProvider } from "../tools/toolsContext";
 import { AppDataTab } from "./AppDataTab";
+import { AppToolsChat } from "./AppToolsChat";
+import { AppToolsTab } from "./AppToolsTab";
 import { AppWorkflowTab } from "./AppWorkflowTab";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type PanelSize = "dock" | "wide" | "modal";
 
-type AppTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
+type AppTab =
+  | "artifacts"
+  | "workflow"
+  | "tools"
+  | "data"
+  | "integrations"
+  | "knowledge";
 
 const TABS: readonly TabDef<AppTab>[] = [
-  { id: "ui", label: "UI" },
+  { id: "artifacts", label: "Artifacts" },
   { id: "workflow", label: "Workflow" },
+  // Tools: the callable tools Nex builds from taught workflows; the app's chat
+  // calls them. Additive — the Workflow tab is unchanged.
+  { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
   { id: "knowledge", label: "Knowledge" },
   { id: "integrations", label: "Integrations" },
@@ -61,7 +76,7 @@ export function OperatorAppDetail({
   onBack,
   buildWalk,
 }: OperatorAppDetailProps) {
-  const [tab, setTab] = useState<AppTab>("ui");
+  const [tab, setTab] = useState<AppTab>("artifacts");
   const [chatOpen, setChatOpen] = useState(false);
   const [panelSize, setPanelSize] = useState<PanelSize>("dock");
   const query = useOperatorApp(appId);
@@ -83,7 +98,7 @@ export function OperatorAppDetail({
       window.setTimeout(() => setTab("workflow"), 900),
       window.setTimeout(() => setTab("data"), 3200),
       window.setTimeout(() => setTab("knowledge"), 5500),
-      window.setTimeout(() => setTab("ui"), 8000),
+      window.setTimeout(() => setTab("artifacts"), 8000),
     ];
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, [buildWalk, ready]);
@@ -94,120 +109,139 @@ export function OperatorAppDetail({
   }
 
   return (
-    <div
-      className={`opr-detail-wrap${
-        chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
-      }`}
-    >
-      <div className="opr-surface-wide opr-app-detail">
-        <button type="button" className="opr-back" onClick={onBack}>
-          <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
-          All apps
-        </button>
+    // Key the provider on the loaded identity: it mounts before the app query
+    // resolves, so remount once the real agent arrives instead of keeping
+    // tools/purpose state seeded from the "This app" placeholder.
+    <ToolsProvider key={app?.id ?? "loading"} appName={app?.name ?? "This app"}>
+      <div
+        className={`opr-detail-wrap${
+          chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
+        }`}
+      >
+        <div className="opr-surface-wide opr-app-detail">
+          <button type="button" className="opr-back" onClick={onBack}>
+            <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
+            All agents
+          </button>
 
-        <div className="opr-detail-head">
-          <span className="opr-tool-emoji" aria-hidden={true}>
-            {app?.icon || "🧩"}
-          </span>
-          <div className="opr-detail-titles">
-            <div className="opr-detail-name">{app?.name ?? "Loading app…"}</div>
-            {app?.summary ? (
-              <p className="opr-tool-summary">{app.summary}</p>
-            ) : null}
-            <div className="opr-tool-meta">
-              <span
-                className={`opr-pill ${failed ? "opr-pill-bad" : "opr-pill-muted"}`}
-              >
+          <div className="opr-detail-head">
+            <span className="opr-tool-emoji" aria-hidden={true}>
+              {app?.icon || "🧩"}
+            </span>
+            <div className="opr-detail-titles">
+              <div className="opr-detail-name">
+                {app ? (
+                  <AgentName id={app.id} fallback={app.name} />
+                ) : (
+                  "Loading agent…"
+                )}
+              </div>
+              <div className="opr-tool-meta">
                 <span
-                  className={`opr-led ${
-                    failed
-                      ? "opr-led-bad"
-                      : ready
-                        ? "opr-led-live"
-                        : "opr-led-draft"
-                  }`}
-                />
-                {failed ? "Failed" : ready ? "Live" : "Building"}
-              </span>
-              {app ? (
-                <span className="opr-meta-dot">v{app.version}</span>
-              ) : null}
+                  className={`opr-pill ${failed ? "opr-pill-bad" : "opr-pill-muted"}`}
+                >
+                  <span
+                    className={`opr-led ${
+                      failed
+                        ? "opr-led-bad"
+                        : ready
+                          ? "opr-led-live"
+                          : "opr-led-draft"
+                    }`}
+                  />
+                  {failed ? "Failed" : ready ? "Live" : "Building"}
+                </span>
+                {app ? (
+                  <span className="opr-meta-dot">v{app.version}</span>
+                ) : null}
+              </div>
             </div>
+            {ready ? (
+              <div className="opr-detail-actions">
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-sm"
+                  onClick={() => setChatOpen(true)}
+                >
+                  <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Ask Agent
+                </button>
+              </div>
+            ) : failed ? (
+              <div className="opr-detail-actions">
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-sm"
+                  onClick={removeAndBack}
+                  disabled={remove.isPending}
+                >
+                  <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Remove
+                </button>
+              </div>
+            ) : null}
           </div>
-          {ready ? (
-            <div className="opr-detail-actions">
-              <button
-                type="button"
-                className="opr-btn opr-btn-sm"
-                onClick={() => setChatOpen(true)}
-              >
-                <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
-                Ask AI
-              </button>
+
+          <AgentPurpose summary={app?.summary} />
+
+          <Tabs tabs={TABS} active={tab} onSelect={setTab} />
+
+          <div
+            role="tabpanel"
+            id={`opr-panel-${tab}`}
+            aria-labelledby={`opr-tab-${tab}`}
+          >
+            {/* The Artifacts tab (hosting the live app frame) stays MOUNTED
+                across tab switches — hidden, not unmounted — so returning to it
+                does NOT reload the iframe and re-run the app every time. The
+                other tabs mount only while active. */}
+            <div style={tab === "artifacts" ? undefined : { display: "none" }}>
+              <ArtifactsTab
+                agentName={app?.name ?? "This agent"}
+                artifacts={[
+                  {
+                    id: "app",
+                    type: "app",
+                    title: app?.name ?? "App",
+                    producedBy: "built by Nex",
+                    at: app ? `v${app.version}` : "",
+                  },
+                ]}
+                renderApp={() => (
+                  <UiTab
+                    query={query}
+                    failed={failed}
+                    onRemove={removeAndBack}
+                    removing={remove.isPending}
+                  />
+                )}
+              />
             </div>
-          ) : failed ? (
-            <div className="opr-detail-actions">
-              <button
-                type="button"
-                className="opr-btn opr-btn-sm"
-                onClick={removeAndBack}
-                disabled={remove.isPending}
-              >
-                <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
-                Remove
-              </button>
-            </div>
-          ) : null}
+            {tab !== "artifacts" ? (
+              <TabBody
+                tab={tab}
+                query={query}
+                failed={failed}
+                onRemove={removeAndBack}
+                removing={remove.isPending}
+              />
+            ) : null}
+          </div>
         </div>
 
-        <Tabs tabs={TABS} active={tab} onSelect={setTab} />
-
-        <div
-          role="tabpanel"
-          id={`opr-panel-${tab}`}
-          aria-labelledby={`opr-tab-${tab}`}
-        >
-          {/* The UI tab's app frame stays MOUNTED across tab switches — hidden,
-              not unmounted, when another tab is active — so returning to the UI
-              tab does NOT reload the iframe and re-run the app (re-fetching
-              Gmail, re-summarizing, re-rendering) every single time. The other
-              tabs mount only while active. */}
-          <div style={tab === "ui" ? undefined : { display: "none" }}>
-            <UiTab
-              query={query}
-              failed={failed}
-              onRemove={removeAndBack}
-              removing={remove.isPending}
-            />
-          </div>
-          {tab !== "ui" ? (
-            <TabBody
-              tab={tab}
-              query={query}
-              failed={failed}
-              onRemove={removeAndBack}
-              removing={remove.isPending}
-            />
-          ) : null}
-        </div>
-      </div>
-
-      {/* Ask AI — floating bubble + docked drawer, openable from any tab. During
+        {/* Ask AI — floating bubble + docked drawer, openable from any tab. During
           the build experience the build chat is already docked, so suppress it. */}
-      {app && ready && !buildWalk ? (
-        <AskAiDock
-          app={app}
-          open={chatOpen}
-          size={panelSize}
-          onOpenChange={setChatOpen}
-          onSizeChange={setPanelSize}
-          onFinish={() => {
-            // The edit republished a new version; refetch so the detail shows it.
-            void query.refetch();
-          }}
-        />
-      ) : null}
-    </div>
+        {app && ready && !buildWalk ? (
+          <AskAiDock
+            app={app}
+            open={chatOpen}
+            size={panelSize}
+            onOpenChange={setChatOpen}
+            onSizeChange={setPanelSize}
+          />
+        ) : null}
+      </div>
+    </ToolsProvider>
   );
 }
 
@@ -219,14 +253,12 @@ function AskAiDock({
   size,
   onOpenChange,
   onSizeChange,
-  onFinish,
 }: {
   app: CustomApp;
   open: boolean;
   size: PanelSize;
   onOpenChange: (open: boolean) => void;
   onSizeChange: (next: (s: PanelSize) => PanelSize) => void;
-  onFinish: () => void;
 }) {
   if (!open) {
     return (
@@ -234,10 +266,10 @@ function AskAiDock({
         type="button"
         className="opr-ask-fab"
         onClick={() => onOpenChange(true)}
-        aria-label={`Ask AI about ${app.name}`}
+        aria-label={`Ask Agent about ${app.name}`}
       >
         <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-        Ask AI
+        Ask Agent
       </button>
     );
   }
@@ -253,12 +285,12 @@ function AskAiDock({
       ) : null}
       <aside
         className={`opr-ask-panel is-${size}`}
-        aria-label={`Ask AI about ${app.name}`}
+        aria-label={`Ask Agent about ${app.name}`}
       >
         <div className="opr-ask-bar">
           <span className="opr-ask-bar-title">
             <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
-            Ask AI · {app.name}
+            Ask Agent · {app.name}
           </span>
           <div className="opr-ask-bar-controls">
             <button
@@ -303,12 +335,7 @@ function AskAiDock({
           </div>
         </div>
         <div className="opr-ask-body">
-          <AppBuilderChat
-            panelMode={true}
-            editApp={{ id: app.id, name: app.name }}
-            onClose={() => onOpenChange(false)}
-            onFinish={onFinish}
-          />
+          <AppToolsChat appName={app.name} />
         </div>
       </aside>
     </>
@@ -332,15 +359,6 @@ function TabBody({
   const ready =
     app && appBuildState(app) === "ready" && Boolean(query.data?.html);
   switch (tab) {
-    case "ui":
-      return (
-        <UiTab
-          query={query}
-          failed={failed}
-          onRemove={onRemove}
-          removing={removing}
-        />
-      );
     case "workflow":
       return ready ? (
         <AppWorkflowTab appId={app.id} />
@@ -348,9 +366,11 @@ function TabBody({
         <EmptyState
           glyph="⌥"
           title="No automation yet"
-          hint="Once this app finishes building, compile it into a deterministic workflow and run it on a schedule."
+          hint="Once this agent finishes building, compile it into a deterministic workflow and run it on a schedule."
         />
       );
+    case "tools":
+      return <AppToolsTab appName={app?.name ?? "This app"} />;
     case "data":
       return app ? (
         <AppDataTab appId={app.id} />
@@ -358,22 +378,21 @@ function TabBody({
         <EmptyState
           glyph="▦"
           title="No data yet"
-          hint="The data this app reads and writes appears here once it has finished building."
+          hint="The data this agent reads and writes appears here once it has finished building."
         />
       );
     case "integrations":
       return <ToolIntegrations usedNames={[]} />;
     case "knowledge":
-      // The gbrain-backed, Wikipedia-style reader with cited claims and an
-      // Explain-why affordance — the same rich Knowledge surface, now backed by
-      // the app's REAL synthesized cited pages (grounded in its own artifacts).
+      // The gbrain-backed, Wikipedia-style reader with cited claims — backed by
+      // the agent's REAL synthesized pages (grounded in its own artifacts).
       return app ? (
         <KnowledgeSurface appId={app.id} />
       ) : (
         <EmptyState
           glyph="📖"
           title="No knowledge yet"
-          hint="Your AI writes cited pages about this app once it has finished building."
+          hint="Your AI writes cited pages about this agent once it has finished building."
         />
       );
     default:
@@ -420,7 +439,7 @@ function UiTab({
         </span>
         <div className="opr-empty-title">Build failed</div>
         <div className="opr-empty-hint">
-          This app stalled before it published a version — it is not building
+          This agent stalled before it published a version — it is not building
           anymore. Remove it and rebuild, or describe it again.
         </div>
         <div className="opr-empty-actions">
@@ -431,7 +450,7 @@ function UiTab({
             disabled={removing}
           >
             <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
-            Remove app
+            Remove agent
           </button>
         </div>
       </div>
@@ -445,7 +464,7 @@ function UiTab({
         <span />
       </span>
       <div className="opr-empty-title">
-        {query.isError ? "Could not load this app" : "Building your app…"}
+        {query.isError ? "Could not load this agent" : "Building your agent…"}
       </div>
       <div className="opr-empty-hint">
         {query.isError

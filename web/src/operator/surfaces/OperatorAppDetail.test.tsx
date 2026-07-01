@@ -34,9 +34,9 @@ vi.mock("../../components/apps/AppLivePreview", () => ({
 vi.mock("./ToolIntegrations", () => ({
   ToolIntegrations: () => <div data-testid="tool-integrations" />,
 }));
-vi.mock("./AppBuilderChat", () => ({
-  AppBuilderChat: ({ editApp }: { editApp?: { name: string } }) => (
-    <div data-testid="ask-ai-chat">edit:{editApp?.name}</div>
+vi.mock("./AppToolsChat", () => ({
+  AppToolsChat: ({ appName }: { appName: string }) => (
+    <div data-testid="ask-ai-chat">tools:{appName}</div>
   ),
 }));
 // The Workflow tab fetches the frozen workflow via React Query; stub it so the
@@ -122,10 +122,10 @@ describe("OperatorAppDetail", () => {
       <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
     // Header action button (exact name "Ask AI").
-    expect(getByRole("button", { name: /^ask ai$/i })).toBeTruthy();
+    expect(getByRole("button", { name: /^ask agent$/i })).toBeTruthy();
     // Floating bubble (aria-label "Ask AI about <app>").
     expect(
-      getByRole("button", { name: /ask ai about open tasks/i }),
+      getByRole("button", { name: /ask agent about open tasks/i }),
     ).toBeTruthy();
   });
 
@@ -137,7 +137,7 @@ describe("OperatorAppDetail", () => {
     const { queryByRole } = render(
       <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
-    expect(queryByRole("button", { name: /ask ai/i })).toBeNull();
+    expect(queryByRole("button", { name: /ask agent/i })).toBeNull();
   });
 
   it("opens Ask AI as a docked drawer (not full screen) when clicked", () => {
@@ -150,8 +150,12 @@ describe("OperatorAppDetail", () => {
     );
     // Drawer closed: only the floating bubble exists, no chat yet.
     expect(queryByTestId("ask-ai-chat")).toBeNull();
-    fireEvent.click(getByRole("button", { name: /ask ai about open tasks/i }));
-    // Drawer open: the edit chat is mounted inside the docked panel.
-    expect(getByTestId("ask-ai-chat").textContent).toContain("edit:Open Tasks");
+    fireEvent.click(
+      getByRole("button", { name: /ask agent about open tasks/i }),
+    );
+    // Drawer open: the tools chat is mounted inside the docked panel.
+    expect(getByTestId("ask-ai-chat").textContent).toContain(
+      "tools:Open Tasks",
+    );
   });
 });

@@ -88,7 +88,7 @@ export function AppBuilderChat({
         from: "ai",
         body: editApp
           ? `Tell me what to change about “${editApp.name}”. I will apply it and publish a new version.`
-          : "Tell me what this app should do. I will build it, and it will appear under Apps the moment it is ready.",
+          : "Tell me what this agent should do. I will build it, and it will appear under Agents the moment it is ready.",
       },
     ];
   });
@@ -292,13 +292,13 @@ export function AppBuilderChat({
         {panelMode ? null : (
           <header className="opr-builder-head">
             <div>
-              <Eyebrow>{editApp ? "Ask AI" : "Build an app"}</Eyebrow>
+              <Eyebrow>{editApp ? "Ask Agent" : "Build an agent"}</Eyebrow>
               <div className="opr-builder-title">
                 {phase === "intro"
                   ? editApp
                     ? `Edit “${editApp.name}”`
                     : "Describe it, I will build it"
-                  : appName || "Building your app"}
+                  : appName || "Building your agent"}
               </div>
             </div>
             <button
@@ -332,14 +332,14 @@ export function AppBuilderChat({
                   nothing until the first event arrives, so the working
                   indicator below carries the initial seconds. */}
               <AppActivity appId={buildingAppId} />
-              <div className="opr-act-working" aria-label="Building your app">
+              <div className="opr-act-working" aria-label="Building your agent">
                 <span className="opr-work-dots" aria-hidden={true}>
                   <span />
                   <span />
                   <span />
                 </span>
                 <span className="opr-work-phrase">
-                  {editApp ? "Applying your change…" : "Building your app…"}
+                  {editApp ? "Applying your change…" : "Building your agent…"}
                 </span>
               </div>
             </div>
@@ -366,7 +366,7 @@ export function AppBuilderChat({
                   className="opr-btn opr-btn-primary opr-btn-sm"
                   onClick={() => onFinish(newAppId)}
                 >
-                  Open the app
+                  Open the agent
                   <ArrowRight size={13} strokeWidth={1.9} aria-hidden={true} />
                 </button>
               </div>

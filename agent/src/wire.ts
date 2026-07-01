@@ -1,6 +1,6 @@
-// FE <-> agent contract. Mirrors web/src/operator/mock/data.ts (WorkflowStep) and
-// the Python harness wire.py, so the operator FE and either backend speak the same
-// WorkflowSpec. Keep these shapes in sync across the three.
+// FE <-> agent contract. Mirrors web/src/operator/mock/data.ts (WorkflowStep) so
+// the operator FE and the agent speak the same WorkflowSpec. Keep these shapes in
+// sync across the two.
 
 export type WorkflowStepKind = "trigger" | "enrich" | "ai" | "decision" | "action" | "branch";
 const STEP_KINDS: readonly WorkflowStepKind[] = ["trigger", "enrich", "ai", "decision", "action", "branch"];
@@ -63,6 +63,63 @@ export interface RunStep {
 	http_status?: number; // present for replayed API steps
 }
 
+export interface ToolInput {
+	name: string;
+	// String-only for now: the whole call path is string-typed (ToolCallRequest.args
+	// is Record<string, string>; a missing arg binds to ""). Structured inputs
+	// ("number" | "record") land with a typed-args slice.
+	type?: "string";
+}
+
+// A callable capability the chat agent authored for an app — a workflow the
+// operator taught it, saved so the agent can call it by `name` later. Mirrors the
+// FE (web/src/operator/tools/mockTools.ts). These are AGENT tools: the app's chat
+// calls them; a human does not run them by hand.
+export interface Tool {
+	name: string; // callable id, e.g. "scoreAndRouteLead"
+	title: string; // plain-language, e.g. "Score & route a lead"
+	purpose: string; // one line: what running it does
+	inputs: ToolInput[];
+	code: string; // the (agent-written) implementation
+}
+
+export interface ToolBuildRequest {
+	schema_version?: number;
+	message: string; // the operator's plain-language task
+	app?: string; // the app the tool is for (copy only)
+}
+
+export interface ToolBuildResult {
+	tool: Tool | null; // the tool the agent made this turn (if it made one)
+	narration: string; // the agent's reflect-back line
+}
+
+// The app's chat CALLS a saved tool (POST /tools/call). approved=true is the
+// human's answer to the approval card — gated capabilities default-deny (CQ1).
+export interface ToolCallRequest {
+	schema_version?: number;
+	tool: Tool;
+	args?: Record<string, string>;
+	approved?: boolean;
+}
+
+export interface ToolCallGate {
+	capability: string; // e.g. "crm.assign"
+	detail: string; // human-readable: "assign Acme to Priya (AE)"
+}
+
+// JSON-plain projection of toolRuntime's ToolRunResult union:
+//   ok             -> { status, result, actions }
+//   needs_approval -> { status, gate, actions }
+//   error          -> { status, detail, actions }
+export interface ToolCallResult {
+	status: "ok" | "needs_approval" | "error";
+	result?: string;
+	detail?: string;
+	gate?: ToolCallGate;
+	actions: string[]; // every capability call the tool made, e.g. crm.deals({"since":"7d"})
+}
+
 export interface RunResult {
 	status: "done" | "needs_approval" | "error";
 	steps: RunStep[];
@@ -70,8 +127,7 @@ export interface RunResult {
 	pending_approval: { step_id: string; title: string; integration?: string; detail: string } | null;
 }
 
-// The BUILD brief: identical intent to the Python harness so any engine produces
-// the same shape. The agent must output ONLY this JSON object.
+// The BUILD brief. The agent must output ONLY this JSON object.
 export const SCHEMA_PROMPT = `You are the BUILD agent for an operator tool-builder. The operator describes an internal workflow. FIGURE OUT a small deterministic pipeline and OUTPUT ONLY a single JSON object (no prose, no code fence) of this shape:
 
 {"name": str, "tool_id": str, "narration": str,

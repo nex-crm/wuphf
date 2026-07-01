@@ -100,7 +100,7 @@ describe("AppDataTab", () => {
     get.mockRejectedValue(new Error("boom"));
     const { getByText } = wrap(<AppDataTab appId="app_abc" />);
     await waitFor(() =>
-      expect(getByText(/could not read this app’s data/i)).toBeTruthy(),
+      expect(getByText(/could not read this agent’s data/i)).toBeTruthy(),
     );
   });
 });
