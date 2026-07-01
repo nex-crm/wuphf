@@ -44,7 +44,14 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 	}
 
 	blueprintID = strings.TrimSpace(blueprintID)
-	synthesized := blueprintID == ""
+
+	// No-team mode: the wizard sends blueprint="" AND an explicit empty agents
+	// list. Since the packs/CEO removal there is no starting roster at all —
+	// people spin up agents that execute their workflows end to end, so the
+	// office seeds empty and the first agent is created by the user. Legacy
+	// clients that send agents=nil keep the synthesis path below.
+	noTeam := blueprintID == "" && selectedAgents != nil && len(selectedAgents) == 0
+	synthesized := blueprintID == "" && !noTeam
 
 	// Resolve the blueprint OUTSIDE the broker lock. LoadBlueprint reads YAML
 	// from disk and runs validation; holding b.mu during that blocks every
@@ -58,7 +65,7 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 			return fmt.Errorf("onboarding: load blueprint %q: %w", blueprintID, err)
 		}
 		bp = loaded
-	} else {
+	} else if !noTeam {
 		bp = synthesizeBlueprintFromState(task)
 	}
 
@@ -78,6 +85,9 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 			}
 		}
 
+		if noTeam {
+			return b.seedEmptyOfficeLocked(task, skipTask)
+		}
 		return b.seedFromBlueprintLocked(bp, selectedAgents, task, skipTask, synthesized)
 	}()
 	if seedErr != nil {
@@ -272,6 +282,59 @@ func scratchFoundingTeamBlueprint(companyName, description, directive string) op
 // (seedBlankSlateOperationLocked + ensureDefaultOfficeMembersLocked+manual
 // kickoff). selectedAgents filters the blueprint's starter roster; see the
 // onboardingCompleteFn doc comment for the three-mode contract.
+// seedEmptyOfficeLocked seeds an office with NO agents. This is the wizard's
+// contract since the packs/CEO removal: there are no built-in agents and no
+// starting roster — people spin up agents that execute their workflows end to
+// end, so a fresh office holds only #general, the welcome (or the first
+// workflow handoff, untagged, waiting for the first agent), and the system
+// Backup & Migration task that owns the channel.
+func (b *Broker) seedEmptyOfficeLocked(task string, skipTask bool) error {
+	b.members = nil
+	b.channels = []teamChannel{{
+		Slug:        "general",
+		Name:        "general",
+		Description: "Primary coordination channel.",
+		Members:     []string{},
+	}}
+	b.tasks = nil
+	b.messages = nil
+	b.counter = 0
+	b.lastTaggedAt = make(map[string]time.Time)
+	b.ensureBackupMigrationTaskLocked()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if skipTask {
+		b.counter++
+		b.appendMessageLocked(channelMessage{
+			ID:        fmt.Sprintf("msg-%d", b.counter),
+			From:      "system",
+			Channel:   "general",
+			Kind:      "system",
+			Content:   emptyOfficeWelcome,
+			Timestamp: now,
+		})
+	} else {
+		task = strings.TrimSpace(task)
+		if task == "" {
+			return fmt.Errorf("onboarding: task is required when skip_task=false")
+		}
+		// The first workflow lands untagged: there is no lead to hand it to.
+		// It waits in #general for the first agent the user spins up.
+		b.counter++
+		b.appendMessageLocked(channelMessage{
+			ID:        fmt.Sprintf("msg-%d", b.counter),
+			From:      "human",
+			Channel:   "general",
+			Kind:      "onboarding_origin",
+			Content:   task,
+			Timestamp: now,
+		})
+	}
+
+	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "office_reseeded"})
+	return b.saveLocked()
+}
+
 func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents []string, task string, skipTask bool, synthesized bool) error {
 	b.members = blankSlateOfficeMembersFromBlueprint(bp, selectedAgents)
 	if len(b.members) == 0 {
@@ -442,10 +505,16 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 // welcomeMessageForMembers builds the system welcome posted to #general when
 // the user finishes onboarding without seeding a task. Names the lead so the
 // office feels staffed (not abstract) and points the user at the composer.
+// emptyOfficeWelcome is the first message of an office with no agents yet:
+// the affordance is spinning up the first agent, not talking to a team.
+const emptyOfficeWelcome = "Welcome to WUPHF. Spin up your first agent and hand it a workflow. It runs the whole thing end to end and reports back here."
+
 func welcomeMessageForMembers(members []officeMember) string {
 	_, leadName := leadSlugAndName(members)
 	if leadName == "" {
-		leadName = "Your lead"
+		// No lead means no roster to speak for — since the packs/CEO removal
+		// an empty office is the normal fresh state, so welcome accordingly.
+		return emptyOfficeWelcome
 	}
 	return fmt.Sprintf(
 		"Welcome to your office. %s and the team are online and ready. Type a directive in the composer below — they'll claim work, argue, and ship.",

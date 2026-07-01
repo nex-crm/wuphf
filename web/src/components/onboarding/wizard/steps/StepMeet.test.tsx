@@ -41,11 +41,6 @@ function makeAnswers(
     ownerRole: "",
     email: "",
     keepInTouch: true,
-    blueprintId: "",
-    pickedAgents: [],
-    startFromScratch: false,
-    agentName: "",
-    agentInstructions: "",
     firstIssue: "",
     telemetryConsent: true,
     recordingConsent: true,
@@ -62,7 +57,6 @@ function renderStep(
       active={true}
       answers={makeAnswers(answers)}
       setAnswers={setAnswers}
-      blueprints={[]}
     />,
   );
 }

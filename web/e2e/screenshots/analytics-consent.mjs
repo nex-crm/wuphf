@@ -61,15 +61,10 @@ await page.waitForSelector('[data-testid="onboarding-wizard"]', {
   timeout: 15_000,
 });
 
-// Advance meet -> wiki -> team, skip the team step (scratch path), then
-// ship -> first-issue, where the consent toggles live.
+// Advance meet -> wiki -> first-issue, where the consent toggles live.
 const primary = '[data-testid="onboarding-wizard-primary"]';
-const teamSkip = '[data-testid="onboarding-wizard-team-skip"]';
 await page.click(primary); // meet -> wiki
-await page.click(primary); // wiki -> team
-await page.waitForSelector(teamSkip, { timeout: 10_000 });
-await page.click(teamSkip); // team -> ship
-await page.click(primary); // ship -> first-issue
+await page.click(primary); // wiki -> first-issue
 await page.waitForSelector('[data-testid="onboarding-step-first-issue"]', {
   timeout: 10_000,
 });
