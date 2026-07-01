@@ -117,7 +117,7 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
     return (
       <div className="wk-cited-answer wk-cited-answer--error">
         <Hatnote>
-          <em>Wiki lookup failed:</em> {error}
+          <em>Company brain lookup failed:</em> {error}
         </Hatnote>
       </div>
     );

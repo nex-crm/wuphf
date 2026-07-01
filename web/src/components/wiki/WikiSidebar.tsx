@@ -38,7 +38,7 @@ interface SidebarLink {
 const MENU_LINKS: SidebarLink[] = [
   { label: "Overview", path: "", testId: "wk-sidebar-home" },
   { label: "Recent changes", path: AUDIT_PATH, testId: "wk-sidebar-audit" },
-  { label: "Wiki health", path: LINT_PATH, testId: "wk-sidebar-lint" },
+  { label: "Brain health", path: LINT_PATH, testId: "wk-sidebar-lint" },
 ];
 
 /** Whether a menu link is the active surface. */

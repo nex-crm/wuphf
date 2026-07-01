@@ -49,7 +49,7 @@ export function sidebarAppRouteKind(
  */
 export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   // First-class surfaces (live at dedicated routes, not `/apps/$id`).
-  wiki: "Wiki",
+  wiki: "Company Brain",
   inbox: "Inbox",
   tasks: "Tasks",
   agents: "Agents",

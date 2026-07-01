@@ -81,7 +81,7 @@ export const OFFICE_TOUR_COPY: Record<
   wiki: {
     eyebrow: "YOUR CONTEXT GRAPH",
     headline: "Write it once. The whole office knows.",
-    body: "Your wiki is the shared brain. Agents read it as first-class citizens, so context you capture once never has to be repeated.",
+    body: "Your company brain holds the rules your agents run on. Agents read it as first-class citizens, so context you capture once never has to be repeated.",
   },
 };
 

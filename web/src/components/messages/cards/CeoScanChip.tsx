@@ -11,7 +11,7 @@
  *
  * Three status strings per spec (backend sets payload.status):
  *   scanning → payload.scanning_label or "Scanning…"
- *   done     → payload.done_label or "Wiki updated ✓"
+ *   done     → payload.done_label or "Company brain updated ✓"
  *   failed   → payload.failed_label or "Couldn't read that URL"
  *
  * All strings rendered as text, never innerHTML.
@@ -32,7 +32,7 @@ function scanLabel(payload: CeoScanChipPayload, status: ScanStatus): string {
     case "scanning":
       return payload.scanning_label ?? `Scanning ${payload.url}…`;
     case "done":
-      return payload.done_label ?? "Wiki updated ✓";
+      return payload.done_label ?? "Company brain updated ✓";
     case "failed":
       return payload.failed_label ?? "Couldn’t read that URL";
   }

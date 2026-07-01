@@ -31,7 +31,7 @@ function navigateToWikiArticle(path: string): void {
 
 interface PaletteItem {
   id: string;
-  group: "Channels" | "Agents" | "Commands" | "Messages" | "Wiki";
+  group: "Channels" | "Agents" | "Commands" | "Messages" | "Company Brain";
   icon: string;
   label: string;
   desc?: string;
@@ -281,7 +281,7 @@ export function SearchModal() {
       for (const hit of wikiHits) {
         list.push({
           id: `wiki:${hit.path}:${hit.line}`,
-          group: "Wiki",
+          group: "Company Brain",
           icon: "📖",
           label: prettyWikiPath(hit.path),
           desc: hit.snippet.trim().slice(0, 120),
@@ -419,13 +419,13 @@ export function SearchModal() {
                     <span className="cmd-palette-item-icon">{item.icon}</span>
                     <span className="cmd-palette-item-text">
                       <span className="cmd-palette-item-label">
-                        {item.group === "Messages" || item.group === "Wiki"
+                        {item.group === "Messages" || item.group === "Company Brain"
                           ? highlightMatch(item.label, query.trim())
                           : item.label}
                       </span>
                       {item.desc ? (
                         <span className="cmd-palette-item-desc">
-                          {item.group === "Wiki"
+                          {item.group === "Company Brain"
                             ? highlightMatch(item.desc, query.trim())
                             : item.desc}
                         </span>

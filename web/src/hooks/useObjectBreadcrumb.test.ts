@@ -51,30 +51,30 @@ describe("deriveBreadcrumbs", () => {
     expect(crumbs[1].href).toBe("#/tasks/abc-123");
   });
 
-  it("returns [Wiki] for wiki catalog route", () => {
+  it("returns [Company Brain] for wiki catalog route", () => {
     const route: CurrentRoute = { kind: "wiki" };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Wiki");
+    expect(crumbs[0].label).toBe("Company Brain");
   });
 
-  it("returns [Wiki, article path] for wiki-article route", () => {
+  it("returns [Company Brain, article path] for wiki-article route", () => {
     const route: CurrentRoute = {
       kind: "wiki-article",
       articlePath: "people/nazz",
     };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(2);
-    expect(crumbs[0].label).toBe("Wiki");
-    expect(crumbs[1].label).toBe("Wiki: people/nazz");
+    expect(crumbs[0].label).toBe("Company Brain");
+    expect(crumbs[1].label).toBe("Company Brain: people/nazz");
     expect(crumbs[1].href).toBe("#/wiki/people/nazz");
   });
 
-  it("returns [Wiki] for wiki-lookup route", () => {
+  it("returns [Company Brain] for wiki-lookup route", () => {
     const route: CurrentRoute = { kind: "wiki-lookup", query: "onboarding" };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Wiki");
+    expect(crumbs[0].label).toBe("Company Brain");
   });
 
   it("returns [Settings] for settings app route", () => {

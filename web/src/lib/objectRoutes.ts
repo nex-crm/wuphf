@@ -108,7 +108,7 @@ export function resolveObjectRoute(ref: ObjectRef): ObjectRouteResolution {
       const encodedPath = ref.path.split("/").map(encodeURIComponent).join("/");
       return {
         href: `#/wiki/${encodedPath}`,
-        label: `Wiki: ${ref.path}`,
+        label: `Company Brain: ${ref.path}`,
         appAction: { app: "wiki" },
       };
     }

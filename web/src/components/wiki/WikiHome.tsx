@@ -123,7 +123,7 @@ export default function WikiHome({
   return (
     <main className="wk-home" data-testid="wk-home">
       <header className="wk-home-masthead">
-        <h1 className="wk-home-title">Team Wiki</h1>
+        <h1 className="wk-home-title">Company Brain</h1>
         <p className="wk-home-tagline">
           Your team’s encyclopedia ·{" "}
           {`${catalog.length} ${pluralize(catalog.length, "article")}`}
@@ -144,8 +144,8 @@ export default function WikiHome({
             type="search"
             className="wk-home-search-input"
             data-testid="wk-home-search"
-            placeholder="Search the wiki"
-            aria-label="Search the wiki"
+            placeholder="Search the company brain"
+            aria-label="Search the company brain"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
