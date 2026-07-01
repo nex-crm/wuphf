@@ -61,10 +61,32 @@ agent is unreachable (`web/src/operator/tools/toolAgentClient.ts`). Authoring is
 deterministic S0 (keyword → shape, shared with the FE mock) so it runs key-free;
 the pi-model authoring path mirrors `buildAgent.ts`'s staging.
 
+## Slice 4 — model authoring (DONE)
+`create_tool` can now WRITE the tool's code: `authorToolWithModel`
+(`agent/src/tools.ts`) makes one structured pi-ai `complete` call against
+`TOOL_SCHEMA_PROMPT` (mirrors `buildAgent.ts`: `extractJson`, abort + 45s timeout,
+`opts.complete` test override) and validates/coerces the result. Opt-in via
+`TOOL_AUTHOR_MODEL=1` on the service — the deterministic stub stays the default
+and the fallback on ANY model failure, so `/tools/build` never blocks on an
+unreachable model. The response carries `authored_by: "model" | "stub"`.
+
+## Slice 5 — sandboxed execution, called from the chat (DONE)
+The chat CALLS tools via `POST /tools/call` → `runTool`
+(`agent/src/toolRuntime.ts`): the tool's code runs in a constrained
+`new Function` scope (dangerous globals shadowed; `import`/`eval` rejected by a
+code scan; cooperative timeout — a prototype boundary, `TODO(security)` for a
+real isolate) against a SIMULATED capability runtime (`nex.ai.*`, `nex.run`,
+`nex.send`, `crm.*`) with every capability call recorded as an action trace.
+**Send-gate:** gated capabilities (`crm.assign`, `nex.send`) default-deny —
+the run halts `needs_approval` with a human-readable gate detail; `approved:
+true` (the human's answer) executes. FE: saying "run the weekly summary" in the
+app's chat invokes the matching tool (name/title mention or run/call/use +
+title-word overlap), renders the call + action trace + result, pauses on an
+inline Approve / Not now card for gated calls, and logs completed calls so the
+Tools tab shows a read-only "Last run". Still no Run button anywhere.
+
 ## Later slices
-4. **Real tool authoring** — the agent writes actual callable code (fills `code`)
-   via pi-ai, same staging as the build agent's model path.
-5. **Real execution** — the chat calls the Tool (sandboxed), against real
-   integrations / the browser-step engine, with the existing send-gate.
-6. Persistence + versioning of Tools; edit-a-tool in chat; restore app-edit-via-AI
+6. Real integrations behind the capability runtime (Composio / the browser-step
+   engine) replacing the simulated `nex`/`crm` implementations; a real sandbox.
+7. Persistence + versioning of Tools; edit-a-tool in chat; restore app-edit-via-AI
    alongside tool-teaching in the Ask-AI dock.
