@@ -17,6 +17,18 @@ vi.mock("../apps/workflowClient", () => ({
   getAppWorkflowConnections: (id: string) => getAppWorkflowConnections(id),
 }));
 
+const getBrowserApprovals = vi.fn();
+const resolveBrowserApproval = vi.fn();
+vi.mock("../apps/browserApprovals", () => ({
+  getBrowserApprovals: (id: string) => getBrowserApprovals(id),
+  resolveBrowserApproval: (id: string, approvalId: string, decision: string) =>
+    resolveBrowserApproval(id, approvalId, decision),
+  browserApprovalPrompt: (a: { kind: string; goal: string }) =>
+    a.kind === "send"
+      ? `This step wants to send: “${a.goal}”. Send it?`
+      : `Let me control your browser to run it? ${a.goal}`,
+}));
+
 // The delivery schedule fetches connections; stub it so this test is scoped to
 // the deterministic-workflow section.
 vi.mock("./AppDeliverySchedule", () => ({
@@ -40,6 +52,10 @@ describe("AppWorkflowTab", () => {
     runAppWorkflow.mockReset();
     getAppWorkflowConnections.mockReset();
     getAppWorkflowConnections.mockResolvedValue({ platforms: [] });
+    getBrowserApprovals.mockReset();
+    getBrowserApprovals.mockResolvedValue([]);
+    resolveBrowserApproval.mockReset();
+    resolveBrowserApproval.mockResolvedValue(undefined);
   });
 
   it("auto-compiles (no button) when the app has no frozen workflow yet", async () => {
@@ -53,7 +69,9 @@ describe("AppWorkflowTab", () => {
       <AppWorkflowTab appId="app_abc" appName="Digest" />,
     );
     // It compiles automatically — no "compile" button to click.
-    await waitFor(() => expect(compileAppWorkflow).toHaveBeenCalledWith("app_abc"));
+    await waitFor(() =>
+      expect(compileAppWorkflow).toHaveBeenCalledWith("app_abc"),
+    );
     expect(getByText(/designing this app's workflow/i)).toBeTruthy();
     expect(queryByRole("button", { name: /compile workflow/i })).toBeNull();
   });
@@ -129,6 +147,48 @@ describe("AppWorkflowTab", () => {
       expect(runAppWorkflow).toHaveBeenCalledWith("app_abc", true, {
         gmail: "conn_a",
       }),
+    );
+  });
+
+  it("a live run surfaces a browser-control ask in chat and Allow resolves it (3b)", async () => {
+    getAppWorkflow.mockResolvedValue({
+      compiled: true,
+      workflow_key: "operator-app-abc",
+      steps: [
+        {
+          id: "s1",
+          type: "browser",
+          description: "Email the digest to finance",
+          gated: true,
+        },
+      ],
+    });
+    // A live run stays in flight (paused on the browser step) so the approvals
+    // poll is active; the broker reports one pending control ask.
+    runAppWorkflow.mockReturnValue(new Promise(() => {}));
+    getBrowserApprovals.mockResolvedValue([
+      {
+        id: "ap_1",
+        app_id: "app_abc",
+        kind: "control",
+        goal: "Email the digest to finance",
+      },
+    ]);
+    const { findByRole } = wrap(
+      <AppWorkflowTab appId="app_abc" appName="Digest" />,
+    );
+    (await findByRole("button", { name: /run live/i })).click();
+    await waitFor(() =>
+      expect(runAppWorkflow).toHaveBeenCalledWith("app_abc", false, {}),
+    );
+    // The ask surfaces conversationally; Allow resumes the paused step.
+    (await findByRole("button", { name: /^allow$/i })).click();
+    await waitFor(() =>
+      expect(resolveBrowserApproval).toHaveBeenCalledWith(
+        "app_abc",
+        "ap_1",
+        "approve",
+      ),
     );
   });
 });
