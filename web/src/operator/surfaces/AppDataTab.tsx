@@ -109,8 +109,10 @@ export function AppDataTab({ appId }: AppDataTabProps) {
 
   return (
     <div className="opr-tool-scoped opr-app-data">
-      {tables.map((t) => (
-        <ModelTableView key={t.name} table={t} />
+      {tables.map((t, i) => (
+        // Name+index key: parseTables falls back to "Table" for a half-written
+        // table, so bare names can collide and misapply reconciliation.
+        <ModelTableView key={`${t.name}-${i}`} table={t} />
       ))}
     </div>
   );

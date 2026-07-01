@@ -20,6 +20,9 @@ import {
 import { Eyebrow } from "../components/primitives";
 
 const BUILD_POLL_MS = 3000;
+// How long a terminal-on-first-sight candidate must STAY terminal before we
+// accept it as the completed build (covers a build faster than one poll tick).
+const TERMINAL_GRACE_MS = 15_000;
 
 type Phase = "intro" | "building" | "done";
 
@@ -112,6 +115,11 @@ export function AppBuilderChat({
   // this, resolveNewAppId can latch onto a stale already-ready app and declare
   // "Done" in a second without anything actually building.
   const sawBuildingRef = useRef<Set<string>>(new Set());
+  // When a candidate is TERMINAL on first sight (never observed building), when
+  // we first saw it that way. A very fast build can publish entirely between two
+  // polls, so after a short grace window of the candidate staying terminal we
+  // accept it rather than waiting forever (see the guard below).
+  const terminalSinceRef = useRef<{ id: string; at: number } | null>(null);
 
   const build = useBuildApp();
 
@@ -167,8 +175,20 @@ export function AppBuilderChat({
     // A NEW build only completes on an observed building -> terminal transition.
     // If the resolved candidate is already terminal on first sight (a stale app
     // resolveNewAppId picked, or a race before the real pre-scaffold appears),
-    // do not declare "Done" — keep polling for the actual build.
-    if (!(refineId || sawBuildingRef.current.has(candidate.id))) return;
+    // do not declare "Done" immediately — keep polling for the actual build. But
+    // a very fast build can also finish entirely between polls, so if the same
+    // candidate stays terminal for a whole grace window, accept it instead of
+    // leaving the chat in "building" forever.
+    if (!(refineId || sawBuildingRef.current.has(candidate.id))) {
+      const seen = terminalSinceRef.current;
+      const now = Date.now();
+      if (!seen || seen.id !== candidate.id) {
+        terminalSinceRef.current = { id: candidate.id, at: now };
+        return;
+      }
+      if (now - seen.at < TERMINAL_GRACE_MS) return;
+      // Consistently terminal through the grace window — treat as completed.
+    }
 
     setNewAppId(candidate.id);
     setPhase("done");
@@ -216,6 +236,7 @@ export function AppBuilderChat({
     activeRefineRef.current = refineId;
     // Fresh build/refine: forget any building-state we observed for a prior run.
     sawBuildingRef.current = new Set();
+    terminalSinceRef.current = null;
     // Refine: the app id is known now, so the activity feed can attach
     // immediately. New build: clear it until the pre-scaffolded app resolves.
     setBuildingAppId(refineId);

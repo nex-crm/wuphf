@@ -46,8 +46,9 @@ Add `GET /apps/{id}/activity` (SSE). Resolve the app → its backing app-builder
 run (via `EditChannel` → the app-builder task whose `Channel == EditChannel` →
 that task's id), then stream that run's agent events using the existing
 `subscribeTaskWithRecent` machinery. Task id stays internal; the FE only sees
-`/apps/{id}/activity`. Returns an empty/closing stream when the app has no active
-run. Test: an app with a backing app-builder task streams its tagged events;
+`/apps/{id}/activity`. Returns an empty SSE stream that stays open (replay-end +
+heartbeat) when the app has no active run, so the UI can attach before the build
+starts. Test: an app with a backing app-builder task streams its tagged events;
 unknown app → 404; app with no run → empty replay then idle.
 
 ### S2 — frontend: AppActivity (app-scoped) + wire into the build chat

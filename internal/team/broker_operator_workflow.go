@@ -410,6 +410,14 @@ func (b *Broker) compileAndFreezeAppWorkflow(ctx context.Context, appID string) 
 // request path so a freshly-published app already has its frozen workflow by the
 // time the operator opens the Workflow tab.
 func (b *Broker) precompileAppWorkflowAsync(appID string) {
+	// Launched as a bare goroutine off the publish path — a panic anywhere in
+	// the compile path must not take the whole broker down. Best-effort: recover,
+	// log, and leave the on-demand compile as the fallback.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("operator workflow: precompile for %s panicked: %v", appID, r)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if err := b.compileAndFreezeAppWorkflow(ctx, appID); err != nil {

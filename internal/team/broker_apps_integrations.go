@@ -89,6 +89,14 @@ const (
 	appIntegrationReadWindow      = time.Minute
 	appIntegrationReadDailyLimit  = 1500
 	appIntegrationReadDailyWindow = 24 * time.Hour
+
+	// appDBWriteLimit bounds how many DB WRITE ops (define/upsert/clear) one app
+	// may run per minute. The store already caps table/row/column GROWTH, but not
+	// write FREQUENCY — a buggy app looping upserts would otherwise keep
+	// rewriting db.json under the store mutex. 120/min (2/s sustained) is far
+	// above any legitimate app's write rate while still stopping tight loops.
+	appDBWriteLimit  = 120
+	appDBWriteWindow = time.Minute
 )
 
 // appsLLMCompleter is the seam the ai() endpoint calls for a one-shot
@@ -629,6 +637,21 @@ func (b *Broker) consumeAppIntegrationReadBudget(key string) (time.Duration, boo
 	return 0, false
 }
 
+// consumeAppDBWriteBudget charges one DB write op against the per-app
+// per-minute bucket. Same peek-then-record discipline as consumeAppAIBudget.
+// Caller must NOT hold b.mu.
+func (b *Broker) consumeAppDBWriteBudget(key string) (time.Duration, bool) {
+	now := b.rateLimitNow()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maybeSweepAppBudgetsLocked(now)
+	if d, limited := peekRollingLimit(b.appDBWriteBuckets, key, appDBWriteLimit, appDBWriteWindow, now); limited {
+		return d, true
+	}
+	recordRollingHit(b.appDBWriteBuckets, key, now)
+	return 0, false
+}
+
 // peekRollingLimit prunes the bucket to the window and reports whether it is at
 // or over the limit WITHOUT recording a new hit (so a rejected multi-limit call
 // pollutes no bucket). It writes the pruned bucket back. Caller holds b.mu and
@@ -667,7 +690,7 @@ func recordRollingHit(buckets map[string]ipRateLimitBucket, key string, now time
 // returns (e.g. a one-off id), bounding total memory to "apps active recently".
 const appBudgetSweepInterval = time.Hour
 
-// maybeSweepAppBudgetsLocked periodically evicts fully-expired keys from all four
+// maybeSweepAppBudgetsLocked periodically evicts fully-expired keys from all the
 // app-budget maps, each pruned by its own window. Throttled to once per
 // appBudgetSweepInterval so it adds negligible cost to the hot path. Caller holds
 // b.mu.
@@ -684,6 +707,7 @@ func (b *Broker) maybeSweepAppBudgetsLocked(now time.Time) {
 		{b.appAIDailyBuckets, appAIDailyWindow},
 		{b.appIntegrationReadBuckets, appIntegrationReadWindow},
 		{b.appIntegrationReadDayBuckets, appIntegrationReadDailyWindow},
+		{b.appDBWriteBuckets, appDBWriteWindow},
 	}
 	for _, s := range specs {
 		cutoff := now.Add(-s.window)

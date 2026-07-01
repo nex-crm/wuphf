@@ -380,3 +380,53 @@ func TestAppDBEndpointBrokerTokenRoundTrip(t *testing.T) {
 		t.Fatalf("row a urgency = %v (sawA=%v), want 99", aURG, sawA)
 	}
 }
+
+// TestAppDBWriteThrottle locks the per-app write-frequency cap: a tight loop of
+// DB writes is cut off at appDBWriteLimit per window with a 429 (the store's
+// growth caps do not bound frequency), while reads stay unmetered.
+func TestAppDBWriteThrottle(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	regBody, _ := json.Marshal(map[string]any{"name": "Loop App", "html": validAppHTML})
+	created := postAppsAsAgent(t, base+"/apps", b.Token(), appBuilderSlug, regBody)
+	app, _ := created["app"].(map[string]any)
+	id, _ := app["id"].(string)
+	if id == "" {
+		t.Fatalf("no app id in register response: %v", created)
+	}
+
+	defBody, _ := json.Marshal(map[string]any{
+		"op": "define", "table": "T",
+		"columns": []map[string]any{{"name": "id", "type": "string"}},
+	})
+	upBody, _ := json.Marshal(map[string]any{
+		"op": "upsert", "table": "T", "key": "id",
+		"rows": []map[string]any{{"id": "a"}},
+	})
+
+	// The define plus upserts up to the cap all pass…
+	postAppsJSON(t, base+"/apps/"+id+"/db", b.Token(), defBody)
+	for i := 1; i < appDBWriteLimit; i++ {
+		if status := postAppsStatus(t, base+"/apps/"+id+"/db", b.Token(), "", upBody); status != http.StatusOK {
+			t.Fatalf("write %d = %d, want 200 under the cap", i, status)
+		}
+	}
+	// …the write over the cap is rejected with 429…
+	if status := postAppsStatus(t, base+"/apps/"+id+"/db", b.Token(), "", upBody); status != http.StatusTooManyRequests {
+		t.Fatalf("write over cap = %d, want 429", status)
+	}
+	// …and reads (the "query" op and GET) stay unmetered.
+	qBody, _ := json.Marshal(map[string]any{"op": "query", "table": "T"})
+	if status := postAppsStatus(t, base+"/apps/"+id+"/db", b.Token(), "", qBody); status != http.StatusOK {
+		t.Fatalf("query while write-limited = %d, want 200", status)
+	}
+	if status, _ := getAppsJSON(t, base+"/apps/"+id+"/db", b.Token()); status != http.StatusOK {
+		t.Fatalf("GET while write-limited = %d, want 200", status)
+	}
+}

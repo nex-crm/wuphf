@@ -190,17 +190,20 @@ type Broker struct {
 	// gbrain is optional: when it is not installed the client still constructs
 	// fine and only errors on first call, which the backend's Ready() gate
 	// keeps from ever happening.
-	gbrainClient        *gbrain.Client
-	inboxCursorMu       sync.RWMutex
-	userInboxCursors    map[string]InboxCursor
-	factLog             *FactLog
-	readLog             *ReadLog
-	entityGraph         *EntityGraph
-	entitySynthesizer   *EntitySynthesizer
-	wikiCompressor      *WikiCompressor
-	teamLearningLog     *LearningLog
-	playbookSynthesizer *PlaybookSynthesizer
-	pamDispatcher       *PamDispatcher
+	gbrainClient *gbrain.Client
+	// knowledgeBrainOverride substitutes the Knowledge surface's brain in tests
+	// (set before Start; nil in production).
+	knowledgeBrainOverride knowledgeBrain
+	inboxCursorMu          sync.RWMutex
+	userInboxCursors       map[string]InboxCursor
+	factLog                *FactLog
+	readLog                *ReadLog
+	entityGraph            *EntityGraph
+	entitySynthesizer      *EntitySynthesizer
+	wikiCompressor         *WikiCompressor
+	teamLearningLog        *LearningLog
+	playbookSynthesizer    *PlaybookSynthesizer
+	pamDispatcher          *PamDispatcher
 	// sourceCaptureDispatcher drains S2 source-capture jobs off-lock (see
 	// source_capture.go). Held as an atomic pointer so captureSource can read
 	// it WITHOUT b.mu — capture hooks fire while b.mu is held, so the read
@@ -295,6 +298,7 @@ type Broker struct {
 	appAIDailyBuckets            map[string]ipRateLimitBucket // ai(): per-day
 	appIntegrationReadBuckets    map[string]ipRateLimitBucket // reads: per-minute
 	appIntegrationReadDayBuckets map[string]ipRateLimitBucket // reads: per-day
+	appDBWriteBuckets            map[string]ipRateLimitBucket // db writes: per-minute
 	lastAppBudgetPrune           time.Time                    // throttles the idle-key sweep
 
 	// workflowDetectionEnabled gates post-task App discovery (broker_workflow_detect.go).
@@ -467,6 +471,7 @@ func NewBrokerAt(statePath string) *Broker {
 		appAIDailyBuckets:            make(map[string]ipRateLimitBucket),
 		appIntegrationReadBuckets:    make(map[string]ipRateLimitBucket),
 		appIntegrationReadDayBuckets: make(map[string]ipRateLimitBucket),
+		appDBWriteBuckets:            make(map[string]ipRateLimitBucket),
 
 		statePath:       statePath,
 		lifecycleCtx:    lifecycleCtx,

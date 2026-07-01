@@ -4110,6 +4110,7 @@
   --accent: var(--t-accent);
   --green: var(--t-green);
   --red: var(--t-red);
+
   border: 1px solid var(--t-line);
   border-radius: var(--t-r-sm);
   background: var(--t-surface);

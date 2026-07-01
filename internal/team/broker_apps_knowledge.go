@@ -131,6 +131,14 @@ func (b *Broker) handleAppKnowledge(w http.ResponseWriter, r *http.Request, id s
 				writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
 				return
 			}
+			// A genuinely-empty synthesis leaves nothing to read back from gbrain,
+			// so its "already ran" record is the per-app file cache holding an
+			// empty page set (stamped on write below). Without this, every request
+			// for an empty app would re-run the full LLM synthesis.
+			if pages, ok, err := store.ReadAppKnowledge(id); err == nil && ok && len(pages) == 0 {
+				writeJSON(w, http.StatusOK, map[string]any{"pages": []appKnowledgePage{}})
+				return
+			}
 		} else if pages, ok, err := store.ReadAppKnowledge(id); err == nil && ok {
 			writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
 			return
@@ -159,6 +167,14 @@ func (b *Broker) handleAppKnowledge(w http.ResponseWriter, r *http.Request, id s
 		if err := b.writeAppKnowledgeToGBrain(ctx, gbClient, id, pages); err != nil {
 			fmt.Fprintf(os.Stderr, "broker: app knowledge gbrain write failed: %v\n", err)
 		}
+		// gbrain holds no durable record for an EMPTY result (the page loop never
+		// ran), so mirror the result into the per-app file cache as the
+		// "synthesis already ran" marker. The read path only honors it when the
+		// set is empty (gbrain stays the source of truth for pages), and a later
+		// non-empty synthesis overwrites a stale empty marker here.
+		if err := store.WriteAppKnowledge(id, pages); err != nil {
+			fmt.Fprintf(os.Stderr, "broker: app knowledge marker write failed: %v\n", err)
+		}
 	} else if err := store.WriteAppKnowledge(id, pages); err != nil {
 		fmt.Fprintf(os.Stderr, "broker: app knowledge cache write failed: %v\n", err)
 	}
@@ -182,10 +198,25 @@ const (
 // visible body stays readable markdown that gbrain search + embeddings index.
 var knowledgeB64Re = regexp.MustCompile(`<!--wuphf-knowledge-b64:([A-Za-z0-9+/=]+)-->`)
 
+// knowledgeBrain is the slice of the gbrain client the Knowledge surface uses —
+// an interface so tests can substitute an in-memory brain. *gbrain.Client
+// satisfies it.
+type knowledgeBrain interface {
+	GetPage(ctx context.Context, slug string) (gbrain.Page, error)
+	ListPages(ctx context.Context, opts gbrain.ListOptions) ([]gbrain.PageMeta, error)
+	PutPage(ctx context.Context, content string, opts gbrain.PutOptions) (gbrain.PutResult, error)
+	AddLink(ctx context.Context, from, to, linkType, linkSource, note string) error
+	GetLinks(ctx context.Context, slug string) ([]gbrain.Link, error)
+}
+
 // gbrainKnowledgeClient returns the brain client when gbrain backs the workspace
 // (WikiWorker nil ⟺ gbrain-backed) and a client exists. Otherwise the file cache
-// is used and this reports (nil, false).
-func (b *Broker) gbrainKnowledgeClient() (*gbrain.Client, bool) {
+// is used and this reports (nil, false). Tests inject knowledgeBrainOverride to
+// force the gbrain-backed path against an in-memory brain.
+func (b *Broker) gbrainKnowledgeClient() (knowledgeBrain, bool) {
+	if b.knowledgeBrainOverride != nil {
+		return b.knowledgeBrainOverride, true
+	}
 	if b.WikiWorker() != nil {
 		return nil, false
 	}
@@ -321,7 +352,7 @@ func renderKnowledgePageForGBrain(page appKnowledgePage, scopeTags []string) (st
 // SHARES it — adding this app's scope tag to that existing page rather than
 // writing a duplicate — so one page shows up in several apps. Re-synthesis
 // preserves any app-scope tags already on a page (a share is never dropped).
-func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client *gbrain.Client, appID string, pages []appKnowledgePage) error {
+func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client knowledgeBrain, appID string, pages []appKnowledgePage) error {
 	scopeTag := appKnowledgeScopeTag(appID)
 	existingByTitle := b.knowledgePagesByTitle(ctx, client)
 	slugByPageID := make(map[string]string, len(pages))
@@ -332,11 +363,17 @@ func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client *gbrain.C
 		if shared, ok := existingByTitle[normalizeKnowledgeTitle(p.Title)]; ok && shared.slug != ownSlug {
 			merged := mergeScopeTags(shared.scopeTags, []string{scopeTag})
 			if len(merged) != len(shared.scopeTags) {
+				// The re-tag must not fail silently: if it does, this app would be
+				// linked to the page while its scope tag never persists, and the
+				// page would silently vanish from this app's Knowledge on read.
 				content, err := renderKnowledgePageForGBrain(shared.page, merged)
-				if err == nil {
-					_, _ = client.PutPage(ctx, content, gbrain.PutOptions{
-						Slug: shared.slug, SourceKind: appKnowledgeSourceKind, IngestedVia: appKnowledgeIngestedVia,
-					})
+				if err != nil {
+					return fmt.Errorf("render shared page %q: %w", shared.slug, err)
+				}
+				if _, err := client.PutPage(ctx, content, gbrain.PutOptions{
+					Slug: shared.slug, SourceKind: appKnowledgeSourceKind, IngestedVia: appKnowledgeIngestedVia,
+				}); err != nil {
+					return fmt.Errorf("re-tag shared page %q: %w", shared.slug, err)
 				}
 			}
 			slugByPageID[p.ID] = shared.slug
@@ -387,7 +424,7 @@ type sharedKnowledgePage struct {
 // knowledgePagesByTitle indexes every app-knowledge page in the brain by its
 // normalized title, so a synthesis can SHARE a same-title page across apps
 // instead of minting a duplicate.
-func (b *Broker) knowledgePagesByTitle(ctx context.Context, client *gbrain.Client) map[string]sharedKnowledgePage {
+func (b *Broker) knowledgePagesByTitle(ctx context.Context, client knowledgeBrain) map[string]sharedKnowledgePage {
 	out := map[string]sharedKnowledgePage{}
 	metas, err := client.ListPages(ctx, gbrain.ListOptions{Tag: appKnowledgeTag, Limit: 200})
 	if err != nil {
@@ -434,7 +471,7 @@ func (b *Broker) knowledgeAlsoIn(tags []string, currentAppID string) []appKnowle
 // the app-scope tag, decode each page's structured form, resolve which OTHER
 // apps each page also belongs to (AlsoIn), and merge the brain's link graph into
 // seeAlso so cross-links surface in the reader.
-func (b *Broker) readAppKnowledgeFromGBrain(ctx context.Context, client *gbrain.Client, appID string) ([]appKnowledgePage, error) {
+func (b *Broker) readAppKnowledgeFromGBrain(ctx context.Context, client knowledgeBrain, appID string) ([]appKnowledgePage, error) {
 	metas, err := client.ListPages(ctx, gbrain.ListOptions{Tag: appKnowledgeScopeTag(appID), Limit: 50})
 	if err != nil {
 		return nil, err
@@ -481,7 +518,21 @@ func (b *Broker) readAppKnowledgeFromGBrain(ctx context.Context, client *gbrain.
 		slugs = append(slugs, rp.slug)
 		pageIDBySlug[rp.slug] = rp.kp.ID
 	}
+	// The ids visible to THIS app. A shared page's decoded SeeAlso was
+	// synthesized for its OWNER app, so it can reference sibling ids that are not
+	// in this app's set — drop those, or the FE renders a dead "See also" link.
+	visibleIDs := make(map[string]bool, len(pages))
+	for _, p := range pages {
+		visibleIDs[p.ID] = true
+	}
 	for i := range pages {
+		kept := pages[i].SeeAlso[:0]
+		for _, sid := range pages[i].SeeAlso {
+			if visibleIDs[sid] && sid != pages[i].ID {
+				kept = append(kept, sid)
+			}
+		}
+		pages[i].SeeAlso = kept
 		// Use the page's ACTUAL slug (a shared page is owned by another app, so
 		// its slug is not k-<thisApp>-<id>).
 		links, err := client.GetLinks(ctx, slugs[i])
@@ -637,8 +688,10 @@ func (b *Broker) appBuildChatSnippet(editChannel string) string {
 }
 
 // appDataHeldSummary reports the distinct VALUES the app tracks per categorical
-// field — grounding for what the app covers (cities, conditions, categories) —
-// without describing the schema. Numeric/date fields are summarised as a range.
+// (string-typed) field — grounding for what the app covers (cities, conditions,
+// categories) — without describing the schema. Non-string fields (numbers,
+// dates) are deliberately skipped: they are volatile readings (temperatures,
+// timestamps), not durable operating context worth writing into knowledge.
 func appDataHeldSummary(tables []AppDBTable) string {
 	var parts []string
 	for _, t := range tables {

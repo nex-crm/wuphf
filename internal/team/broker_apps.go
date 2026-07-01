@@ -231,11 +231,22 @@ func (b *Broker) handleAppDB(w http.ResponseWriter, r *http.Request, id string) 
 			return
 		}
 		store := b.appStore()
+		// Throttle WRITE frequency per app: the store caps table/row/column
+		// GROWTH, but a tight loop could still keep rewriting db.json under the
+		// store mutex. Reads (GET and the "query" op) are unmetered.
+		op := strings.TrimSpace(req.Op)
+		if op == "define" || op == "upsert" || op == "clear" {
+			if retryAfter, limited := b.consumeAppDBWriteBudget(appBudgetKey(id, r)); limited {
+				w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "db write rate limit reached — retry shortly"})
+				return
+			}
+		}
 		var (
 			table AppDBTable
 			opErr error
 		)
-		switch strings.TrimSpace(req.Op) {
+		switch op {
 		case "define":
 			table, opErr = store.DefineAppDBTable(id, req.Table, req.Columns)
 		case "upsert":
