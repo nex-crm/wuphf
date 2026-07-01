@@ -18,11 +18,13 @@ import {
 } from "lucide-react";
 
 import type { CustomApp, CustomAppDetail } from "../../api/apps";
+import { get } from "../../api/client";
 import { AppLivePreview } from "../../components/apps/AppLivePreview";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
 import { AgentName } from "../agents/AgentName";
 import { AgentPurpose } from "../agents/AgentPurpose";
 import { AgentSessions } from "../agents/AgentSessions";
+import { tryListArtifacts } from "../agents/agentStateClient";
 import {
   appBuildState,
   useDeleteApp,
@@ -90,6 +92,34 @@ export function OperatorAppDetail({
   const failed = state === "failed";
   const ready = state === "ready" && !!detail?.html;
 
+  // The agent's persisted artifacts (routine outcomes) from the agent service,
+  // appended after the live app artifact. Refreshed each time the Artifacts tab
+  // becomes active; stays empty when the service is unreachable.
+  const [remoteArtifacts, setRemoteArtifacts] = useState<Artifact[]>([]);
+  const agentId = app?.id;
+  useEffect(() => {
+    if (tab !== "artifacts" || !agentId) return;
+    let cancelled = false;
+    void tryListArtifacts(agentId).then((wire) => {
+      if (cancelled || !wire) return;
+      setRemoteArtifacts(
+        wire.map(({ id, type, title, producedBy, at, content, url, size }) => ({
+          id,
+          type,
+          title,
+          producedBy,
+          at,
+          content,
+          url,
+          size,
+        })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, agentId]);
+
   // Guided reveal: when the app finishes building, walk through the tabs once so
   // the operator sees the workflow, data, and knowledge get hooked up.
   const walkedRef = useRef(false);
@@ -114,7 +144,11 @@ export function OperatorAppDetail({
     // Key the provider on the loaded identity: it mounts before the app query
     // resolves, so remount once the real agent arrives instead of keeping
     // tools/purpose state seeded from the "This app" placeholder.
-    <ToolsProvider key={app?.id ?? "loading"} appName={app?.name ?? "This app"}>
+    <ToolsProvider
+      key={app?.id ?? "loading"}
+      appName={app?.name ?? "This app"}
+      agentId={app?.id}
+    >
       <div
         className={`opr-detail-wrap${
           chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
@@ -208,6 +242,7 @@ export function OperatorAppDetail({
                     producedBy: "built by Nex",
                     at: app ? `v${app.version}` : "",
                   },
+                  ...remoteArtifacts,
                 ]}
                 renderApp={() => (
                   <UiTab
@@ -343,6 +378,7 @@ function AskAiDock({
         <div className="opr-ask-body">
           <AgentSessions
             agentName={app.name}
+            agentId={app.id}
             requestedSessionId={requestedSessionId}
           />
         </div>
@@ -366,6 +402,7 @@ function TabBody({
       return (
         <RoutinesTab
           agentName={app?.name ?? "This agent"}
+          agentId={app?.id}
           onOpenSession={(sessionId) => onOpenRoutineSession?.(sessionId)}
         />
       );
@@ -382,7 +419,7 @@ function TabBody({
         />
       );
     case "integrations":
-      return <ToolIntegrations usedNames={[]} />;
+      return <AppIntegrationsTab />;
     case "knowledge":
       // The gbrain-backed, Wikipedia-style reader with cited claims — backed by
       // the agent's REAL synthesized pages (grounded in its own artifacts).
@@ -398,6 +435,42 @@ function TabBody({
     default:
       return null;
   }
+}
+
+// The broker's app-scoped integration catalog: the CONNECTED platforms an app
+// (and the agent behind it) can call. Mirrors appIntegrationCatalogResponse in
+// internal/team/broker_apps_integrations.go. Passing the connected names into
+// ToolIntegrations stops the tab from falsely claiming "does not use any
+// integrations"; a fetch failure degrades to the previous empty state.
+interface AppIntegrationCatalogItem {
+  platform: string;
+  name: string;
+  logo_url?: string;
+  read_actions: string[];
+}
+
+function AppIntegrationsTab() {
+  const [connectedNames, setConnectedNames] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    get<{ connected?: AppIntegrationCatalogItem[] }>(
+      "/apps/integrations/catalog",
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const names = (data.connected ?? [])
+          .map((c) => (c.name || c.platform || "").trim())
+          .filter((n) => n.length > 0);
+        setConnectedNames(names);
+      })
+      .catch(() => {
+        // Broker unreachable — keep the empty state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return <ToolIntegrations usedNames={connectedNames} />;
 }
 
 function UiTab({
