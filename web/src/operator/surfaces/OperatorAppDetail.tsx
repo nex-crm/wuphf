@@ -29,8 +29,8 @@ import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
 import { AppBuilderChat } from "./AppBuilderChat";
 import { AppDataTab } from "./AppDataTab";
-import { AppKnowledgeTab } from "./AppKnowledgeTab";
 import { AppWorkflowTab } from "./AppWorkflowTab";
+import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type PanelSize = "dock" | "wide" | "modal";
@@ -41,8 +41,8 @@ const TABS: readonly TabDef<AppTab>[] = [
   { id: "ui", label: "UI" },
   { id: "workflow", label: "Workflow" },
   { id: "data", label: "Data" },
-  { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge" },
+  { id: "integrations", label: "Integrations" },
 ];
 
 interface OperatorAppDetailProps {
@@ -167,13 +167,28 @@ export function OperatorAppDetail({
           id={`opr-panel-${tab}`}
           aria-labelledby={`opr-tab-${tab}`}
         >
-          <TabBody
-            tab={tab}
-            query={query}
-            failed={failed}
-            onRemove={removeAndBack}
-            removing={remove.isPending}
-          />
+          {/* The UI tab's app frame stays MOUNTED across tab switches — hidden,
+              not unmounted, when another tab is active — so returning to the UI
+              tab does NOT reload the iframe and re-run the app (re-fetching
+              Gmail, re-summarizing, re-rendering) every single time. The other
+              tabs mount only while active. */}
+          <div style={tab === "ui" ? undefined : { display: "none" }}>
+            <UiTab
+              query={query}
+              failed={failed}
+              onRemove={removeAndBack}
+              removing={remove.isPending}
+            />
+          </div>
+          {tab !== "ui" ? (
+            <TabBody
+              tab={tab}
+              query={query}
+              failed={failed}
+              onRemove={removeAndBack}
+              removing={remove.isPending}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -328,7 +343,7 @@ function TabBody({
       );
     case "workflow":
       return ready ? (
-        <AppWorkflowTab appId={app.id} appName={app.name} />
+        <AppWorkflowTab appId={app.id} />
       ) : (
         <EmptyState
           glyph="⌥"
@@ -349,7 +364,18 @@ function TabBody({
     case "integrations":
       return <ToolIntegrations usedNames={[]} />;
     case "knowledge":
-      return <AppKnowledgeTab />;
+      // The gbrain-backed, Wikipedia-style reader with cited claims and an
+      // Explain-why affordance — the same rich Knowledge surface, now backed by
+      // the app's REAL synthesized cited pages (grounded in its own artifacts).
+      return app ? (
+        <KnowledgeSurface appId={app.id} />
+      ) : (
+        <EmptyState
+          glyph="📖"
+          title="No knowledge yet"
+          hint="Your AI writes cited pages about this app once it has finished building."
+        />
+      );
     default:
       return null;
   }

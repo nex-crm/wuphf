@@ -13,6 +13,7 @@
  *                    payload:{ title, details } }    // the one safe write
  *   app  -> host : { source: "wuphf-app",  type: "integration", id, platform, action, params }
  *   app  -> host : { source: "wuphf-app",  type: "ai", id, prompt, input?, json? }
+ *   app  -> host : { source: "wuphf-app",  type: "db", id, op, table?, columns?, rows?, key? }
  *   host -> app  : { source: "wuphf-host", id, ok, data? , error? }
  *
  * Reads go through callBroker() (GET allowlist). The single write is
@@ -49,9 +50,13 @@ function ensureListener(): void {
   if (listening) return;
   listening = true;
   window.addEventListener("message", (event: MessageEvent) => {
-    const data = event.data as
-      | { source?: string; id?: number; ok?: boolean; data?: unknown; error?: string }
-      | null;
+    const data = event.data as {
+      source?: string;
+      id?: number;
+      ok?: boolean;
+      data?: unknown;
+      error?: string;
+    } | null;
     if (!data || data.source !== "wuphf-host" || typeof data.id !== "number") {
       return;
     }
@@ -106,10 +111,7 @@ function postToHost<T = unknown>(
   const id = nextId++;
   return new Promise<T>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-    window.parent.postMessage(
-      { source: "wuphf-app", id, ...fields },
-      "*",
-    );
+    window.parent.postMessage({ source: "wuphf-app", id, ...fields }, "*");
     window.setTimeout(() => {
       if (pending.has(id)) {
         pending.delete(id);
@@ -232,6 +234,79 @@ export function ai<T = unknown>(
   );
 }
 
+// ── db: the app's OWN backing database (persisted, typed data model) ─────────
+
+/**
+ * A typed column in an app table. `type` is a hint the Data tab renders; values
+ * are stored as-is. Use "string" | "number" | "boolean" | "date" | "string[]".
+ */
+export interface DBColumn {
+  name: string;
+  type: "string" | "number" | "boolean" | "date" | "string[]";
+}
+
+/** One table in the app's database: its name, typed columns, and rows. */
+export interface DBTable {
+  name: string;
+  columns: DBColumn[];
+  rows: Record<string, unknown>[];
+}
+
+/**
+ * db is the app's REAL backing store — persisted server-side, per app. This is
+ * how an app OWNS its data model instead of recomputing it on every mount:
+ *
+ *   1. On first load, derive your model ONCE from the source reads (getEmails,
+ *      getTasks, callIntegration, …) and persist it: defineTable() then upsert().
+ *   2. Render from db.query()/db.all() — the Data tab reads the very same tables,
+ *      so what the app shows and what the Data tab shows are one source of truth.
+ *   3. On later mounts, read the DB first; only re-derive when it is empty or you
+ *      explicitly refresh. Do NOT recompute from the integration on every mount.
+ *
+ * Writes are gated + bounded server-side (table/column/row limits); every call
+ * REJECTS on a transport/host failure, so await in try/catch. `upsert` with a
+ * `key` column replaces the row whose key matches (primary-key dedup); without a
+ * key it appends. A table must be defined (defineTable) before you upsert to it.
+ */
+export const db = {
+  /** Create a table or replace its columns (existing rows are preserved). */
+  defineTable(name: string, columns: DBColumn[]): Promise<{ table: DBTable }> {
+    return postToHost<{ table: DBTable }>(
+      { type: "db", op: "define", table: name, columns },
+      15_000,
+    );
+  },
+  /** Append rows, or replace by `key` (primary-key dedup) when key is given. */
+  upsert(
+    name: string,
+    rows: Record<string, unknown>[],
+    key?: string,
+  ): Promise<{ table: DBTable }> {
+    return postToHost<{ table: DBTable }>(
+      { type: "db", op: "upsert", table: name, rows, key },
+      15_000,
+    );
+  },
+  /** Read one table by name. */
+  query(name: string): Promise<{ table: DBTable }> {
+    return postToHost<{ table: DBTable }>(
+      { type: "db", op: "query", table: name },
+      15_000,
+    );
+  },
+  /** Read every table in the app's database. */
+  all(): Promise<{ tables: DBTable[] }> {
+    return postToHost<{ tables: DBTable[] }>({ type: "db", op: "all" }, 15_000);
+  },
+  /** Empty a table's rows, keeping its column definition. */
+  clear(name: string): Promise<{ table: DBTable }> {
+    return postToHost<{ table: DBTable }>(
+      { type: "db", op: "clear", table: name },
+      15_000,
+    );
+  },
+};
+
 // ── Typed convenience wrappers for the common reads ─────────────────────────
 
 export interface OfficeMember {
@@ -324,9 +399,7 @@ export interface GetEmailsResult {
  * (render an error state); in both cases `emails` is empty. Build your own reads
  * the same way: pick a READ action id, bound its params, and handle failures.
  */
-export function getEmails(opts?: {
-  limit?: number;
-}): Promise<GetEmailsResult> {
+export function getEmails(opts?: { limit?: number }): Promise<GetEmailsResult> {
   const limit =
     typeof opts?.limit === "number" &&
     Number.isFinite(opts.limit) &&

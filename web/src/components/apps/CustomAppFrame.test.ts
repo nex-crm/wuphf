@@ -6,6 +6,7 @@ import {
   appBrokerPath,
   isAllowedGetPath,
   parseAIArgs,
+  parseDBArgs,
   parseDownloadPayload,
   parseErrorPayload,
   parseIntegrationArgs,
@@ -781,5 +782,170 @@ describe("parseDownloadPayload (host-brokered download validation)", () => {
         }
       ).mime,
     ).toBe("application/octet-stream");
+  });
+});
+
+describe("parseDBArgs (app-DB bridge validation)", () => {
+  const msg = (over: Record<string, unknown>) => ({
+    source: "wuphf-app",
+    type: "db",
+    id: 1,
+    ...over,
+  });
+
+  it("rejects an unknown or missing op", () => {
+    expect(parseDBArgs(msg({ op: "drop" }))).toBeNull();
+    expect(parseDBArgs(msg({}))).toBeNull();
+    expect(parseDBArgs(null)).toBeNull();
+  });
+
+  it("accepts 'all' with no table", () => {
+    expect(parseDBArgs(msg({ op: "all" }))).toEqual({ op: "all" });
+  });
+
+  it("requires a table for query/clear", () => {
+    expect(parseDBArgs(msg({ op: "query" }))).toBeNull();
+    expect(parseDBArgs(msg({ op: "query", table: "Emails" }))).toEqual({
+      op: "query",
+      table: "Emails",
+    });
+    expect(parseDBArgs(msg({ op: "clear", table: "Emails" }))).toEqual({
+      op: "clear",
+      table: "Emails",
+    });
+  });
+
+  it("normalizes define columns and drops nameless ones", () => {
+    const out = parseDBArgs(
+      msg({
+        op: "define",
+        table: "Emails",
+        columns: [
+          { name: "id", type: "string" },
+          { name: "", type: "string" }, // dropped
+          { name: "urgency" }, // type defaults to string
+        ],
+      }),
+    );
+    expect(out).toEqual({
+      op: "define",
+      table: "Emails",
+      columns: [
+        { name: "id", type: "string" },
+        { name: "urgency", type: "string" },
+      ],
+    });
+  });
+
+  it("rejects a define with no usable columns", () => {
+    expect(
+      parseDBArgs(msg({ op: "define", table: "T", columns: [{ type: "x" }] })),
+    ).toBeNull();
+    expect(
+      parseDBArgs(msg({ op: "define", table: "T", columns: 5 })),
+    ).toBeNull();
+  });
+
+  it("keeps only plain-object rows for upsert and carries the key", () => {
+    const out = parseDBArgs(
+      msg({
+        op: "upsert",
+        table: "Emails",
+        rows: [{ id: "a" }, 5, ["x"], null, { id: "b" }],
+        key: "id",
+      }),
+    );
+    expect(out).toEqual({
+      op: "upsert",
+      table: "Emails",
+      rows: [{ id: "a" }, { id: "b" }],
+      key: "id",
+    });
+  });
+
+  it("rejects an oversized upsert payload", () => {
+    const big = [{ blob: "x".repeat(600 * 1024) }];
+    expect(
+      parseDBArgs(msg({ op: "upsert", table: "T", rows: big })),
+    ).toBeNull();
+  });
+
+  it("rejects an oversized table name instead of truncating it", () => {
+    // Truncation would alias two distinct 65+ char names to one store key.
+    const long = "T".repeat(65);
+    expect(parseDBArgs(msg({ op: "query", table: long }))).toBeNull();
+    expect(parseDBArgs(msg({ op: "clear", table: long }))).toBeNull();
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: long,
+          columns: [{ name: "id", type: "string" }],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseDBArgs(msg({ op: "upsert", table: long, rows: [{ id: "a" }] })),
+    ).toBeNull();
+    // Boundary: exactly 64 chars is still accepted.
+    const max = "T".repeat(64);
+    expect(parseDBArgs(msg({ op: "query", table: max }))).toEqual({
+      op: "query",
+      table: max,
+    });
+  });
+
+  it("rejects a define with an oversized column name or type", () => {
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: "T",
+          columns: [{ name: "c".repeat(65), type: "string" }],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: "T",
+          columns: [{ name: "id", type: "t".repeat(33) }],
+        }),
+      ),
+    ).toBeNull();
+    // A single bad column fails the whole call — no silent dropping.
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: "T",
+          columns: [
+            { name: "id", type: "string" },
+            { name: "c".repeat(65), type: "string" },
+          ],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects an oversized upsert key instead of forwarding it", () => {
+    expect(
+      parseDBArgs(
+        msg({
+          op: "upsert",
+          table: "T",
+          rows: [{ id: "a" }],
+          key: "k".repeat(65),
+        }),
+      ),
+    ).toBeNull();
+    // Boundary: a 64-char key is still accepted.
+    const maxKey = "k".repeat(64);
+    expect(
+      parseDBArgs(
+        msg({ op: "upsert", table: "T", rows: [{ id: "a" }], key: maxKey }),
+      ),
+    ).toEqual({ op: "upsert", table: "T", rows: [{ id: "a" }], key: maxKey });
   });
 });

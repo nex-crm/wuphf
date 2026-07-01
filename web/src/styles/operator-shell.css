@@ -1020,6 +1020,27 @@
   color: var(--t-faint);
   margin-right: 2px;
 }
+/* Inline, editable channel picker native to the delivery node — reads as an
+   editable chip, not a form field bolted below the flow. */
+.opr-step-channel {
+  font-family: var(--t-mono, monospace);
+  font-size: 11px;
+  color: var(--t-cyan);
+  background: color-mix(in srgb, var(--t-accent-2) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-2) 45%, var(--t-line-2));
+  border-radius: var(--t-r-sm);
+  padding: 1px 6px;
+  width: 11ch;
+  min-width: 8ch;
+  outline: none;
+}
+.opr-step-channel:focus {
+  border-color: var(--t-accent-2);
+  background: color-mix(in srgb, var(--t-accent-2) 16%, transparent);
+}
+.opr-step-channel::placeholder {
+  color: var(--t-faint);
+}
 .opr-step-gate {
   margin-top: var(--space-2);
   display: inline-flex;
@@ -1817,6 +1838,16 @@
   color: var(--t-faint);
   margin-bottom: var(--space-4);
 }
+/* Cross-app share: which other apps this same brain page belongs to. */
+.opr-article-alsoin {
+  font-size: 12px;
+  color: var(--t-dim);
+  margin: calc(-1 * var(--space-3)) 0 var(--space-4);
+}
+.opr-alsoin-app {
+  color: var(--t-accent-2, var(--t-blue));
+  font-weight: 600;
+}
 .opr-article h2 {
   font-size: 18px;
   font-weight: 650;
@@ -1911,6 +1942,46 @@
 }
 .opr-ref-detail {
   color: var(--t-faint);
+}
+/* A reference is clickable: open it to reveal the source itself. */
+.opr-ref-row {
+  display: inline;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.opr-ref-row:hover .opr-ref-source {
+  text-decoration: underline;
+}
+.opr-ref-expand {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-accent-2) 6%, transparent);
+}
+.opr-ref-snippet {
+  margin: 0 0 var(--space-2);
+  color: var(--t-ink);
+  font-style: italic;
+}
+.opr-ref-why {
+  margin: 0;
+  color: var(--t-dim);
+  font-size: 12px;
+}
+.opr-ref-why-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: var(--space-2);
+  color: var(--t-accent-2, var(--t-blue));
+  font-weight: 600;
 }
 
 .opr-seealso {
@@ -3171,8 +3242,12 @@
   place-items: center;
   border: 1px solid var(--t-line-2);
   border-radius: var(--t-r-sm);
-  /* Dark tile so colored brand marks read cleanly. */
-  background: color-mix(in srgb, #000 42%, var(--t-paper));
+  /* Light tile: brand marks are designed for white, so a colored or monochrome
+     logo reads on it (the old dark tile rendered dark/monochrome marks
+     invisible — dark-on-dark). The fixed dark `color` keeps currentColor SVG
+     fallbacks (ToolkitBrandLogo) readable on the light tile too. */
+  background: #fff;
+  color: #14161a;
   overflow: hidden;
 }
 .opr-int-logo :is(svg, img) {
@@ -3772,6 +3847,11 @@
   text-transform: none;
   color: var(--t-faint);
 }
+.opr-data-empty {
+  font-size: 12px;
+  color: var(--t-faint);
+  padding: var(--space-2) 0;
+}
 .opr-data-list {
   list-style: none;
   margin: 0;
@@ -4013,4 +4093,50 @@
     border-top: 1px solid var(--t-line-2);
     max-height: 45%;
   }
+}
+
+/* ── App-build activity feed (the live build log in the build chat) ──────────
+   AppActivity reuses the office .app-build-activity markup, which is themed via
+   office tokens (--border/--bg-card/--text/--accent…) that do not exist in the
+   operator surface — so it fell back to a stark white-on-black. Remap those
+   tokens to the operator palette within the .opr-build-activity wrapper so the
+   thinking + tool-call trace blends into the terminal-muted surface. Scoped to
+   the wrapper, so the office feed is untouched. */
+.opr-build-activity .app-build-activity {
+  --border: var(--t-line);
+  --bg-card: var(--t-surface);
+  --text: var(--t-ink);
+  --text-secondary: var(--t-dim);
+  --accent: var(--t-accent);
+  --green: var(--t-green);
+  --red: var(--t-red);
+
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  margin-bottom: 8px;
+  max-height: 46%;
+}
+.opr-build-activity .app-build-activity__title {
+  color: var(--t-ink);
+  letter-spacing: 0.01em;
+}
+.opr-build-activity .app-build-activity__row {
+  font-family: var(--font-mono);
+}
+
+/* Data-tab column header: the field name with its data type shown beneath it,
+   so the Data table's headers double as the data model's typed schema. */
+.opr-data-table th .opr-data-col-name {
+  display: block;
+}
+.opr-data-table th .opr-data-col-type {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--t-dim);
 }

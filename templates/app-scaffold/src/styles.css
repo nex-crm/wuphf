@@ -3,11 +3,13 @@
  * "@mantine/core/styles.css", inlined into the single-file build) — so this file
  * is only for page-level layout and any custom, non-Mantine bits. No @import, no
  * Google Fonts, no external assets — the sandbox blocks them. The app renders on
- * a light surface inside WUPHF (we pin MantineProvider to the light scheme).
+ * the operator's muted-dark surface inside WUPHF (we pin MantineProvider to the
+ * dark scheme) so a built app BLENDS into the shell instead of being a white
+ * card on a dark surface.
  */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
@@ -25,7 +27,9 @@ body {
     Helvetica,
     Arial,
     sans-serif;
-  background: #fff;
+  /* Muted near-black to match the operator shell's terminal surface — not pure
+     black. Mantine's dark components sit slightly elevated above this. */
+  background: #15171b;
 }
 
 /* The app root container. Mantine's <Stack className="app"> uses this for the

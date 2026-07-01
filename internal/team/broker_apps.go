@@ -67,6 +67,12 @@ func (b *Broker) handleApps(w http.ResponseWriter, r *http.Request) {
 			writeAppError(w, err)
 			return
 		}
+		// The app's deterministic workflow is a PART of the app, not an
+		// afterthought — so figure it out at publish time: precompile + freeze it
+		// off the request path so the Workflow tab opens already-compiled instead
+		// of compiling on demand while the operator watches. Fail-safe; the
+		// on-demand compile remains as the fallback.
+		go b.precompileAppWorkflowAsync(app.ID)
 		// A republish rewrites the source and may change the dependency set, so
 		// any running live-preview server is now stale. Stop it and pre-warm a
 		// fresh one in the background: the new deps (e.g. the refine stack)
@@ -122,8 +128,144 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		b.handleAppImprove(w, r, id)
 	case "dev":
 		b.handleAppDev(w, r, id, parts)
+	case "activity":
+		b.handleAppActivity(w, r, id)
+	case "db":
+		b.handleAppDB(w, r, id)
+	case "knowledge":
+		b.handleAppKnowledge(w, r, id)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// handleAppActivity streams the app's live build/edit activity (the App
+// Builder's thinking + tool calls) as SSE, scoped to THIS app. It resolves the
+// app's backing app-builder run from its EditChannel and delegates to the shared
+// agent-stream writer, so the operator surface subscribes by app id alone and
+// never threads a task id. An app whose run has not started yet streams an empty
+// (replay-end + heartbeat) connection rather than erroring, so the FE can attach
+// the feed the instant a build begins.
+//
+//	GET /apps/{id}/activity  -> text/event-stream of the app's build/edit run
+func (b *Broker) handleAppActivity(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	app, _, err := b.appStore().Get(id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	// Scope by the backing run's task id. When no run exists yet, scope by the
+	// app id instead: no task event carries that tag, so the client gets an
+	// empty stream that fills once the run starts — never the global app-builder
+	// feed (which would leak other apps' activity).
+	scope := b.appBuilderRunTaskID(app.EditChannel)
+	if scope == "" {
+		scope = id
+	}
+	b.streamAgentTaskSSE(w, r, appBuilderSlug, scope)
+}
+
+// appBuilderRunTaskID resolves an app's persistent edit channel to the id of the
+// app-builder task that backs it (the build/improve run whose events feed the
+// activity stream). Returns "" when no such task exists yet.
+func (b *Broker) appBuilderRunTaskID(editChannel string) string {
+	editChannel = strings.TrimSpace(editChannel)
+	if editChannel == "" {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].Channel == editChannel && b.tasks[i].Owner == appBuilderSlug {
+			return b.tasks[i].ID
+		}
+	}
+	return ""
+}
+
+// appDBOpRequest is the POST /apps/{id}/db body: an op selector plus the
+// op-specific fields. One endpoint, op-dispatched, so the Bridge speaks a single
+// db channel rather than a route per verb.
+type appDBOpRequest struct {
+	Op      string           `json:"op"`
+	Table   string           `json:"table"`
+	Columns []AppDBColumn    `json:"columns"`
+	Rows    []map[string]any `json:"rows"`
+	Key     string           `json:"key"`
+}
+
+// handleAppDB is the app's backing DATABASE: named tables, typed columns, rows.
+// The app writes its derived model here (via the Bridge) and renders from it; the
+// Data tab reads it directly.
+//
+// AUTH: the whole /apps/ tree is behind requireAuth, so every caller here holds a
+// valid broker token or human session. Writes are NOT further gated to
+// app-builder/human — unlike app BYTES (register/delete/rollback), which change
+// app CODE and so are appWriterAllowed-only. DB rows are app DATA the app writes
+// about ITSELF, exactly like the create_task / integration bridge writes, which
+// also run under the broker token (the sandboxed app reaches the broker through
+// the web proxy carrying that token — it is broker-kind, never a human session,
+// so an appWriterAllowed gate would reject the app's own writes). The real
+// protections are: authenticated caller + valid app id + server-side bounds
+// (table/column/row caps), all enforced below and in custom_app_db.go.
+//
+//	GET  /apps/{id}/db  -> {tables:[{name,columns,rows}]}
+//	POST /apps/{id}/db  -> op-dispatch: define | upsert | query | clear
+func (b *Broker) handleAppDB(w http.ResponseWriter, r *http.Request, id string) {
+	switch r.Method {
+	case http.MethodGet:
+		tables, err := b.appStore().AppDBTables(id)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"tables": tables})
+	case http.MethodPost:
+		var req appDBOpRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		store := b.appStore()
+		// Throttle WRITE frequency per app: the store caps table/row/column
+		// GROWTH, but a tight loop could still keep rewriting db.json under the
+		// store mutex. Reads (GET and the "query" op) are unmetered.
+		op := strings.TrimSpace(req.Op)
+		if op == "define" || op == "upsert" || op == "clear" {
+			if retryAfter, limited := b.consumeAppDBWriteBudget(appBudgetKey(id, r)); limited {
+				w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "db write rate limit reached — retry shortly"})
+				return
+			}
+		}
+		var (
+			table AppDBTable
+			opErr error
+		)
+		switch op {
+		case "define":
+			table, opErr = store.DefineAppDBTable(id, req.Table, req.Columns)
+		case "upsert":
+			table, opErr = store.UpsertAppDBRows(id, req.Table, req.Rows, req.Key)
+		case "query":
+			table, opErr = store.QueryAppDBTable(id, req.Table)
+		case "clear":
+			table, opErr = store.ClearAppDBTable(id, req.Table)
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown op: want define|upsert|query|clear"})
+			return
+		}
+		if opErr != nil {
+			writeAppError(w, opErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"table": table})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 

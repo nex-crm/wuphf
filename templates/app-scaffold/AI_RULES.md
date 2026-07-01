@@ -37,7 +37,7 @@ import { MantineProvider } from "@mantine/core";
 import { Refine } from "@refinedev/core";
 import { bridgeDataProvider } from "./bridgeDataProvider";
 
-<MantineProvider forceColorScheme="light">       // apps render on white
+<MantineProvider forceColorScheme="dark">        // apps render on the dark operator surface
   <Refine
     dataProvider={bridgeDataProvider}            // routes data through the bridge
     resources={[{ name: "tasks" }, { name: "members" }, { name: "emails" }]}
@@ -48,8 +48,18 @@ import { bridgeDataProvider } from "./bridgeDataProvider";
 </MantineProvider>
 ```
 
-- **`forceColorScheme="light"`** is required — the sealed sandbox blocks
-  `localStorage`, and apps render on a white surface. Don't remove it.
+- **`forceColorScheme="dark"`** is required — the app renders on the operator's
+  muted-dark surface so it blends into the WUPHF shell (not a white card on a
+  dark surface). Pinning the scheme also sidesteps Mantine's `localStorage`
+  color manager, which the sealed sandbox blocks. Don't remove it, don't switch
+  it to light.
+- **Use REAL data through the bridge** — the data hooks (`useList`/`useTable` on
+  `tasks`/`members`/`emails`, or `getEmails`/`getTasks`/`getOfficeMembers`) read
+  the signed-in user's actual office data. Do NOT hardcode mock/sample/fixture
+  rows when a real bridge source exists for what you are building. If the app
+  needs a data source that has NO bridge resource (e.g. "expenses"), surface a
+  short empty state naming what to connect rather than silently inventing fake
+  data.
 - **NO `routerProvider`** — the sandbox has no app-owned URL. A WUPHF App is one
   screen; you don't need a router. `useTable` defaults to `syncWithLocation:
   false`, so table state lives in React, not the URL.
@@ -170,6 +180,89 @@ loudly — apps are read-mostly by design. Don't try to work around this.
   the host saves the bytes from its own trusted origin. Wire it to a button,
   never fire it on load. For binary, base64-encode and pass `encoding:"base64"`.
 
+## The app's database — own your data model
+
+Every WUPHF App has a small, real, PERSISTED database of its own (per app,
+server-side, via `db` in `wuphf-bridge.ts`). This is how an app OWNS the model it
+manages instead of recomputing it from scratch on every mount — and it is exactly
+what the **Data tab** shows. Reach for it the moment your app DERIVES or CURATES
+something from a source read: an urgency score, a one-line summary, a group + its
+count, an action item, a normalized row. The pattern is **derive ONCE, persist,
+render from the DB**:
+
+1. **Define your tables** — the entities the app manages and their typed columns,
+   INCLUDING the computed fields, not just the raw source fields.
+2. **On first load, derive once and persist** — fetch the real source
+   (`getEmails` / `getTasks` / `callIntegration`), compute your model, and write it
+   with `db.defineTable` + `db.upsert`. Pass a stable `key` column so a re-run
+   REPLACES rows instead of duplicating them.
+3. **Render from the DB** — read with `db.query(name)` / `db.all()` and render
+   that. On later mounts read the DB FIRST; only re-derive when the initialized
+   marker is missing or the human hits Refresh. Track "already derived" with an
+   EXPLICIT marker (a tiny meta table or sentinel row), NOT `rows.length` — a
+   valid empty derive (zero urgent emails is a real answer) would otherwise
+   re-fetch on every mount. This is also how you satisfy hard rule 8 (don't
+   recompute on every mount) — the DB is your cache of record.
+
+```tsx
+import { db, getEmails, ai } from "./wuphf-bridge";
+
+const TABLE = "Emails";
+const META = "Meta"; // one sentinel row marks "the derive already ran"
+
+async function ensureModel() {
+  // Already derived? Render straight from the DB — do NOT recompute. The check
+  // is the explicit marker, not rows.length, so an empty model still counts.
+  const meta = await db.query(META).catch(() => null);
+  if (meta?.table.rows.some((r) => r.key === "initialized")) {
+    const existing = await db.query(TABLE).catch(() => null);
+    if (existing) return { state: "ready", table: existing.table } as const;
+  }
+
+  // EVERY db.* call can reject (transport failure, server-side bounds) — not
+  // just db.query — so the WHOLE derive/write block is guarded. A failure
+  // becomes a designed error state with a Retry, never a blank screen.
+  try {
+    await db.defineTable(TABLE, [
+      { name: "id", type: "string" },
+      { name: "sender", type: "string" },
+      { name: "subject", type: "string" },
+      { name: "urgency", type: "number" }, // COMPUTED — not in the raw source
+      { name: "summary", type: "string" }, // COMPUTED via ai()
+    ]);
+    await db.defineTable(META, [{ name: "key", type: "string" }]);
+
+    const { connected, emails } = await getEmails({ limit: 25 });
+    if (!connected) return { state: "connect" } as const; // render a connect-state
+
+    const rows = await Promise.all(
+      emails.map(async (e) => ({
+        id: e.id,
+        sender: e.fromName || e.from,
+        subject: e.subject,
+        urgency: 0, // compute from labels/snippet
+        summary: (await ai(`One line: ${e.snippet}`).catch(() => ({}))).text ?? "",
+      })),
+    );
+    const { table } = await db.upsert(TABLE, rows, "id"); // key "id" = dedup on re-run
+    await db.upsert(META, [{ key: "initialized" }], "key"); // mark ONLY after the write
+    return { state: "ready", table } as const;
+  } catch {
+    return { state: "error" } as const; // degraded state — offer a Retry
+  }
+}
+```
+
+- The DB is DETERMINISTIC storage, not a query engine — v1 is tables, typed
+  columns, upsert-by-key, and read. No server-side joins or filters; filter and
+  sort in React after `db.query`.
+- Writes are gated + bounded server-side (table / column / row caps). Every `db.*`
+  call REJECTS on a transport failure, so await in try/catch, exactly like the
+  other bridge helpers.
+- A pure pass-through app with NO derived data (it lists a live source verbatim)
+  does not need the DB — read the source and render. Use the DB the moment you
+  COMPUTE or CURATE something worth keeping and showing in the Data tab.
+
 ## Hard rules
 
 1. **Self-contained output.** `bun run build` must emit ONE `dist/index.html`
@@ -188,9 +281,9 @@ loudly — apps are read-mostly by design. Don't try to work around this.
 5. **Protected files — use, don't rewrite.**
    - `src/wuphf-bridge.ts` — the only channel out of the sandbox. Its helpers
      (`callBroker`, `getTasks`, `getOfficeMembers`, `createTask`,
-     `callIntegration`, `listIntegrations`, `ai`, `getEmails`, `download`) are already
-     correct (e.g. `getTasks()` returns ALL channels, not just "general"). Import
-     and call them as-is.
+     `callIntegration`, `listIntegrations`, `ai`, `getEmails`, `download`, and the
+     `db` store) are already correct (e.g. `getTasks()` returns ALL channels, not
+     just "general"). Import and call them as-is.
    - `src/bridgeDataProvider.ts` — refine's `DataProvider` over the bridge. Import
      `bridgeDataProvider`; do NOT reimplement it. Add a resource by extending its
      `readers` map or passing `meta:{platform,action}` for an integration.
@@ -252,7 +345,7 @@ or rows instead). In short:
 1. **Set a real theme.** Override Mantine once in `main.tsx` via `createTheme` —
    `primaryColor`, one `defaultRadius`, a heading scale, a tightened `spacing`
    scale. Never ship default-themed Mantine; it is the #1 AI tell. (Keep
-   `forceColorScheme="light"` and the provider shape above — only `theme` is yours.)
+   `forceColorScheme="dark"` and the provider shape above — only `theme` is yours.)
 2. **Hierarchy is type, not boxes.** One real `<Title>`, then `fw`/`size`/`c="dimmed"`
    for rank — three tiers, not five font sizes. Monospace numbers and IDs.
 3. **Earn the card.** A pile of identical `<Card>`s is a tell — use a `<Table>` or
