@@ -3,13 +3,15 @@
 //   GET  /health        liveness
 //   GET  /providers     which inference paths are available (subscription/BYOK/local)
 //   POST /build/stream  description -> the pi-mono agent assembles a WorkflowSpec (SSE)
+//   POST /tools/call    the app's chat calls a saved tool (sandboxed; gated -> approval)
 //   POST /run           execute a compiled spec deterministically (gated step -> CQ1)
 
 import { streamWorkflow } from "./buildAgent.js";
 import { runWorkflow } from "./executor.js";
 import { providersPayload } from "./providers.js";
+import { runTool } from "./toolRuntime.js";
 import { buildTool } from "./tools.js";
-import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type ToolBuildRequest, type WorkflowSpec } from "./wire.js";
+import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type ToolBuildRequest, type ToolCallRequest, type WorkflowSpec } from "./wire.js";
 
 type BuildEvent = { type: "step"; step: WorkflowSpec["steps"][number] } | { type: "spec"; spec: WorkflowSpec };
 type BuildStream = (message: string, opts: { toolId?: string; signal?: AbortSignal }) => AsyncGenerator<BuildEvent>;
@@ -91,6 +93,24 @@ export function createServer(opts: ServerOptions = {}) {
 				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
 				return json(buildTool(body.message));
+			}
+
+			if (req.method === "POST" && pathname === "/tools/call") {
+				// The app's chat CALLS a saved tool. Execution is sandboxed
+				// (toolRuntime.ts); a gated capability halts with needs_approval
+				// unless the request carries approved=true (CQ1, default deny).
+				let body: ToolCallRequest;
+				try {
+					body = (await req.json()) as ToolCallRequest;
+				} catch {
+					return json({ error: "invalid JSON body" }, 400);
+				}
+				const tool = body && typeof body === "object" ? body.tool : undefined;
+				if (!tool || typeof tool !== "object" || typeof tool.name !== "string" || typeof tool.code !== "string") {
+					return json({ error: "invalid tool call request: tool { name, code } required" }, 400);
+				}
+				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
+				return json(await runTool(tool, body.args ?? {}, { approved: body.approved === true }));
 			}
 
 			if (req.method === "POST" && pathname === "/run") {

@@ -4143,3 +4143,17 @@
   color: var(--t-text-2);
   white-space: pre;
 }
+
+/* What the tool did: the capability calls a run recorded (toolRuntime actions),
+   listed under the tool-call block in the app chat. */
+.opr-toolcall-actions {
+  margin-top: var(--space-1-5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.opr-toolcall-actions code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--t-faint);
+}

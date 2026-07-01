@@ -83,6 +83,19 @@ function ToolEntry({
         </p>
       ) : null}
 
+      {tool.calls.length > 0 ? (
+        // Read-only last-run readout — display only; the chat is still the
+        // only caller (no Run button).
+        <div className="opr-toolcall">
+          <div className="opr-toolcall-line">
+            Last run · {tool.calls[tool.calls.length - 1].at}
+          </div>
+          <div className="opr-toolcall-result">
+            {tool.calls[tool.calls.length - 1].result}
+          </div>
+        </div>
+      ) : null}
+
       <button
         type="button"
         className="opr-tool-code-toggle"
