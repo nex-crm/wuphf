@@ -1,7 +1,9 @@
 package team
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +13,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/nex-crm/wuphf/internal/gbrain"
 )
 
 // broker_apps_knowledge.go — the app's KNOWLEDGE tab, made real via gbrain.
@@ -101,9 +107,21 @@ func (b *Broker) handleAppKnowledge(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(r.Context(), knowledgeSynthTimeout)
+	defer cancel()
+
 	refresh := r.URL.Query().Get("refresh") == "1"
+	gbClient, gbBacked := b.gbrainKnowledgeClient()
+
+	// Read the cache first — gbrain IS the store when it backs the workspace;
+	// otherwise the per-app knowledge.json file.
 	if !refresh {
-		if pages, ok, err := store.ReadAppKnowledge(id); err == nil && ok {
+		if gbBacked {
+			if pages, err := b.readAppKnowledgeFromGBrain(ctx, gbClient, id); err == nil && len(pages) > 0 {
+				writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
+				return
+			}
+		} else if pages, ok, err := store.ReadAppKnowledge(id); err == nil && ok {
 			writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
 			return
 		}
@@ -115,8 +133,6 @@ func (b *Broker) handleAppKnowledge(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), knowledgeSynthTimeout)
-	defer cancel()
 	pages, err := b.synthesizeAppKnowledge(ctx, id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "broker: app knowledge synth failed: %v\n", err)
@@ -125,10 +141,210 @@ func (b *Broker) handleAppKnowledge(w http.ResponseWriter, r *http.Request, id s
 		writeJSON(w, http.StatusOK, map[string]any{"pages": []appKnowledgePage{}, "error": "ai_unavailable"})
 		return
 	}
-	if err := store.WriteAppKnowledge(id, pages); err != nil {
+
+	// Persist: write pages INTO gbrain (the shared brain) when it backs the
+	// workspace, so they are durable, searchable, linked, and reusable across
+	// apps; otherwise fall back to the per-app file cache.
+	if gbBacked {
+		if err := b.writeAppKnowledgeToGBrain(ctx, gbClient, id, pages); err != nil {
+			fmt.Fprintf(os.Stderr, "broker: app knowledge gbrain write failed: %v\n", err)
+		}
+	} else if err := store.WriteAppKnowledge(id, pages); err != nil {
 		fmt.Fprintf(os.Stderr, "broker: app knowledge cache write failed: %v\n", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
+}
+
+// ── gbrain-backed store: knowledge pages live in the shared brain ─────────────
+
+const (
+	// appKnowledgeTag marks every app-knowledge page in the brain.
+	appKnowledgeTag = "wuphf-app-knowledge"
+	// appKnowledgeSourceKind / appKnowledgeIngestedVia are the gbrain provenance
+	// stamps for pages this surface writes.
+	appKnowledgeSourceKind  = "wuphf_app_knowledge"
+	appKnowledgeIngestedVia = "wuphf-app-knowledge"
+)
+
+// knowledgeB64Re extracts the exact structured page from a gbrain page body. We
+// keep the machine-readable page as base64 in an HTML comment (opaque, preserved
+// verbatim) so the cited/explain-why render reconstructs faithfully, while the
+// visible body stays readable markdown that gbrain search + embeddings index.
+var knowledgeB64Re = regexp.MustCompile(`<!--wuphf-knowledge-b64:([A-Za-z0-9+/=]+)-->`)
+
+// gbrainKnowledgeClient returns the brain client when gbrain backs the workspace
+// (WikiWorker nil ⟺ gbrain-backed) and a client exists. Otherwise the file cache
+// is used and this reports (nil, false).
+func (b *Broker) gbrainKnowledgeClient() (*gbrain.Client, bool) {
+	if b.WikiWorker() != nil {
+		return nil, false
+	}
+	b.mu.Lock()
+	c := b.gbrainClient
+	b.mu.Unlock()
+	if c == nil {
+		return nil, false
+	}
+	return c, true
+}
+
+// appKnowledgeScopeTag is the per-app tag that scopes a knowledge page to an app.
+// A page tagged with several of these belongs to several apps (cross-app share).
+func appKnowledgeScopeTag(appID string) string {
+	return "wuphf-app-" + strings.TrimPrefix(appID, "app_")
+}
+
+// appKnowledgeSlug is the stable brain slug for one app's knowledge page.
+func appKnowledgeSlug(appID, pageID string) string {
+	return "k-" + strings.TrimPrefix(appID, "app_") + "-" + pageID
+}
+
+func stripCites(s string) string {
+	return strings.TrimSpace(knowledgeCiteRe.ReplaceAllString(s, ""))
+}
+
+// renderKnowledgePageForGBrain builds the gbrain page: YAML frontmatter (title,
+// type, app-scope tags), a readable markdown body (indexed by gbrain), and the
+// exact structured page as base64 for faithful reconstruction.
+func renderKnowledgePageForGBrain(appID string, page appKnowledgePage) (string, error) {
+	raw, err := json.Marshal(page)
+	if err != nil {
+		return "", fmt.Errorf("marshal knowledge page: %w", err)
+	}
+	fm := map[string]any{
+		"title": page.Title,
+		"type":  appKnowledgeTag,
+		"tags":  []string{appKnowledgeScopeTag(appID), appKnowledgeTag},
+	}
+	var buf bytes.Buffer
+	buf.WriteString("---\n")
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(fm); err != nil {
+		return "", fmt.Errorf("yaml encode: %w", err)
+	}
+	_ = enc.Close()
+	buf.WriteString("---\n\n")
+	buf.WriteString("# ")
+	buf.WriteString(page.Title)
+	buf.WriteString("\n\n")
+	if lead := stripCites(page.Lead); lead != "" {
+		buf.WriteString(lead)
+		buf.WriteString("\n\n")
+	}
+	for _, s := range page.Sections {
+		if h := strings.TrimSpace(s.Heading); h != "" {
+			buf.WriteString("## ")
+			buf.WriteString(h)
+			buf.WriteString("\n\n")
+		}
+		for _, p := range s.Paras {
+			if para := stripCites(p); para != "" {
+				buf.WriteString(para)
+				buf.WriteString("\n\n")
+			}
+		}
+	}
+	buf.WriteString("<!--wuphf-knowledge-b64:")
+	buf.WriteString(base64.StdEncoding.EncodeToString(raw))
+	buf.WriteString("-->\n")
+	return buf.String(), nil
+}
+
+// writeAppKnowledgeToGBrain upserts each page into the brain (tagged for the app)
+// and cross-links pages via the brain's link graph (seeAlso becomes real edges).
+func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client *gbrain.Client, appID string, pages []appKnowledgePage) error {
+	slugByPageID := make(map[string]string, len(pages))
+	for _, p := range pages {
+		content, err := renderKnowledgePageForGBrain(appID, p)
+		if err != nil {
+			return err
+		}
+		slug := appKnowledgeSlug(appID, p.ID)
+		if _, err := client.PutPage(ctx, content, gbrain.PutOptions{
+			Slug:        slug,
+			SourceKind:  appKnowledgeSourceKind,
+			IngestedVia: appKnowledgeIngestedVia,
+		}); err != nil {
+			return fmt.Errorf("put page %q: %w", slug, err)
+		}
+		slugByPageID[p.ID] = slug
+	}
+	// Cross-link seeAlso → real graph edges (best-effort; a failed edge is not
+	// fatal to persistence).
+	for _, p := range pages {
+		from := slugByPageID[p.ID]
+		for _, target := range p.SeeAlso {
+			to := slugByPageID[target]
+			if to == "" || to == from {
+				continue
+			}
+			_ = client.AddLink(ctx, from, to, "related", appKnowledgeIngestedVia, "knowledge see-also")
+		}
+	}
+	return nil
+}
+
+// readAppKnowledgeFromGBrain reads the app's pages back from the brain: list by
+// the app-scope tag, decode each page's structured form, and merge the brain's
+// link graph into seeAlso so cross-links (including future cross-app ones)
+// surface in the reader.
+func (b *Broker) readAppKnowledgeFromGBrain(ctx context.Context, client *gbrain.Client, appID string) ([]appKnowledgePage, error) {
+	metas, err := client.ListPages(ctx, gbrain.ListOptions{Tag: appKnowledgeScopeTag(appID), Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	pages := make([]appKnowledgePage, 0, len(metas))
+	pageIDBySlug := make(map[string]string, len(metas))
+	for _, m := range metas {
+		page, err := client.GetPage(ctx, m.Slug)
+		if err != nil {
+			continue
+		}
+		kp, ok := decodeKnowledgePageFromBody(page.Content)
+		if !ok {
+			continue
+		}
+		pages = append(pages, kp)
+		pageIDBySlug[m.Slug] = kp.ID
+	}
+	for i := range pages {
+		slug := appKnowledgeSlug(appID, pages[i].ID)
+		links, err := client.GetLinks(ctx, slug)
+		if err != nil {
+			continue
+		}
+		seen := make(map[string]bool, len(pages[i].SeeAlso))
+		for _, s := range pages[i].SeeAlso {
+			seen[s] = true
+		}
+		for _, l := range links {
+			if pid := pageIDBySlug[l.To]; pid != "" && pid != pages[i].ID && !seen[pid] {
+				pages[i].SeeAlso = append(pages[i].SeeAlso, pid)
+				seen[pid] = true
+			}
+		}
+	}
+	return pages, nil
+}
+
+func decodeKnowledgePageFromBody(body string) (appKnowledgePage, bool) {
+	m := knowledgeB64Re.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return appKnowledgePage{}, false
+	}
+	raw, err := base64.StdEncoding.DecodeString(m[1])
+	if err != nil {
+		return appKnowledgePage{}, false
+	}
+	var p appKnowledgePage
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return appKnowledgePage{}, false
+	}
+	if strings.TrimSpace(p.ID) == "" || strings.TrimSpace(p.Title) == "" {
+		return appKnowledgePage{}, false
+	}
+	return p, true
 }
 
 // ── Synthesis ────────────────────────────────────────────────────────────────

@@ -1,6 +1,74 @@
 package team
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestKnowledgePageGBrainRoundTrip(t *testing.T) {
+	page := appKnowledgePage{
+		ID:       "world-weather",
+		Title:    "World Weather",
+		Category: "Weather app",
+		Summary:  "Weather for five cities.",
+		Infobox:  []appKnowledgeInfoRow{{Label: "Unit", Value: "Celsius"}},
+		Lead:     "Shows temperatures in Celsius.[[1]]",
+		Sections: []appKnowledgeSection{
+			{Heading: "What it shows", Paras: []string{"Temp in degrees C.[[1]]"}},
+		},
+		References: []appKnowledgeRef{
+			{N: 1, Title: "App brief", Detail: "spec", Kind: "document", Snippet: "…", Why: "states the unit"},
+		},
+		Categories: []string{"Weather"},
+		SeeAlso:    []string{"other"},
+	}
+	content, err := renderKnowledgePageForGBrain("app_d50e34194a87a5ed", page)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	// Frontmatter carries the app-scope tag for ListPages filtering.
+	if !strings.Contains(content, "wuphf-app-d50e34194a87a5ed") {
+		t.Fatalf("missing app-scope tag in frontmatter:\n%s", content)
+	}
+	// The readable body strips citation markers (the exact form is in base64).
+	body := content[strings.LastIndex(content, "---\n\n")+len("---\n\n"):]
+	readable := body[:strings.Index(body, "<!--")]
+	if strings.Contains(readable, "[[1]]") {
+		t.Fatalf("readable body should strip [[n]] citations:\n%s", readable)
+	}
+	if !strings.Contains(readable, "World Weather") {
+		t.Fatalf("readable body should contain the title")
+	}
+	// The structured page round-trips exactly.
+	got, ok := decodeKnowledgePageFromBody(content)
+	if !ok {
+		t.Fatalf("decode failed")
+	}
+	a, _ := json.Marshal(page)
+	b, _ := json.Marshal(got)
+	if string(a) != string(b) {
+		t.Fatalf("round-trip mismatch:\n want %s\n got  %s", a, b)
+	}
+}
+
+func TestAppKnowledgeSlugAndTag(t *testing.T) {
+	if got := appKnowledgeScopeTag("app_abc123"); got != "wuphf-app-abc123" {
+		t.Fatalf("scope tag = %q", got)
+	}
+	if got := appKnowledgeSlug("app_abc123", "world-weather"); got != "k-abc123-world-weather" {
+		t.Fatalf("slug = %q", got)
+	}
+}
+
+func TestDecodeKnowledgePageRejectsGarbage(t *testing.T) {
+	if _, ok := decodeKnowledgePageFromBody("no marker here"); ok {
+		t.Fatalf("should reject body with no marker")
+	}
+	if _, ok := decodeKnowledgePageFromBody("<!--wuphf-knowledge-b64:%%%notb64%%%-->"); ok {
+		t.Fatalf("should reject invalid base64")
+	}
+}
 
 func testSources() []knowledgeSource {
 	return []knowledgeSource{
