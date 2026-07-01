@@ -276,6 +276,12 @@ func (c *ComposioREST) decodeWorkflowDefinition(definition json.RawMessage) (com
 				return spec, fmt.Errorf("workflow step %q is missing query_template", spec.Steps[i].ID)
 			}
 		case "nex_insights":
+		case "browser":
+			// No Composio action — the browser step carries a natural-language
+			// goal (in template or description) that cua runs.
+			if strings.TrimSpace(spec.Steps[i].Template) == "" && strings.TrimSpace(spec.Steps[i].Description) == "" {
+				return spec, fmt.Errorf("workflow step %q (browser) is missing a goal", spec.Steps[i].ID)
+			}
 		default:
 			return spec, fmt.Errorf("unsupported workflow step type %q", spec.Steps[i].Type)
 		}
@@ -430,9 +436,24 @@ func (c *ComposioREST) executeWorkflowStep(ctx context.Context, step workflowSte
 		return executeWorkflowNexAskStep(step, scope)
 	case "nex_insights":
 		return executeWorkflowNexInsightsStep(step, scope)
+	case "browser":
+		return executeWorkflowBrowserStep(step)
 	default:
 		return nil, fmt.Errorf("unsupported workflow step type %q", step.Type)
 	}
+}
+
+// executeWorkflowBrowserStep records a browser step deterministically. The step
+// has NO Composio action — Nex drives the browser to accomplish its goal. Actual
+// cua execution + the in-chat permission are wired at the broker orchestration
+// layer (which can reach the cua runner); here we emit a stable marker so a
+// frozen run never breaks on a browser step and later steps can reference it.
+func executeWorkflowBrowserStep(step workflowStep) (map[string]any, error) {
+	goal := strings.TrimSpace(step.Template)
+	if goal == "" {
+		goal = strings.TrimSpace(step.Description)
+	}
+	return map[string]any{"type": "browser", "goal": goal, "runs_in_browser": true}, nil
 }
 
 func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workflowStep, scope map[string]any, workflowDryRun bool) (map[string]any, error) {

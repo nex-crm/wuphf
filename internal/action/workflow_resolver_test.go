@@ -40,6 +40,38 @@ func TestResolverBindsActionFromCandidate(t *testing.T) {
 	}
 }
 
+func TestResolverBrowserStep(t *testing.T) {
+	// A browser step (no integration) binds to a "browser" step carrying its goal
+	// — no Composio action, no search/LLM needed.
+	r := resolverWith(nil, nil)
+	step := PlanStep{
+		ID:     "portal",
+		Kind:   "browser",
+		Title:  "Submit in the vendor portal",
+		Detail: "Open the vendor portal and submit the refund",
+	}
+	bound, err := r.Resolve(context.Background(), Plan{Steps: []PlanStep{step}}, step)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if bound.Type != "browser" {
+		t.Fatalf("browser step should bind to type browser, got %#v", bound)
+	}
+	if bound.Template != "Open the vendor portal and submit the refund" {
+		t.Fatalf("browser goal not carried in template: %q", bound.Template)
+	}
+}
+
+func TestExecuteWorkflowBrowserStepEmitsGoal(t *testing.T) {
+	out, err := executeWorkflowBrowserStep(workflowStep{Type: "browser", Template: "do the thing"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out["type"] != "browser" || out["goal"] != "do the thing" || out["runs_in_browser"] != true {
+		t.Fatalf("browser step output = %#v", out)
+	}
+}
+
 func TestResolverRejectsInventedActionAndFallsBack(t *testing.T) {
 	search := func(_ context.Context, _, _ string) ([]Action, error) { return slackCandidates(), nil }
 	// The model picks an action id that is NOT a candidate — must not be trusted.
