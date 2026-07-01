@@ -398,14 +398,99 @@ func (b *Broker) gatherKnowledgeSources(id string) []knowledgeSource {
 		})
 	}
 
+	var editChannel string
 	if app, _, err := store.Get(id); err == nil {
 		brief := strings.TrimSpace(strings.Join([]string{app.Summary, app.Description}, "\n"))
 		add("document", fmt.Sprintf("%s — app brief", app.Name), "What this app is for and the choices in it", brief)
+		editChannel = app.EditChannel
 	}
 
-	// Deliberately NOT sourcing the code, data model, or roster: those describe
-	// how the app was built, which is not knowledge the user needs to operate it.
+	// The build conversation — what the user actually asked for and any
+	// refinements (preferences, special requirements). The richest source of
+	// user-facing operating context.
+	if chat := b.appBuildChatSnippet(editChannel); chat != "" {
+		add("chat", "Build conversation", "What the user asked for when building this app", chat)
+	}
+
+	// The DATA the app currently holds — the real values it tracks. Grounds what
+	// the app COVERS (which cities, which conditions, which categories), never
+	// how it stores them. The prompt forbids describing the schema.
+	if tables, err := store.AppDBTables(id); err == nil {
+		if held := appDataHeldSummary(tables); held != "" {
+			add("document", "Data the app holds", "The values the app currently tracks", held)
+		}
+	}
+
+	// Deliberately NOT sourcing the code, the schema, or the roster: those
+	// describe how the app was built, not knowledge the user needs to operate it.
 	return sources
+}
+
+// appBuildChatSnippet reads the app's build/edit conversation (its EditChannel)
+// into a bounded transcript, so the synthesis is grounded in what the user
+// actually asked for. Skips machine event rows; keeps human + agent prose.
+func (b *Broker) appBuildChatSnippet(editChannel string) string {
+	editChannel = normalizeChannelSlug(strings.TrimSpace(editChannel))
+	if editChannel == "" {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var lines []string
+	for _, m := range b.messages {
+		if normalizeChannelSlug(m.Channel) != editChannel {
+			continue
+		}
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
+			continue
+		}
+		from := strings.TrimSpace(m.From)
+		if from == "" {
+			from = "someone"
+		}
+		lines = append(lines, from+": "+clampRunes(content, 400))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	// Keep the most recent turns if the thread is long — that is where
+	// refinements and final preferences land.
+	if len(lines) > 20 {
+		lines = lines[len(lines)-20:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// appDataHeldSummary reports the distinct VALUES the app tracks per categorical
+// field — grounding for what the app covers (cities, conditions, categories) —
+// without describing the schema. Numeric/date fields are summarised as a range.
+func appDataHeldSummary(tables []AppDBTable) string {
+	var parts []string
+	for _, t := range tables {
+		for _, c := range t.Columns {
+			switch c.Type {
+			case "string", "string[]":
+				seen := map[string]bool{}
+				var vals []string
+				for _, row := range t.Rows {
+					v := strings.TrimSpace(fmt.Sprintf("%v", row[c.Name]))
+					if v == "" || v == "<nil>" || seen[v] {
+						continue
+					}
+					seen[v] = true
+					vals = append(vals, v)
+					if len(vals) >= 8 {
+						break
+					}
+				}
+				if len(vals) > 0 {
+					parts = append(parts, fmt.Sprintf("%s: %s", c.Name, strings.Join(vals, ", ")))
+				}
+			}
+		}
+	}
+	return strings.Join(parts, ". ")
 }
 
 func buildKnowledgePrompt(sources []knowledgeSource) (system, user string) {
@@ -419,7 +504,7 @@ INCLUDE, only when the sources support it:
 - notable choices about the app's scope or behaviour,
 - limitations the user should know about.
 
-NEVER include how the app is built: no architecture, no data model, no database, no code, no frameworks, no libraries, no implementation details. The user does not care how it was built. If a source describes implementation, ignore that part and use only the user-facing meaning.
+You MAY use the DATA the app holds (its values) to state what the app COVERS — the specific cities, conditions, categories, or entities it tracks. That is useful operating context. But NEVER describe how the app is built: no architecture, no data model, no database, no columns or schema, no code, no frameworks, no libraries, no implementation details. The user does not care how it was built. If a source describes implementation, ignore that part and use only the user-facing meaning.
 
 Only write facts that are genuinely useful as operating context for THIS app. Quality over volume. If nothing in the sources is worth writing as user-facing knowledge, return exactly {"pages":[]}. Do not pad.
 
