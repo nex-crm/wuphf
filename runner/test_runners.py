@@ -58,7 +58,7 @@ class TestExecSnapshot(unittest.TestCase):
         labels = [e["label"] for e in elements]
         self.assertIn("Send", labels)
         self.assertNotIn("File", labels)  # macOS menu bar never reaches the model
-        self.assertTrue(any("redacted" in l for l in labels))
+        self.assertTrue(any("redacted" in label for label in labels))
 
 
 class TestObserve(unittest.TestCase):
@@ -75,7 +75,7 @@ class TestObserve(unittest.TestCase):
         labels = [c["label"] for c in comps]
         self.assertIn("Approve", labels)
         self.assertNotIn("Quit", labels)
-        self.assertTrue(any("redacted" in l for l in labels))
+        self.assertTrue(any("redacted" in label for label in labels))
 
     def test_snapshot_skips_page_reads_for_non_browser(self):
         # A non-browser frontmost app: components captured, no text_excerpt.
@@ -126,6 +126,9 @@ class TestReplay(unittest.TestCase):
             mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
             mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
             mock.patch.object(cua_exec, "cua"),
+            # The Enter submits the field we just typed into, so it is gated like a
+            # send; the operator approves it here so replay stays deterministic.
+            mock.patch.object(cua_exec, "await_approval", return_value=True),
             mock.patch.object(cua_exec, "plan") as plan_mock,
             mock.patch.object(cua_exec, "emit", side_effect=events.append),
         ):
@@ -185,6 +188,10 @@ class TestSendGating(unittest.TestCase):
         self.assertTrue(cua_common.needs_approval("Send"))
         self.assertTrue(cua_common.needs_approval("Post to channel"))
         self.assertTrue(cua_common.needs_approval("Reply all"))
+        # Submit-style buttons can send externally too — gate them, don't fire.
+        self.assertTrue(cua_common.needs_approval("Submit"))
+        self.assertTrue(cua_common.needs_approval("Add comment"))
+        self.assertTrue(cua_common.needs_approval("Forward"))
         self.assertFalse(cua_common.needs_approval("Search"))
         self.assertFalse(cua_common.needs_approval("Open menu"))
 
@@ -242,6 +249,202 @@ class TestSendGating(unittest.TestCase):
             cua_exec.run("send it", "Google Chrome", "key")
         clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
         self.assertEqual(len(clicks), 1)  # approved → executed
+
+    def _type_then_enter(self):
+        # type into a field, then press Enter (which could submit a composer), then done
+        return [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "type_text", "arguments": '{"i":6,"text":"hi team","reason":"draft"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "press_key", "arguments": '{"key":"Enter","reason":"send"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "3", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+
+    def test_run_gates_enter_after_typing_when_not_approved(self):
+        # Regression: Enter after typing could submit a focused composer and send
+        # externally without approval. It must be gated like a Send click.
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 6, "role": "TextArea", "label": "Message"}], "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", side_effect=self._type_then_enter()),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("message the team", "Google Chrome", "key")
+        presses = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "press_key"]
+        self.assertEqual(len(presses), 0)  # Enter submit was gated + denied → not fired
+        self.assertTrue(any(e.get("skipped") and e.get("tool") == "press_key" for e in events if e.get("type") == "action"))
+
+    def test_run_allows_enter_when_no_prior_typing(self):
+        # An Enter with no composer typed into (e.g. activating a focused control)
+        # is not a send, so it must NOT require approval.
+        seq = [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "press_key", "arguments": '{"key":"Enter","reason":"activate"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 6, "role": "Button", "label": "Go"}], "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False) as approval,
+            mock.patch.object(cua_exec, "plan", side_effect=seq),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("open it", "Google Chrome", "key")
+        presses = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "press_key"]
+        self.assertEqual(len(presses), 1)  # no prior typing → fired without approval
+        approval.assert_not_called()
+
+    def test_replay_gates_enter_after_typing_when_not_approved(self):
+        # Same protection on the replay path: a recorded type + Enter must gate the
+        # Enter so replay can't silently re-send.
+        steps = [
+            {"action": "type", "role": "TextArea", "label": "Message", "text": "hi"},
+            {"action": "press_key", "key": "Enter"},
+        ]
+        elements = [{"i": 6, "role": "TextArea", "label": "Message"}]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        plan_mock.assert_not_called()
+        presses = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "press_key"]
+        self.assertEqual(len(presses), 0)  # Enter submit gated + denied → not fired
+        self.assertTrue(any(e.get("skipped") and e.get("tool") == "press_key" for e in events if e.get("type") == "action"))
+
+    def test_run_gates_type_pre_click_on_send_like_target(self):
+        # Regression: type_text pre-clicks its target before typing. If the model
+        # points type_text at a send-like control ("Submit"), that pre-click would
+        # fire the send before approval. It must be gated like a Send click.
+        seq = [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "type_text", "arguments": '{"i":6,"text":"hi","reason":"draft"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 6, "role": "Button", "label": "Submit"}], "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", side_effect=seq),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("submit it", "Google Chrome", "key")
+        touched = [c for c in cua_mock.call_args_list if c.args and c.args[0] in ("click", "type_text")]
+        self.assertEqual(len(touched), 0)  # pre-click for the send-like type was gated
+        self.assertTrue(any(e.get("skipped") and e.get("tool") == "type_text" for e in events if e.get("type") == "action"))
+
+    def test_replay_gates_type_pre_click_on_send_like_target(self):
+        # Regression: a replayed type step matching a send-like element still does
+        # a pre-click. Gate it — a replayed type must not fire a Send unapproved.
+        steps = [{"action": "type", "role": "Button", "label": "Submit", "text": "hi"}]
+        elements = [{"i": 9, "role": "Button", "label": "Submit"}]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        plan_mock.assert_not_called()  # matched deterministically, no heal
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # send-like pre-click gated + denied
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
+    def test_replay_gates_on_current_matched_label_not_recorded(self):
+        # Regression: find_element can fuzzy-match a recorded BENIGN label onto a
+        # current send-like element. Gating only on the recorded label would let a
+        # replayed click pre-click a live "Submit …" without approval. The gate must
+        # look at the current matched element's label too.
+        steps = [{"action": "click", "role": "Button", "label": "results"}]  # benign
+        elements = [{"i": 9, "role": "Button", "label": "Submit results"}]  # send-like now
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False) as approval_mock,
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        plan_mock.assert_not_called()  # matched deterministically
+        approval_mock.assert_called()  # the current send-like label triggered the gate
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # gated + denied → no pre-click
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
+    def test_healed_type_pre_click_on_send_like_target_is_gated(self):
+        # Regression: a healed type_text can land on a send-like element too. Its
+        # pre-click must be gated so healing never becomes a way to send unapproved.
+        steps = [{"action": "type", "role": "Button", "label": "Gone", "text": "hi"}]
+        elements = [{"i": 9, "role": "Button", "label": "Submit"}]
+        heal_resp = {"choices": [{"message": {"tool_calls": [{"function": {"name": "type_text", "arguments": '{"i":9,"text":"hi","reason":"x"}'}}]}}]}
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", return_value=heal_resp),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # healed send-like pre-click gated + denied
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
+    def test_replay_rejects_unsupported_action_before_clicking(self):
+        # Regression: an unsupported replay action (e.g. "scroll") would otherwise
+        # match an element and fire a click, bypassing the send-approval gate. It
+        # must be rejected up front — before the snapshot/element-match/click.
+        steps = [{"action": "scroll", "role": "Button", "label": "Submit"}]
+        elements = [{"i": 9, "role": "Button", "label": "Submit"}]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")) as snap_mock,
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval") as approval,
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # unsupported action never reached a click
+        snap_mock.assert_not_called()  # rejected before element-match
+        approval.assert_not_called()
+        plan_mock.assert_not_called()
+        self.assertTrue(
+            any(e.get("skipped") and "unsupported" in e.get("label", "").lower() for e in events if e.get("type") == "action")
+        )
+
+
+class TestObserveTickResilience(unittest.TestCase):
+    def test_bad_tick_does_not_kill_capture(self):
+        # A transient snapshot failure on one tick must emit an error and let the
+        # loop continue capturing the next tick + the record summary, not tear the
+        # whole session down.
+        good = {"tick": 1, "ts": 1.0, "app": "Slack", "title": "t", "components": []}
+        events = []
+        with (
+            mock.patch.object(cua_observe, "snapshot", side_effect=[RuntimeError("AX hiccup"), good]),
+            mock.patch.object(cua_observe, "emit", side_effect=events.append),
+        ):
+            cua_observe.run(interval=0, max_ticks=1, duration=0)
+        self.assertTrue(any(e.get("type") == "error" for e in events))  # bad tick reported
+        self.assertTrue(any(e.get("type") == "snapshot" for e in events))  # next tick captured
+        self.assertTrue(any(e.get("type") == "record" for e in events))  # summary still emitted
 
 
 if __name__ == "__main__":

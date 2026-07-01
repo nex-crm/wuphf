@@ -40,17 +40,20 @@ func runBrowserStepViaCua(ctx context.Context, goal string) (map[string]any, err
 	if strings.TrimSpace(appID) == "" {
 		return map[string]any{"skipped": "browser control needs operator approval"}, nil
 	}
-	// Ask permission to control the browser for this step, in chat. The run stays
-	// paused until the operator replies (or the ask times out → deny).
-	if !browserApprovals.ask(ctx, appID, browserApprovalControl, goal) {
-		return map[string]any{"skipped": "browser control not approved"}, nil
-	}
-
+	// Check host capability BEFORE asking the operator: if there is no key/runner
+	// on this host we can never drive, so asking for control approval would waste
+	// the operator's "yes" on a step that then silently does nothing.
 	key := strings.TrimSpace(config.ResolveOpenAIAPIKey())
 	runner := cuaRunnerPath("cua_exec.py", "WUPHF_CUA_RUNNER")
 	if key == "" || runner == "" {
 		// No key/runner on this host → tolerate; the frozen run still completes.
 		return map[string]any{"skipped": "browser execution unavailable on this host"}, nil
+	}
+
+	// Ask permission to control the browser for this step, in chat. The run stays
+	// paused until the operator replies (or the ask times out → deny).
+	if !browserApprovals.ask(ctx, appID, browserApprovalControl, goal) {
+		return map[string]any{"skipped": "browser control not approved"}, nil
 	}
 
 	cmd := exec.CommandContext(ctx, cuaPython(), runner, "--goal", goal)
@@ -98,7 +101,17 @@ func runBrowserStepViaCua(ctx context.Context, goal string) (map[string]any, err
 		}
 	}
 	_ = stdin.Close()
-	_ = cmd.Wait()
+	waitErr := cmd.Wait()
+	// Surface a crash / kill / truncated-scan as an error so the caller does not
+	// treat an aborted step as a clean success. A runner-emitted "error" event
+	// wins (it is more specific); ctx cancellation is an intentional stop, not a
+	// failure.
+	if scanErr := scanner.Err(); errMsg == "" && scanErr != nil {
+		errMsg = "runner output error: " + scanErr.Error()
+	}
+	if errMsg == "" && waitErr != nil && ctx.Err() == nil {
+		errMsg = "runner exited abnormally: " + waitErr.Error()
+	}
 
 	out := map[string]any{"actions": actions, "actions_count": len(actions)}
 	if result != "" {

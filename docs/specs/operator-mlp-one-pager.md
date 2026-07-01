@@ -183,16 +183,17 @@ tools. The operator never meets the words "broker," "agent," or "wiki."
    workflow/tool context, retrieval, runs, and learnings.
 5. **App builder: build on top.** Keep the render/build/edit foundation; rewrite only the
    read-mostly + roster-agent assumptions; from-scratch only where it clearly wins.
-6. **Data Model: IN the MLP** (eng-review #6). The acceptance scenario needs persistent
-   per-request entity state (status across runs) + the digest counts — run-records alone can't
-   show a live worklist. Internal Tool ships **3 tabs (UI · Workflow · Data)**; Data = operator-
-   owned typed tables for tool run-state/entities (distinct from gbrain, which is the knowledge
-   brain, not a run-state DB).
+6. **Data Model: DEFERRED to v1.1.** The MLP Internal Tool ships **2 tabs (UI · Workflow)**;
+   per-request entity state and the digest counts are covered by run-records + gbrain for the
+   first wedge, so no owned data layer is required to hit the acceptance scenario. Operator-
+   owned typed tables (a third **Data** tab, distinct from gbrain — which is the knowledge
+   brain, not a run-state DB) are a **v1.1** addition, taken up once a workflow provably needs a
+   live worklist that run-records can't express.
 7. **Build strategy: simplify in place** in this worktree. Keep & build on the engine,
    detection, and app builder; replace context with gbrain; delete the office cruft (wiki
    product, skills, notebooks, agent roster, channels, lifecycle/review). Net codebase lighter.
 8. **Naming: "Internal Tool"** (Bubble-style tabs).
-10. **Activation + voice economics (CEO review).** The **call is the primary activation + ship
+9. **Activation + voice economics (CEO review).** The **call is the primary activation + ship
     gate** (the magic; chat is post-call iteration) — founder decision, with the concentrated-risk
     bet named and owned. **Voice = BYO-key** (operator's OpenAI Realtime key in Settings) **or
     Nex-cloud hosted/metered**; **no key → the call is optional and chat-authoring is the keyless
@@ -200,7 +201,7 @@ tools. The operator never meets the words "broker," "agent," or "wiki."
     works for Composio-covered workflows (server-side); sniffed/UI-replay fallback is
     operator-present/manual. **gbrain** ships as a bundled subprocess (PGLite + local ollama
     embeddings default, BYO cloud-embedding-key optional).
-9. **Knowledge = a 5th surface.** **gbrain owns the entire Knowledge backend** (sources, compile,
+10. **Knowledge = a 5th surface.** **gbrain owns the entire Knowledge backend** (sources, compile,
    index, graph, citations, retrieval, self-maintenance — it's a mature superset of what
    `feat/karpathy-wiki` built, so that Go compile backend is retired). **We keep only the
    karpathy-wiki Wikipedia reader + design + IA** as the human surface over gbrain. Office activity

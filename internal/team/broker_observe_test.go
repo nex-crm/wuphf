@@ -15,9 +15,13 @@ import (
 func TestHandleObserveBrowserStreams(t *testing.T) {
 	dir := t.TempDir()
 	runner := filepath.Join(dir, "fake_observe.sh")
+	// Mirror the real shapes cua_observe.py emits: a navigate event
+	// (`{"type":"navigate",...}`) and a full snapshot. Using the real navigate
+	// shape (not a made-up `event`/`type2` one) means the assertion below
+	// actually exercises navigate forwarding.
 	script := "#!/bin/sh\n" +
 		"echo '{\"type\":\"status\",\"status\":\"observing\"}'\n" +
-		"echo '{\"type\":\"event\",\"type2\":\"navigate\",\"app\":\"Google Chrome\",\"title\":\"HubSpot\"}'\n" +
+		"echo '{\"type\":\"navigate\",\"app\":\"Google Chrome\",\"title\":\"HubSpot\"}'\n" +
 		"echo '{\"type\":\"snapshot\",\"app\":\"Google Chrome\",\"title\":\"HubSpot\",\"components\":[]}'\n"
 	if err := os.WriteFile(runner, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -38,7 +42,10 @@ func TestHandleObserveBrowserStreams(t *testing.T) {
 	body := w.Body.String()
 	for _, want := range []string{
 		`data: {"type":"status","status":"observing"}`,
-		`"app":"Google Chrome","title":"HubSpot"`,
+		// Navigate-specific frame: this distinguishes navigate forwarding from
+		// the snapshot line (which also carries app/title).
+		`data: {"type":"navigate","app":"Google Chrome","title":"HubSpot"}`,
+		`data: {"type":"snapshot","app":"Google Chrome","title":"HubSpot","components":[]}`,
 		"event: end",
 	} {
 		if !strings.Contains(body, want) {

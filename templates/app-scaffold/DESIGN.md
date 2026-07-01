@@ -5,8 +5,9 @@ like every other AI-generated tool: default Mantine on white, a `<Title>`, a car
 pile, gray-on-gray. The bar: a teammate glancing at the live preview should think
 "someone made this on purpose," not "an LLM bolted Mantine onto a table."
 
-You are NOT building a free-form website. You have a fixed kit (Mantine on a white,
-light-scheme surface), one screen, no router, no external fonts, no external images.
+You are NOT building a free-form website. You have a fixed kit (Mantine on a
+muted-dark, dark-scheme surface that matches the operator shell), one screen, no
+router, no external fonts, no external images.
 So the design discipline below is the bold-aesthetic advice from real design
 practice ADAPTED to "make one focused Mantine data tool feel crafted" — expressed
 through the levers you actually have: the `MantineProvider` theme, the spacing and
@@ -59,10 +60,10 @@ const theme = createTheme({
   spacing: { xs: "0.5rem", sm: "0.75rem", md: "1rem", lg: "1.5rem", xl: "2.25rem" },
 });
 
-<MantineProvider forceColorScheme="light" theme={theme}>
+<MantineProvider forceColorScheme="dark" theme={theme}>
 ```
 
-Keep `forceColorScheme="light"` and the provider shape from AI_RULES.md — only the
+Keep `forceColorScheme="dark"` and the provider shape from AI_RULES.md — only the
 `theme` is yours. Choose `primaryColor` to fit the tool's world (a finance tool ≠ a
 support inbox); use one of Mantine's named palettes rather than inventing hex you
 then have to maintain. Set the accent ONCE here; don't hand-color every component.
@@ -114,8 +115,8 @@ mean something — never decorate.
 - The accent (`primaryColor`) belongs on the ONE primary action and active states,
   nothing else. Secondary actions: `variant="default"` or `variant="subtle"`.
 - No gradients, no glassmorphism, no rainbow of badge colors, no colored card
-  backgrounds. A near-white surface with disciplined neutral borders
-  (`var(--mantine-color-gray-3)`) and one accent looks more expensive than color
+  backgrounds. A muted-dark surface with disciplined neutral borders
+  (`var(--mantine-color-dark-4)`) and one accent looks more expensive than color
   everywhere.
 
 ## 6. Motion: subtle, optional, never decorative
@@ -163,5 +164,8 @@ connect-state, not a red error. Every guarded bridge call gets a designed fallba
       region, not a reflexive centered column.
 - [ ] Real, specific copy — no "Dashboard"/"Welcome"/"Items" placeholders.
 - [ ] Empty / loading / error / not-connected states are all present and designed.
+- [ ] If the app COMPUTES or CURATES anything, its model is persisted to the app
+      `db` (defineTable + upsert) and rendered from `db.query` — not recomputed on
+      every mount. See "The app's database" in AI_RULES.md.
 - [ ] Could a teammate tell a human designed this? If "AI made that" is undeniable,
       it failed — fix the direction before publishing.

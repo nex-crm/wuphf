@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nex-crm/wuphf/internal/config"
 )
@@ -92,24 +93,40 @@ func spawnRunnerSSE(w http.ResponseWriter, r *http.Request, args, extraEnv []str
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	// First frame: the run id, so the FE can POST send-approvals back to this run.
-	fmt.Fprintf(w, "data: {\"type\":\"run\",\"run_id\":%q}\n\n", runID)
+	_, _ = fmt.Fprintf(w, "data: {\"type\":\"run\",\"run_id\":%q}\n\n", runID)
 	flusher.Flush()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	streamBroken := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+			streamBroken = true
 			break
 		}
 		flusher.Flush()
 	}
-	_ = cmd.Wait()
-	fmt.Fprint(w, "event: end\ndata: {}\n\n")
-	flusher.Flush()
+	waitErr := cmd.Wait()
+	// Surface a scan failure or a non-zero exit that the runner did not report
+	// itself, so the client never mistakes an aborted run for a clean one. A
+	// cancelled request context is an intentional stop, not a failure.
+	errText := ""
+	if scanErr := scanner.Err(); scanErr != nil {
+		errText = "runner output error: " + scanErr.Error()
+	} else if waitErr != nil && r.Context().Err() == nil {
+		errText = "runner exited abnormally: " + waitErr.Error()
+	}
+	if !streamBroken && r.Context().Err() == nil {
+		if errText != "" {
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"error\",\"message\":%q}\n\n", errText)
+		}
+		_, _ = fmt.Fprint(w, "event: end\ndata: {}\n\n")
+		flusher.Flush()
+	}
 }
 
 // cuaPython is the interpreter that runs the runner. Overridable so the test can
@@ -127,8 +144,9 @@ type executeBrowserRequest struct {
 	WindowID int    `json:"window_id,omitempty"`
 }
 
-// decodeExecuteBrowserRequest parses + validates the body. The goal is required;
-// it is capped so a runaway prompt cannot bloat the argv.
+// decodeExecuteBrowserRequest parses + validates the body. The goal is required
+// and bounded: an over-long goal is REJECTED (not silently truncated) because a
+// mid-word cut could steer the browser toward something the operator never meant.
 func decodeExecuteBrowserRequest(r *http.Request) (executeBrowserRequest, error) {
 	var req executeBrowserRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
@@ -138,8 +156,8 @@ func decodeExecuteBrowserRequest(r *http.Request) (executeBrowserRequest, error)
 	if req.Goal == "" {
 		return req, fmt.Errorf("missing goal")
 	}
-	if len(req.Goal) > 2000 {
-		req.Goal = req.Goal[:2000]
+	if utf8.RuneCountInString(req.Goal) > 2000 {
+		return req, fmt.Errorf("goal too long (max 2000 chars)")
 	}
 	req.App = strings.TrimSpace(req.App)
 	return req, nil
@@ -218,13 +236,13 @@ func (b *Broker) handleExecuteReplay(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "temp file failed"})
 		return
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.Write(req.Trajectory); err != nil {
-		f.Close()
+		_ = f.Close()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "temp write failed"})
 		return
 	}
-	f.Close()
+	_ = f.Close()
 
 	args := []string{runner, "--replay", f.Name()}
 	if req.WindowID > 0 {

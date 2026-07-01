@@ -33,10 +33,10 @@ import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
 import { ToolsProvider } from "../tools/toolsContext";
 import { AppDataTab } from "./AppDataTab";
-import { AppKnowledgeTab } from "./AppKnowledgeTab";
 import { AppToolsChat } from "./AppToolsChat";
 import { AppToolsTab } from "./AppToolsTab";
 import { AppWorkflowTab } from "./AppWorkflowTab";
+import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type PanelSize = "dock" | "wide" | "modal";
@@ -56,8 +56,8 @@ const TABS: readonly TabDef<AppTab>[] = [
   // calls them. Additive — the Workflow tab is unchanged.
   { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
-  { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge" },
+  { id: "integrations", label: "Integrations" },
 ];
 
 interface OperatorAppDetailProps {
@@ -188,13 +188,41 @@ export function OperatorAppDetail({
             id={`opr-panel-${tab}`}
             aria-labelledby={`opr-tab-${tab}`}
           >
-            <TabBody
-              tab={tab}
-              query={query}
-              failed={failed}
-              onRemove={removeAndBack}
-              removing={remove.isPending}
-            />
+            {/* The Artifacts tab (hosting the live app frame) stays MOUNTED
+                across tab switches — hidden, not unmounted — so returning to it
+                does NOT reload the iframe and re-run the app every time. The
+                other tabs mount only while active. */}
+            <div style={tab === "artifacts" ? undefined : { display: "none" }}>
+              <ArtifactsTab
+                agentName={app?.name ?? "This agent"}
+                artifacts={[
+                  {
+                    id: "app",
+                    type: "app",
+                    title: app?.name ?? "App",
+                    producedBy: "built by Nex",
+                    at: app ? `v${app.version}` : "",
+                  },
+                ]}
+                renderApp={() => (
+                  <UiTab
+                    query={query}
+                    failed={failed}
+                    onRemove={removeAndBack}
+                    removing={remove.isPending}
+                  />
+                )}
+              />
+            </div>
+            {tab !== "artifacts" ? (
+              <TabBody
+                tab={tab}
+                query={query}
+                failed={failed}
+                onRemove={removeAndBack}
+                removing={remove.isPending}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -328,34 +356,9 @@ function TabBody({
   const ready =
     app && appBuildState(app) === "ready" && Boolean(query.data?.html);
   switch (tab) {
-    case "artifacts": {
-      // The app is ONE artifact among the agent's outcomes; more (PDFs, pages,
-      // docs from tool runs) collect here as they are produced.
-      const appArtifact: Artifact = {
-        id: "app",
-        type: "app",
-        title: app?.name ?? "App",
-        producedBy: "built by Nex",
-        at: app ? `v${app.version}` : "",
-      };
-      return (
-        <ArtifactsTab
-          agentName={app?.name ?? "This agent"}
-          artifacts={[appArtifact]}
-          renderApp={() => (
-            <UiTab
-              query={query}
-              failed={failed}
-              onRemove={onRemove}
-              removing={removing}
-            />
-          )}
-        />
-      );
-    }
     case "workflow":
       return ready ? (
-        <AppWorkflowTab appId={app.id} appName={app.name} />
+        <AppWorkflowTab appId={app.id} />
       ) : (
         <EmptyState
           glyph="⌥"
@@ -378,7 +381,17 @@ function TabBody({
     case "integrations":
       return <ToolIntegrations usedNames={[]} />;
     case "knowledge":
-      return <AppKnowledgeTab />;
+      // The gbrain-backed, Wikipedia-style reader with cited claims — backed by
+      // the agent's REAL synthesized pages (grounded in its own artifacts).
+      return app ? (
+        <KnowledgeSurface appId={app.id} />
+      ) : (
+        <EmptyState
+          glyph="📖"
+          title="No knowledge yet"
+          hint="Your AI writes cited pages about this agent once it has finished building."
+        />
+      );
     default:
       return null;
   }

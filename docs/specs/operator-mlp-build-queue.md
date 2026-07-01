@@ -64,6 +64,7 @@ The whole product shape, clickable, no backend. Mounted full-bleed at
 ## Queue (build only after the shape is locked)
 
 ### Slice 2 — FE iteration from founder feedback
+
 Tighten the shape: surfaces to cut/add, the call flow, the tool-detail tabs, copy.
 Still mock data. Re-screenshot.
 
@@ -77,37 +78,43 @@ Still mock data. Re-screenshot.
   Space-key on rows, tabpanel roles, live-tool primary-action emphasis.)
 
 ### Slice 3 — Strip the office cruft + operator shell becomes the app (Phase 0)
+
 Make `/operator` the real app surface (route the old office bundle out); delete
 notebooks/skills/policies/roster/wizard engine paths the operator does not need.
 `go build` + web build green; LOC down. *No new backend yet — wire mock to thin
 read endpoints.*
 
 ### Slice 4 — gbrain stood up + Knowledge over it (Phase 0; tests A1, A2)
+
 gbrain as a bundled subprocess (PGLite + local-ollama default), reached over MCP.
 Knowledge reader points at gbrain pages.
 - **Test (A1):** parallel-run vs the karpathy-wiki compile backend → reader-compatible pages + retrieval/lint bar, THEN retire old backend.
 - **Test (A2):** all broker→gbrain MCP calls off-lock; gbrain-unreachable degrades gracefully (never deadlock / hard-fail).
 
 ### Slice 5 — The deterministic loop, hand-authored (Phase 1; test CQ1)
+
 One inbound-routing spec by hand → engine run on 10 fixtures → digest. Wire the
 UI/Workflow/Data tabs to real run records + the Data store.
 - **Test (CQ1):** build- and exec-time external mutation → the shared human approval card.
 
 ### Slice 6 — Operator authoring via chat + detection (Phase 2)
+
 AI drafts the spec + UI from a chat; chat-to-edit; publish = freeze + version.
 Detection repointed to operator activity proposes a candidate.
 *FE already prototyped in Slice 1 (`WorkflowBuilder` + `planWorkflow`); this slice
 swaps the keyword compiler for a real agentic build and persists the draft.*
 
 ### Slice 7 — The magical call (Phase 3; the demo gate; tests A3, A4)
+
 Electron renderer screen-share + free-voice → capture (CDP/chromedp) →
 `browsersniff` (lift) → workflow-spec draft into the build chat. Composio-first
 build; sniffed-API / UI-replay / CUA-heal fallback.
-- **Test (A3):** capture HAR scoped to active tab + secrets stripped (piiplaceholders) + ephemeral; auth = typed ref, never value on disk.
+- **Test (A3):** capture HAR scoped to active tab + secrets stripped (PII placeholders) + ephemeral; auth = typed ref, never value on disk.
 - **Test (A4):** sniffed auth classified — stable key stored, rotating session flagged "needs a live session".
 - **GATE:** no external "this is the product" demo until this lands.
 
 ### Slice 8 — Proactive improvement (Phase 4)
+
 Context change → "suggested change + why" card → approve → overlay/refreeze,
 version+1, visible in history.
 

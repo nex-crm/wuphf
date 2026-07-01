@@ -77,8 +77,13 @@ export type StreamPhase = "replay" | "live";
 export function useAgentStream(
   slug: string | null,
   taskId: string | null = null,
-  opts: { keepAlive?: boolean; maxLines?: number } = {},
+  opts: { keepAlive?: boolean; maxLines?: number; url?: string } = {},
 ) {
+  // url overrides the default /agent-stream/{slug}?task= endpoint. The
+  // app-scoped activity feed points it at /apps/{id}/activity so the operator
+  // surface subscribes by app id alone — the broker resolves the backing run and
+  // the SSE shape is identical, so the parser/reducer below is unchanged.
+  const urlOverride = opts.url;
   // keepAlive keeps the SSE source open across turn boundaries (idle events).
   // A single-turn view (the agent's Live Stream tab) wants the connection to
   // close when the turn goes idle; a long-running build feed wants to keep
@@ -109,7 +114,7 @@ export function useAgentStream(
     phaseRef.current = "replay";
     setLines([]);
 
-    const url = agentStreamURL(slug, taskId);
+    const url = urlOverride ?? agentStreamURL(slug, taskId);
     const source = new EventSource(url);
     sourceRef.current = source;
 
@@ -185,7 +190,7 @@ export function useAgentStream(
       sourceRef.current = null;
       setConnected(false);
     };
-  }, [slug, taskId, keepAlive, maxLines]);
+  }, [slug, taskId, keepAlive, maxLines, urlOverride]);
 
   return { lines, connected };
 }

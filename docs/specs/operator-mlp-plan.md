@@ -3,7 +3,7 @@
 **Companion to:** `operator-mlp-one-pager.md` · **Branch:** `pivot/operator-mlp` · **Date:** 2026-06-25
 
 Locked decisions (from the one-pager): wedge = **inbound routing + scoring**; **demo bar =
-the magical screen-share + free-voice call** (CUA in the **Wails desktop app**); context =
+the magical screen-share + free-voice call** (CUA in the **Electron desktop app**; Wails/oswails for OS verbs only, per Phase 3); context =
 **replace our engine with gbrain**; **keep & build on** the workflow engine, **workflow
 detection**, and the **app builder**; data layer = **deferred to v1.1**; strategy = **simplify
 in place**; object = **Internal Tool (UI · Workflow tabs)**.
@@ -100,7 +100,7 @@ gone, not hidden; detection + app builder + engine still compile; LOC down.
    gate, version snapshots; reads via Bridge v2), **Workflow** (the spec + live run view, our
    engine), and **Data** (operator-owned typed tables for run-state/entities — request rows with
    mutable status across runs; distinct from gbrain). The UI table + digest project over run
-   records + the Data store.
+   records + the Data store. **NOTE:** per the locked decision above, the Data layer is **deferred to v1.1**; Phase 1 ships UI + Workflow only. Data is described here for the full object shape, not as Phase-1 scope.
 2. **Author one routing spec by hand** against the kernel: trigger (new inbound, manual
    test-fire) → enrich (integration read) → `ActionLLM` fit-score → guard (score ≥ threshold)
    → route (gated external write to Slack) / else nurture.
@@ -240,7 +240,7 @@ history.
 
 ## Sequencing & demo cadence
 
-```
+```text
 Phase 0 (strip + gbrain) ──┬─► Phase 1 (loop, hand-authored) ─► Phase 2 (chat + detection) ─► Phase 4 (improve)
                            └─► Phase 3 (the magical call) ──────────────────► [DEMO GATE] ◄─┘ (lands into P2)
 ```

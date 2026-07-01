@@ -287,23 +287,37 @@ export async function startRealtimeCall(
       opts.onError(errMessage(err)),
     );
 
+  // `cleanup` is safe to call at any point after media capture starts, even
+  // before `frameTimer` is armed below (it guards on `frameTimer !== undefined`
+  // and is idempotent via `cleanedUp`).
+  let frameTimer: number | undefined;
+  let cleanedUp = false;
+
   // 4. SDP offer/answer with OpenAI, authorized by the ephemeral key only. The
-  // model is carried by the ephemeral token, so no query param is needed.
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  const sdpResp = await fetch(token.sdp_url, {
-    method: "POST",
-    body: offer.sdp,
-    headers: {
-      Authorization: `Bearer ${token.ephemeral_key}`,
-      "Content-Type": "application/sdp",
-    },
-  });
-  if (!sdpResp.ok) {
-    cleanup();
-    throw new Error(`Realtime handshake failed (${sdpResp.status}).`);
+  // model is carried by the ephemeral token, so no query param is needed. Any
+  // failure here must still tear down the live screen/mic tracks.
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const sdpResp = await fetch(token.sdp_url, {
+      method: "POST",
+      body: offer.sdp,
+      headers: {
+        Authorization: `Bearer ${token.ephemeral_key}`,
+        "Content-Type": "application/sdp",
+      },
+    });
+    if (!sdpResp.ok) {
+      throw new Error(`Realtime handshake failed (${sdpResp.status}).`);
+    }
+    await pc.setRemoteDescription({
+      type: "answer",
+      sdp: await sdpResp.text(),
+    });
+  } catch (err) {
+    cleanup("error");
+    throw err;
   }
-  await pc.setRemoteDescription({ type: "answer", sdp: await sdpResp.text() });
 
   opts.onStatus({ phase: "live" });
 
@@ -312,7 +326,7 @@ export async function startRealtimeCall(
   // is not speaking, invite it to note a new step — so it narrates silent clicks
   // without ever talking over anyone.
   let frameTick = 0;
-  const frameTimer = window.setInterval(() => {
+  frameTimer = window.setInterval(() => {
     const frame = opts.videoEl ? grabFrame(opts.videoEl) : null;
     if (!frame || dc.readyState !== "open") return;
     dc.send(
@@ -352,7 +366,9 @@ export async function startRealtimeCall(
   }
 
   function cleanup(phase: RealtimeStatus["phase"] = "ended") {
-    window.clearInterval(frameTimer);
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (frameTimer !== undefined) window.clearInterval(frameTimer);
     meter.stop();
     try {
       dc.close();

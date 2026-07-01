@@ -20,12 +20,21 @@ interface PendingResult {
   pending: BrowserApproval[];
 }
 
-/** The app's currently paused browser-step asks (oldest first), or empty. */
+/**
+ * The app's currently paused browser-step asks (oldest first), or empty.
+ *
+ * Pass React Query's `signal` so a poll that is superseded (the query refetches
+ * or a new run resets the cache) is aborted. Without it a late response from a
+ * previous poll could repopulate stale approval cards during the next run.
+ */
 export async function getBrowserApprovals(
   appId: string,
+  signal?: AbortSignal,
 ): Promise<BrowserApproval[]> {
   const res = await get<PendingResult>(
     `/operator/apps/${encodeURIComponent(appId)}/workflow/browser/pending`,
+    undefined,
+    { signal },
   );
   return res.pending ?? [];
 }

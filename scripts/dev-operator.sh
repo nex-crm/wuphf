@@ -21,7 +21,7 @@ BROKER_PORT="${WUPHF_BROKER_PORT:-7892}"
 WEB_PORT="${WUPHF_WEB_PORT:-7893}"
 VITE_PORT="${WUPHF_VITE_PORT:-5280}"
 HOME_DIR="${WUPHF_RUNTIME_HOME:-/private/tmp/wuphf-operator-home}"
-COMPOSIO_USER_ID="${WUPHF_COMPOSIO_USER_ID:-najmuzzaman@nex.ai}"
+COMPOSIO_USER_ID="${WUPHF_COMPOSIO_USER_ID:?set WUPHF_COMPOSIO_USER_ID to your Composio user id}"
 LOG_DIR="${TMPDIR:-/tmp}"
 
 free_port() {
@@ -45,9 +45,14 @@ fi
 echo "==> starting broker on broker:$BROKER_PORT web:$WEB_PORT (home: $HOME_DIR)"
 # Never inherit a stray OpenAI/Composio key from the shell — the broker resolves
 # them from the runtime home config (Settings).
+# Pass the Composio user id under BOTH names the broker resolves it from
+# (config.ResolveComposioUserID: WUPHF_COMPOSIO_USER_ID first, COMPOSIO_USER_ID
+# as the compat fallback), so Composio is configured regardless of which name a
+# given broker build reads.
 env -u WUPHF_COMPOSIO_API_KEY -u OPENAI_API_KEY -u WUPHF_OPENAI_API_KEY \
   WUPHF_RUNTIME_HOME="$HOME_DIR" \
   WUPHF_COMPOSIO_USER_ID="$COMPOSIO_USER_ID" \
+  COMPOSIO_USER_ID="$COMPOSIO_USER_ID" \
   ./wuphf-mvp --no-open --broker-port "$BROKER_PORT" --web-port "$WEB_PORT" \
   >"$LOG_DIR/wuphf-operator-broker.log" 2>&1 &
 echo "  broker pid $! (log: $LOG_DIR/wuphf-operator-broker.log)"

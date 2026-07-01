@@ -273,6 +273,15 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID := strings.TrimSpace(r.URL.Query().Get("task"))
+	b.streamAgentTaskSSE(w, r, slug, taskID)
+}
+
+// streamAgentTaskSSE writes an agent's live HeadlessEvent stream as SSE,
+// optionally scoped to a single task. Shared by the raw /agent-stream/{slug}
+// endpoint and the app-scoped GET /apps/{id}/activity, which resolves an app's
+// backing app-builder run and streams it WITHOUT exposing the task id to the
+// client — the App is the only identifier the operator surface ever sees.
+func (b *Broker) streamAgentTaskSSE(w http.ResponseWriter, r *http.Request, slug, taskID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)

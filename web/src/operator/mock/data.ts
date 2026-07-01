@@ -566,6 +566,8 @@ export interface KnowledgePage {
   references: KnowledgeRef[];
   categories: string[];
   seeAlso: string[]; // page ids
+  /** Other apps this page also belongs to (cross-app share). */
+  alsoIn?: { appId: string; name: string }[];
 }
 
 export const KNOWLEDGE: KnowledgePage[] = [

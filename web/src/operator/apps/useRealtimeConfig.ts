@@ -4,12 +4,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { get } from "../../api/client";
-
-interface ConfigStatus {
-  openai_key_set?: boolean;
-  realtime_model?: string;
-}
+import { type ConfigStatus, get } from "../../api/client";
 
 export interface RealtimeConfig {
   available: boolean;

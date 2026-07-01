@@ -52,6 +52,15 @@ export function OperatorApp() {
   const [surface, setSurface] = useState<OperatorSurface>("tools");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [call, setCall] = useState<CallContext | null>(null);
+  // Freeze which call surface to use at the moment the call opens. Deriving it
+  // from `realtime.available` every render lets a later config refetch (the
+  // `/config` query refetches on window focus, or resolves late) swap the
+  // component type for the same JSX position, unmounting the live WebRTC call.
+  const [callIsReal, setCallIsReal] = useState(false);
+  function openCall(ctx: CallContext) {
+    setCallIsReal(realtime.available);
+    setCall(ctx);
+  }
   // Two builders: the app builder (primary, real) and the legacy workflow
   // builder (kept for the workflow-tab path).
   const [appBuilding, setAppBuilding] = useState(false);
@@ -157,7 +166,7 @@ export function OperatorApp() {
           tool={selectedTool}
           onBack={() => setSelectedId(null)}
           onStartCall={() =>
-            setCall({
+            openCall({
               mode: "modify",
               toolId: selectedTool.id,
               toolName: selectedTool.name,
@@ -171,7 +180,7 @@ export function OperatorApp() {
     return (
       <InternalToolsSurface
         onOpen={openTool}
-        onStartCall={() => setCall({ mode: "build" })}
+        onStartCall={() => openCall({ mode: "build" })}
         onBuild={() => setAppBuilding(true)}
       />
     );
@@ -182,7 +191,7 @@ export function OperatorApp() {
       <OperatorSidebar
         active={surface}
         onSelect={go}
-        onStartCall={() => setCall({ mode: "build" })}
+        onStartCall={() => openCall({ mode: "build" })}
         onBuild={() => setAppBuilding(true)}
         agents={sidebarAgents}
         activeAgentId={selectedId}
@@ -211,9 +220,11 @@ export function OperatorApp() {
 
       {call
         ? (() => {
-            // Real call when a Realtime key is configured; mock otherwise. Both
+            // Real call when a Realtime key was configured at call start; mock
+            // otherwise. `callIsReal` is pinned when the call opens so a later
+            // config refetch can't swap the component and drop a live call. Both
             // share the same props and the same capture → build-engine handoff.
-            const CallSurface = realtime.available ? RealCallModal : CallModal;
+            const CallSurface = callIsReal ? RealCallModal : CallModal;
             return (
               <CallSurface
                 tool={
