@@ -22,6 +22,7 @@ import { InternalToolsSurface } from "./surfaces/InternalToolsSurface";
 import { OperatorAppDetail } from "./surfaces/OperatorAppDetail";
 import { OperatorBuildExperience } from "./surfaces/OperatorBuildExperience";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
+import { ToolsWorkspace } from "./surfaces/ToolsWorkspace";
 import {
   type BuiltWorkflow,
   type FinishMode,
@@ -112,6 +113,7 @@ export function OperatorApp() {
       : baseTool;
 
   function renderSurface() {
+    if (surface === "assistant") return <ToolsWorkspace />;
     if (surface === "settings") return <SettingsSurface />;
     if (isRealAppId(selectedId)) {
       return (
