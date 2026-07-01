@@ -35,6 +35,13 @@ const STARTERS: readonly string[] = [
   "A weekly pipeline summary I can glance at",
 ];
 
+// A per-app chat transcript, persisted across the build chat -> app detail ->
+// "Ask AI" edit chat transition (each is a SEPARATE AppBuilderChat instance) so
+// clicking Ask AI after a build continues the same conversation instead of
+// starting blank. Module-level (session-lived) is enough: this is UI history,
+// not server state, and it should not survive a full reload.
+const appChatHistory = new Map<string, ChatMessage[]>();
+
 interface AppBuilderChatProps {
   onClose: () => void;
   /** Called once the built/updated app is ready, with its id. */
@@ -67,15 +74,21 @@ export function AppBuilderChat({
 }: AppBuilderChatProps) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "intro",
-      from: "ai",
-      body: editApp
-        ? `Tell me what to change about “${editApp.name}”. I will apply it and publish a new version.`
-        : "Tell me what this app should do. I will build it, and it will appear under Apps the moment it is ready.",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    // Ask AI opened on a built app: continue the build conversation if we still
+    // have it, so the transcript from describing + building the app stays.
+    const saved = editApp ? appChatHistory.get(editApp.id) : undefined;
+    if (saved && saved.length > 0) return saved;
+    return [
+      {
+        id: "intro",
+        from: "ai",
+        body: editApp
+          ? `Tell me what to change about “${editApp.name}”. I will apply it and publish a new version.`
+          : "Tell me what this app should do. I will build it, and it will appear under Apps the moment it is ready.",
+      },
+    ];
+  });
   const [appName, setAppName] = useState(editApp?.name ?? "");
   const [newAppId, setNewAppId] = useState<string | null>(null);
   // The app currently building/refining, used to stream its live activity
@@ -180,6 +193,14 @@ export function AppBuilderChat({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [lastMsgId, phase]);
+
+  // Persist the transcript keyed by the app id (known immediately for an edit,
+  // resolved once a new build publishes) so the "Ask AI" edit chat continues
+  // this same conversation instead of starting blank.
+  useEffect(() => {
+    const id = editApp?.id ?? newAppId;
+    if (id) appChatHistory.set(id, messages);
+  }, [messages, editApp, newAppId]);
 
   async function send(text?: string): Promise<void> {
     const description = (text ?? draft).trim();
