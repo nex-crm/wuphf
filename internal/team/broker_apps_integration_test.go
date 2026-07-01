@@ -295,3 +295,88 @@ func postAppsJSON(t *testing.T, url, token string, body []byte) map[string]any {
 	}
 	return out
 }
+
+// TestAppDBEndpointBrokerTokenRoundTrip locks the DB write gate at the HTTP
+// layer: the sandboxed app reaches the broker through the web proxy carrying the
+// BROKER token (broker-kind, NOT a human session and NOT the app-builder agent),
+// so a define → upsert → GET round-trip MUST succeed under a plain broker token.
+// This is the exact caller a human/app-builder-only gate would wrongly reject —
+// which would break the app writing its own data model in the browser.
+func TestAppDBEndpointBrokerTokenRoundTrip(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	// Register an app (as the App Builder) so it has a manifest to attach a DB to.
+	regBody, _ := json.Marshal(map[string]any{"name": "Data App", "html": validAppHTML})
+	created := postAppsAsAgent(t, base+"/apps", b.Token(), appBuilderSlug, regBody)
+	app, _ := created["app"].(map[string]any)
+	id, _ := app["id"].(string)
+	if id == "" {
+		t.Fatalf("no app id in register response: %v", created)
+	}
+
+	// Fresh app: GET returns empty tables (broker token, no agent header).
+	status, empty := getAppsJSON(t, base+"/apps/"+id+"/db", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("GET db: %d", status)
+	}
+	if tables, _ := empty["tables"].([]any); len(tables) != 0 {
+		t.Fatalf("fresh app tables = %v, want empty", empty["tables"])
+	}
+
+	// define + upsert with a PLAIN broker token (postAppsJSON sends no agent
+	// header → broker-kind). Must succeed — this is the regression guard.
+	defBody, _ := json.Marshal(map[string]any{
+		"op":    "define",
+		"table": "Emails",
+		"columns": []map[string]any{
+			{"name": "id", "type": "string"},
+			{"name": "urgency", "type": "number"},
+		},
+	})
+	postAppsJSON(t, base+"/apps/"+id+"/db", b.Token(), defBody)
+
+	upBody, _ := json.Marshal(map[string]any{
+		"op":    "upsert",
+		"table": "Emails",
+		"key":   "id",
+		"rows": []map[string]any{
+			{"id": "a", "urgency": 10},
+			{"id": "a", "urgency": 99}, // same key in one batch → last wins
+			{"id": "b", "urgency": 20},
+		},
+	})
+	postAppsJSON(t, base+"/apps/"+id+"/db", b.Token(), upBody)
+
+	// GET back: two rows (key dedup), and row "a" carries the replaced value.
+	status, out := getAppsJSON(t, base+"/apps/"+id+"/db", b.Token())
+	if status != http.StatusOK {
+		t.Fatalf("GET db after write: %d", status)
+	}
+	tables, _ := out["tables"].([]any)
+	if len(tables) != 1 {
+		t.Fatalf("tables = %v, want 1", out["tables"])
+	}
+	tbl, _ := tables[0].(map[string]any)
+	rows, _ := tbl["rows"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %v, want 2 after key dedup", rows)
+	}
+	var aURG float64
+	var sawA bool
+	for _, r := range rows {
+		row, _ := r.(map[string]any)
+		if row["id"] == "a" {
+			sawA = true
+			aURG, _ = row["urgency"].(float64)
+		}
+	}
+	if !sawA || aURG != 99 {
+		t.Fatalf("row a urgency = %v (sawA=%v), want 99", aURG, sawA)
+	}
+}

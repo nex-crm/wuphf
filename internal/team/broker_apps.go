@@ -198,9 +198,18 @@ type appDBOpRequest struct {
 
 // handleAppDB is the app's backing DATABASE: named tables, typed columns, rows.
 // The app writes its derived model here (via the Bridge) and renders from it; the
-// Data tab reads it directly. Reads are authed; writes are gated to the App
-// Builder or a human session (appWriterAllowed), the same trust boundary as app
-// bytes.
+// Data tab reads it directly.
+//
+// AUTH: the whole /apps/ tree is behind requireAuth, so every caller here holds a
+// valid broker token or human session. Writes are NOT further gated to
+// app-builder/human — unlike app BYTES (register/delete/rollback), which change
+// app CODE and so are appWriterAllowed-only. DB rows are app DATA the app writes
+// about ITSELF, exactly like the create_task / integration bridge writes, which
+// also run under the broker token (the sandboxed app reaches the broker through
+// the web proxy carrying that token — it is broker-kind, never a human session,
+// so an appWriterAllowed gate would reject the app's own writes). The real
+// protections are: authenticated caller + valid app id + server-side bounds
+// (table/column/row caps), all enforced below and in custom_app_db.go.
 //
 //	GET  /apps/{id}/db  -> {tables:[{name,columns,rows}]}
 //	POST /apps/{id}/db  -> op-dispatch: define | upsert | query | clear
@@ -214,15 +223,6 @@ func (b *Broker) handleAppDB(w http.ResponseWriter, r *http.Request, id string) 
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"tables": tables})
 	case http.MethodPost:
-		actor, status, err := richArtifactAuthenticatedSlug(r, "", "actor")
-		if err != nil {
-			writeJSON(w, status, map[string]string{"error": err.Error()})
-			return
-		}
-		if !b.appWriterAllowed(r, actor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "not allowed to write app data"})
-			return
-		}
 		var req appDBOpRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
