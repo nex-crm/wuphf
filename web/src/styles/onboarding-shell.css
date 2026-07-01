@@ -1,0 +1,187 @@
+/* onboarding-shell.css — pins the onboarding flow to the app shell's look.
+ *
+ * The product front door (the operator shell, operator-shell.css) is a dark
+ * technical manual: paper-dark surfaces, soft off-white ink, mono labels,
+ * construction grids, hairline rules, B&W bevel buttons, purple reserved for
+ * selection/meaning. Onboarding used to follow the active office theme and
+ * rendered as a light marketing page — a different product from the one the
+ * user lands in. This sheet remaps the semantic token layer consumed by
+ * onboarding.css / onboarding-wizard.css / office-tour-slides.css on the two
+ * onboarding hosts, so the first-run flow and the app read as one surface.
+ *
+ * Scope: `.pre-pick-screen` (runtime picker) and `.onboarding-wizard` (the
+ * stepped wizard) ONLY. The office-tour replay from Help renders outside these
+ * hosts and keeps following the office theme. Values are copied from
+ * operator-shell.css `.opr-root` — if the operator palette moves, move this
+ * with it (or extract a shared token block).
+ */
+
+.pre-pick-screen,
+.onboarding-wizard {
+  /* Native form controls (checkboxes, selects, scrollbars) render dark. */
+  color-scheme: dark;
+
+  /* ── Operator palette (mirrors .opr-root) ── */
+  --onb-paper: hsl(210 6% 8%);
+  --onb-surface: hsl(210 5% 10%);
+  --onb-surface-2: hsl(214 5% 14%);
+  --onb-ink: hsl(210 8% 82%); /* soft, not harsh white */
+  --onb-dim: hsl(215 6% 60%);
+  --onb-faint: hsl(215 6% 56%);
+  --onb-line: hsl(210 6% 20%);
+  --onb-line-2: hsl(210 6% 25%);
+  --onb-purple: hsl(264.84 100% 53.7%); /* operator --primary */
+  --onb-cobalt: oklch(50.58% 0.2886 264.84); /* --ms-cobalt-600 */
+
+  /* ── Semantic remap: everything below is what the existing onboarding
+     rules actually consume, so the whole flow re-skins from here. ── */
+  --bg: var(--onb-paper);
+  --bg-subtle: hsl(210 6% 6%);
+  --bg-warm: var(--onb-surface-2);
+  --bg-card: var(--onb-surface);
+
+  --text: var(--onb-ink);
+  --text-secondary: var(--onb-dim);
+  --text-tertiary: var(--onb-faint);
+  --text-disabled: hsl(215 6% 38%);
+
+  --border: var(--onb-line);
+  --border-light: hsl(210 6% 16%);
+  --border-dark: var(--onb-line-2);
+  --border-strong: hsl(210 6% 32%);
+
+  /* Purple = selection/meaning only (matches the operator nav + section
+     labels). Lightened a step from --primary so small text passes on paper. */
+  --accent: hsl(265 95% 72%);
+  --accent-bg: hsl(264.84 100% 53.7% / 0.12);
+  --accent-bg-strong: hsl(264.84 100% 53.7% / 0.28);
+
+  /* Status colors, softened so nothing glows on the muted surface. */
+  --green: oklch(0.76 0.11 158);
+  --red: hsl(6 58% 60%);
+  --red-bg: hsl(6 58% 60% / 0.12);
+  --warning-500: oklch(0.79 0.1 85);
+
+  /* Tokens that chain off the ones above are computed at :root, so the
+     inherited value is still the light one — re-declare the chains the
+     onboarding sheets actually consume. */
+  --input-bg: var(--onb-surface-2);
+  --input-bg-disabled: var(--onb-surface);
+  --input-border: var(--onb-line-2);
+  --focus-ring-color: hsl(265 95% 72%);
+
+  /* The serif logo face is the office's voice; the shell is sans-only.
+     Headlines pick up weight instead (below). */
+  --font-logo: var(--font-sans);
+
+  /* Operator radii: 6px chrome, 4px small controls. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  color: var(--text);
+}
+
+/* ── Paper atmosphere: speckle + fine construction grid, same recipe as
+   .opr-root. Replaces the light accent-radial wash both hosts carried. ── */
+.pre-pick-screen,
+.onboarding-wizard {
+  background-color: var(--onb-paper);
+  background-image:
+    radial-gradient(
+      circle at 1px 1px,
+      color-mix(in srgb, var(--onb-ink) 3%, transparent) 1px,
+      transparent 0
+    ),
+    linear-gradient(90deg, hsl(210 6% 13% / 0.34) 1px, transparent 1px),
+    linear-gradient(180deg, hsl(210 6% 13% / 0.34) 1px, transparent 1px);
+  background-size:
+    15px 15px,
+    56px 56px,
+    56px 56px;
+}
+
+/* ── Headlines: the operator surface title is sans 800 with a short cobalt
+   hairline above it (see .opr-surface-title). Quote that signature on both
+   the pre-pick hero and the wizard slide headlines. ── */
+.pre-pick-headline,
+.onboarding-wizard .office-tour-slide-headline,
+.onboarding-wizard .office-tour-slide-headline--serif {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.pre-pick-headline::before,
+.onboarding-wizard .office-tour-slide-headline::before {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 1px;
+  margin: 0 0 var(--space-3);
+  background: var(--onb-cobalt);
+}
+
+/* ── Eyebrows: operator eyebrows are small faint mono caps, not brand
+   purple (purple is reserved for active/selected states). ── */
+.pre-pick-eyebrow,
+.onboarding-wizard .office-tour-slide-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--onb-faint);
+}
+
+/* ── Buttons: the app's B&W bevel system (.opr-btn). Primary CTA is soft
+   off-white on dark, not brand purple — color stays reserved for meaning. ── */
+.pre-pick-screen .btn-primary,
+.onboarding-wizard .btn-primary {
+  background: var(--onb-ink);
+  color: hsl(210 10% 10%);
+  box-shadow: none;
+}
+
+.pre-pick-screen .btn-primary:not(:disabled):hover,
+.onboarding-wizard .btn-primary:not(:disabled):hover {
+  background: var(--onb-ink);
+  filter: brightness(1.08);
+}
+
+.pre-pick-screen .btn-secondary,
+.onboarding-wizard .btn-secondary {
+  border: 1px solid var(--onb-line-2);
+  background: color-mix(in srgb, var(--onb-surface) 82%, var(--onb-paper));
+  color: var(--onb-ink);
+  box-shadow:
+    inset 1px 1px 0 color-mix(in srgb, var(--onb-ink) 9%, transparent),
+    inset -1px -1px 0 color-mix(in srgb, black 32%, transparent);
+}
+
+.pre-pick-screen .btn-secondary:not(:disabled):hover,
+.onboarding-wizard .btn-secondary:not(:disabled):hover {
+  border-color: var(--onb-ink);
+  color: var(--onb-ink);
+  background: color-mix(in srgb, var(--onb-surface) 82%, var(--onb-paper));
+}
+
+/* ── Cards: operator chrome radius (6px) instead of the 12px pill cards,
+   and a dark-appropriate hover shadow (the light 4% black lift vanishes
+   on paper-dark). ── */
+.pre-pick-screen .pre-pick-card {
+  border-radius: var(--radius-md);
+}
+
+.pre-pick-screen .pre-pick-card:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Figures: the step clips are self-contained light product windows.
+   On the dark manual they read as figures — matte them on a hairline
+   border like every other operator figure panel. ── */
+.pre-pick-screen .pre-pick-clip,
+.onboarding-wizard .onboarding-wizard-clip {
+  border: 1px solid var(--onb-line);
+  border-radius: var(--radius-md);
+}

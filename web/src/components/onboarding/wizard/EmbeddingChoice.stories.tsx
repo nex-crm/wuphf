@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import type { EmbeddingOptions } from "../../../api/knowledge";
 import "../../../styles/onboarding-wizard.css";
+import "../../../styles/onboarding-shell.css";
 import { EmbeddingChoiceView } from "./EmbeddingChoice";
 
 /**
