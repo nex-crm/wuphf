@@ -130,32 +130,54 @@ interface EmailRow {
   sender: string;
   subject: string;
   received: string;
+  preview: string;
 }
 
-// Best-effort normalizer over the GMAIL_FETCH_EMAILS payload (its envelope
-// varies — a bare array, or { messages } / { data } — and per-email field names
-// differ), so the preview shows real rows regardless of the exact shape.
+// The columns of the app's email data model + the type shown in each header.
+const EMAIL_COLUMNS: { key: keyof EmailRow; label: string; type: string }[] = [
+  { key: "sender", label: "Sender", type: "string" },
+  { key: "subject", label: "Subject", type: "string" },
+  { key: "received", label: "Received", type: "date" },
+  { key: "preview", label: "Preview", type: "string" },
+];
+
+// Best-effort normalizer over the GMAIL_FETCH_EMAILS payload. The FE receives
+// `result`, which is `{ data: { messages: [...] }, ... }`; per-email field names
+// vary, so pull the common ones defensively.
 function normalizeEmails(raw: unknown): EmailRow[] {
   const asArray = (v: unknown): unknown[] => {
     if (Array.isArray(v)) return v;
     const o = (v ?? {}) as { messages?: unknown; data?: unknown };
     if (Array.isArray(o.messages)) return o.messages;
+    const data = (o.data ?? {}) as { messages?: unknown };
+    if (Array.isArray(data.messages)) return data.messages;
     if (Array.isArray(o.data)) return o.data;
     return [];
   };
   const str = (v: unknown): string =>
     typeof v === "string" ? v : v == null ? "" : String(v);
+  const clip = (s: string, n: number): string =>
+    s.length > n ? `${s.slice(0, n)}…` : s;
   return asArray(raw)
     .slice(0, 12)
     .map((e, i) => {
       const o = (e ?? {}) as Record<string, unknown>;
       return {
         id: str(o.id ?? o.message_id ?? o.messageId ?? i),
-        sender: str(o.sender ?? o.from ?? o.from_email ?? o.fromEmail).trim(),
-        subject: str(o.subject).trim(),
+        sender: clip(
+          str(o.sender ?? o.from ?? o.from_email ?? o.fromEmail).trim(),
+          40,
+        ),
+        subject: clip(str(o.subject).trim(), 60),
         received: str(
           o.date ?? o.received_at ?? o.messageTimestamp ?? o.internalDate,
         ).trim(),
+        preview: clip(
+          str(o.snippet ?? o.messageText ?? o.preview)
+            .replace(/\s+/g, " ")
+            .trim(),
+          70,
+        ),
       };
     });
 }
@@ -179,34 +201,33 @@ function EmailsPreview({ appId }: { appId: string }) {
 
   return (
     <div className="opr-data-block">
-      <div className="opr-data-block-head">
-        Live preview · Emails
-        <span className="opr-data-block-sub">what the app sees right now</span>
-      </div>
       {query.isLoading ? (
-        <p className="opr-scoped-note">Reading your inbox…</p>
+        <p className="opr-scoped-note">Reading the app's data…</p>
       ) : failed ? (
         <p className="opr-scoped-note">
-          Could not read Gmail right now — connect it in Settings, or the
+          Could not read the data right now — connect Gmail in Settings, or the
           workspace is offline.
         </p>
       ) : rows.length === 0 ? (
-        <p className="opr-scoped-note">No recent emails in the window.</p>
+        <p className="opr-scoped-note">No records yet.</p>
       ) : (
         <table className="opr-data-table">
           <thead>
             <tr>
-              <th>Sender</th>
-              <th>Subject</th>
-              <th>Received</th>
+              {EMAIL_COLUMNS.map((c) => (
+                <th key={c.key}>
+                  <span className="opr-data-col-name">{c.label}</span>
+                  <span className="opr-data-col-type">{c.type}</span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((e) => (
               <tr key={e.id}>
-                <td>{e.sender || "—"}</td>
-                <td>{e.subject || "—"}</td>
-                <td>{e.received || "—"}</td>
+                {EMAIL_COLUMNS.map((c) => (
+                  <td key={c.key}>{e[c.key] || "—"}</td>
+                ))}
               </tr>
             ))}
           </tbody>

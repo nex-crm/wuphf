@@ -4047,3 +4047,19 @@
 .opr-build-activity .app-build-activity__row {
   font-family: var(--font-mono);
 }
+
+/* Data-tab column header: the field name with its data type shown beneath it,
+   so the Data table's headers double as the data model's typed schema. */
+.opr-data-table th .opr-data-col-name {
+  display: block;
+}
+.opr-data-table th .opr-data-col-type {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--t-dim);
+}
