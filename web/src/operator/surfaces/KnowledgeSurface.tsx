@@ -251,6 +251,17 @@ export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
               <div className="opr-article-meta">
                 From the company brain · {page.updatedAt}
               </div>
+              {page.alsoIn && page.alsoIn.length > 0 ? (
+                <div className="opr-article-alsoin">
+                  Also used by{" "}
+                  {page.alsoIn.map((a, i) => (
+                    <span key={a.appId}>
+                      {i > 0 ? ", " : ""}
+                      <span className="opr-alsoin-app">{a.name}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
 
               <p className="opr-article-lead">
                 {renderProse(page.lead, refByN)}

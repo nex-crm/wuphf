@@ -23,7 +23,7 @@ func TestKnowledgePageGBrainRoundTrip(t *testing.T) {
 		Categories: []string{"Weather"},
 		SeeAlso:    []string{"other"},
 	}
-	content, err := renderKnowledgePageForGBrain("app_d50e34194a87a5ed", page)
+	content, err := renderKnowledgePageForGBrain(page, []string{appKnowledgeScopeTag("app_d50e34194a87a5ed")})
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -155,5 +155,41 @@ func TestSanitizeKnowledgePagesCapsAtThree(t *testing.T) {
 	out := sanitizeKnowledgePages(pages, testSources())
 	if len(out) != 3 {
 		t.Fatalf("want at most 3 pages, got %d", len(out))
+	}
+}
+
+func TestAppKnowledgeScopeTagRoundTrip(t *testing.T) {
+	tag := appKnowledgeScopeTag("app_d50e34194a87a5ed")
+	if tag != "wuphf-app-d50e34194a87a5ed" {
+		t.Fatalf("scope tag = %q", tag)
+	}
+	id, ok := appIDFromScopeTag(tag)
+	if !ok || id != "app_d50e34194a87a5ed" {
+		t.Fatalf("reverse = %q,%v", id, ok)
+	}
+	// The shared knowledge tag is NOT an app-scope tag.
+	if _, ok := appIDFromScopeTag(appKnowledgeTag); ok {
+		t.Fatalf("wuphf-app-knowledge must not resolve to an app id")
+	}
+}
+
+func TestAppScopeTagsHelpers(t *testing.T) {
+	tags := []string{
+		"wuphf-app-knowledge",
+		"wuphf-app-d50e34194a87a5ed",
+		"wuphf-app-aaaa1111bbbb2222",
+		"office",
+	}
+	scoped := appScopeTagsOf(tags)
+	if len(scoped) != 2 {
+		t.Fatalf("want 2 app-scope tags, got %v", scoped)
+	}
+	// mergeScopeTags unions + dedups, keeping only real app-scope tags.
+	merged := mergeScopeTags(
+		[]string{"wuphf-app-d50e34194a87a5ed"},
+		[]string{"wuphf-app-d50e34194a87a5ed", "wuphf-app-cccc3333dddd4444", "office"},
+	)
+	if len(merged) != 2 {
+		t.Fatalf("want 2 merged scope tags (dedup + drop non-app), got %v", merged)
 	}
 }

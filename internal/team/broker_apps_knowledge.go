@@ -82,6 +82,16 @@ type appKnowledgePage struct {
 	References []appKnowledgeRef     `json:"references"`
 	Categories []string              `json:"categories"`
 	SeeAlso    []string              `json:"seeAlso"`
+	// AlsoIn lists the OTHER apps this page also belongs to (cross-app share).
+	// Computed at read time from the page's app-scope tags — not stored in the
+	// page body — so a page shared across apps shows "Also in: <app>" in each.
+	AlsoIn []appKnowledgeAppRef `json:"alsoIn,omitempty"`
+}
+
+// appKnowledgeAppRef names another app a shared page belongs to.
+type appKnowledgeAppRef struct {
+	AppID string `json:"appId"`
+	Name  string `json:"name"`
 }
 
 // knowledgeSource is one real artifact the synthesis may cite. N is its citation
@@ -194,9 +204,59 @@ func appKnowledgeScopeTag(appID string) string {
 	return "wuphf-app-" + strings.TrimPrefix(appID, "app_")
 }
 
-// appKnowledgeSlug is the stable brain slug for one app's knowledge page.
-func appKnowledgeSlug(appID, pageID string) string {
-	return "k-" + strings.TrimPrefix(appID, "app_") + "-" + pageID
+// appKnowledgeSlug is the stable brain slug for one app's knowledge page,
+// derived from the TITLE (not the model's page id) so re-synthesizing the same
+// page overwrites the same slug — refresh is idempotent, no duplicates.
+func appKnowledgeSlug(appID, title string) string {
+	return "k-" + strings.TrimPrefix(appID, "app_") + "-" + slugifyKnowledgeID(title)
+}
+
+// appIDFromScopeTag reverses appKnowledgeScopeTag: "wuphf-app-<idhex>" -> app id.
+// Returns false for the shared "wuphf-app-knowledge" tag or any non-app tag.
+func appIDFromScopeTag(tag string) (string, bool) {
+	s := strings.TrimPrefix(tag, "wuphf-app-")
+	if s == tag || s == "" {
+		return "", false
+	}
+	id := "app_" + s
+	if validateCustomAppID(id) != nil {
+		return "", false
+	}
+	return id, true
+}
+
+// appScopeTagsOf returns the app-scope tags (wuphf-app-<idhex>) present on a page,
+// deduped, preserving order. The shared wuphf-app-knowledge tag is not included.
+func appScopeTagsOf(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := map[string]bool{}
+	for _, t := range tags {
+		if _, ok := appIDFromScopeTag(t); ok && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// mergeScopeTags unions two app-scope tag lists (order-stable, deduped).
+func mergeScopeTags(a, b []string) []string {
+	out := append([]string{}, a...)
+	seen := map[string]bool{}
+	for _, t := range a {
+		seen[t] = true
+	}
+	for _, t := range b {
+		if _, ok := appIDFromScopeTag(t); ok && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func normalizeKnowledgeTitle(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
 func stripCites(s string) string {
@@ -206,15 +266,19 @@ func stripCites(s string) string {
 // renderKnowledgePageForGBrain builds the gbrain page: YAML frontmatter (title,
 // type, app-scope tags), a readable markdown body (indexed by gbrain), and the
 // exact structured page as base64 for faithful reconstruction.
-func renderKnowledgePageForGBrain(appID string, page appKnowledgePage) (string, error) {
+func renderKnowledgePageForGBrain(page appKnowledgePage, scopeTags []string) (string, error) {
+	// AlsoIn is computed at read time from tags; never persist it in the body.
+	page.AlsoIn = nil
 	raw, err := json.Marshal(page)
 	if err != nil {
 		return "", fmt.Errorf("marshal knowledge page: %w", err)
 	}
+	tags := append([]string{}, scopeTags...)
+	tags = append(tags, appKnowledgeTag)
 	fm := map[string]any{
 		"title": page.Title,
 		"type":  appKnowledgeTag,
-		"tags":  []string{appKnowledgeScopeTag(appID), appKnowledgeTag},
+		"tags":  tags,
 	}
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
@@ -251,24 +315,51 @@ func renderKnowledgePageForGBrain(appID string, page appKnowledgePage) (string, 
 	return buf.String(), nil
 }
 
-// writeAppKnowledgeToGBrain upserts each page into the brain (tagged for the app)
-// and cross-links pages via the brain's link graph (seeAlso becomes real edges).
+// writeAppKnowledgeToGBrain upserts each page into the brain and cross-links
+// pages via the brain's link graph. Cross-app aware: if the workspace brain
+// already holds a knowledge page with the same title (from ANOTHER app), this
+// SHARES it — adding this app's scope tag to that existing page rather than
+// writing a duplicate — so one page shows up in several apps. Re-synthesis
+// preserves any app-scope tags already on a page (a share is never dropped).
 func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client *gbrain.Client, appID string, pages []appKnowledgePage) error {
+	scopeTag := appKnowledgeScopeTag(appID)
+	existingByTitle := b.knowledgePagesByTitle(ctx, client)
 	slugByPageID := make(map[string]string, len(pages))
 	for _, p := range pages {
-		content, err := renderKnowledgePageForGBrain(appID, p)
+		ownSlug := appKnowledgeSlug(appID, p.Title)
+		// Cross-app SHARE: a same-title page owned by a different app → tag it for
+		// this app too and reuse it, instead of minting a duplicate.
+		if shared, ok := existingByTitle[normalizeKnowledgeTitle(p.Title)]; ok && shared.slug != ownSlug {
+			merged := mergeScopeTags(shared.scopeTags, []string{scopeTag})
+			if len(merged) != len(shared.scopeTags) {
+				content, err := renderKnowledgePageForGBrain(shared.page, merged)
+				if err == nil {
+					_, _ = client.PutPage(ctx, content, gbrain.PutOptions{
+						Slug: shared.slug, SourceKind: appKnowledgeSourceKind, IngestedVia: appKnowledgeIngestedVia,
+					})
+				}
+			}
+			slugByPageID[p.ID] = shared.slug
+			continue
+		}
+		// Own page: preserve any app-scope tags already on this slug (a prior
+		// share), then add ours.
+		scopeTags := []string{scopeTag}
+		if prev, err := client.GetPage(ctx, ownSlug); err == nil {
+			scopeTags = mergeScopeTags(scopeTags, appScopeTagsOf(prev.Tags))
+		}
+		content, err := renderKnowledgePageForGBrain(p, scopeTags)
 		if err != nil {
 			return err
 		}
-		slug := appKnowledgeSlug(appID, p.ID)
 		if _, err := client.PutPage(ctx, content, gbrain.PutOptions{
-			Slug:        slug,
+			Slug:        ownSlug,
 			SourceKind:  appKnowledgeSourceKind,
 			IngestedVia: appKnowledgeIngestedVia,
 		}); err != nil {
-			return fmt.Errorf("put page %q: %w", slug, err)
+			return fmt.Errorf("put page %q: %w", ownSlug, err)
 		}
-		slugByPageID[p.ID] = slug
+		slugByPageID[p.ID] = ownSlug
 	}
 	// Cross-link seeAlso → real graph edges (best-effort; a failed edge is not
 	// fatal to persistence).
@@ -285,17 +376,80 @@ func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client *gbrain.C
 	return nil
 }
 
+// sharedKnowledgePage indexes an existing brain page for the cross-app share
+// lookup: its slug, decoded page, and the app-scope tags currently on it.
+type sharedKnowledgePage struct {
+	slug      string
+	page      appKnowledgePage
+	scopeTags []string
+}
+
+// knowledgePagesByTitle indexes every app-knowledge page in the brain by its
+// normalized title, so a synthesis can SHARE a same-title page across apps
+// instead of minting a duplicate.
+func (b *Broker) knowledgePagesByTitle(ctx context.Context, client *gbrain.Client) map[string]sharedKnowledgePage {
+	out := map[string]sharedKnowledgePage{}
+	metas, err := client.ListPages(ctx, gbrain.ListOptions{Tag: appKnowledgeTag, Limit: 200})
+	if err != nil {
+		return out
+	}
+	for _, m := range metas {
+		pg, err := client.GetPage(ctx, m.Slug)
+		if err != nil {
+			continue
+		}
+		kp, ok := decodeKnowledgePageFromBody(pg.Content)
+		if !ok {
+			continue
+		}
+		out[normalizeKnowledgeTitle(kp.Title)] = sharedKnowledgePage{
+			slug:      m.Slug,
+			page:      kp,
+			scopeTags: appScopeTagsOf(pg.Tags),
+		}
+	}
+	return out
+}
+
+// knowledgeAlsoIn resolves a page's app-scope tags to the OTHER apps it belongs
+// to (name-resolved), so a shared page shows "Also in: <app>" in each reader.
+func (b *Broker) knowledgeAlsoIn(tags []string, currentAppID string) []appKnowledgeAppRef {
+	store := b.appStore()
+	var out []appKnowledgeAppRef
+	for _, t := range appScopeTagsOf(tags) {
+		id, ok := appIDFromScopeTag(t)
+		if !ok || id == currentAppID {
+			continue
+		}
+		name := id
+		if app, _, err := store.Get(id); err == nil && strings.TrimSpace(app.Name) != "" {
+			name = app.Name
+		}
+		out = append(out, appKnowledgeAppRef{AppID: id, Name: name})
+	}
+	return out
+}
+
 // readAppKnowledgeFromGBrain reads the app's pages back from the brain: list by
-// the app-scope tag, decode each page's structured form, and merge the brain's
-// link graph into seeAlso so cross-links (including future cross-app ones)
-// surface in the reader.
+// the app-scope tag, decode each page's structured form, resolve which OTHER
+// apps each page also belongs to (AlsoIn), and merge the brain's link graph into
+// seeAlso so cross-links surface in the reader.
 func (b *Broker) readAppKnowledgeFromGBrain(ctx context.Context, client *gbrain.Client, appID string) ([]appKnowledgePage, error) {
 	metas, err := client.ListPages(ctx, gbrain.ListOptions{Tag: appKnowledgeScopeTag(appID), Limit: 50})
 	if err != nil {
 		return nil, err
 	}
-	pages := make([]appKnowledgePage, 0, len(metas))
-	pageIDBySlug := make(map[string]string, len(metas))
+	// Dedupe by title, keeping the MOST-shared page (most app-scope tags) — a
+	// stale same-title page from an earlier synthesis has fewer tags than the
+	// live shared one. Title-based slugs make refresh idempotent going forward;
+	// this guards any already-accumulated duplicates and picks the right winner.
+	type readPage struct {
+		kp    appKnowledgePage
+		slug  string
+		score int
+	}
+	byTitle := make(map[string]readPage, len(metas))
+	order := make([]string, 0, len(metas))
 	for _, m := range metas {
 		page, err := client.GetPage(ctx, m.Slug)
 		if err != nil {
@@ -305,12 +459,32 @@ func (b *Broker) readAppKnowledgeFromGBrain(ctx context.Context, client *gbrain.
 		if !ok {
 			continue
 		}
-		pages = append(pages, kp)
-		pageIDBySlug[m.Slug] = kp.ID
+		kp.AlsoIn = b.knowledgeAlsoIn(page.Tags, appID)
+		key := normalizeKnowledgeTitle(kp.Title)
+		if key == "" {
+			key = m.Slug
+		}
+		score := len(appScopeTagsOf(page.Tags))
+		if prev, seen := byTitle[key]; !seen || score > prev.score {
+			if !seen {
+				order = append(order, key)
+			}
+			byTitle[key] = readPage{kp: kp, slug: m.Slug, score: score}
+		}
+	}
+	pages := make([]appKnowledgePage, 0, len(order))
+	slugs := make([]string, 0, len(order))
+	pageIDBySlug := make(map[string]string, len(order))
+	for _, key := range order {
+		rp := byTitle[key]
+		pages = append(pages, rp.kp)
+		slugs = append(slugs, rp.slug)
+		pageIDBySlug[rp.slug] = rp.kp.ID
 	}
 	for i := range pages {
-		slug := appKnowledgeSlug(appID, pages[i].ID)
-		links, err := client.GetLinks(ctx, slug)
+		// Use the page's ACTUAL slug (a shared page is owned by another app, so
+		// its slug is not k-<thisApp>-<id>).
+		links, err := client.GetLinks(ctx, slugs[i])
 		if err != nil {
 			continue
 		}
