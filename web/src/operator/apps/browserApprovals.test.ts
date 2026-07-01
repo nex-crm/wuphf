@@ -22,8 +22,23 @@ describe("getBrowserApprovals", () => {
     const out = await getBrowserApprovals("app x");
     expect(get).toHaveBeenCalledWith(
       "/operator/apps/app%20x/workflow/browser/pending",
+      undefined,
+      { signal: undefined },
     );
     expect(out).toEqual(pending);
+  });
+
+  it("threads the abort signal so a superseded poll is cancellable", async () => {
+    // React Query passes its `signal`; without threading it, a late response
+    // from a previous poll could repopulate stale approval cards next run.
+    (get as Mock).mockResolvedValue({ pending: [] });
+    const controller = new AbortController();
+    await getBrowserApprovals("app_x", controller.signal);
+    expect(get).toHaveBeenCalledWith(
+      "/operator/apps/app_x/workflow/browser/pending",
+      undefined,
+      { signal: controller.signal },
+    );
   });
 
   it("tolerates a missing pending array", async () => {
