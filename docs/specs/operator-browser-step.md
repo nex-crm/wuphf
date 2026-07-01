@@ -43,18 +43,31 @@ the `run_id` + stdin back-channel already built for the send-gate
 sends.
 
 ## Slices
-1. **Authoring (this slice):** the plan model + parser produce `browser` steps
-   when there is no integration (A + B). `kind:"browser"` is a first-class kind.
-2. **Bind tolerance:** `BindWorkflowPlan` passes a `browser` step through as a
-   non-Composio step (no `action_id`), so a frozen workflow can hold browser
-   steps.
-3. **Execution:** the run engine runs a `browser` step via the cua runner,
-   streaming its actions into the run + surfacing the permission/send-gate in the
-   app chat.
-4. **Retire the modal:** remove the standalone `BrowserRunModal` "Run" button;
-   browser runs happen only inside a workflow run.
-5. **FE:** render a `browser` step in the workflow view (its own glyph + "runs in
-   your browser" note) and the chat permission/approval affordance.
+1. **Authoring — DONE.** The plan model + parser produce `browser` steps when
+   there is no integration (A + B). `kind:"browser"` is a first-class kind.
+2. **Bind + engine tolerance — DONE.** The resolver binds a browser step
+   (`BoundStep{Type:"browser"}`, goal in the template); the Composio spec
+   validates a `browser` type; `executeWorkflowStep` emits a deterministic marker
+   (`{type:browser, goal, runs_in_browser}`) so a frozen run never breaks.
+3. **Execution — the architectural bridge (NEXT, do carefully).** Run a `browser`
+   step via the cua runner. The hard part: the deterministic workflow run
+   (`ExecuteWorkflow`) is **synchronous/batch**, while cua is **streaming +
+   interactive with a mid-run chat approval**. Options:
+   - **(a) injected step-executor hook** — the action package calls an injected
+     `browserStepRunner(ctx, goal)` (package-var, like `realtimeHTTPClient`); the
+     broker supplies a cua-backed, chat-gated implementation. Keeps the engine
+     agnostic; the runner blocks until cua finishes/approves.
+   - **(b) broker orchestration** — the broker runs the workflow itself, calling
+     `ExecuteWorkflow` for Composio steps and cua for browser steps, interleaved.
+     More control, but re-implements the step loop + scope/data flow.
+   Lean **(a)**. Either way the browser step pauses for the in-chat permission via
+   the existing `run_id`/stdin back-channel before it drives, and a gated send
+   inside it asks again.
+4. **Chat permission + send-gate** surfaced in `AppBuilderChat` (part of slice 3's
+   flow).
+5. **Retire the modal:** remove the standalone `BrowserRunModal` "Run" button.
+6. **FE:** render a `browser` step in the workflow view (its own glyph + "runs in
+   your browser") and the chat approval affordance.
 
 ## Reused, unchanged
 `runner/cua_exec.py` (execute/record/replay/heal + `needs_approval`), broker
