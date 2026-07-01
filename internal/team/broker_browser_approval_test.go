@@ -217,6 +217,10 @@ func TestBrowserStepHeadlessSkips(t *testing.T) {
 // TestBrowserStepControlDenyDoesNotDrive proves the in-chat pause gates driving:
 // a denied control ask returns skipped and never reaches the runner (no cua).
 func TestBrowserStepControlDenyDoesNotDrive(t *testing.T) {
+	// A fake runner makes the host "available" so the control ask is reached
+	// (availability is now checked before the ask); the run is denied before the
+	// runner ever spawns, so denying control still means the browser is not driven.
+	writeFakeCuaRunner(t, `echo '{"type":"done","result":"should-not-run"}'`+"\n")
 	const app = "app_gate"
 	ctx := context.WithValue(context.Background(), browserStepAppIDKey, app)
 	res := make(chan map[string]any, 1)
@@ -232,6 +236,9 @@ func TestBrowserStepControlDenyDoesNotDrive(t *testing.T) {
 	out := <-res
 	if out["skipped"] != "browser control not approved" {
 		t.Fatalf("denied control should skip, got %#v", out)
+	}
+	if _, drove := out["result"]; drove {
+		t.Fatalf("denied control must not spawn the runner, got %#v", out)
 	}
 }
 
@@ -320,25 +327,23 @@ func TestBrowserStepSurfacesRunnerCrash(t *testing.T) {
 	}
 }
 
-// TestBrowserStepControlApprovePassesGate proves an approved control ask passes
-// the gate; with no key/runner on the test host it then degrades to the
-// unavailable marker (distinct from the not-approved skip), so the gate order is
-// verifiable without a real browser.
-func TestBrowserStepControlApprovePassesGate(t *testing.T) {
+// TestBrowserStepUnavailableSkipsBeforeAsking proves the availability check runs
+// BEFORE the control ask: with no key/runner on the host, the step degrades to
+// the unavailable marker WITHOUT ever asking the operator to approve browser
+// control (asking for a "yes" that then does nothing is confusing). The call
+// returns synchronously here — if a control ask were raised first, it would be
+// left pending, which the pendingFor assertion catches.
+func TestBrowserStepUnavailableSkipsBeforeAsking(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("WUPHF_OPENAI_API_KEY", "")
 	t.Setenv("WUPHF_CUA_RUNNER", "/nonexistent/cua_exec.py")
-	const app = "app_pass"
+	const app = "app_unavail"
 	ctx := context.WithValue(context.Background(), browserStepAppIDKey, app)
-	res := make(chan map[string]any, 1)
-	go func() {
-		out, _ := runBrowserStepViaCua(ctx, "email the digest")
-		res <- out
-	}()
-	p := waitForPending(t, app, 1)
-	browserApprovals.resolve(p[0].ID, true)
-	out := <-res
+	out, _ := runBrowserStepViaCua(ctx, "email the digest")
 	if out["skipped"] != "browser execution unavailable on this host" {
-		t.Fatalf("approved control should pass the gate then hit unavailable, got %#v", out)
+		t.Fatalf("unavailable host should skip, got %#v", out)
+	}
+	if p := browserApprovals.pendingFor(app); len(p) != 0 {
+		t.Fatalf("no control ask should be raised before the availability check, got %d pending", len(p))
 	}
 }

@@ -503,11 +503,23 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
             # A replayed external send still pauses for approval. Both click and
             # type do a pre-click on this element, so gate either when the target
             # is send-like — a replayed type must not fire a Send before approval.
-            if action in ("click", "type") and needs_approval(step.get("label", "")) and not await_approval(step.get("label", "")):
+            #
+            # find_element can fuzzy-match a recorded benign label onto a current
+            # send-like element, so gate on the CURRENT matched label too, not
+            # only the recorded one, and show the operator the label that will
+            # actually be clicked.
+            recorded_label = step.get("label", "") or ""
+            current_label = el.get("label", "") or ""
+            gate_label = current_label if needs_approval(current_label) else recorded_label
+            if (
+                action in ("click", "type")
+                and (needs_approval(recorded_label) or needs_approval(current_label))
+                and not await_approval(gate_label)
+            ):
                 emit(
                     {
                         "type": "action",
-                        "label": f"Skipped (not approved): {step.get('label', '')}",
+                        "label": f"Skipped (not approved): {gate_label}",
                         "tool": action,
                         "skipped": True,
                     }

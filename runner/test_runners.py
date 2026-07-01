@@ -361,6 +361,29 @@ class TestSendGating(unittest.TestCase):
         self.assertEqual(len(clicks), 0)  # send-like pre-click gated + denied
         self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
 
+    def test_replay_gates_on_current_matched_label_not_recorded(self):
+        # Regression: find_element can fuzzy-match a recorded BENIGN label onto a
+        # current send-like element. Gating only on the recorded label would let a
+        # replayed click pre-click a live "Submit …" without approval. The gate must
+        # look at the current matched element's label too.
+        steps = [{"action": "click", "role": "Button", "label": "results"}]  # benign
+        elements = [{"i": 9, "role": "Button", "label": "Submit results"}]  # send-like now
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False) as approval_mock,
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        plan_mock.assert_not_called()  # matched deterministically
+        approval_mock.assert_called()  # the current send-like label triggered the gate
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # gated + denied → no pre-click
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
     def test_healed_type_pre_click_on_send_like_target_is_gated(self):
         # Regression: a healed type_text can land on a send-like element too. Its
         # pre-click must be gated so healing never becomes a way to send unapproved.
