@@ -37,7 +37,15 @@ export function ToolsProvider({
     () => ({
       tools,
       addTool: (tool) =>
-        setTools((prev) => [...prev.filter((t) => t.name !== tool.name), tool]),
+        setTools((prev) => {
+          // Re-teaching a same-named tool replaces it but keeps its run
+          // history, so "Last run" survives an update to the tool.
+          const prevSameName = prev.find((t) => t.name === tool.name);
+          return [
+            ...prev.filter((t) => t.name !== tool.name),
+            { ...tool, calls: prevSameName?.calls ?? tool.calls },
+          ];
+        }),
       logCall: (toolId, call) =>
         setTools((prev) =>
           prev.map((t) =>

@@ -22,29 +22,38 @@ function read(): NameMap {
   return {};
 }
 
+// The in-memory map is the source of truth; localStorage is best-effort
+// persistence. A failed setItem loses only the cross-reload copy — the rename
+// still applies everywhere in this session.
 let cache: NameMap = read();
 const listeners = new Set<() => void>();
 
-function emit() {
-  cache = read();
+function notify() {
   for (const l of listeners) l();
 }
 
 export function setAgentName(id: string, name: string): void {
-  const next = { ...read() };
+  const next = { ...cache };
   const trimmed = name.trim();
   if (trimmed) next[id] = trimmed;
   else delete next[id];
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
-    // storage unavailable — the rename just doesn't persist
+    // storage unavailable — the rename holds in memory, just not across reloads
   }
-  emit();
+  cache = next;
+  notify();
 }
 
 export function agentName(id: string, fallback: string): string {
-  return read()[id] ?? fallback;
+  return cache[id] ?? fallback;
+}
+
+/** Re-hydrate the in-memory map from storage (tests; a storage-event hook). */
+export function reloadAgentNames(): void {
+  cache = read();
+  notify();
 }
 
 function subscribe(listener: () => void): () => void {
