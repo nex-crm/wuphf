@@ -221,6 +221,20 @@ test("POST /tools/call 400s on a missing/malformed tool", async () => {
 	expect(notJson.status).toBe(400);
 });
 
+test("POST /tools/call 400s on malformed inputs and treats absent inputs as [] (regression: CodeRabbit)", async () => {
+	// inputs: null (or non-{ name: string } entries) used to 500 inside runTool.
+	const { inputs: _drop, ...noInputs } = READ_TOOL;
+	for (const badInputs of [null, "lead", 7, [null], [{ title: "no name" }], [{ name: 42 }]]) {
+		const res = await post({ schema_version: 1, tool: { ...noInputs, inputs: badInputs } });
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { error?: string }).error).toContain("inputs");
+	}
+	// Absent inputs normalize to [] and the call runs.
+	const ok = await post({ schema_version: 1, tool: noInputs });
+	expect(ok.status).toBe(200);
+	expect(((await ok.json()) as ToolCallResult).status).toBe("ok");
+});
+
 test("POST /tools/call rejects a schema_version mismatch", async () => {
 	const res = await post({ schema_version: 99, tool: READ_TOOL });
 	expect(res.status).toBe(400);

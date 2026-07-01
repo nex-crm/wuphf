@@ -29,7 +29,17 @@
 
 import { complete, type Context, type Model, type StreamOptions } from "@mariozechner/pi-ai";
 import { apiKeyFor, resolveModel } from "./model.js";
+import { deadlineSignal, textOf } from "./modelCall.js";
 import type { CapabilityFn, CapabilityTree } from "./toolRuntime.js";
+
+// THE SEND-GATE ALLOW-LIST (CQ1, default deny). Every capability that mutates
+// the outside world or seizes the operator's browser MUST be listed here, keyed
+// by dotted path — toolRuntime.ts default-ALLOWS anything not in this set, so a
+// new mutating/side-effectful capability added below without an entry here ships
+// ungated. Kept next to the capability definitions on purpose.
+// (integrations.call is intentionally absent: the broker classifies
+// read-vs-mutate server-side and raises its own approval card for mutations.)
+export const GATED_CAPABILITIES: ReadonlySet<string> = new Set(["crm.assign", "nex.send", "nex.browser"]);
 
 export interface CapabilityConfig {
 	/** Broker base URL (e.g. http://127.0.0.1:7893) for integrations + browser. */
@@ -126,19 +136,13 @@ export function simulatedCapabilities(): CapabilityTree {
 // Real nex.ai.* — one structured pi-ai call each, simulated fallback on failure.
 // ---------------------------------------------------------------------------
 
-function textOf(content: { type: string; text?: string }[]): string {
-	return content
-		.filter((c) => c.type === "text" && typeof c.text === "string")
-		.map((c) => c.text as string)
-		.join("");
-}
-
 async function aiComplete(cfg: CapabilityConfig, system: string, user: string): Promise<string> {
 	const model = cfg.aiModel;
 	if (!model) throw new Error("no runtime model");
 	const completeFn = cfg.complete ?? complete;
-	const ctrl = new AbortController();
-	const timer = setTimeout(() => ctrl.abort(new Error("ai capability timed out")), cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS);
+	const deadline = deadlineSignal(undefined, cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS, {
+		timeoutMessage: "ai capability timed out",
+	});
 	try {
 		const ctx: Context = {
 			systemPrompt: system,
@@ -146,11 +150,11 @@ async function aiComplete(cfg: CapabilityConfig, system: string, user: string): 
 		};
 		const res = await completeFn(model, ctx, {
 			apiKey: cfg.apiKey ?? apiKeyFor(model),
-			signal: ctrl.signal,
+			signal: deadline.signal,
 		} satisfies StreamOptions);
 		return textOf(res.content as { type: string; text?: string }[]).trim();
 	} finally {
-		clearTimeout(timer);
+		deadline.done();
 	}
 }
 
@@ -335,6 +339,13 @@ export function capabilityConfigFromEnv(env: Record<string, string | undefined> 
 	};
 	if (env.TOOL_RUNTIME_MODEL === "1") {
 		cfg.aiModel = resolveModel();
+	}
+	// Per-capability call bound follows the host's tool deadline knob; without
+	// this, TOOL_CALL_TIMEOUT_MS raised the worker kill but capability calls
+	// stayed capped at the fixed 60s default.
+	const callTimeoutMs = Number(env.TOOL_CALL_TIMEOUT_MS);
+	if (Number.isFinite(callTimeoutMs) && callTimeoutMs > 0) {
+		cfg.callTimeoutMs = callTimeoutMs;
 	}
 	return cfg;
 }

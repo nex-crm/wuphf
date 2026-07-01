@@ -39,6 +39,23 @@ test("authorTool synthesizes a name + plain title for an unknown workflow", () =
 	expect(t.inputs.map((i) => i.name)).toEqual(["input"]);
 });
 
+test("authorTool synthesizes a valid identifier from a digit-leading workflow", () => {
+	// "2026" leads after stopword filtering — bare camelCasing would emit
+	// `async function 2026RenewalSync(...)`, which is not legal JS.
+	const t = authorTool("2026 renewal sync");
+	expect(t.name).toBe("run2026RenewalSync");
+	expect(/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(t.name)).toBe(true);
+	expect(t.code).toContain(`async function ${t.name}(input)`);
+});
+
+test("authorTool keeps a multi-line description inside the scripted-from comment", () => {
+	// A raw newline in the description would terminate the `//` comment and spill
+	// text into the function body. It must be collapsed to a single space.
+	const t = authorTool("archive old records\nnightly across regions");
+	const commentLine = t.code.split("\n").find((l) => l.includes("Nex scripted this from"));
+	expect(commentLine).toContain('archive old records nightly across regions"');
+});
+
 test("buildTool returns the tool + a narration (stub by default)", async () => {
 	const r = await buildTool("draft a follow-up for a stalled deal");
 	expect(r.tool?.name).toBe("draftFollowup");
@@ -122,16 +139,22 @@ test("authorToolWithModel rejects before calling the model when the signal is al
 
 let server: ReturnType<typeof createServer>;
 let base: string;
+let prevToolAuthorModel: string | undefined;
 beforeAll(() => {
 	// With TOOL_AUTHOR_MODEL unset, /tools/build answers deterministically (no
 	// model attempted, no authoring timeout) — these requests must be fast. Clear
 	// it explicitly so a dev shell that exports it cannot make this suite hit a
-	// live model.
+	// live model; restore the shell's value in afterAll.
+	prevToolAuthorModel = process.env.TOOL_AUTHOR_MODEL;
 	delete process.env.TOOL_AUTHOR_MODEL;
 	server = createServer({ port: 0 });
 	base = server.url.toString().replace(/\/$/, "");
 });
-afterAll(() => server.stop(true));
+afterAll(() => {
+	server.stop(true);
+	if (prevToolAuthorModel === undefined) delete process.env.TOOL_AUTHOR_MODEL;
+	else process.env.TOOL_AUTHOR_MODEL = prevToolAuthorModel;
+});
 
 test("POST /tools/build creates a tool", async () => {
 	const res = await fetch(`${base}/tools/build`, {

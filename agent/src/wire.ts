@@ -65,7 +65,10 @@ export interface RunStep {
 
 export interface ToolInput {
 	name: string;
-	type?: "string" | "number" | "record";
+	// String-only for now: the whole call path is string-typed (ToolCallRequest.args
+	// is Record<string, string>; a missing arg binds to ""). Structured inputs
+	// ("number" | "record") land with a typed-args slice.
+	type?: "string";
 }
 
 // A callable capability the chat agent authored for an app — a workflow the
