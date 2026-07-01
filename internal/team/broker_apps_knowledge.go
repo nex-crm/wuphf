@@ -207,7 +207,9 @@ NEVER include how the app is built: no architecture, no data model, no database,
 
 Only write facts that are genuinely useful as operating context for THIS app. Quality over volume. If nothing in the sources is worth writing as user-facing knowledge, return exactly {"pages":[]}. Do not pad.
 
-Prefer ONE short, high-signal page. Every claim MUST carry a [[n]] citation to the source that supports it. Never invent facts, sources, numbers, or names. Output ONLY strict JSON of the schema below — no prose outside the JSON, no markdown fences.
+Prefer few, high-signal pages. Usually ONE page is right; split a topic onto its own page only when it is genuinely distinct and substantial enough to stand alone. When you write more than one page, CONNECT them: list each related page in the other's "seeAlso" (using its id), and when a page mentions a concept that has its own page, phrase it so the reader knows to look there. A knowledge base is a web of linked pages, not islands.
+
+Every claim MUST carry a [[n]] citation to the source that supports it. Never invent facts, sources, numbers, or names. Output ONLY strict JSON of the schema below — no prose outside the JSON, no markdown fences.
 
 Schema:
 {"pages":[{

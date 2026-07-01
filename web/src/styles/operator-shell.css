@@ -1933,6 +1933,46 @@
 .opr-ref-detail {
   color: var(--t-faint);
 }
+/* A reference is clickable: open it to reveal the source itself. */
+.opr-ref-row {
+  display: inline;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.opr-ref-row:hover .opr-ref-source {
+  text-decoration: underline;
+}
+.opr-ref-expand {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: color-mix(in srgb, var(--t-accent-2) 6%, transparent);
+}
+.opr-ref-snippet {
+  margin: 0 0 var(--space-2);
+  color: var(--t-ink);
+  font-style: italic;
+}
+.opr-ref-why {
+  margin: 0;
+  color: var(--t-dim);
+  font-size: 12px;
+}
+.opr-ref-why-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: var(--space-2);
+  color: var(--t-accent-2, var(--t-blue));
+  font-weight: 600;
+}
 
 .opr-seealso {
   margin: 0 0 var(--space-4);

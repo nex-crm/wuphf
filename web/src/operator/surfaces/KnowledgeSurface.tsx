@@ -94,6 +94,39 @@ function Citation({ n, source }: { n: number; source?: KnowledgeRef }) {
   );
 }
 
+// A reference at the bottom of a page. Clickable: opening it reveals the source
+// itself — the exact excerpt the fact was drawn from, and why the brain chose
+// it. So every reference is reachable, not just a label.
+function ReferenceItem({ source }: { source: KnowledgeRef }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li id={`ref-${source.n}`} className="opr-ref-item">
+      <button
+        type="button"
+        className="opr-ref-row"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="opr-ref-kind">{KIND_LABEL[source.kind]}</span>
+        <span className="opr-ref-source">{source.title}</span>
+        <span className="opr-ref-detail"> · {source.detail}</span>
+      </button>
+      {open ? (
+        <div className="opr-ref-expand">
+          <p className="opr-ref-snippet">{source.snippet}</p>
+          <p className="opr-ref-why">
+            <span className="opr-ref-why-label">
+              <Sparkles size={11} strokeWidth={2} aria-hidden={true} /> Why this
+              source
+            </span>
+            {source.why}
+          </p>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 // Turn "...routes it.[[1]]" prose into text + citation popovers.
 function renderProse(
   text: string,
@@ -235,11 +268,7 @@ export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
               <h2>References</h2>
               <ol className="opr-refs">
                 {page.references.map((ref) => (
-                  <li id={`ref-${ref.n}`} key={ref.n}>
-                    <span className="opr-ref-kind">{KIND_LABEL[ref.kind]}</span>
-                    <span className="opr-ref-source">{ref.title}</span>
-                    <span className="opr-ref-detail"> · {ref.detail}</span>
-                  </li>
+                  <ReferenceItem key={ref.n} source={ref} />
                 ))}
               </ol>
 
@@ -261,15 +290,6 @@ export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
                   </ul>
                 </>
               ) : null}
-
-              <div className="opr-categories">
-                <span className="opr-cat-label">Categories</span>
-                {page.categories.map((c) => (
-                  <span className="opr-cat" key={c}>
-                    {c}
-                  </span>
-                ))}
-              </div>
             </article>
           ) : null}
         </div>
