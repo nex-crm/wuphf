@@ -335,12 +335,13 @@ func (b *Broker) operatorWorkflowProvider(w http.ResponseWriter) (action.Provide
 const workflowAuthorSystemPrompt = `You design a DETERMINISTIC automation that runs an internal app on a schedule.
 Return ONLY a JSON object, no prose: {"steps":[{"id","kind","title","detail","integration","gated"}]}.
 Rules:
-- kind is one of: trigger, enrich, ai, decision, action, branch.
+- kind is one of: trigger, enrich, ai, decision, action, branch, browser.
 - The FIRST step is exactly one "trigger" (the schedule).
 - "enrich" reads data; "ai" summarizes/analyzes; "action" sends or writes to an external system; "decision"/"branch" gate on a condition.
 - integration is a lowercase platform slug (e.g. "gmail", "slack") ONLY for a step that calls that external system, else "".
 - gated is true for any step that SENDS or WRITES to an external system.
 - Use ONLY the data sources and integrations the app actually has (listed below). Do NOT invent capabilities.
+- kind "browser" — for a step that must use an external system the app has NO integration for: set integration to "" and put the exact goal in "detail". Nex drives the browser to do it. Set gated true if it sends/writes.
 - Tailor the steps to THIS app's specific purpose. Keep it tight: 3 to 7 steps.`
 
 // authoredAppWorkflowPlan asks the model to design a workflow for THIS app from
@@ -414,14 +415,20 @@ func parseAuthoredWorkflowPlan(raw string, app CustomApp, caps AppCapabilities) 
 			id = fmt.Sprintf("s%d", i)
 		}
 		integ := strings.ToLower(strings.TrimSpace(s.Integration))
-		// Clamp a hallucinated integration to nothing (it becomes a narration step
-		// rather than a call to a system the app does not actually use).
+		kind := normalizeAuthoredKind(s.Kind)
+		// No integration for what this step needs → drive the browser instead of
+		// pretending the API exists ("no integration available → browser step").
+		// Only convert steps that actually touch an external system (action/send);
+		// a stray integration on a read becomes a plain narration as before.
 		if integ != "" && !known[integ] {
+			if kind == "action" || s.Gated {
+				kind = "browser"
+			}
 			integ = ""
 		}
 		steps = append(steps, action.PlanStep{
 			ID:          id,
-			Kind:        normalizeAuthoredKind(s.Kind),
+			Kind:        kind,
 			Title:       strings.TrimSpace(s.Title),
 			Detail:      strings.TrimSpace(s.Detail),
 			Integration: integ,
@@ -443,7 +450,7 @@ func parseAuthoredWorkflowPlan(raw string, app CustomApp, caps AppCapabilities) 
 
 func normalizeAuthoredKind(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "trigger", "enrich", "ai", "decision", "action", "branch":
+	case "trigger", "enrich", "ai", "decision", "action", "branch", "browser":
 		return strings.ToLower(strings.TrimSpace(raw))
 	case "read", "fetch", "load":
 		return "enrich"

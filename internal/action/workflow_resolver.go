@@ -54,6 +54,16 @@ func (r *ComposioActionResolver) Resolve(ctx context.Context, plan Plan, step Pl
 	if kind == "trigger" {
 		return BoundStep{Skip: true}, nil
 	}
+	if kind == "browser" {
+		// No integration for this step → Nex drives the browser. The sub-goal
+		// rides in the template; the broker's browser-step executor runs it via
+		// cua (there is no Composio action to bind).
+		goal := strings.TrimSpace(step.Detail)
+		if goal == "" {
+			goal = stepLabel(step)
+		}
+		return BoundStep{Type: "browser", Template: goal}, nil
+	}
 
 	integration := strings.TrimSpace(step.Integration)
 	if integration == "" {
