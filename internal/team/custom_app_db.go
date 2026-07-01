@@ -255,19 +255,33 @@ func (s *customAppStore) UpsertAppDBRows(id, table string, rows []map[string]any
 	if body.Rows == nil {
 		body.Rows = []map[string]any{}
 	}
-	// Index existing rows by key value for O(1) dedup when a key is given.
+	// The key must name a DEFINED column: a misspelled key would render every
+	// row's key value as "" and collapse unrelated rows into one another.
+	if key != "" && !appDBHasColumn(body.Columns, key) {
+		return AppDBTable{}, newCustomAppCallerError("app db: key column %q is not defined in %q", key, table)
+	}
+	// Index existing rows by key value for O(1) dedup when a key is given. Rows
+	// without a usable key value (legacy keyless appends) are never dedup
+	// targets — they must not all collapse onto the "" key.
 	keyIndex := map[string]int{}
 	if key != "" {
 		for i, row := range body.Rows {
-			keyIndex[appDBKeyValue(row[key])] = i
+			if kv := appDBKeyValue(row[key]); kv != "" {
+				keyIndex[kv] = i
+			}
 		}
 	}
-	for _, incoming := range rows {
+	for i, incoming := range rows {
 		if incoming == nil {
 			continue
 		}
 		if key != "" {
 			kv := appDBKeyValue(incoming[key])
+			if kv == "" {
+				// A missing/empty key value cannot dedup; silently appending (or
+				// worse, overwriting another empty-keyed row) hides an app bug.
+				return AppDBTable{}, newCustomAppCallerError("app db: row %d is missing a value for key column %q", i, key)
+			}
 			if idx, found := keyIndex[kv]; found {
 				body.Rows[idx] = incoming
 				continue
@@ -339,6 +353,16 @@ func (s *customAppStore) ClearAppDBTable(id, table string) (AppDBTable, error) {
 		return AppDBTable{}, err
 	}
 	return tableToOut(table, body), nil
+}
+
+// appDBHasColumn reports whether name is a defined column of the table.
+func appDBHasColumn(cols []AppDBColumn, name string) bool {
+	for _, c := range cols {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // appDBKeyValue renders a row's key-column value to a stable string for dedup.

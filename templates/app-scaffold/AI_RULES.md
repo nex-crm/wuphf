@@ -197,42 +197,59 @@ render from the DB**:
    with `db.defineTable` + `db.upsert`. Pass a stable `key` column so a re-run
    REPLACES rows instead of duplicating them.
 3. **Render from the DB** — read with `db.query(name)` / `db.all()` and render
-   that. On later mounts read the DB FIRST; only re-derive when it is empty or the
-   human hits Refresh. This is also how you satisfy hard rule 8 (don't recompute
-   on every mount) — the DB is your cache of record.
+   that. On later mounts read the DB FIRST; only re-derive when the initialized
+   marker is missing or the human hits Refresh. Track "already derived" with an
+   EXPLICIT marker (a tiny meta table or sentinel row), NOT `rows.length` — a
+   valid empty derive (zero urgent emails is a real answer) would otherwise
+   re-fetch on every mount. This is also how you satisfy hard rule 8 (don't
+   recompute on every mount) — the DB is your cache of record.
 
 ```tsx
 import { db, getEmails, ai } from "./wuphf-bridge";
 
 const TABLE = "Emails";
+const META = "Meta"; // one sentinel row marks "the derive already ran"
 
 async function ensureModel() {
-  // Already derived? Render straight from the DB — do NOT recompute.
-  const existing = await db.query(TABLE).catch(() => null);
-  if (existing?.table.rows.length) return existing.table;
+  // Already derived? Render straight from the DB — do NOT recompute. The check
+  // is the explicit marker, not rows.length, so an empty model still counts.
+  const meta = await db.query(META).catch(() => null);
+  if (meta?.table.rows.some((r) => r.key === "initialized")) {
+    const existing = await db.query(TABLE).catch(() => null);
+    if (existing) return { state: "ready", table: existing.table } as const;
+  }
 
-  await db.defineTable(TABLE, [
-    { name: "id", type: "string" },
-    { name: "sender", type: "string" },
-    { name: "subject", type: "string" },
-    { name: "urgency", type: "number" }, // COMPUTED — not in the raw source
-    { name: "summary", type: "string" }, // COMPUTED via ai()
-  ]);
+  // EVERY db.* call can reject (transport failure, server-side bounds) — not
+  // just db.query — so the WHOLE derive/write block is guarded. A failure
+  // becomes a designed error state with a Retry, never a blank screen.
+  try {
+    await db.defineTable(TABLE, [
+      { name: "id", type: "string" },
+      { name: "sender", type: "string" },
+      { name: "subject", type: "string" },
+      { name: "urgency", type: "number" }, // COMPUTED — not in the raw source
+      { name: "summary", type: "string" }, // COMPUTED via ai()
+    ]);
+    await db.defineTable(META, [{ name: "key", type: "string" }]);
 
-  const { connected, emails } = await getEmails({ limit: 25 });
-  if (!connected) return null; // render a connect-state; nothing to persist yet
+    const { connected, emails } = await getEmails({ limit: 25 });
+    if (!connected) return { state: "connect" } as const; // render a connect-state
 
-  const rows = await Promise.all(
-    emails.map(async (e) => ({
-      id: e.id,
-      sender: e.fromName || e.from,
-      subject: e.subject,
-      urgency: 0, // compute from labels/snippet
-      summary: (await ai(`One line: ${e.snippet}`).catch(() => ({}))).text ?? "",
-    })),
-  );
-  const { table } = await db.upsert(TABLE, rows, "id"); // key "id" = dedup on re-run
-  return table;
+    const rows = await Promise.all(
+      emails.map(async (e) => ({
+        id: e.id,
+        sender: e.fromName || e.from,
+        subject: e.subject,
+        urgency: 0, // compute from labels/snippet
+        summary: (await ai(`One line: ${e.snippet}`).catch(() => ({}))).text ?? "",
+      })),
+    );
+    const { table } = await db.upsert(TABLE, rows, "id"); // key "id" = dedup on re-run
+    await db.upsert(META, [{ key: "initialized" }], "key"); // mark ONLY after the write
+    return { state: "ready", table } as const;
+  } catch {
+    return { state: "error" } as const; // degraded state — offer a Retry
+  }
 }
 ```
 

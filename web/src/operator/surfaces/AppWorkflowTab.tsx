@@ -100,6 +100,17 @@ export function AppWorkflowTab({ appId }: AppWorkflowTabProps) {
           </span>
           <div className="opr-empty-title">Reading the workflow…</div>
         </div>
+      ) : workflowQuery.isError ? (
+        // A failed initial read never sets isSuccess, so the auto-compile
+        // would never fire — surface it as its own retryable error state
+        // instead of the compile spinner.
+        <EmptyState
+          glyph="⚠"
+          title="Could not read the workflow"
+          hint="The workspace could not load this app's workflow just now. Try again in a moment."
+          actionLabel="Try again"
+          onAction={() => workflowQuery.refetch()}
+        />
       ) : compiled && wf ? (
         <CompiledWorkflow wf={wf} appId={appId} />
       ) : (
@@ -157,6 +168,11 @@ function CompiledWorkflow({ wf, appId }: { wf: AppWorkflow; appId: string }) {
   // Which Slack channel delivery targets — configured inline on the delivery
   // node itself, not as a separate block. Running/scheduling is done from the
   // app; here you just say where the result lands.
+  //
+  // NOTE: display-level placeholder. The AppWorkflow contract does not carry a
+  // delivery channel yet, so this state is local-only and edits do not persist
+  // across remounts. Channel selection is deliberately native to the delivery
+  // node; the backing field lands with the delivery contract.
   const [channel, setChannel] = useState("#general");
 
   // The tab is a READ-ONLY picture — EXCEPT for a workflow that contains a

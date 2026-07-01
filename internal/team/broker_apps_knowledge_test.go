@@ -105,10 +105,17 @@ func TestSanitizeKnowledgePagesDropsUngroundedRefsAndPages(t *testing.T) {
 			Lead:       "Unsupported claim.",
 			References: []appKnowledgeRef{{N: 42, Title: "nope"}},
 		},
+		{
+			// A REAL source listed in references but never cited as [[1]] in the
+			// prose → the ref is decoration, not grounding: ref and page dropped.
+			Title:      "Uncited Ref",
+			Lead:       "A claim with no citation marker.",
+			References: []appKnowledgeRef{{N: 1, Title: "App: X", Kind: "document"}},
+		},
 	}
 	out := sanitizeKnowledgePages(pages, testSources())
 	if len(out) != 1 {
-		t.Fatalf("want 1 page (ungrounded dropped), got %d", len(out))
+		t.Fatalf("want 1 page (ungrounded + uncited dropped), got %d", len(out))
 	}
 	p := out[0]
 	if p.ID != "good-page" {
@@ -131,14 +138,15 @@ func TestSanitizeKnowledgePagesDropsUngroundedRefsAndPages(t *testing.T) {
 func TestSanitizeRefsNormalizesKindAndFillsFromSource(t *testing.T) {
 	refs := []appKnowledgeRef{
 		{N: 1, Kind: "bogus"},           // unknown kind → source kind (document)
-		{N: 2, Title: "", Kind: "chat"}, // valid kind kept; title filled from source
+		{N: 2, Title: "", Kind: "chat"}, // title filled from source
 		{N: 1, Kind: "document"},        // duplicate n → dropped
 	}
 	byN := map[int]knowledgeSource{}
 	for _, s := range testSources() {
 		byN[s.N] = s
 	}
-	out := sanitizeRefs(refs, byN)
+	cited := map[int]bool{1: true, 2: true}
+	out := sanitizeRefs(refs, byN, cited)
 	if len(out) != 2 {
 		t.Fatalf("want 2 refs (dup dropped), got %d", len(out))
 	}
@@ -154,10 +162,54 @@ func TestSanitizeRefsNormalizesKindAndFillsFromSource(t *testing.T) {
 	}
 }
 
+// TestSanitizeRefsCanonicalizesMismatchedMetadata locks that model-provided
+// title/detail/kind/snippet are NEVER trusted: a ref whose n maps to a real
+// source is overwritten with that source's metadata, so a page cannot
+// misattribute a claim to a source it did not come from. Why stays the model's.
+func TestSanitizeRefsCanonicalizesMismatchedMetadata(t *testing.T) {
+	refs := []appKnowledgeRef{{
+		N:       1,
+		Title:   "Totally Different Doc", // mismatched, non-empty → overwritten
+		Detail:  "made-up detail",
+		Kind:    "crm", // valid kind, but not the source's → overwritten
+		Snippet: "a snippet the source never contained",
+		Why:     "explains the claim",
+	}}
+	byN := map[int]knowledgeSource{}
+	for _, s := range testSources() {
+		byN[s.N] = s
+	}
+	out := sanitizeRefs(refs, byN, map[int]bool{1: true})
+	if len(out) != 1 {
+		t.Fatalf("want 1 ref, got %d", len(out))
+	}
+	got := out[0]
+	if got.Title != "App: X" || got.Detail != "spec" || got.Kind != "document" || got.Snippet != "does a thing" {
+		t.Fatalf("ref metadata must canonicalize from the source, got %+v", got)
+	}
+	if got.Why != "explains the claim" {
+		t.Fatalf("why is the model's explanation and must be preserved, got %q", got.Why)
+	}
+}
+
+// TestSanitizeRefsDropsUncitedRefs locks that a reference whose [[n]] never
+// appears in the prose is dropped even when it maps to a real source.
+func TestSanitizeRefsDropsUncitedRefs(t *testing.T) {
+	byN := map[int]knowledgeSource{}
+	for _, s := range testSources() {
+		byN[s.N] = s
+	}
+	out := sanitizeRefs([]appKnowledgeRef{{N: 1, Kind: "document"}, {N: 2, Kind: "roster"}}, byN, map[int]bool{2: true})
+	if len(out) != 1 || out[0].N != 2 {
+		t.Fatalf("want only the cited ref [2], got %+v", out)
+	}
+}
+
 func TestSanitizeKnowledgePagesCapsAtThree(t *testing.T) {
 	mk := func(id string) appKnowledgePage {
 		return appKnowledgePage{
 			Title:      id,
+			Lead:       "About " + id + ".[[1]]",
 			References: []appKnowledgeRef{{N: 1, Kind: "document"}},
 		}
 	}
@@ -165,6 +217,34 @@ func TestSanitizeKnowledgePagesCapsAtThree(t *testing.T) {
 	out := sanitizeKnowledgePages(pages, testSources())
 	if len(out) != 3 {
 		t.Fatalf("want at most 3 pages, got %d", len(out))
+	}
+}
+
+// TestAppDataHeldSummaryFlattensStringArrays locks that string[] cells surface
+// their ELEMENTS as individual values (deduped across rows), not one formatted
+// "[a b]" blob per row.
+func TestAppDataHeldSummaryFlattensStringArrays(t *testing.T) {
+	tables := []AppDBTable{{
+		Name: "Emails",
+		Columns: []AppDBColumn{
+			{Name: "tags", Type: "string[]"},
+			{Name: "city", Type: "string"},
+		},
+		Rows: []map[string]any{
+			{"tags": []any{"sales", "ops"}, "city": "Austin"},
+			{"tags": []string{"ops", "finance"}, "city": "Boston"},
+			{"tags": nil, "city": ""},
+		},
+	}}
+	got := appDataHeldSummary(tables)
+	if !strings.Contains(got, "tags: sales, ops, finance") {
+		t.Fatalf("string[] elements should flatten + dedupe, got %q", got)
+	}
+	if strings.Contains(got, "[") {
+		t.Fatalf("no whole-array formatting should leak into the summary, got %q", got)
+	}
+	if !strings.Contains(got, "city: Austin, Boston") {
+		t.Fatalf("plain string column should still summarize, got %q", got)
 	}
 }
 

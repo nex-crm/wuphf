@@ -50,8 +50,13 @@ function parseTables(raw: unknown): ModelTable[] {
           })
           .filter((c) => c.name)
       : [];
+    // Keep only plain objects: a null or array entry would crash the cell
+    // lookup (row[c.name]) at render time.
     const rows = Array.isArray(tt.rows)
-      ? (tt.rows as Record<string, unknown>[])
+      ? tt.rows.filter(
+          (r): r is Record<string, unknown> =>
+            !!r && typeof r === "object" && !Array.isArray(r),
+        )
       : [];
     return {
       name: String(tt.name ?? "Table").trim() || "Table",
@@ -64,7 +69,10 @@ function parseTables(raw: unknown): ModelTable[] {
 export function AppDataTab({ appId }: AppDataTabProps) {
   const dbQuery = useQuery({
     queryKey: ["operator-app-db", appId],
-    staleTime: 30_000,
+    // The app writes to its DB through the bridge in a different component
+    // tree, so nothing invalidates this key. It is a cheap local read: always
+    // refetch on mount so the tab never shows a stale snapshot.
+    refetchOnMount: "always",
     queryFn: async (): Promise<ModelTable[]> => {
       const res = await get<{ tables?: unknown }>(
         `/apps/${encodeURIComponent(appId)}/db`,

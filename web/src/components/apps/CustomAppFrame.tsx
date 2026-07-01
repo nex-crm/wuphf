@@ -352,6 +352,29 @@ export type DBCallArgs =
     };
 
 /**
+ * Validate the columns of a "define" call. Returns null when the shape is
+ * wrong, no usable column survives, or any column name/type exceeds its cap —
+ * an oversized identifier rejects the whole call rather than being truncated
+ * (nameless columns are merely dropped).
+ */
+function parseDBColumns(raw: unknown): { name: string; type: string }[] | null {
+  if (!Array.isArray(raw)) return null;
+  const columns: { name: string; type: string }[] = [];
+  for (const c of raw.slice(0, DB_COLUMNS_MAX)) {
+    const cc = (c ?? {}) as Record<string, unknown>;
+    const name = typeof cc.name === "string" ? cc.name.trim() : "";
+    const type = typeof cc.type === "string" ? cc.type.trim() : "string";
+    if (name.length > DB_TABLE_MAX || type.length > DB_COLUMN_TYPE_MAX) {
+      return null;
+    }
+    if (!name) continue; // nameless columns are dropped, not fatal
+    columns.push({ name, type });
+  }
+  if (columns.length === 0) return null;
+  return columns;
+}
+
+/**
  * Validate + normalize an inbound "db" message into the host's trusted
  * DBCallArgs. Pure so it can be unit-tested without a frame. Returns null when
  * the op is unknown or the op-specific fields are missing/oversized. The broker
@@ -363,29 +386,15 @@ export function parseDBArgs(data: unknown): DBCallArgs | null {
   const op = typeof d.op === "string" ? d.op.trim() : "";
   if (!DB_OP_ALLOWLIST.has(op)) return null;
   if (op === "all") return { op: "all" };
-  const table =
-    typeof d.table === "string" ? d.table.trim().slice(0, DB_TABLE_MAX) : "";
-  if (!table) return null;
+  // Reject-don't-truncate: slicing an oversized identifier can alias two
+  // caller-supplied names to the same store key, so query/clear/upsert would
+  // hit the wrong table. An oversized identifier fails the whole call instead.
+  const table = typeof d.table === "string" ? d.table.trim() : "";
+  if (!table || table.length > DB_TABLE_MAX) return null;
   if (op === "query" || op === "clear") return { op, table };
   if (op === "define") {
-    if (!Array.isArray(d.columns)) return null;
-    const columns = d.columns
-      .slice(0, DB_COLUMNS_MAX)
-      .map((c) => {
-        const cc = (c ?? {}) as Record<string, unknown>;
-        return {
-          name:
-            typeof cc.name === "string"
-              ? cc.name.trim().slice(0, DB_TABLE_MAX)
-              : "",
-          type:
-            typeof cc.type === "string"
-              ? cc.type.trim().slice(0, DB_COLUMN_TYPE_MAX)
-              : "string",
-        };
-      })
-      .filter((c) => c.name);
-    if (columns.length === 0) return null;
+    const columns = parseDBColumns(d.columns);
+    if (!columns) return null;
     return { op: "define", table, columns };
   }
   // upsert: rows must be an array of plain objects within the size cap.
@@ -401,7 +410,10 @@ export function parseDBArgs(data: unknown): DBCallArgs | null {
     (r): r is Record<string, unknown> =>
       !!r && typeof r === "object" && !Array.isArray(r),
   );
+  // The key names a column, so it gets the same reject-don't-truncate cap:
+  // an uncapped key would otherwise ride the POST body out of the host.
   const key = typeof d.key === "string" ? d.key.trim() : "";
+  if (key.length > DB_TABLE_MAX) return null;
   return key
     ? { op: "upsert", table, rows, key }
     : { op: "upsert", table, rows };

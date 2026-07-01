@@ -138,6 +138,57 @@ func TestAppDBKeylessUpsertAppends(t *testing.T) {
 	}
 }
 
+func TestAppDBUpsertRejectsUnknownKey(t *testing.T) {
+	store, id := newTestAppWithDB(t, t.TempDir())
+	if _, err := store.DefineAppDBTable(id, "Emails", []AppDBColumn{{Name: "id", Type: "string"}}); err != nil {
+		t.Fatalf("define: %v", err)
+	}
+	// A misspelled key must be a caller error, not silently treated as "" for
+	// every row (which would collapse unrelated rows onto one key).
+	if _, err := store.UpsertAppDBRows(id, "Emails", []map[string]any{{"id": "a"}}, "idd"); err == nil || !isCustomAppCallerError(err) {
+		t.Fatalf("unknown key: want caller error, got %v", err)
+	}
+	// The rejected upsert persisted nothing.
+	tbl, err := store.QueryAppDBTable(id, "Emails")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(tbl.Rows) != 0 {
+		t.Fatalf("rejected upsert must not persist rows, got %d", len(tbl.Rows))
+	}
+}
+
+func TestAppDBUpsertRejectsRowMissingKey(t *testing.T) {
+	store, id := newTestAppWithDB(t, t.TempDir())
+	if _, err := store.DefineAppDBTable(id, "Emails", []AppDBColumn{
+		{Name: "id", Type: "string"},
+		{Name: "subject", Type: "string"},
+	}); err != nil {
+		t.Fatalf("define: %v", err)
+	}
+	if _, err := store.UpsertAppDBRows(id, "Emails", []map[string]any{{"id": "a", "subject": "s1"}}, "id"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// A row omitting the key column, and a row whose key value is empty, are
+	// both invalid: pre-fix they dedup to the "" key and overwrite each other.
+	for _, rows := range [][]map[string]any{
+		{{"subject": "no key at all"}},
+		{{"id": "", "subject": "empty key"}},
+	} {
+		if _, err := store.UpsertAppDBRows(id, "Emails", rows, "id"); err == nil || !isCustomAppCallerError(err) {
+			t.Fatalf("rows %v: want caller error, got %v", rows, err)
+		}
+	}
+	// The seeded row is untouched by the rejected upserts.
+	tbl, err := store.QueryAppDBTable(id, "Emails")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(tbl.Rows) != 1 || tbl.Rows[0]["subject"] != "s1" {
+		t.Fatalf("seed row must be untouched, got %v", tbl.Rows)
+	}
+}
+
 func TestAppDBUnknownAppIsCallerError(t *testing.T) {
 	store := newCustomAppStore(t.TempDir())
 	ghost := "app_0123456789abcdef"

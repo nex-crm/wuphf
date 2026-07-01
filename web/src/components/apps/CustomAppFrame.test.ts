@@ -869,4 +869,83 @@ describe("parseDBArgs (app-DB bridge validation)", () => {
       parseDBArgs(msg({ op: "upsert", table: "T", rows: big })),
     ).toBeNull();
   });
+
+  it("rejects an oversized table name instead of truncating it", () => {
+    // Truncation would alias two distinct 65+ char names to one store key.
+    const long = "T".repeat(65);
+    expect(parseDBArgs(msg({ op: "query", table: long }))).toBeNull();
+    expect(parseDBArgs(msg({ op: "clear", table: long }))).toBeNull();
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: long,
+          columns: [{ name: "id", type: "string" }],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseDBArgs(msg({ op: "upsert", table: long, rows: [{ id: "a" }] })),
+    ).toBeNull();
+    // Boundary: exactly 64 chars is still accepted.
+    const max = "T".repeat(64);
+    expect(parseDBArgs(msg({ op: "query", table: max }))).toEqual({
+      op: "query",
+      table: max,
+    });
+  });
+
+  it("rejects a define with an oversized column name or type", () => {
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: "T",
+          columns: [{ name: "c".repeat(65), type: "string" }],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: "T",
+          columns: [{ name: "id", type: "t".repeat(33) }],
+        }),
+      ),
+    ).toBeNull();
+    // A single bad column fails the whole call — no silent dropping.
+    expect(
+      parseDBArgs(
+        msg({
+          op: "define",
+          table: "T",
+          columns: [
+            { name: "id", type: "string" },
+            { name: "c".repeat(65), type: "string" },
+          ],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects an oversized upsert key instead of forwarding it", () => {
+    expect(
+      parseDBArgs(
+        msg({
+          op: "upsert",
+          table: "T",
+          rows: [{ id: "a" }],
+          key: "k".repeat(65),
+        }),
+      ),
+    ).toBeNull();
+    // Boundary: a 64-char key is still accepted.
+    const maxKey = "k".repeat(64);
+    expect(
+      parseDBArgs(
+        msg({ op: "upsert", table: "T", rows: [{ id: "a" }], key: maxKey }),
+      ),
+    ).toEqual({ op: "upsert", table: "T", rows: [{ id: "a" }], key: maxKey });
+  });
 });

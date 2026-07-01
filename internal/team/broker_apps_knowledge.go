@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -360,6 +361,13 @@ func (b *Broker) writeAppKnowledgeToGBrain(ctx context.Context, client knowledge
 		ownSlug := appKnowledgeSlug(appID, p.Title)
 		// Cross-app SHARE: a same-title page owned by a different app → tag it for
 		// this app too and reuse it, instead of minting a duplicate.
+		//
+		// Tradeoff (deliberate): sharing is keyed by TITLE ALONE, so a generic
+		// title from another app is reused even when this app's synthesis produced
+		// a different body — one page appearing in multiple apps is the product
+		// intent. This is accepted for now: the synthesis prompt keeps pages
+		// app-generic, and a follow-up may require content-similarity evidence
+		// before sharing.
 		if shared, ok := existingByTitle[normalizeKnowledgeTitle(p.Title)]; ok && shared.slug != ownSlug {
 			merged := mergeScopeTags(shared.scopeTags, []string{scopeTag})
 			if len(merged) != len(shared.scopeTags) {
@@ -701,12 +709,17 @@ func appDataHeldSummary(tables []AppDBTable) string {
 				seen := map[string]bool{}
 				var vals []string
 				for _, row := range t.Rows {
-					v := strings.TrimSpace(fmt.Sprintf("%v", row[c.Name]))
-					if v == "" || v == "<nil>" || seen[v] {
-						continue
+					for _, raw := range knowledgeCellValues(row[c.Name]) {
+						v := strings.TrimSpace(raw)
+						if v == "" || v == "<nil>" || seen[v] {
+							continue
+						}
+						seen[v] = true
+						vals = append(vals, v)
+						if len(vals) >= 8 {
+							break
+						}
 					}
-					seen[v] = true
-					vals = append(vals, v)
 					if len(vals) >= 8 {
 						break
 					}
@@ -718,6 +731,27 @@ func appDataHeldSummary(tables []AppDBTable) string {
 		}
 	}
 	return strings.Join(parts, ". ")
+}
+
+// knowledgeCellValues flattens one cell into individual string values: a
+// string[] cell ([]any after a JSON round-trip, []string in-memory) yields each
+// element, so distinct categories inside arrays surface as individual values;
+// any other cell yields its single rendered value.
+func knowledgeCellValues(v any) []string {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			out = append(out, fmt.Sprintf("%v", e))
+		}
+		return out
+	default:
+		return []string{fmt.Sprintf("%v", t)}
+	}
 }
 
 func buildKnowledgePrompt(sources []knowledgeSource) (system, user string) {
@@ -796,7 +830,7 @@ func sanitizeKnowledgePages(pages []appKnowledgePage, sources []knowledgeSource)
 			continue // drop duplicate id
 		}
 		p.UpdatedAt = "Synthesized from your workspace by your AI"
-		p.References = sanitizeRefs(p.References, sourceByN)
+		p.References = sanitizeRefs(p.References, sourceByN, citedKnowledgeNs(p))
 		if len(p.References) == 0 {
 			// A page with no grounded citation is exactly what we refuse to ship.
 			continue
@@ -819,32 +853,48 @@ func sanitizeKnowledgePages(pages []appKnowledgePage, sources []knowledgeSource)
 	return out
 }
 
-// sanitizeRefs keeps only references that correspond to a real source, normalizes
-// the kind, and fills a missing title/kind from the source pack.
-func sanitizeRefs(refs []appKnowledgeRef, sourceByN map[int]knowledgeSource) []appKnowledgeRef {
+// citedKnowledgeNs collects the citation numbers actually used as [[n]] in the
+// page's prose (lead + every section paragraph). A reference the prose never
+// cites is decoration, not grounding.
+func citedKnowledgeNs(p appKnowledgePage) map[int]bool {
+	out := map[int]bool{}
+	collect := func(s string) {
+		for _, m := range knowledgeCiteRe.FindAllStringSubmatch(s, -1) {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				out[n] = true
+			}
+		}
+	}
+	collect(p.Lead)
+	for _, sec := range p.Sections {
+		for _, para := range sec.Paras {
+			collect(para)
+		}
+	}
+	return out
+}
+
+// sanitizeRefs keeps only references that correspond to a real source AND are
+// actually cited as [[n]] in the page prose, then canonicalizes the reference
+// metadata (title/detail/kind/snippet) from the SOURCE PACK — the model's
+// copies are never trusted, so a reference cannot misattribute its source.
+// Why stays model-provided: it is the explanation, not source metadata.
+func sanitizeRefs(refs []appKnowledgeRef, sourceByN map[int]knowledgeSource, cited map[int]bool) []appKnowledgeRef {
 	out := make([]appKnowledgeRef, 0, len(refs))
 	seen := make(map[int]bool)
 	for _, ref := range refs {
 		src, ok := sourceByN[ref.N]
-		if !ok || seen[ref.N] {
-			continue // cites a source that does not exist, or a duplicate
+		if !ok || seen[ref.N] || !cited[ref.N] {
+			continue // no such source, a duplicate, or never cited in the prose
 		}
 		seen[ref.N] = true
-		if strings.TrimSpace(ref.Title) == "" {
-			ref.Title = src.Title
-		}
-		if strings.TrimSpace(ref.Detail) == "" {
-			ref.Detail = src.Detail
-		}
+		ref.Title = src.Title
+		ref.Detail = src.Detail
+		ref.Kind = src.Kind
 		if !knowledgeKinds[ref.Kind] {
-			ref.Kind = src.Kind
-			if !knowledgeKinds[ref.Kind] {
-				ref.Kind = "document"
-			}
+			ref.Kind = "document"
 		}
-		if strings.TrimSpace(ref.Snippet) == "" {
-			ref.Snippet = clampRunes(src.Snippet, 240)
-		}
+		ref.Snippet = clampRunes(src.Snippet, 240)
 		out = append(out, ref)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].N < out[j].N })

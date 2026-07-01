@@ -170,7 +170,21 @@ export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
 
   // Real synthesis takes a few seconds on first open (cached after).
   const synthesizing = Boolean(appId) && query.isLoading;
-  const emptyBrain = Boolean(appId) && !query.isLoading && pages.length === 0;
+  // Synthesis failures are NOT an empty brain: the broker reports them as
+  // { error: "ai_unavailable" | "rate_limited" }, and a transport failure
+  // surfaces as query.isError. Render those honestly, distinct from "no
+  // knowledge yet". If cached pages arrived alongside an error, the pages win.
+  const backendError = appId ? query.data?.error : undefined;
+  const knowledgeFailed =
+    Boolean(appId) &&
+    !query.isLoading &&
+    pages.length === 0 &&
+    (query.isError || Boolean(backendError));
+  const emptyBrain =
+    Boolean(appId) &&
+    !query.isLoading &&
+    !knowledgeFailed &&
+    pages.length === 0;
 
   return (
     <div className="opr-surface-wide">
@@ -206,6 +220,20 @@ export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
             Synthesizing cited pages from this app's real sources.
           </div>
         </div>
+      ) : knowledgeFailed ? (
+        backendError === "rate_limited" ? (
+          <EmptyState
+            glyph="⚠"
+            title="Knowledge is busy — try again in a minute."
+            hint="Your AI hit a rate limit while synthesizing this app's pages. Nothing is lost — reopen this tab shortly."
+          />
+        ) : (
+          <EmptyState
+            glyph="⚠"
+            title="Knowledge is unavailable right now."
+            hint="Your AI provider is not reachable or not configured, so cited pages could not be synthesized. Once it is back, they appear here."
+          />
+        )
       ) : emptyBrain ? (
         <EmptyState
           glyph="📖"
@@ -279,7 +307,10 @@ export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
               <h2>References</h2>
               <ol className="opr-refs">
                 {page.references.map((ref) => (
-                  <ReferenceItem key={ref.n} source={ref} />
+                  // Key by page identity + n: ref numbers reset per page, so a
+                  // bare ref.n would reuse instances (and leak open state)
+                  // across page switches.
+                  <ReferenceItem key={`${page.id}-${ref.n}`} source={ref} />
                 ))}
               </ol>
 

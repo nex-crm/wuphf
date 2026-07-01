@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppDataTab } from "./AppDataTab";
 
-const get = vi.fn();
+// vi.mock is hoisted above this file's const declarations, so the mock handle
+// must be hoisted too or the factory hits the TDZ.
+const { get } = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("../../api/client", () => ({
-  get: (path: string) => get(path),
+  get,
 }));
 
 function wrap(node: ReactNode) {
@@ -75,6 +77,23 @@ describe("AppDataTab", () => {
     await waitFor(() =>
       expect(getByText(/defined, no rows yet/i)).toBeTruthy(),
     );
+  });
+
+  it("drops malformed row entries (null, array) without crashing", async () => {
+    get.mockResolvedValue({
+      tables: [
+        {
+          name: "Emails",
+          columns: [{ name: "sender", type: "string" }],
+          rows: [null, ["not", "a", "row"], { sender: "a@b.com" }],
+        },
+      ],
+    });
+    const { getByText } = wrap(<AppDataTab appId="app_abc" />);
+    await waitFor(() => expect(getByText("Emails")).toBeTruthy());
+    // Only the plain-object row survives; the tab renders instead of crashing.
+    expect(getByText("a@b.com")).toBeTruthy();
+    expect(getByText("1 row")).toBeTruthy();
   });
 
   it("shows an error state when the DB read fails", async () => {
