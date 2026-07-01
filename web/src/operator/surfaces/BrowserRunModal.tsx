@@ -24,6 +24,7 @@ import {
   flattenRun,
 } from "../exec/browserExec";
 import {
+  approveExec,
   EXEC_UNAVAILABLE,
   type RunnerEvent,
   runBrowserExec,
@@ -185,13 +186,21 @@ function LiveBrowserRun({
   // healing only the steps whose elements moved. None → drive live + record one.
   const saved = useMemo(() => loadTrajectory(toolName, goal), [toolName, goal]);
   const [replaying] = useState(Boolean(saved));
+  // An external send the runner paused on, waiting for the operator's decision.
+  const [pendingSend, setPendingSend] = useState<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     const onEvent = (e: RunnerEvent) => {
-      if (e.type === "status") {
+      if (e.type === "run") {
+        runIdRef.current = e.run_id ?? null;
+      } else if (e.type === "approval_request") {
+        setThinking(false);
+        setPendingSend(e.label ?? "this message");
+      } else if (e.type === "status") {
         setThinking(e.status === "thinking");
         if (e.detail) setContext(e.detail);
       } else if (e.type === "action") {
@@ -273,6 +282,12 @@ function LiveBrowserRun({
   function stop() {
     abortRef.current?.abort();
     onClose();
+  }
+
+  function decideSend(decision: "approve" | "deny") {
+    const id = runIdRef.current;
+    setPendingSend(null);
+    if (id) approveExec(id, decision).catch(() => {});
   }
 
   return (
@@ -358,22 +373,48 @@ function LiveBrowserRun({
           ) : null}
         </div>
 
-        <div
-          className={`opr-exec-result${done ? " is-done" : ""}`}
-          role="status"
-        >
-          {phase === "done" ? (
-            <Check size={14} strokeWidth={2} aria-hidden={true} />
-          ) : null}
-          {result ||
-            (thinking
-              ? replaying
-                ? "A step moved — re-finding it…"
-                : "Working out the next step…"
-              : replaying
-                ? "Replaying your saved run…"
-                : "Driving your browser…")}
-        </div>
+        {pendingSend ? (
+          <div className="opr-exec-approval">
+            <div className="opr-exec-approval-text">
+              <Send size={13} strokeWidth={1.9} aria-hidden={true} />
+              Send this externally? — “{pendingSend}”
+            </div>
+            <div className="opr-exec-approval-actions">
+              <button
+                type="button"
+                className="opr-btn opr-btn-sm"
+                onClick={() => decideSend("deny")}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                className="opr-btn opr-btn-primary opr-btn-sm"
+                onClick={() => decideSend("approve")}
+              >
+                <Check size={13} strokeWidth={1.9} aria-hidden={true} />
+                Approve &amp; send
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className={`opr-exec-result${done ? " is-done" : ""}`}
+            role="status"
+          >
+            {phase === "done" ? (
+              <Check size={14} strokeWidth={2} aria-hidden={true} />
+            ) : null}
+            {result ||
+              (thinking
+                ? replaying
+                  ? "A step moved — re-finding it…"
+                  : "Working out the next step…"
+                : replaying
+                  ? "Replaying your saved run…"
+                  : "Driving your browser…")}
+          </div>
+        )}
       </div>
     </RunScrim>
   );

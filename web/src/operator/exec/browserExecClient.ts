@@ -5,7 +5,7 @@
 // no runner on the host) we throw EXEC_UNAVAILABLE so the modal falls back to
 // the scripted mock. See docs/specs/operator-cua-migration.md.
 
-import { postStream } from "../../api/client";
+import { post, postStream } from "../../api/client";
 import { readEventStream } from "./sse";
 
 // One recorded action, keyed by the element's STABLE identity (role + label),
@@ -26,7 +26,14 @@ export interface Trajectory {
 
 // One event from the runner — mirrors runner/cua_exec.py's emit() shapes.
 export interface RunnerEvent {
-  type: "status" | "action" | "done" | "error" | "trajectory";
+  type:
+    | "status"
+    | "action"
+    | "done"
+    | "error"
+    | "trajectory"
+    | "run"
+    | "approval_request";
   // status: running | thinking | replaying | healing
   status?: string;
   detail?: string;
@@ -37,6 +44,7 @@ export interface RunnerEvent {
   refused?: boolean;
   replayed?: boolean;
   healed?: boolean;
+  skipped?: boolean;
   // done / error:
   result?: string;
   message?: string;
@@ -44,6 +52,17 @@ export interface RunnerEvent {
   goal?: string;
   app?: string;
   steps?: TrajectoryStep[];
+  // run (first frame): the id used to POST a send-approval back to this run.
+  run_id?: string;
+}
+
+// Forward the operator's send decision to a paused run (the runner is blocked on
+// its stdin waiting for an external send). "approve" sends; "deny" skips it.
+export async function approveExec(
+  runId: string,
+  decision: "approve" | "deny",
+): Promise<void> {
+  await post("/execute/approve", { run_id: runId, decision });
 }
 
 // Thrown when the backend can't run (no OpenAI key or no cua runner) — the

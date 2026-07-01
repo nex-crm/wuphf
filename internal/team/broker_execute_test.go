@@ -1,6 +1,7 @@
 package team
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,41 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestHandleExecuteApproveForwardsDecision(t *testing.T) {
+	var buf bytes.Buffer
+	activeRuns.add("run-1", &buf)
+	defer activeRuns.remove("run-1")
+
+	r := httptest.NewRequest(http.MethodPost, "/execute/approve", strings.NewReader(`{"run_id":"run-1","decision":"approve"}`))
+	w := httptest.NewRecorder()
+	(&Broker{}).handleExecuteApprove(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if buf.String() != "approve\n" {
+		t.Fatalf("forwarded stdin = %q, want approve", buf.String())
+	}
+}
+
+func TestHandleExecuteApproveDenyAndUnknownRun(t *testing.T) {
+	var buf bytes.Buffer
+	activeRuns.add("run-2", &buf)
+	defer activeRuns.remove("run-2")
+	// Any non-approve decision forwards "deny" (never auto-send).
+	r := httptest.NewRequest(http.MethodPost, "/execute/approve", strings.NewReader(`{"run_id":"run-2","decision":"whatever"}`))
+	(&Broker{}).handleExecuteApprove(httptest.NewRecorder(), r)
+	if buf.String() != "deny\n" {
+		t.Fatalf("forwarded stdin = %q, want deny", buf.String())
+	}
+	// Unknown run → 404.
+	r2 := httptest.NewRequest(http.MethodPost, "/execute/approve", strings.NewReader(`{"run_id":"missing","decision":"approve"}`))
+	w2 := httptest.NewRecorder()
+	(&Broker{}).handleExecuteApprove(w2, r2)
+	if w2.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for unknown run", w2.Code)
+	}
+}
 
 func TestExecuteBrowserArgs(t *testing.T) {
 	got := executeBrowserArgs("/r/cua.py", executeBrowserRequest{Goal: "open menu", App: "Google Chrome", WindowID: 42})

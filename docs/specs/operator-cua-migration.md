@@ -122,8 +122,12 @@ to accomplish one step → every action streams live into the Run modal, gated.
 - **Explicit Start only**; the AI never drives on its own.
 - **Permission gate** before the first browser/desktop action ("Let Nex control
   your browser?").
-- **External-send approval** (Slack/email/CRM) still pauses to `needs-you` —
-  cua does not bypass it.
+- **External-send approval (IMPLEMENTED):** an action whose element label is a
+  send (send/post/publish/share/reply/tweet/…) NEVER auto-fires — live and on
+  replay the runner emits `approval_request` and blocks on stdin; the broker
+  forwards the operator's decision (`/execute/approve`, addressed by the run_id
+  from the first SSE frame); the Run modal shows "Send this externally? Approve
+  & send / Skip". Default is deny. Typing/focus is not gated.
 - **Bounded** per step; **visible + stoppable** (every action + screenshot shown;
   Pause/Stop always live).
 - Long-lived model key stays on the broker; cua-driver runs on the operator's
