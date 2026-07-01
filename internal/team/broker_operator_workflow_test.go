@@ -112,6 +112,36 @@ func TestParseAuthoredWorkflowPlan(t *testing.T) {
 	}
 }
 
+func TestParseAuthoredWorkflowPlanBrowserStep(t *testing.T) {
+	app := CustomApp{ID: "app_b", Name: "Portal Poster"}
+	caps := AppCapabilities{Integrations: []AppIntegrationUsage{{Platform: "slack"}}}
+	// A send step to a system the app has NO integration for → browser step
+	// ("no integration available → browser step"). An explicit kind:"browser"
+	// is kept as-is.
+	raw := `{"steps":[
+	  {"id":"t","kind":"trigger","title":"On a schedule"},
+	  {"id":"post","kind":"action","title":"Submit in the vendor portal","detail":"Open the vendor portal and submit the refund","integration":"vendorportal","gated":true},
+	  {"id":"nav","kind":"browser","title":"Update the tracker","detail":"Mark it done in the web tracker"}
+	]}`
+	plan, ok := parseAuthoredWorkflowPlan(raw, app, caps)
+	if !ok {
+		t.Fatal("expected a valid plan")
+	}
+	// Unavailable integration on a gated send → browser, integration cleared,
+	// gated preserved, goal kept in detail.
+	post := plan.Steps[1]
+	if post.Kind != "browser" || post.Integration != "" || !post.Gated {
+		t.Fatalf("post step should be a gated browser step, got %+v", post)
+	}
+	if post.Detail == "" {
+		t.Fatal("browser step must carry the goal in detail")
+	}
+	// An explicitly-authored browser step is preserved.
+	if plan.Steps[2].Kind != "browser" {
+		t.Fatalf("explicit browser step = %+v", plan.Steps[2])
+	}
+}
+
 func TestParseAuthoredWorkflowPlanRejectsJunk(t *testing.T) {
 	if _, ok := parseAuthoredWorkflowPlan("not json at all", CustomApp{}, AppCapabilities{}); ok {
 		t.Fatal("expected non-JSON to be rejected")
