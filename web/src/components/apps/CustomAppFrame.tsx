@@ -109,6 +109,24 @@ const INTEGRATION_PARAMS_MAX = 16 * 1024;
 const AI_PROMPT_MAX = 8 * 1024;
 const AI_INPUT_MAX = 200 * 1024;
 
+// Bridge v2 app-DB caps. The broker re-enforces the real bounds (table/column/
+// row limits); these are the first cheap gate so an obviously-abusive db message
+// never leaves the host. `all` reads every table; `query`/`clear` name a table;
+// `define` sets columns; `upsert` writes rows (with an optional primary key).
+const DB_OP_ALLOWLIST: ReadonlySet<string> = new Set([
+  "all",
+  "query",
+  "define",
+  "upsert",
+  "clear",
+]);
+const DB_TABLE_MAX = 64;
+const DB_COLUMN_TYPE_MAX = 32;
+const DB_COLUMNS_MAX = 64;
+// Serialized rows byte-ish proxy: the derived model an app persists, not a raw
+// integration dump. Generous, but bounded so a runaway upsert can't flood.
+const DB_ROWS_MAX = 512 * 1024;
+
 // Host-brokered file download caps. A sandboxed opaque-origin frame can't do a
 // raw anchor download (the `download` attribute is ignored for an opaque-origin
 // blob, so the click becomes a blocked navigation), so the app posts the bytes
@@ -170,6 +188,18 @@ interface AppDownloadMessage {
   content?: unknown;
   mime?: unknown;
   encoding?: unknown;
+}
+
+/** Bridge v2: an app's backing-database call (its own persisted data model). */
+interface AppDBMessage {
+  source: typeof APP_SOURCE;
+  type: "db";
+  id: string | number;
+  op?: unknown;
+  table?: unknown;
+  columns?: unknown;
+  rows?: unknown;
+  key?: unknown;
 }
 
 /** Validated, host-trusted shape of an integration call. */
@@ -307,6 +337,74 @@ export function parseAIArgs(data: unknown): AICallArgs | null {
   return d.input === undefined || d.input === null
     ? { prompt, json }
     : { prompt, input: d.input, json };
+}
+
+/** Validated, host-trusted shape of an app-DB call. */
+export type DBCallArgs =
+  | { op: "all" }
+  | { op: "query" | "clear"; table: string }
+  | { op: "define"; table: string; columns: { name: string; type: string }[] }
+  | {
+      op: "upsert";
+      table: string;
+      rows: Record<string, unknown>[];
+      key?: string;
+    };
+
+/**
+ * Validate + normalize an inbound "db" message into the host's trusted
+ * DBCallArgs. Pure so it can be unit-tested without a frame. Returns null when
+ * the op is unknown or the op-specific fields are missing/oversized. The broker
+ * re-enforces the real table/column/row bounds; this is the cheap first gate.
+ */
+export function parseDBArgs(data: unknown): DBCallArgs | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  const op = typeof d.op === "string" ? d.op.trim() : "";
+  if (!DB_OP_ALLOWLIST.has(op)) return null;
+  if (op === "all") return { op: "all" };
+  const table =
+    typeof d.table === "string" ? d.table.trim().slice(0, DB_TABLE_MAX) : "";
+  if (!table) return null;
+  if (op === "query" || op === "clear") return { op, table };
+  if (op === "define") {
+    if (!Array.isArray(d.columns)) return null;
+    const columns = d.columns
+      .slice(0, DB_COLUMNS_MAX)
+      .map((c) => {
+        const cc = (c ?? {}) as Record<string, unknown>;
+        return {
+          name:
+            typeof cc.name === "string"
+              ? cc.name.trim().slice(0, DB_TABLE_MAX)
+              : "",
+          type:
+            typeof cc.type === "string"
+              ? cc.type.trim().slice(0, DB_COLUMN_TYPE_MAX)
+              : "string",
+        };
+      })
+      .filter((c) => c.name);
+    if (columns.length === 0) return null;
+    return { op: "define", table, columns };
+  }
+  // upsert: rows must be an array of plain objects within the size cap.
+  if (!Array.isArray(d.rows)) return null;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(d.rows);
+  } catch {
+    return null;
+  }
+  if (serialized.length > DB_ROWS_MAX) return null;
+  const rows = d.rows.filter(
+    (r): r is Record<string, unknown> =>
+      !!r && typeof r === "object" && !Array.isArray(r),
+  );
+  const key = typeof d.key === "string" ? d.key.trim() : "";
+  return key
+    ? { op: "upsert", table, rows, key }
+    : { op: "upsert", table, rows };
 }
 
 export function isAllowedGetPath(path: string): boolean {
@@ -746,6 +844,62 @@ async function serviceAICall(
   }
 }
 
+/**
+ * Service a Bridge v2 "db" call: the app reading/writing its OWN backing
+ * database (its persisted, typed data model). `all` → GET /apps/{id}/db;
+ * define/upsert/query/clear → POST /apps/{id}/db op-dispatch. Scoped to THIS app
+ * by the host-supplied app id (the sealed iframe never sees it), so an app can
+ * only touch its own store. The broker gates writes and re-enforces the bounds.
+ */
+async function serviceDBCall(
+  message: AppDBMessage,
+  target: Window,
+  replyOrigin: string,
+  appId?: string,
+): Promise<void> {
+  const reply = (payload: {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  }): void => {
+    target.postMessage(
+      { source: HOST_SOURCE, id: message.id, ...payload },
+      replyOrigin,
+    );
+  };
+  if (!appId) {
+    reply({ ok: false, error: "This app has no data store in this context." });
+    return;
+  }
+  const args = parseDBArgs(message);
+  if (!args) {
+    reply({
+      ok: false,
+      error:
+        "A db call needs op ∈ {all,query,define,upsert,clear} and (except all) a table.",
+    });
+    return;
+  }
+  const base = `/apps/${encodeURIComponent(appId)}/db`;
+  try {
+    if (args.op === "all") {
+      const data = await get(base);
+      reply({ ok: true, data });
+      return;
+    }
+    const body: Record<string, unknown> = { op: args.op, table: args.table };
+    if (args.op === "define") body.columns = args.columns;
+    if (args.op === "upsert") {
+      body.rows = args.rows;
+      if (args.key) body.key = args.key;
+    }
+    const data = await post(base, body);
+    reply({ ok: true, data });
+  } catch (err) {
+    reply({ ok: false, error: errorMessage(err) });
+  }
+}
+
 type SelectHandlerRef = {
   current: ((sel: AppSelectPayload) => void) | undefined;
 };
@@ -840,6 +994,10 @@ function routeAppRequest(
     // Bridge v2: a bounded one-shot ai() completion over data the app holds.
     case "ai":
       void serviceAICall(data as AppAIMessage, source, replyOrigin, appId);
+      return;
+    // Bridge v2: the app's own backing database (its persisted data model).
+    case "db":
+      void serviceDBCall(data as AppDBMessage, source, replyOrigin, appId);
       return;
     case "broker":
       void serviceBrokerGet(data as BrokerBridgeMessage, source, replyOrigin);
