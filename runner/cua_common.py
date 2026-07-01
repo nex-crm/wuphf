@@ -70,7 +70,9 @@ _EXCLUDED_ROLES = {
 # auto-fire — they pause for the operator's approval (the confidential-send rule).
 # Heuristic on the element label; over-asking is far safer than auto-sending.
 _SEND_PATTERN = re.compile(
-    r"\b(send|post|publish|share|reply|tweet|deliver|broadcast)\b", re.I
+    r"\b(send|post|publish|share|reply|tweet|deliver|broadcast"
+    r"|submit|comment|forward)\b",
+    re.I,
 )
 
 
@@ -117,15 +119,32 @@ def frontmost_app_name():
     return None
 
 
+def _usable_window(w):
+    """True when a cua-driver window record has every field find_window indexes.
+
+    cua-driver can return a partial record (missing bounds/pid/window_id); those
+    must be skipped so a malformed candidate can't crash the sort or the return.
+    """
+    if not isinstance(w, dict):
+        return False
+    if w.get("pid") is None or w.get("window_id") is None:
+        return False
+    bounds = w.get("bounds")
+    if not isinstance(bounds, dict):
+        return False
+    height, width = bounds.get("height"), bounds.get("width")
+    return isinstance(height, (int, float)) and isinstance(width, (int, float))
+
+
 def find_window(app_name):
     """The largest on-screen window for an app — its main content window."""
     cands = [
         w
         for w in list_windows()
-        if isinstance(w, dict)
+        if _usable_window(w)
         and w.get("app_name") == app_name
         and w.get("is_on_screen")
-        and w.get("bounds", {}).get("height", 0) > 300
+        and w["bounds"]["height"] > 300
     ]
     if not cands:
         return None

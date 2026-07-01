@@ -1148,6 +1148,14 @@ export type ConfigUpdate = Partial<{
   analytics_session_recording_enabled: boolean;
 }>;
 
+// The narrow slice of GET /config the operator surfaces read to decide whether
+// the real voice call is available. Shared so useRealtimeConfig and
+// SettingsSurface stay in lockstep if the response shape changes.
+export interface ConfigStatus {
+  openai_key_set?: boolean;
+  realtime_model?: string;
+}
+
 export function getConfig() {
   return get<ConfigSnapshot>("/config");
 }

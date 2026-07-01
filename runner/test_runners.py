@@ -58,7 +58,7 @@ class TestExecSnapshot(unittest.TestCase):
         labels = [e["label"] for e in elements]
         self.assertIn("Send", labels)
         self.assertNotIn("File", labels)  # macOS menu bar never reaches the model
-        self.assertTrue(any("redacted" in l for l in labels))
+        self.assertTrue(any("redacted" in label for label in labels))
 
 
 class TestObserve(unittest.TestCase):
@@ -75,7 +75,7 @@ class TestObserve(unittest.TestCase):
         labels = [c["label"] for c in comps]
         self.assertIn("Approve", labels)
         self.assertNotIn("Quit", labels)
-        self.assertTrue(any("redacted" in l for l in labels))
+        self.assertTrue(any("redacted" in label for label in labels))
 
     def test_snapshot_skips_page_reads_for_non_browser(self):
         # A non-browser frontmost app: components captured, no text_excerpt.
@@ -188,6 +188,10 @@ class TestSendGating(unittest.TestCase):
         self.assertTrue(cua_common.needs_approval("Send"))
         self.assertTrue(cua_common.needs_approval("Post to channel"))
         self.assertTrue(cua_common.needs_approval("Reply all"))
+        # Submit-style buttons can send externally too — gate them, don't fire.
+        self.assertTrue(cua_common.needs_approval("Submit"))
+        self.assertTrue(cua_common.needs_approval("Add comment"))
+        self.assertTrue(cua_common.needs_approval("Forward"))
         self.assertFalse(cua_common.needs_approval("Search"))
         self.assertFalse(cua_common.needs_approval("Open menu"))
 

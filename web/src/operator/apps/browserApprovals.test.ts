@@ -43,6 +43,17 @@ describe("resolveBrowserApproval", () => {
       { approval_id: "a1", decision: "approve" },
     );
   });
+
+  it("posts a deny decision unchanged", async () => {
+    // The deny path gates a send; a typo in the literal would silently let it
+    // through, so pin the exact "deny" value that reaches the broker.
+    (post as Mock).mockResolvedValue({ status: "ok" });
+    await resolveBrowserApproval("app_x", "a1", "deny");
+    expect(post).toHaveBeenCalledWith(
+      "/operator/apps/app_x/workflow/browser/approve",
+      { approval_id: "a1", decision: "deny" },
+    );
+  });
 });
 
 describe("browserApprovalPrompt", () => {

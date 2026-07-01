@@ -6,13 +6,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { get, post } from "../../api/client";
+import { type ConfigStatus, get, post } from "../../api/client";
 import { Eyebrow, SurfaceHeader } from "../components/primitives";
-
-interface ConfigStatus {
-  openai_key_set?: boolean;
-  realtime_model?: string;
-}
 
 export function SettingsSurface() {
   const [nexHosted, setNexHosted] = useState(false);

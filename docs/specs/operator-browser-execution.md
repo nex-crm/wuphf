@@ -33,7 +33,7 @@ person would: look at the page, click, type, read the result, move on.
 
 ## 3. Architecture
 
-```
+```text
 ┌─ Operator FE — BrowserRunModal ───────────────────────────────────────┐
 │  live browser viewport (screenshots) + narrated action timeline       │
 │  goal · status (running/paused/needs-you/done) · Pause / Stop         │
