@@ -90,7 +90,9 @@ export function createServer(opts: ServerOptions = {}) {
 					return json({ error: "invalid tool build request: message (string) required" }, 400);
 				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
-				return json(buildTool(body.message));
+				// Model authoring is opt-in (TOOL_AUTHOR_MODEL=1): with no model configured
+				// the endpoint must answer deterministically FAST, not eat a model timeout.
+				return json(await buildTool(body.message, { tryModel: process.env.TOOL_AUTHOR_MODEL === "1", signal: req.signal }));
 			}
 
 			if (req.method === "POST" && pathname === "/run") {
