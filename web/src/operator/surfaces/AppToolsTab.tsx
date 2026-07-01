@@ -10,29 +10,16 @@ import { useState } from "react";
 import { ChevronDown, Play, Wrench } from "lucide-react";
 
 import { Eyebrow } from "../components/primitives";
-import {
-  callTool,
-  sampleArgsFor,
-  seedToolsForApp,
-  type Tool,
-} from "../tools/mockTools";
+import type { Tool } from "../tools/mockTools";
+import { useAppTools } from "../tools/toolsContext";
 
 interface AppToolsTabProps {
   appName: string;
 }
 
 export function AppToolsTab({ appName }: AppToolsTabProps) {
-  const [tools, setTools] = useState<Tool[]>(() => seedToolsForApp(appName));
+  const { tools, runTool } = useAppTools();
   const [openId, setOpenId] = useState<string | null>(null);
-
-  function runTool(tool: Tool) {
-    const call = callTool(tool, sampleArgsFor(tool));
-    setTools((prev) =>
-      prev.map((t) =>
-        t.id === tool.id ? { ...t, calls: [call, ...t.calls] } : t,
-      ),
-    );
-  }
 
   return (
     <div className="opr-tool-scoped opr-app-tools">

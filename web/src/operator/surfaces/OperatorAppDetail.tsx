@@ -27,9 +27,10 @@ import {
 } from "../apps/useOperatorApps";
 import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
-import { AppBuilderChat } from "./AppBuilderChat";
+import { ToolsProvider } from "../tools/toolsContext";
 import { AppDataTab } from "./AppDataTab";
 import { AppKnowledgeTab } from "./AppKnowledgeTab";
+import { AppToolsChat } from "./AppToolsChat";
 import { AppToolsTab } from "./AppToolsTab";
 import { AppWorkflowTab } from "./AppWorkflowTab";
 import { ToolIntegrations } from "./ToolIntegrations";
@@ -104,105 +105,105 @@ export function OperatorAppDetail({
   }
 
   return (
-    <div
-      className={`opr-detail-wrap${
-        chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
-      }`}
-    >
-      <div className="opr-surface-wide opr-app-detail">
-        <button type="button" className="opr-back" onClick={onBack}>
-          <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
-          All apps
-        </button>
+    <ToolsProvider appName={app?.name ?? "This app"}>
+      <div
+        className={`opr-detail-wrap${
+          chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
+        }`}
+      >
+        <div className="opr-surface-wide opr-app-detail">
+          <button type="button" className="opr-back" onClick={onBack}>
+            <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
+            All apps
+          </button>
 
-        <div className="opr-detail-head">
-          <span className="opr-tool-emoji" aria-hidden={true}>
-            {app?.icon || "🧩"}
-          </span>
-          <div className="opr-detail-titles">
-            <div className="opr-detail-name">{app?.name ?? "Loading app…"}</div>
-            {app?.summary ? (
-              <p className="opr-tool-summary">{app.summary}</p>
-            ) : null}
-            <div className="opr-tool-meta">
-              <span
-                className={`opr-pill ${failed ? "opr-pill-bad" : "opr-pill-muted"}`}
-              >
-                <span
-                  className={`opr-led ${
-                    failed
-                      ? "opr-led-bad"
-                      : ready
-                        ? "opr-led-live"
-                        : "opr-led-draft"
-                  }`}
-                />
-                {failed ? "Failed" : ready ? "Live" : "Building"}
-              </span>
-              {app ? (
-                <span className="opr-meta-dot">v{app.version}</span>
+          <div className="opr-detail-head">
+            <span className="opr-tool-emoji" aria-hidden={true}>
+              {app?.icon || "🧩"}
+            </span>
+            <div className="opr-detail-titles">
+              <div className="opr-detail-name">
+                {app?.name ?? "Loading app…"}
+              </div>
+              {app?.summary ? (
+                <p className="opr-tool-summary">{app.summary}</p>
               ) : null}
+              <div className="opr-tool-meta">
+                <span
+                  className={`opr-pill ${failed ? "opr-pill-bad" : "opr-pill-muted"}`}
+                >
+                  <span
+                    className={`opr-led ${
+                      failed
+                        ? "opr-led-bad"
+                        : ready
+                          ? "opr-led-live"
+                          : "opr-led-draft"
+                    }`}
+                  />
+                  {failed ? "Failed" : ready ? "Live" : "Building"}
+                </span>
+                {app ? (
+                  <span className="opr-meta-dot">v{app.version}</span>
+                ) : null}
+              </div>
             </div>
+            {ready ? (
+              <div className="opr-detail-actions">
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-sm"
+                  onClick={() => setChatOpen(true)}
+                >
+                  <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Ask AI
+                </button>
+              </div>
+            ) : failed ? (
+              <div className="opr-detail-actions">
+                <button
+                  type="button"
+                  className="opr-btn opr-btn-sm"
+                  onClick={removeAndBack}
+                  disabled={remove.isPending}
+                >
+                  <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
+                  Remove
+                </button>
+              </div>
+            ) : null}
           </div>
-          {ready ? (
-            <div className="opr-detail-actions">
-              <button
-                type="button"
-                className="opr-btn opr-btn-sm"
-                onClick={() => setChatOpen(true)}
-              >
-                <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
-                Ask AI
-              </button>
-            </div>
-          ) : failed ? (
-            <div className="opr-detail-actions">
-              <button
-                type="button"
-                className="opr-btn opr-btn-sm"
-                onClick={removeAndBack}
-                disabled={remove.isPending}
-              >
-                <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
-                Remove
-              </button>
-            </div>
-          ) : null}
+
+          <Tabs tabs={TABS} active={tab} onSelect={setTab} />
+
+          <div
+            role="tabpanel"
+            id={`opr-panel-${tab}`}
+            aria-labelledby={`opr-tab-${tab}`}
+          >
+            <TabBody
+              tab={tab}
+              query={query}
+              failed={failed}
+              onRemove={removeAndBack}
+              removing={remove.isPending}
+            />
+          </div>
         </div>
 
-        <Tabs tabs={TABS} active={tab} onSelect={setTab} />
-
-        <div
-          role="tabpanel"
-          id={`opr-panel-${tab}`}
-          aria-labelledby={`opr-tab-${tab}`}
-        >
-          <TabBody
-            tab={tab}
-            query={query}
-            failed={failed}
-            onRemove={removeAndBack}
-            removing={remove.isPending}
-          />
-        </div>
-      </div>
-
-      {/* Ask AI — floating bubble + docked drawer, openable from any tab. During
+        {/* Ask AI — floating bubble + docked drawer, openable from any tab. During
           the build experience the build chat is already docked, so suppress it. */}
-      {app && ready && !buildWalk ? (
-        <AskAiDock
-          app={app}
-          open={chatOpen}
-          size={panelSize}
-          onOpenChange={setChatOpen}
-          onSizeChange={setPanelSize}
-          onFinish={() => {
-            // The edit republished a new version; refetch so the detail shows it.
-            void query.refetch();
-          }}
-        />
-      ) : null}
-    </div>
+        {app && ready && !buildWalk ? (
+          <AskAiDock
+            app={app}
+            open={chatOpen}
+            size={panelSize}
+            onOpenChange={setChatOpen}
+            onSizeChange={setPanelSize}
+          />
+        ) : null}
+      </div>
+    </ToolsProvider>
   );
 }
 
@@ -214,14 +215,12 @@ function AskAiDock({
   size,
   onOpenChange,
   onSizeChange,
-  onFinish,
 }: {
   app: CustomApp;
   open: boolean;
   size: PanelSize;
   onOpenChange: (open: boolean) => void;
   onSizeChange: (next: (s: PanelSize) => PanelSize) => void;
-  onFinish: () => void;
 }) {
   if (!open) {
     return (
@@ -298,12 +297,7 @@ function AskAiDock({
           </div>
         </div>
         <div className="opr-ask-body">
-          <AppBuilderChat
-            panelMode={true}
-            editApp={{ id: app.id, name: app.name }}
-            onClose={() => onOpenChange(false)}
-            onFinish={onFinish}
-          />
+          <AppToolsChat appName={app.name} />
         </div>
       </aside>
     </>
