@@ -127,7 +127,10 @@ export function createServer(opts: ServerOptions = {}) {
 				// configured (WUPHF_BROKER_URL/TOKEN, TOOL_RUNTIME_MODEL=1), simulated
 				// otherwise. TOOL_CALL_TIMEOUT_MS raises the hard-kill deadline for
 				// hosts running slow capabilities (e.g. nex.browser drives real Chrome).
-				const timeoutMs = Number(process.env.TOOL_CALL_TIMEOUT_MS) || undefined;
+				// Same positive-finite guard as capabilityConfigFromEnv, so the worker
+				// deadline and the capability call bound never diverge on a bad value.
+				const rawTimeoutMs = Number(process.env.TOOL_CALL_TIMEOUT_MS);
+				const timeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? rawTimeoutMs : undefined;
 				return json(
 					await runTool({ ...tool, inputs: rawInputs === undefined ? [] : tool.inputs }, body.args ?? {}, {
 						approved: body.approved === true,

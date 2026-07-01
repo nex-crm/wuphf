@@ -128,17 +128,37 @@ func (b *Broker) handleAppKnowledge(w http.ResponseWriter, r *http.Request, id s
 	// otherwise the per-app knowledge.json file.
 	if !refresh {
 		if gbBacked {
-			if pages, err := b.readAppKnowledgeFromGBrain(ctx, gbClient, id); err == nil && len(pages) > 0 {
+			pages, err := b.readAppKnowledgeFromGBrain(ctx, gbClient, id)
+			switch {
+			case err == nil && len(pages) > 0:
 				writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
 				return
-			}
-			// A genuinely-empty synthesis leaves nothing to read back from gbrain,
-			// so its "already ran" record is the per-app file cache holding an
-			// empty page set (stamped on write below). Without this, every request
-			// for an empty app would re-run the full LLM synthesis.
-			if pages, ok, err := store.ReadAppKnowledge(id); err == nil && ok && len(pages) == 0 {
-				writeJSON(w, http.StatusOK, map[string]any{"pages": []appKnowledgePage{}})
-				return
+			case err != nil:
+				// The brain is UNREACHABLE (dead serve, lock contention, missing
+				// binary) — not empty. Serve the last good synthesis from the
+				// per-app file cache (stamped on every write below) instead of
+				// reporting "no knowledge yet" and burning an LLM pass whose
+				// result could not persist anyway. A reachable-but-empty brain
+				// deliberately skips this: pages deleted from the brain must not
+				// be resurrected from a stale cache.
+				fmt.Fprintf(os.Stderr, "broker: app knowledge gbrain read failed: %v\n", err)
+				if cached, ok, cerr := store.ReadAppKnowledge(id); cerr == nil && ok {
+					if cached == nil {
+						cached = []appKnowledgePage{}
+					}
+					writeJSON(w, http.StatusOK, map[string]any{"pages": cached})
+					return
+				}
+			default:
+				// A genuinely-empty synthesis leaves nothing to read back from
+				// gbrain, so its "already ran" record is the per-app file cache
+				// holding an empty page set (stamped on write below). Without
+				// this, every request for an empty app would re-run the full LLM
+				// synthesis.
+				if cached, ok, cerr := store.ReadAppKnowledge(id); cerr == nil && ok && len(cached) == 0 {
+					writeJSON(w, http.StatusOK, map[string]any{"pages": []appKnowledgePage{}})
+					return
+				}
 			}
 		} else if pages, ok, err := store.ReadAppKnowledge(id); err == nil && ok {
 			writeJSON(w, http.StatusOK, map[string]any{"pages": pages})
