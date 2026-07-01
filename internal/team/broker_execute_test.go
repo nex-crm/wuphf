@@ -74,6 +74,31 @@ func TestDecodeExecuteBrowserRequest(t *testing.T) {
 	}
 }
 
+// TestDecodeExecuteBrowserRequestCountsRunesNotBytes proves the 2000 limit is a
+// CHARACTER limit: a multibyte goal that is under 2000 runes but over 2000 bytes
+// is accepted, and a goal over 2000 runes is rejected. Counting bytes would reject
+// a legitimate non-ASCII goal (e.g. CJK) that fits the contract.
+func TestDecodeExecuteBrowserRequestCountsRunesNotBytes(t *testing.T) {
+	// 1500 CJK runes = 4500 UTF-8 bytes: over the byte limit, under the char limit.
+	underLimit := strings.Repeat("あ", 1500)
+	body := `{"goal":"` + underLimit + `"}`
+	r := httptest.NewRequest(http.MethodPost, "/execute/browser", strings.NewReader(body))
+	req, err := decodeExecuteBrowserRequest(r)
+	if err != nil {
+		t.Fatalf("a 1500-char multibyte goal must be accepted, got: %v", err)
+	}
+	if req.Goal != underLimit {
+		t.Fatal("multibyte goal was altered")
+	}
+
+	// 2001 runes must be rejected.
+	overLimit := strings.Repeat("あ", 2001)
+	r = httptest.NewRequest(http.MethodPost, "/execute/browser", strings.NewReader(`{"goal":"`+overLimit+`"}`))
+	if _, err := decodeExecuteBrowserRequest(r); err == nil {
+		t.Fatal("a 2001-char goal must be rejected")
+	}
+}
+
 // TestHandleExecuteBrowserStreams drives the handler with a FAKE runner (a tiny
 // shell script emitting JSON lines) and asserts each line is forwarded as an SSE
 // data frame followed by the closing boundary. This is the end-to-end proxy

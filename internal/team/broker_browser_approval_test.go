@@ -126,6 +126,34 @@ func TestBrowserPendingAndApproveEndpoints(t *testing.T) {
 	}
 }
 
+// TestBrowserApproveEndpointRejectsMalformedDecision proves a decision that is
+// neither "approve" nor "deny" is a 400 and does NOT consume/resolve the pending
+// ask: a malformed request must fail fast, not silently deny (and eat) the run.
+func TestBrowserApproveEndpointRejectsMalformedDecision(t *testing.T) {
+	const app = "app_malformed"
+	b := &Broker{}
+	got := make(chan bool, 1)
+	go func() { got <- browserApprovals.ask(context.Background(), app, browserApprovalControl, "x") }()
+	p := waitForPending(t, app, 1)
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"approval_id":"` + p[0].ID + `","decision":"maybe"}`)
+	req := httptest.NewRequest(http.MethodPost, "/operator/apps/"+app+"/workflow/browser/approve", body)
+	b.handleOperatorAppWorkflow(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed decision should be 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	// The ask must still be pending — a malformed request cannot consume it.
+	if len(browserApprovals.pendingFor(app)) != 1 {
+		t.Fatal("a malformed decision must leave the ask pending")
+	}
+	// A valid deny now resolves it (and drains the goroutine).
+	browserApprovals.resolve(p[0].ID, false)
+	if allow := <-got; allow {
+		t.Fatal("ask should deny after the follow-up deny")
+	}
+}
+
 // TestBrowserApprovalResolveForAppScopes proves an approval raised by one app
 // cannot be resolved through another app's endpoint: resolveForApp refuses a
 // mismatched app id (leaving the ask pending) and only the owning app resolves.

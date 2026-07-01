@@ -101,15 +101,26 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
     null,
   );
 
+  // Read onClose from a ref so the focus-trap effect can stay mounted for the
+  // life of the modal. OperatorApp passes a fresh onClose on every render; if
+  // the trap depended on it directly, each parent rerender would tear down and
+  // reattach the keydown handler and re-run the focus-restore cleanup, which
+  // could snap focus away mid-interaction.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   // a11y: close on Escape, focus the dialog on open, restore focus on close,
   // and keep Tab focus inside the dialog (a minimal focus trap). Mirrors
-  // CallModal so keyboard-only operators can dismiss and stay scoped.
+  // CallModal so keyboard-only operators can dismiss and stay scoped. Mounts
+  // once (empty deps) and reads onClose from the ref, so it never reattaches.
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -132,7 +143,7 @@ export function RealCallModal({ onClose, onBuild, tool }: RealCallModalProps) {
       document.removeEventListener("keydown", onKey);
       prev?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   // Start the realtime call exactly once on mount. `isModify`/`tool` are read at
   // start and must not restart a live call, so the empty dep list is deliberate.

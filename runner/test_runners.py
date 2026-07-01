@@ -319,6 +319,93 @@ class TestSendGating(unittest.TestCase):
         self.assertEqual(len(presses), 0)  # Enter submit gated + denied → not fired
         self.assertTrue(any(e.get("skipped") and e.get("tool") == "press_key" for e in events if e.get("type") == "action"))
 
+    def test_run_gates_type_pre_click_on_send_like_target(self):
+        # Regression: type_text pre-clicks its target before typing. If the model
+        # points type_text at a send-like control ("Submit"), that pre-click would
+        # fire the send before approval. It must be gated like a Send click.
+        seq = [
+            {"choices": [{"message": {"tool_calls": [{"id": "1", "function": {"name": "type_text", "arguments": '{"i":6,"text":"hi","reason":"draft"}'}}]}}]},
+            {"choices": [{"message": {"tool_calls": [{"id": "2", "function": {"name": "done", "arguments": '{"result":"ok"}'}}]}}]},
+        ]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=([{"i": 6, "role": "Button", "label": "Submit"}], "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", side_effect=seq),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.run("submit it", "Google Chrome", "key")
+        touched = [c for c in cua_mock.call_args_list if c.args and c.args[0] in ("click", "type_text")]
+        self.assertEqual(len(touched), 0)  # pre-click for the send-like type was gated
+        self.assertTrue(any(e.get("skipped") and e.get("tool") == "type_text" for e in events if e.get("type") == "action"))
+
+    def test_replay_gates_type_pre_click_on_send_like_target(self):
+        # Regression: a replayed type step matching a send-like element still does
+        # a pre-click. Gate it — a replayed type must not fire a Send unapproved.
+        steps = [{"action": "type", "role": "Button", "label": "Submit", "text": "hi"}]
+        elements = [{"i": 9, "role": "Button", "label": "Submit"}]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        plan_mock.assert_not_called()  # matched deterministically, no heal
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # send-like pre-click gated + denied
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
+    def test_healed_type_pre_click_on_send_like_target_is_gated(self):
+        # Regression: a healed type_text can land on a send-like element too. Its
+        # pre-click must be gated so healing never becomes a way to send unapproved.
+        steps = [{"action": "type", "role": "Button", "label": "Gone", "text": "hi"}]
+        elements = [{"i": 9, "role": "Button", "label": "Submit"}]
+        heal_resp = {"choices": [{"message": {"tool_calls": [{"function": {"name": "type_text", "arguments": '{"i":9,"text":"hi","reason":"x"}'}}]}}]}
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", return_value=heal_resp),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # healed send-like pre-click gated + denied
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
+    def test_replay_rejects_unsupported_action_before_clicking(self):
+        # Regression: an unsupported replay action (e.g. "scroll") would otherwise
+        # match an element and fire a click, bypassing the send-approval gate. It
+        # must be rejected up front — before the snapshot/element-match/click.
+        steps = [{"action": "scroll", "role": "Button", "label": "Submit"}]
+        elements = [{"i": 9, "role": "Button", "label": "Submit"}]
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")) as snap_mock,
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval") as approval,
+            mock.patch.object(cua_exec, "plan") as plan_mock,
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # unsupported action never reached a click
+        snap_mock.assert_not_called()  # rejected before element-match
+        approval.assert_not_called()
+        plan_mock.assert_not_called()
+        self.assertTrue(
+            any(e.get("skipped") and "unsupported" in e.get("label", "").lower() for e in events if e.get("type") == "action")
+        )
+
 
 class TestObserveTickResilience(unittest.TestCase):
     def test_bad_tick_does_not_kill_capture(self):

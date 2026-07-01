@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nex-crm/wuphf/internal/config"
 )
@@ -155,7 +156,7 @@ func decodeExecuteBrowserRequest(r *http.Request) (executeBrowserRequest, error)
 	if req.Goal == "" {
 		return req, fmt.Errorf("missing goal")
 	}
-	if len(req.Goal) > 2000 {
+	if utf8.RuneCountInString(req.Goal) > 2000 {
 		return req, fmt.Errorf("goal too long (max 2000 chars)")
 	}
 	req.App = strings.TrimSpace(req.App)

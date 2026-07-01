@@ -39,7 +39,7 @@ func TestBindAndRunBrowserStepE2E(t *testing.T) {
 		t.Fatalf("browser step lost its goal: %q", browser.Template)
 	}
 	// A frozen run tolerates the browser step (marker, no error).
-	out, err := executeWorkflowBrowserStep(context.Background(), *browser, false)
+	out, err := executeWorkflowBrowserStep(context.Background(), *browser, nil, false)
 	if err != nil {
 		t.Fatalf("run browser step: %v", err)
 	}
@@ -105,12 +105,51 @@ func TestResolverBrowserStep(t *testing.T) {
 }
 
 func TestExecuteWorkflowBrowserStepEmitsGoal(t *testing.T) {
-	out, err := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "do the thing"}, false)
+	out, err := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "do the thing"}, nil, false)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if out["type"] != "browser" || out["goal"] != "do the thing" || out["runs_in_browser"] != true {
 		t.Fatalf("browser step output = %#v", out)
+	}
+}
+
+// TestExecuteWorkflowBrowserStepRendersTemplatedGoal proves a browser step's
+// templated goal is resolved against the workflow scope (like every other step
+// type) BEFORE cua sees it, so a placeholder never reaches the browser raw.
+func TestExecuteWorkflowBrowserStepRendersTemplatedGoal(t *testing.T) {
+	prev := BrowserStepRunner
+	defer func() { BrowserStepRunner = prev }()
+
+	var gotGoal string
+	BrowserStepRunner = func(_ context.Context, goal string) (map[string]any, error) {
+		gotGoal = goal
+		return map[string]any{"result": "ok"}, nil
+	}
+
+	scope := map[string]any{"inputs": map[string]any{"vendor": "Acme"}}
+	// The step-normalized template form ({{ .inputs.* }}); the raw workflow shorthand
+	// {{ inputs.vendor }} is rewritten to this during decode.
+	step := workflowStep{Type: "browser", Template: "Submit the refund in the {{ .inputs.vendor }} portal"}
+	out, err := executeWorkflowBrowserStep(context.Background(), step, scope, false)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotGoal != "Submit the refund in the Acme portal" {
+		t.Fatalf("templated goal not rendered before driving: %q", gotGoal)
+	}
+	if out["goal"] != "Submit the refund in the Acme portal" {
+		t.Fatalf("rendered goal not surfaced in output: %#v", out)
+	}
+
+	// Description is the fallback goal and is rendered the same way.
+	gotGoal = ""
+	descStep := workflowStep{Type: "browser", Description: "Email {{ .inputs.vendor }}"}
+	if _, err := executeWorkflowBrowserStep(context.Background(), descStep, scope, false); err != nil {
+		t.Fatalf("execute (description fallback): %v", err)
+	}
+	if gotGoal != "Email Acme" {
+		t.Fatalf("description fallback not rendered: %q", gotGoal)
 	}
 }
 
@@ -124,7 +163,7 @@ func TestExecuteWorkflowBrowserStepDrivesViaRunner(t *testing.T) {
 		return map[string]any{"actions_count": 2, "result": "did it"}, nil
 	}
 	// A REAL (non-dry) run drives the runner and merges its outcome.
-	out, err := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "email the digest"}, false)
+	out, err := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "email the digest"}, nil, false)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -137,7 +176,7 @@ func TestExecuteWorkflowBrowserStepDrivesViaRunner(t *testing.T) {
 
 	// A DRY run NEVER drives the browser (preview only).
 	gotGoal = ""
-	dryOut, _ := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "x"}, true)
+	dryOut, _ := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "x"}, nil, true)
 	if gotGoal != "" {
 		t.Fatal("dry run must not drive the browser")
 	}

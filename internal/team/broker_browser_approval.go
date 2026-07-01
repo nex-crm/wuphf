@@ -161,9 +161,16 @@ func (b *Broker) getOperatorAppBrowserPending(w http.ResponseWriter, _ *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"pending": browserApprovals.pendingFor(appID)})
 }
 
+// The two decision literals the FE (resolveBrowserApproval) ever sends. Kept as a
+// closed set so a malformed decision fails fast instead of silently denying.
+const (
+	browserDecisionApprove = "approve" // resume the step (drive / send)
+	browserDecisionDeny    = "deny"    // skip the step
+)
+
 type browserApproveRequest struct {
 	ApprovalID string `json:"approval_id"`
-	// "approve" resumes the step (drive / send); anything else skips it.
+	// One of browserDecisionApprove / browserDecisionDeny; anything else is a 400.
 	Decision string `json:"decision"`
 }
 
@@ -180,9 +187,15 @@ func (b *Broker) resolveOperatorAppBrowserApproval(w http.ResponseWriter, r *htt
 		http.Error(w, "missing approval_id", http.StatusBadRequest)
 		return
 	}
+	// Validate the decision BEFORE resolving: a malformed value must fail fast with
+	// a 400 rather than fall through as a silent deny that consumes the pending ask.
+	if req.Decision != browserDecisionApprove && req.Decision != browserDecisionDeny {
+		http.Error(w, "invalid decision", http.StatusBadRequest)
+		return
+	}
 	// Scope the resolve to the app in the URL: an approval id from another app
 	// must not be resolvable through this app's endpoint.
-	if !browserApprovals.resolveForApp(appID, req.ApprovalID, req.Decision == "approve") {
+	if !browserApprovals.resolveForApp(appID, req.ApprovalID, req.Decision == browserDecisionApprove) {
 		http.Error(w, "approval not found", http.StatusNotFound)
 		return
 	}

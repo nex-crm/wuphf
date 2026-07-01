@@ -286,6 +286,26 @@ def run(goal, app_name, api_key, dry_run=False, window_id_arg=None):
             tgt = next((e for e in elements if e["i"] == a["i"]), {})
             label = f"Type “{a['text']}” into [{a['i']}]"
             if not dry_run:
+                # type_text pre-clicks its target first — if that target is a
+                # send-like control the click would fire before approval, so gate
+                # it exactly like a click before touching the app.
+                if needs_approval(tgt.get("label", "")) and not await_approval(tgt.get("label", "")):
+                    emit(
+                        {
+                            "type": "action",
+                            "label": f"Skipped (not approved): {tgt.get('label', '')}",
+                            "tool": "type_text",
+                            "skipped": True,
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": "skipped: external send not approved by the operator",
+                        }
+                    )
+                    continue
                 cua("click", {"pid": pid, "window_id": window_id, "element_index": a["i"]})
                 cua(
                     "type_text",
@@ -459,6 +479,20 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
                     typed_into_field = False
             continue
 
+        # Only click/type replay steps reach the element-match + pre-click below.
+        # Any other recorded action would otherwise still match an element and
+        # fire a click, bypassing the send-approval gate — reject it up front.
+        if action not in ("click", "type"):
+            emit(
+                {
+                    "type": "action",
+                    "label": f"Skipped (unsupported action): {action}",
+                    "tool": "skip",
+                    "skipped": True,
+                }
+            )
+            continue
+
         elements, err = snapshot(pid, window_id)
         if err:
             emit({"type": "error", "message": f"snapshot: {err}"})
@@ -466,13 +500,15 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
         el = find_element(elements, step.get("role"), step.get("label"))
 
         if el is not None:
-            # A replayed external send still pauses for approval.
-            if action == "click" and needs_approval(step.get("label", "")) and not await_approval(step.get("label", "")):
+            # A replayed external send still pauses for approval. Both click and
+            # type do a pre-click on this element, so gate either when the target
+            # is send-like — a replayed type must not fire a Send before approval.
+            if action in ("click", "type") and needs_approval(step.get("label", "")) and not await_approval(step.get("label", "")):
                 emit(
                     {
                         "type": "action",
                         "label": f"Skipped (not approved): {step.get('label', '')}",
-                        "tool": "click",
+                        "tool": action,
                         "skipped": True,
                     }
                 )
@@ -508,13 +544,14 @@ def replay(steps, goal, app_name, api_key, window_id_arg=None):
         tgt = next((e for e in elements if e["i"] == ha.get("i")), {})
         if hname in ("click", "type_text") and "i" in ha:
             # A HEALED action can land on a send too — gate it just like a matched
-            # one, so healing never becomes a way to send without approval.
-            if hname == "click" and needs_approval(tgt.get("label", "")) and not await_approval(tgt.get("label", "")):
+            # one, so healing never becomes a way to send without approval. Both
+            # click and type_text pre-click this element, so gate either kind.
+            if needs_approval(tgt.get("label", "")) and not await_approval(tgt.get("label", "")):
                 emit(
                     {
                         "type": "action",
                         "label": f"Skipped (not approved): {tgt.get('label', '')}",
-                        "tool": "click",
+                        "tool": "type" if hname == "type_text" else "click",
                         "skipped": True,
                     }
                 )

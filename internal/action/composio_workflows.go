@@ -437,7 +437,7 @@ func (c *ComposioREST) executeWorkflowStep(ctx context.Context, step workflowSte
 	case "nex_insights":
 		return executeWorkflowNexInsightsStep(step, scope)
 	case "browser":
-		return executeWorkflowBrowserStep(ctx, step, workflowDryRun)
+		return executeWorkflowBrowserStep(ctx, step, scope, workflowDryRun)
 	default:
 		return nil, fmt.Errorf("unsupported workflow step type %q", step.Type)
 	}
@@ -454,10 +454,23 @@ var BrowserStepRunner func(ctx context.Context, goal string) (map[string]any, er
 // — its goal is driven in the browser by cua (via BrowserStepRunner). A DRY run
 // never drives (preview only) and an unwired runner degrades to a stable marker,
 // so a frozen run never breaks on a browser step and later steps can reference it.
-func executeWorkflowBrowserStep(ctx context.Context, step workflowStep, dryRun bool) (map[string]any, error) {
-	goal := strings.TrimSpace(step.Template)
+//
+// The goal is a template rendered against the workflow scope with the SAME helper
+// every other step type uses, so a templated goal ({{ inputs.* }}, {{ steps.* }})
+// resolves to real values before cua sees it instead of driving on raw
+// placeholders. Template wins; Description is the fallback goal.
+func executeWorkflowBrowserStep(ctx context.Context, step workflowStep, scope map[string]any, dryRun bool) (map[string]any, error) {
+	goal, err := renderWorkflowTemplate(step.Template, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render browser goal: %w", err)
+	}
+	goal = strings.TrimSpace(goal)
 	if goal == "" {
-		goal = strings.TrimSpace(step.Description)
+		fallback, err := renderWorkflowTemplate(step.Description, scope)
+		if err != nil {
+			return nil, fmt.Errorf("render browser goal: %w", err)
+		}
+		goal = strings.TrimSpace(fallback)
 	}
 	if dryRun || BrowserStepRunner == nil {
 		return map[string]any{"type": "browser", "goal": goal, "runs_in_browser": true, "dry_run": dryRun}, nil

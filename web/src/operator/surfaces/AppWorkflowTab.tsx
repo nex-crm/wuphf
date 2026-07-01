@@ -127,7 +127,9 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
   // chat asks so the operator can allow/skip. Idle otherwise (no polling).
   const approvalsQuery = useQuery({
     queryKey: ["operator-app-browser-approvals", appId],
-    queryFn: () => getBrowserApprovals(appId),
+    // Thread React Query's signal so a superseded poll is aborted and a late
+    // response can't repopulate stale cards during the next run.
+    queryFn: ({ signal }) => getBrowserApprovals(appId, signal),
     enabled: runLive.isPending,
     refetchInterval: runLive.isPending ? 1200 : false,
   });
