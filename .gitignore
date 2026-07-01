@@ -107,3 +107,4 @@ wuphf-dev
 # Operator orchestration spikes (LangGraph/deepagents/Inngest) — scratch only, not adopted
 /orchestrator/
 /spikes/
+runner/__pycache__/

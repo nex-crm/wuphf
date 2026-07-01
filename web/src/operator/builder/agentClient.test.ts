@@ -92,24 +92,40 @@ describe("buildPlanSmart fallback boundary", () => {
     const spec =
       'event: spec\ndata: {"spec":{"name":"X","tool_id":"inbound-routing","steps":[]}}\n\n';
     let buildBody: unknown = null;
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/integrations")) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            providers: [],
-            items: [
-              { provider: "composio", platform: "hubspot", name: "HubSpot", state: "connected", can_connect: false, can_disconnect: true },
-              { provider: "composio", platform: "slack", name: "Slack", state: "disconnected", can_connect: true, can_disconnect: false },
-            ],
-          }),
-        } as unknown as Response;
-      }
-      buildBody = init?.body ? JSON.parse(String(init.body)) : null;
-      return streamResponse(spec);
-    }) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/integrations")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              providers: [],
+              items: [
+                {
+                  provider: "composio",
+                  platform: "hubspot",
+                  name: "HubSpot",
+                  state: "connected",
+                  can_connect: false,
+                  can_disconnect: true,
+                },
+                {
+                  provider: "composio",
+                  platform: "slack",
+                  name: "Slack",
+                  state: "disconnected",
+                  can_connect: true,
+                  can_disconnect: false,
+                },
+              ],
+            }),
+          } as unknown as Response;
+        }
+        buildBody = init?.body ? JSON.parse(String(init.body)) : null;
+        return streamResponse(spec);
+      },
+    ) as unknown as typeof fetch;
 
     await buildPlanSmart("route hot demos");
 

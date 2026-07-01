@@ -44,10 +44,7 @@ export function ScorePill({ score }: { score: number | null }) {
 
 // ── Request status pill ─────────────────────────────────────────────────
 
-const REQUEST_STATUS: Record<
-  RequestStatus,
-  { label: string; tone: string }
-> = {
+const REQUEST_STATUS: Record<RequestStatus, { label: string; tone: string }> = {
   new: { label: "New", tone: "opr-pill-muted" },
   scored: { label: "Scored", tone: "opr-pill-info" },
   routed: { label: "Routed", tone: "opr-pill-good" },
@@ -62,10 +59,7 @@ export function RequestStatusPill({ status }: { status: RequestStatus }) {
 
 // ── Tool status (LED + label) ───────────────────────────────────────────
 
-const TOOL_STATUS: Record<
-  ToolStatus,
-  { label: string; led: string }
-> = {
+const TOOL_STATUS: Record<ToolStatus, { label: string; led: string }> = {
   enabled: { label: "Enabled", led: "opr-led-live" },
   disabled: { label: "Disabled", led: "opr-led-draft" },
   draft: { label: "Draft", led: "opr-led-draft" },
@@ -84,10 +78,7 @@ export function ToolStatusBadge({ status }: { status: ToolStatus }) {
 
 // ── Integration status pill ─────────────────────────────────────────────
 
-const INT_STATUS: Record<
-  IntegrationStatus,
-  { label: string; tone: string }
-> = {
+const INT_STATUS: Record<IntegrationStatus, { label: string; tone: string }> = {
   connected: { label: "Connected", tone: "opr-pill-good" },
   available: { label: "Available", tone: "opr-pill-muted" },
   "needs-attention": { label: "Needs attention", tone: "opr-pill-warn" },

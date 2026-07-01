@@ -276,6 +276,12 @@ func (c *ComposioREST) decodeWorkflowDefinition(definition json.RawMessage) (com
 				return spec, fmt.Errorf("workflow step %q is missing query_template", spec.Steps[i].ID)
 			}
 		case "nex_insights":
+		case "browser":
+			// No Composio action — the browser step carries a natural-language
+			// goal (in template or description) that cua runs.
+			if strings.TrimSpace(spec.Steps[i].Template) == "" && strings.TrimSpace(spec.Steps[i].Description) == "" {
+				return spec, fmt.Errorf("workflow step %q (browser) is missing a goal", spec.Steps[i].ID)
+			}
 		default:
 			return spec, fmt.Errorf("unsupported workflow step type %q", spec.Steps[i].Type)
 		}
@@ -430,9 +436,55 @@ func (c *ComposioREST) executeWorkflowStep(ctx context.Context, step workflowSte
 		return executeWorkflowNexAskStep(step, scope)
 	case "nex_insights":
 		return executeWorkflowNexInsightsStep(step, scope)
+	case "browser":
+		return executeWorkflowBrowserStep(ctx, step, scope, workflowDryRun)
 	default:
 		return nil, fmt.Errorf("unsupported workflow step type %q", step.Type)
 	}
+}
+
+// BrowserStepRunner drives the browser (via cua) to accomplish a browser step's
+// goal and returns the outcome when the broker sets it. It is a hook
+// (not a direct dependency) so the action package never imports the broker/cua;
+// the broker wires a cua-backed, chat-gated implementation in. Left nil in tests
+// and when unwired, so a browser step degrades to a deterministic marker.
+var BrowserStepRunner func(ctx context.Context, goal string) (map[string]any, error)
+
+// executeWorkflowBrowserStep runs a browser step. The step has NO Composio action
+// — its goal is driven in the browser by cua (via BrowserStepRunner). A DRY run
+// never drives (preview only) and an unwired runner degrades to a stable marker,
+// so a frozen run never breaks on a browser step and later steps can reference it.
+//
+// The goal is a template rendered against the workflow scope with the SAME helper
+// every other step type uses, so a templated goal ({{ inputs.* }}, {{ steps.* }})
+// resolves to real values before cua sees it instead of driving on raw
+// placeholders. Template wins; Description is the fallback goal.
+func executeWorkflowBrowserStep(ctx context.Context, step workflowStep, scope map[string]any, dryRun bool) (map[string]any, error) {
+	goal, err := renderWorkflowTemplate(step.Template, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render browser goal: %w", err)
+	}
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		fallback, err := renderWorkflowTemplate(step.Description, scope)
+		if err != nil {
+			return nil, fmt.Errorf("render browser goal: %w", err)
+		}
+		goal = strings.TrimSpace(fallback)
+	}
+	if dryRun || BrowserStepRunner == nil {
+		return map[string]any{"type": "browser", "goal": goal, "runs_in_browser": true, "dry_run": dryRun}, nil
+	}
+	res, err := BrowserStepRunner(ctx, goal)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		res = map[string]any{}
+	}
+	res["type"] = "browser"
+	res["goal"] = goal
+	return res, nil
 }
 
 func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workflowStep, scope map[string]any, workflowDryRun bool) (map[string]any, error) {

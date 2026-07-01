@@ -80,6 +80,18 @@ func (b *Broker) handleOperatorAppWorkflow(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		b.getOperatorAppWorkflowConnections(w, r, appID)
+	case "workflow/browser/pending":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.getOperatorAppBrowserPending(w, r, appID)
+	case "workflow/browser/approve":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.resolveOperatorAppBrowserApproval(w, r, appID)
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -300,7 +312,11 @@ func (b *Broker) runOperatorAppWorkflow(w http.ResponseWriter, r *http.Request, 
 	if body.DryRun != nil {
 		dryRun = *body.DryRun
 	}
-	execution, err := prov.ExecuteWorkflow(r.Context(), action.WorkflowExecuteRequest{
+	// Carry the app id so a `browser` step knows which app's chat to ask for
+	// browser-control + send approval (slice 3b). A live (non-dry) run may PAUSE
+	// on that ask; the request stays open until the operator replies in chat.
+	ctx := context.WithValue(r.Context(), browserStepAppIDKey, appID)
+	execution, err := prov.ExecuteWorkflow(ctx, action.WorkflowExecuteRequest{
 		KeyOrPath: key,
 		Inputs:    inputs,
 		DryRun:    dryRun,
@@ -335,12 +351,13 @@ func (b *Broker) operatorWorkflowProvider(w http.ResponseWriter) (action.Provide
 const workflowAuthorSystemPrompt = `You design a DETERMINISTIC automation that runs an internal app on a schedule.
 Return ONLY a JSON object, no prose: {"steps":[{"id","kind","title","detail","integration","gated"}]}.
 Rules:
-- kind is one of: trigger, enrich, ai, decision, action, branch.
+- kind is one of: trigger, enrich, ai, decision, action, branch, browser.
 - The FIRST step is exactly one "trigger" (the schedule).
 - "enrich" reads data; "ai" summarizes/analyzes; "action" sends or writes to an external system; "decision"/"branch" gate on a condition.
 - integration is a lowercase platform slug (e.g. "gmail", "slack") ONLY for a step that calls that external system, else "".
 - gated is true for any step that SENDS or WRITES to an external system.
 - Use ONLY the data sources and integrations the app actually has (listed below). Do NOT invent capabilities.
+- kind "browser" — for a step that must use an external system the app has NO integration for: set integration to "" and put the exact goal in "detail". Nex drives the browser to do it. Set gated true if it sends/writes.
 - Tailor the steps to THIS app's specific purpose. Keep it tight: 3 to 7 steps.`
 
 // authoredAppWorkflowPlan asks the model to design a workflow for THIS app from
@@ -414,14 +431,20 @@ func parseAuthoredWorkflowPlan(raw string, app CustomApp, caps AppCapabilities) 
 			id = fmt.Sprintf("s%d", i)
 		}
 		integ := strings.ToLower(strings.TrimSpace(s.Integration))
-		// Clamp a hallucinated integration to nothing (it becomes a narration step
-		// rather than a call to a system the app does not actually use).
+		kind := normalizeAuthoredKind(s.Kind)
+		// No integration for what this step needs → drive the browser instead of
+		// pretending the API exists ("no integration available → browser step").
+		// Only convert steps that actually touch an external system (action/send);
+		// a stray integration on a read becomes a plain narration as before.
 		if integ != "" && !known[integ] {
+			if kind == "action" || s.Gated {
+				kind = "browser"
+			}
 			integ = ""
 		}
 		steps = append(steps, action.PlanStep{
 			ID:          id,
-			Kind:        normalizeAuthoredKind(s.Kind),
+			Kind:        kind,
 			Title:       strings.TrimSpace(s.Title),
 			Detail:      strings.TrimSpace(s.Detail),
 			Integration: integ,
@@ -443,7 +466,7 @@ func parseAuthoredWorkflowPlan(raw string, app CustomApp, caps AppCapabilities) 
 
 func normalizeAuthoredKind(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "trigger", "enrich", "ai", "decision", "action", "branch":
+	case "trigger", "enrich", "ai", "decision", "action", "branch", "browser":
 		return strings.ToLower(strings.TrimSpace(raw))
 	case "read", "fetch", "load":
 		return "enrich"
