@@ -152,6 +152,7 @@ function Compiling({
 }
 
 function CompiledWorkflow({ wf, appId }: { wf: AppWorkflow; appId: string }) {
+  const qc = useQueryClient();
   const steps = wf.steps ?? [];
   // Which Slack channel delivery targets — configured inline on the delivery
   // node itself, not as a separate block. Running/scheduling is done from the
@@ -165,6 +166,10 @@ function CompiledWorkflow({ wf, appId }: { wf: AppWorkflow; appId: string }) {
   const hasBrowserStep = steps.some((s) => s.type === "browser");
   const runLive = useMutation({
     mutationFn: () => runAppWorkflow(appId, false, {}),
+    // Drop any approval cards left cached from a previous run so stale asks
+    // can't flash before the first poll of the new run returns.
+    onMutate: () =>
+      qc.setQueryData(["operator-app-browser-approvals", appId], []),
     onSuccess: () => showNotice("Live run finished.", "success"),
     onError: (err) =>
       showNotice(
@@ -174,7 +179,9 @@ function CompiledWorkflow({ wf, appId }: { wf: AppWorkflow; appId: string }) {
   });
   const approvalsQuery = useQuery({
     queryKey: ["operator-app-browser-approvals", appId],
-    queryFn: () => getBrowserApprovals(appId),
+    // Thread React Query's signal so a superseded poll is aborted and a late
+    // response can't repopulate stale cards during the next run.
+    queryFn: ({ signal }) => getBrowserApprovals(appId, signal),
     enabled: runLive.isPending,
     refetchInterval: runLive.isPending ? 1200 : false,
   });
@@ -187,6 +194,13 @@ function CompiledWorkflow({ wf, appId }: { wf: AppWorkflow; appId: string }) {
       decision: "approve" | "deny";
     }) => resolveBrowserApproval(appId, id, decision),
     onSuccess: () => approvalsQuery.refetch(),
+    onError: (err) =>
+      showNotice(
+        err instanceof Error
+          ? err.message
+          : "Could not update this browser approval.",
+        "error",
+      ),
   });
   const approvals: BrowserApproval[] = approvalsQuery.data ?? [];
 
