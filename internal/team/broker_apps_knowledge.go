@@ -153,17 +153,18 @@ func (b *Broker) synthesizeAppKnowledge(ctx context.Context, id string) ([]appKn
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("decode synthesis: %w", err)
 	}
-	pages := sanitizeKnowledgePages(parsed.Pages, sources)
-	if len(pages) == 0 {
-		return nil, fmt.Errorf("synthesis produced no usable pages")
-	}
-	return pages, nil
+	// Empty is a VALID outcome: "if there is nothing worth writing, don't write
+	// it." Only a provider/parse failure (above) is an error. An empty result is
+	// cached like any other, so we don't re-synthesize a genuinely-empty app.
+	return sanitizeKnowledgePages(parsed.Pages, sources), nil
 }
 
-// gatherKnowledgeSources builds the real source pack: the app's spec, its data
-// model, its source, the office roster, and up to a few workspace brain pages.
-// Only real artifacts — nothing invented. Snippets are bounded so the prompt
-// stays within provider limits.
+// gatherKnowledgeSources builds the real source pack for USER-FACING knowledge.
+// Knowledge is operating context that helps someone USE the app — the data
+// source, unit/display preferences, domain rules, notable choices, limitations —
+// NOT how the app is built. So the source is the app's BRIEF (what it is for and
+// the choices in it), never its code, data model, or the office roster. Only a
+// real artifact; nothing invented.
 func (b *Broker) gatherKnowledgeSources(id string) []knowledgeSource {
 	store := b.appStore()
 	var sources []knowledgeSource
@@ -177,66 +178,36 @@ func (b *Broker) gatherKnowledgeSources(id string) []knowledgeSource {
 			Kind:    kind,
 			Title:   title,
 			Detail:  detail,
-			Snippet: clampRunes(snippet, 900),
+			Snippet: clampRunes(snippet, 1200),
 		})
 	}
 
-	app, _, err := store.Get(id)
-	if err == nil {
-		spec := strings.TrimSpace(strings.Join([]string{app.Summary, app.Description}, "\n"))
-		add("document", fmt.Sprintf("App: %s", app.Name), "The app's specification", spec)
+	if app, _, err := store.Get(id); err == nil {
+		brief := strings.TrimSpace(strings.Join([]string{app.Summary, app.Description}, "\n"))
+		add("document", fmt.Sprintf("%s — app brief", app.Name), "What this app is for and the choices in it", brief)
 	}
 
-	if tables, err := store.AppDBTables(id); err == nil {
-		for _, t := range tables {
-			cols := make([]string, 0, len(t.Columns))
-			for _, c := range t.Columns {
-				cols = append(cols, fmt.Sprintf("%s (%s)", c.Name, c.Type))
-			}
-			body := fmt.Sprintf("Columns: %s. %d row(s).", strings.Join(cols, ", "), len(t.Rows))
-			if len(t.Rows) > 0 {
-				if sample, err := json.Marshal(t.Rows[0]); err == nil {
-					body += " Example row: " + string(sample)
-				}
-			}
-			add("document", fmt.Sprintf("Data model: %s", t.Name), "A table in the app's database", body)
-		}
-	}
-
-	if src, err := store.Source(id); err == nil {
-		if code := strings.TrimSpace(src["src/App.tsx"]); code != "" {
-			add("document", "App logic (App.tsx)", "The app's source code", code)
-		}
-	}
-
-	if members := b.OfficeMembers(); len(members) > 0 {
-		lines := make([]string, 0, len(members))
-		for _, m := range members {
-			role := strings.TrimSpace(m.Role)
-			if role == "" {
-				role = "team member"
-			}
-			lines = append(lines, fmt.Sprintf("%s — %s", m.Name, role))
-		}
-		add("roster", "Office roster", "The team that runs this workspace", strings.Join(lines, "; "))
-	}
-
-	// TODO: also draw on the workspace brain (wiki) as sources once the two wiki
-	// backends (markdown worker vs gbrain) expose a single read path. For now the
-	// app's own artifacts are the grounded, guaranteed-real corpus.
+	// Deliberately NOT sourcing the code, data model, or roster: those describe
+	// how the app was built, which is not knowledge the user needs to operate it.
 	return sources
 }
 
 func buildKnowledgePrompt(sources []knowledgeSource) (system, user string) {
 	system = strings.TrimSpace(`
-You are the workspace brain. You write Wikipedia-style knowledge pages about an app and what the workspace knows that is relevant to it. Every factual claim MUST be grounded in one of the numbered SOURCES and carry a citation.
+You maintain a short KNOWLEDGE BASE that helps a user OPERATE an app. It captures only context that is genuinely useful for USING the app day to day — never how the app was built.
 
-Rules:
-- Write flowing, encyclopedic prose — calm, factual, third person. No marketing.
-- Put a citation marker [[n]] immediately after each claim, where n is the SOURCE number that supports it. Only cite sources that genuinely support the claim.
-- Do NOT invent facts, sources, numbers, people, or dates. If the sources do not support a claim, do not make it.
-- Produce 1 to 3 pages. Prefer one strong page over three thin ones.
-- Output ONLY strict JSON of the exact schema below. No prose outside the JSON, no markdown fences.
+INCLUDE, only when the sources support it:
+- the data source the app draws on,
+- display or unit preferences (for example Celsius vs Fahrenheit),
+- domain rules or special cases the user needs to be aware of,
+- notable choices about the app's scope or behaviour,
+- limitations the user should know about.
+
+NEVER include how the app is built: no architecture, no data model, no database, no code, no frameworks, no libraries, no implementation details. The user does not care how it was built. If a source describes implementation, ignore that part and use only the user-facing meaning.
+
+Only write facts that are genuinely useful as operating context for THIS app. Quality over volume. If nothing in the sources is worth writing as user-facing knowledge, return exactly {"pages":[]}. Do not pad.
+
+Prefer ONE short, high-signal page. Every claim MUST carry a [[n]] citation to the source that supports it. Never invent facts, sources, numbers, or names. Output ONLY strict JSON of the schema below — no prose outside the JSON, no markdown fences.
 
 Schema:
 {"pages":[{
@@ -252,14 +223,14 @@ Schema:
   "seeAlso": ["other-page-id"]
 }]}
 
-For each reference: n and kind and title MUST match the SOURCE you cite; snippet MUST be a short excerpt drawn from that source's text; why is one sentence explaining why it supports the claim. Only list references you actually cite with [[n]]. seeAlso may only reference ids of pages you produce in this response.`)
+For each reference: n and kind and title MUST match the SOURCE you cite; snippet MUST be a short excerpt drawn from that source's text; why is one sentence explaining why it supports the claim. Only list references you actually cite with [[n]]. seeAlso may only reference ids of pages you produce.`)
 
 	var sb strings.Builder
 	sb.WriteString("SOURCES (cite by number):\n")
 	for _, s := range sources {
 		sb.WriteString(fmt.Sprintf("[%d] (%s) %s — %s\n    \"%s\"\n", s.N, s.Kind, s.Title, s.Detail, s.Snippet))
 	}
-	sb.WriteString("\nWrite the knowledge page(s) about this app and the workspace knowledge relevant to it, grounded ONLY in the sources above. Return the JSON now.")
+	sb.WriteString("\nWrite the user-facing knowledge base for this app — only the operating context worth knowing, grounded ONLY in the sources above. If there is nothing worth writing, return {\"pages\":[]}. Return the JSON now.")
 	return system, sb.String()
 }
 
