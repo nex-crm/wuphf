@@ -102,6 +102,26 @@ class Tool(BaseModel):
     code: str = ""  # the agent-written implementation (empty until real authoring)
 
 
+class ToolBuildRequest(BaseModel):
+    """The operator's chat message; the tool agent may call create_tool for it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = SCHEMA_VERSION
+    message: str
+    app: str | None = None  # the app the tool is for (copy only)
+
+
+class ToolBuildResult(BaseModel):
+    """What the tool agent produced for one chat turn: the tool it created (if it
+    decided to make one) plus its reflect-back line."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: Tool | None = None
+    narration: str = ""
+
+
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

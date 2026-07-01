@@ -12,19 +12,12 @@ import {
   useState,
 } from "react";
 
-import {
-  callTool,
-  sampleArgsFor,
-  seedToolsForApp,
-  type Tool,
-} from "./mockTools";
+import { seedToolsForApp, type Tool } from "./mockTools";
 
 interface AppToolsValue {
   tools: Tool[];
   /** Register a tool (re-teaching a workflow updates it in place, by name). */
   addTool: (tool: Tool) => void;
-  /** Log a mock invocation on a tool (the chat calling it, or a manual Run). */
-  runTool: (tool: Tool) => void;
 }
 
 const Ctx = createContext<AppToolsValue | null>(null);
@@ -43,14 +36,6 @@ export function ToolsProvider({
       tools,
       addTool: (tool) =>
         setTools((prev) => [...prev.filter((t) => t.name !== tool.name), tool]),
-      runTool: (tool) =>
-        setTools((prev) =>
-          prev.map((t) =>
-            t.id === tool.id
-              ? { ...t, calls: [callTool(t, sampleArgsFor(t)), ...t.calls] }
-              : t,
-          ),
-        ),
     }),
     [tools],
   );

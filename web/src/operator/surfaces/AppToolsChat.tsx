@@ -1,14 +1,15 @@
 // AppToolsChat — the app's Ask-AI chat, as the tool-teaching agent. Describe a
-// repeatable workflow and the agent calls its create_tool tool: the chat renders
-// the tool-call, and the new tool lands in the app's Tools tab (shared context).
-// This is the FE shape of the harness chat agent's create_tool tool
-// (harness/src/harness/tools.py) — mock authoring, no backend yet. See
-// docs/specs/operator-workflows-as-tools.md.
+// repeatable workflow and it calls the harness /tools/build endpoint, where the
+// chat agent's create_tool tool authors it (harness/src/harness/tools.py). The
+// chat renders the create_tool call and the new tool lands in the app's Tools tab
+// (shared context). Falls back to the local mock when the harness is unreachable,
+// so the FE keeps working offline. See docs/specs/operator-workflows-as-tools.md.
 
 import { useEffect, useRef, useState } from "react";
 import { Send, Terminal } from "lucide-react";
 
-import { authorToolFromDescription, type Tool } from "../tools/mockTools";
+import { buildToolFromChat } from "../tools/harnessClient";
+import type { Tool } from "../tools/mockTools";
 import { useAppTools } from "../tools/toolsContext";
 
 interface AppToolsChatProps {
@@ -63,7 +64,7 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
     });
   }
 
-  function send(text?: string) {
+  async function send(text?: string) {
     const body = (text ?? draft).trim();
     if (!body || thinking) return;
     setDraft("");
@@ -73,30 +74,33 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
     ]);
     setThinking(true);
     scrollDown();
-    // The agent decides to make a tool and calls create_tool.
-    window.setTimeout(() => {
-      const tool = authorToolFromDescription(body);
-      addTool(tool);
-      setItems((prev) => [
-        ...prev,
-        { kind: "call", id: nextId(), tool },
-        {
-          kind: "text",
-          id: nextId(),
-          from: "nex",
-          body: `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.`,
-        },
-      ]);
-      setThinking(false);
-      scrollDown();
-    }, 650);
+    // The harness chat agent decides to make a tool and calls create_tool; we
+    // render that call and drop the tool into the shared Tools state.
+    const { tool, offline } = await buildToolFromChat(body, appName);
+    addTool(tool);
+    setItems((prev) => [
+      ...prev,
+      { kind: "call", id: nextId(), tool },
+      {
+        kind: "text",
+        id: nextId(),
+        from: "nex",
+        body: `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.${
+          offline
+            ? " (built offline — start the harness to use the live agent.)"
+            : ""
+        }`,
+      },
+    ]);
+    setThinking(false);
+    scrollDown();
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fire the seed once
   useEffect(() => {
     if (seed && !seededRef.current) {
       seededRef.current = true;
-      send(seed);
+      void send(seed);
     }
   }, [seed]);
 
@@ -153,13 +157,13 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
             disabled={thinking}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") send();
+              if (e.key === "Enter") void send();
             }}
           />
           <button
             type="button"
             className="opr-btn opr-btn-primary"
-            onClick={() => send()}
+            onClick={() => void send()}
             disabled={thinking || !draft.trim()}
           >
             <Send size={14} strokeWidth={1.9} aria-hidden={true} />

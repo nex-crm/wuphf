@@ -7,7 +7,12 @@ the tool function is pure over an in-memory ToolStore.
 
 from __future__ import annotations
 
-from harness.tools import ToolStore, make_create_tool
+from harness.tools import (
+    StubToolAgent,
+    ToolStore,
+    author_tool_spec,
+    make_create_tool,
+)
 from harness.wire import Tool
 
 
@@ -59,3 +64,28 @@ def test_title_falls_back_to_name_when_blank():
     store = ToolStore()
     make_create_tool(store)(name="do_thing", title="  ", purpose="does the thing")
     assert store.get("do_thing").title == "do_thing"
+
+
+def test_author_tool_spec_matches_known_shapes():
+    spec = author_tool_spec("score its fit and route hot leads to the AE")
+    assert spec["name"] == "scoreAndRouteLead"
+    assert spec["title"] == "Score & route a lead"
+    assert spec["inputs"] == ["lead"]
+
+
+def test_author_tool_spec_synthesizes_unknown_workflow():
+    spec = author_tool_spec("Archive old records nightly")
+    assert spec["name"] == "archiveOldRecords"  # stopwords dropped, camelCased
+    assert spec["title"] == "Archive old records nightly"
+    assert spec["inputs"] == ["input"]
+
+
+def test_stub_tool_agent_creates_and_returns_the_tool():
+    agent = StubToolAgent()
+    result = agent.build("draft a follow-up for a stalled deal", app="Pipeline")
+    assert result.tool is not None
+    assert result.tool.name == "draftFollowup"
+    assert result.tool.title == "Draft a follow-up email"
+    assert "Built" in result.narration
+    # The agent registered it in its store (a later call could reuse it).
+    assert agent.tools.get("draftFollowup") is result.tool

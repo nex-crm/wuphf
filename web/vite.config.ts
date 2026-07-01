@@ -19,6 +19,19 @@ const proxyTarget =
 
 const proxyEntry = { target: proxyTarget, changeOrigin: true };
 
+// The Python harness (the operator chat agent). Its /tools/build endpoint authors
+// tools the app's chat calls. Overridable so a worktree can point at its own
+// harness; defaults to the harness dev port. The /harness prefix is stripped so
+// the harness sees /tools/build.
+const harnessTarget =
+  process.env.WUPHF_HARNESS_TARGET ||
+  `http://127.0.0.1:${process.env.WUPHF_HARNESS_PORT || "8810"}`;
+const harnessEntry = {
+  target: harnessTarget,
+  changeOrigin: true,
+  rewrite: (p: string) => p.replace(/^\/harness/, ""),
+};
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -34,6 +47,7 @@ export default defineConfig({
       "/api": proxyEntry,
       "/api-token": proxyEntry,
       "/onboarding": proxyEntry,
+      "/harness": harnessEntry,
     },
   },
   build: {

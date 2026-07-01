@@ -4053,13 +4053,13 @@
   color: var(--t-text);
   letter-spacing: -0.01em;
 }
-.opr-tool-runs {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--t-text-2);
-}
-.opr-tool-run-btn {
+.opr-tool-agentonly {
   margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--t-faint);
 }
 .opr-tool-purpose {
   margin: var(--space-2) 0 0;
