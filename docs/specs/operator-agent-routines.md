@@ -1,6 +1,8 @@
 # Routines: workflows are scheduled prompts in the chat
 
-**Status:** slice 1 (FE-first, mock). Branch `operator/agent-routines`.
+**Status:** slice 1 (FE mock) done; slice 2 (backend persistence + scheduler)
+done — see `agent/README.md` §Persistence + routines routes. Branch
+`operator/agent-routines`.
 **Founder direction (2026-07-01):** "Let workflows be what Claude Routines is —
 it just runs a prompt in the chat on a schedule. Which means we should allow
 multiple chat sessions in our agent. Disable and Publish new version flows will
@@ -28,7 +30,14 @@ only belong to each workflow, not to the whole agent."
    session holds its own transcript. Agent-header Disable / Publish buttons are
    removed. Mock state lives in a per-agent `routinesContext` +
    `sessionsContext` seam.
-2. Backend: routines persisted per agent; the scheduler runs a routine by
-   posting its prompt into a fresh chat session against the pi-mono agent
-   (/tools/build + /tools/call flow); session transcripts persisted.
-3. Runs produce artifacts (a routine's md/pdf/html output lands in Artifacts).
+2. **Backend (DONE).** Routines, tools, sessions, and artifacts persist per
+   agent (`agent/src/store.ts`, one JSON file per agent id under
+   `WUPHF_AGENT_DATA_DIR`); the scheduler (`ROUTINE_SCHEDULER=1`,
+   `agent/src/scheduler.ts`) runs a due routine through the tools flow
+   (match-or-author, then run with `approved: false` — a gated run records
+   needs_approval, never auto-sends); transcripts persist into the routine's
+   session; `POST /routines/<id>/run` runs one NOW. Schedule labels are
+   approximate (once per matching day at/after HH:MM), not cron.
+3. **Artifacts (md DONE with slice 2).** Every routine run saves its outcome
+   as an `md` artifact (`<kebab-name>-run-<n>.md`) served by `GET /artifacts`.
+   pdf/html outputs are still to come.

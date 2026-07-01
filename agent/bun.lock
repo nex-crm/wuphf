@@ -5,12 +5,12 @@
     "": {
       "name": "wuphf-agent",
       "dependencies": {
-        "@mariozechner/pi-agent-core": "^0.73.1",
-        "@mariozechner/pi-ai": "^0.73.1",
+        "@mariozechner/pi-agent-core": "0.73.1",
+        "@mariozechner/pi-ai": "0.73.1",
       },
       "devDependencies": {
-        "@types/bun": "^1.3.14",
-        "typescript": "^6.0.3",
+        "@types/bun": "latest",
+        "typescript": "latest",
       },
     },
   },

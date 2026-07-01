@@ -30,6 +30,7 @@
 import { complete, type Context, type Model, type StreamOptions } from "@mariozechner/pi-ai";
 import { apiKeyFor, resolveModel } from "./model.js";
 import { deadlineSignal, textOf } from "./modelCall.js";
+import { currentRunSignal } from "./runContext.js";
 import type { CapabilityFn, CapabilityTree } from "./toolRuntime.js";
 
 // THE SEND-GATE ALLOW-LIST (CQ1, default deny). Every capability that mutates
@@ -140,8 +141,11 @@ async function aiComplete(cfg: CapabilityConfig, system: string, user: string): 
 	const model = cfg.aiModel;
 	if (!model) throw new Error("no runtime model");
 	const completeFn = cfg.complete ?? complete;
-	const deadline = deadlineSignal(undefined, cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS, {
+	// Compose the ambient RUN signal (runContext.ts) with the per-call timeout:
+	// a settled tool run aborts this model call instead of leaving it burning.
+	const deadline = deadlineSignal(currentRunSignal(), cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS, {
 		timeoutMessage: "ai capability timed out",
+		abortFallback: "tool run settled",
 	});
 	try {
 		const ctx: Context = {
@@ -221,17 +225,27 @@ function realIntegrations(cfg: CapabilityConfig): CapabilityTree {
 			throw new Error("integrations are not connected on this host (set WUPHF_BROKER_URL and WUPHF_BROKER_TOKEN)");
 		}
 		const fetchFn = cfg.fetch ?? fetch;
-		const res = await fetchFn(`${cfg.brokerUrl.replace(/\/$/, "")}/apps/integrations/call`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				authorization: `Bearer ${cfg.brokerToken}`,
-			},
-			body: JSON.stringify({ platform: String(platform), action: String(action), params: params ?? {} }),
-			signal: AbortSignal.timeout(cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS),
+		// Run signal + timeout in one signal: a settled tool run aborts the fetch.
+		const deadline = deadlineSignal(currentRunSignal(), cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS, {
+			timeoutMessage: "integration call timed out",
+			abortFallback: "tool run settled",
 		});
-		if (!res.ok) throw new Error(`integration call failed (${res.status})`);
-		const body = (await res.json()) as BrokerCallResponse;
+		let body: BrokerCallResponse;
+		try {
+			const res = await fetchFn(`${cfg.brokerUrl.replace(/\/$/, "")}/apps/integrations/call`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${cfg.brokerToken}`,
+				},
+				body: JSON.stringify({ platform: String(platform), action: String(action), params: params ?? {} }),
+				signal: deadline.signal,
+			});
+			if (!res.ok) throw new Error(`integration call failed (${res.status})`);
+			body = (await res.json()) as BrokerCallResponse;
+		} finally {
+			deadline.done();
+		}
 		if (body.error) throw new Error(body.error);
 		if (body.connected === false) throw new Error(`${String(platform)} is not connected`);
 		if (body.status === "needs_approval") {
@@ -254,54 +268,65 @@ function realBrowser(cfg: CapabilityConfig): CapabilityFn {
 			throw new Error("browser execution is not configured on this host (set WUPHF_BROKER_URL and WUPHF_BROKER_TOKEN)");
 		}
 		const fetchFn = cfg.fetch ?? fetch;
-		const res = await fetchFn(`${cfg.brokerUrl.replace(/\/$/, "")}/execute/browser`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				authorization: `Bearer ${cfg.brokerToken}`,
-			},
-			body: JSON.stringify({ goal: String(goal) }),
-			signal: AbortSignal.timeout(cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS),
+		// Run signal + timeout in one signal, held open across the SSE STREAM (the
+		// body read is the long part of a browser run): a settled tool run aborts
+		// the in-flight request/stream instead of leaving Chrome driving unattended.
+		const deadline = deadlineSignal(currentRunSignal(), cfg.callTimeoutMs ?? DEFAULT_CAP_TIMEOUT_MS, {
+			timeoutMessage: "browser execution timed out",
+			abortFallback: "tool run settled",
 		});
-		if (!res.ok || !res.body) throw new Error(`browser execution failed (${res.status})`);
-		// Parse the runner's SSE frames: collect action labels; `done` carries the
-		// outcome; `error` fails the capability. (Sends inside the run pause in the
-		// broker's own send-gate; unattended runs there default-deny.)
 		const actions: string[] = [];
 		let result = "";
-		const handleFrame = (frame: string) => {
-			const data = frame
-				.split("\n")
-				.filter((l) => l.startsWith("data: "))
-				.map((l) => l.slice(6))
-				.join("");
-			if (!data) return;
-			let ev: { type?: string; label?: string; result?: string; message?: string };
-			try {
-				ev = JSON.parse(data) as typeof ev;
-			} catch {
-				return; // a non-JSON frame (e.g. the terminal `event: end` marker) — skip
+		try {
+			const res = await fetchFn(`${cfg.brokerUrl.replace(/\/$/, "")}/execute/browser`, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${cfg.brokerToken}`,
+				},
+				body: JSON.stringify({ goal: String(goal) }),
+				signal: deadline.signal,
+			});
+			if (!res.ok || !res.body) throw new Error(`browser execution failed (${res.status})`);
+			// Parse the runner's SSE frames: collect action labels; `done` carries the
+			// outcome; `error` fails the capability. (Sends inside the run pause in the
+			// broker's own send-gate; unattended runs there default-deny.)
+			const handleFrame = (frame: string) => {
+				const data = frame
+					.split("\n")
+					.filter((l) => l.startsWith("data: "))
+					.map((l) => l.slice(6))
+					.join("");
+				if (!data) return;
+				let ev: { type?: string; label?: string; result?: string; message?: string };
+				try {
+					ev = JSON.parse(data) as typeof ev;
+				} catch {
+					return; // a non-JSON frame (e.g. the terminal `event: end` marker) — skip
+				}
+				if (ev.type === "action" && ev.label) actions.push(ev.label);
+				if (ev.type === "done" && typeof ev.result === "string") result = ev.result;
+				if (ev.type === "error") throw new Error(ev.message || "browser run failed");
+			};
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buf = "";
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buf += decoder.decode(value, { stream: true });
+				let idx = buf.indexOf("\n\n");
+				while (idx >= 0) {
+					handleFrame(buf.slice(0, idx));
+					buf = buf.slice(idx + 2);
+					idx = buf.indexOf("\n\n");
+				}
 			}
-			if (ev.type === "action" && ev.label) actions.push(ev.label);
-			if (ev.type === "done" && typeof ev.result === "string") result = ev.result;
-			if (ev.type === "error") throw new Error(ev.message || "browser run failed");
-		};
-		const reader = res.body.getReader();
-		const decoder = new TextDecoder();
-		let buf = "";
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buf += decoder.decode(value, { stream: true });
-			let idx = buf.indexOf("\n\n");
-			while (idx >= 0) {
-				handleFrame(buf.slice(0, idx));
-				buf = buf.slice(idx + 2);
-				idx = buf.indexOf("\n\n");
-			}
+			// Flush the tail: a final frame without a trailing blank line still counts.
+			if (buf.trim()) handleFrame(buf);
+		} finally {
+			deadline.done();
 		}
-		// Flush the tail: a final frame without a trailing blank line still counts.
-		if (buf.trim()) handleFrame(buf);
 		const trace = actions.length ? ` (${actions.length} browser action${actions.length === 1 ? "" : "s"}: ${actions.slice(0, 3).join("; ")}${actions.length > 3 ? "; …" : ""})` : "";
 		return `${result || "Browser run finished."}${trace}`;
 	};
