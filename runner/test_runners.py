@@ -209,6 +209,26 @@ class TestSendGating(unittest.TestCase):
         self.assertEqual(len(clicks), 0)  # the send was NOT auto-fired
         self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
 
+    def test_healed_send_is_also_gated(self):
+        # A recorded step whose element is gone heals onto a "Send" element — the
+        # HEALED click must still be gated (regression: healing bypassed the gate).
+        steps = [{"action": "click", "role": "Button", "label": "Gone"}]
+        elements = [{"i": 9, "role": "Button", "label": "Send"}]
+        heal_resp = {"choices": [{"message": {"tool_calls": [{"function": {"name": "click", "arguments": '{"i":9,"reason":"x"}'}}]}}]}
+        events = []
+        with (
+            mock.patch.object(cua_exec, "find_window", return_value=(1, 2, "t")),
+            mock.patch.object(cua_exec, "snapshot", return_value=(elements, "")),
+            mock.patch.object(cua_exec, "cua") as cua_mock,
+            mock.patch.object(cua_exec, "await_approval", return_value=False),
+            mock.patch.object(cua_exec, "plan", return_value=heal_resp),
+            mock.patch.object(cua_exec, "emit", side_effect=events.append),
+        ):
+            cua_exec.replay(steps, "g", "Google Chrome", "key")
+        clicks = [c for c in cua_mock.call_args_list if c.args and c.args[0] == "click"]
+        self.assertEqual(len(clicks), 0)  # healed send was gated + denied → not sent
+        self.assertTrue(any(e.get("skipped") for e in events if e.get("type") == "action"))
+
     def test_run_sends_when_approved(self):
         events = []
         with (
