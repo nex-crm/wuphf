@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock, ShieldCheck } from "lucide-react";
+import { Globe, Lock, ShieldCheck } from "lucide-react";
 
 import { showNotice } from "../../components/ui/Toast";
 import {
@@ -27,13 +27,13 @@ import {
   type AppWorkflow,
   compileAppWorkflow,
   getAppWorkflow,
+  runAppWorkflow,
   type WorkflowStepView,
 } from "../apps/workflowClient";
 import { EmptyState } from "../components/EmptyState";
 import { Eyebrow } from "../components/primitives";
 
-// A short node label per frozen step type, so the flow reads at a glance. A
-// `browser` step renders the Globe icon instead (handled in WorkflowStep).
+// A short node label per frozen step type, so the flow reads at a glance.
 const STEP_GLYPH: Record<string, string> = {
   action: "DO",
   template: "··",
@@ -101,7 +101,7 @@ export function AppWorkflowTab({ appId }: AppWorkflowTabProps) {
           <div className="opr-empty-title">Reading the workflow…</div>
         </div>
       ) : compiled && wf ? (
-        <CompiledWorkflow wf={wf} />
+        <CompiledWorkflow wf={wf} appId={appId} />
       ) : (
         <Compiling
           failed={compile.isError}
@@ -151,12 +151,45 @@ function Compiling({
   );
 }
 
-function CompiledWorkflow({ wf }: { wf: AppWorkflow }) {
+function CompiledWorkflow({ wf, appId }: { wf: AppWorkflow; appId: string }) {
   const steps = wf.steps ?? [];
   // Which Slack channel delivery targets — configured inline on the delivery
   // node itself, not as a separate block. Running/scheduling is done from the
   // app; here you just say where the result lands.
   const [channel, setChannel] = useState("#general");
+
+  // The tab is a READ-ONLY picture — EXCEPT for a workflow that contains a
+  // `browser` step. Browser execution is inherently interactive: it drives the
+  // operator's own browser and pauses to ask permission per step, so it needs a
+  // live trigger here. A workflow with no browser step stays fully read-only.
+  const hasBrowserStep = steps.some((s) => s.type === "browser");
+  const runLive = useMutation({
+    mutationFn: () => runAppWorkflow(appId, false, {}),
+    onSuccess: () => showNotice("Live run finished.", "success"),
+    onError: (err) =>
+      showNotice(
+        err instanceof Error ? err.message : "Could not run this workflow.",
+        "error",
+      ),
+  });
+  const approvalsQuery = useQuery({
+    queryKey: ["operator-app-browser-approvals", appId],
+    queryFn: () => getBrowserApprovals(appId),
+    enabled: runLive.isPending,
+    refetchInterval: runLive.isPending ? 1200 : false,
+  });
+  const resolveApproval = useMutation({
+    mutationFn: ({
+      id,
+      decision,
+    }: {
+      id: string;
+      decision: "approve" | "deny";
+    }) => resolveBrowserApproval(appId, id, decision),
+    onSuccess: () => approvalsQuery.refetch(),
+  });
+  const approvals: BrowserApproval[] = approvalsQuery.data ?? [];
+
   return (
     <div className="opr-workflow-frozen">
       <div className="opr-workflow-banner">
@@ -195,6 +228,68 @@ function CompiledWorkflow({ wf }: { wf: AppWorkflow }) {
           last={true}
         />
       </div>
+
+      {hasBrowserStep ? (
+        <>
+          <div className="opr-delivery-actions">
+            <button
+              type="button"
+              className="opr-btn opr-btn-primary opr-btn-sm"
+              onClick={() => runLive.mutate()}
+              disabled={runLive.isPending}
+              title="Runs for real — a browser step asks to control your browser first."
+            >
+              <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
+              {runLive.isPending ? "Running live…" : "Run live"}
+            </button>
+          </div>
+          {approvals.length > 0 ? (
+            <section
+              className="opr-browser-asks"
+              aria-label="Browser step approvals"
+            >
+              {approvals.map((a) => (
+                <div className="opr-browser-ask" key={a.id}>
+                  <div className="opr-browser-ask-head">
+                    <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
+                    {a.kind === "send"
+                      ? "Confirm this send"
+                      : "Control your browser?"}
+                  </div>
+                  <p className="opr-browser-ask-body">
+                    {browserApprovalPrompt(a)}
+                  </p>
+                  <div className="opr-browser-ask-actions">
+                    <button
+                      type="button"
+                      className="opr-btn opr-btn-primary opr-btn-sm"
+                      onClick={() =>
+                        resolveApproval.mutate({
+                          id: a.id,
+                          decision: "approve",
+                        })
+                      }
+                      disabled={resolveApproval.isPending}
+                    >
+                      {a.kind === "send" ? "Send it" : "Allow"}
+                    </button>
+                    <button
+                      type="button"
+                      className="opr-btn opr-btn-ghost opr-btn-sm"
+                      onClick={() =>
+                        resolveApproval.mutate({ id: a.id, decision: "deny" })
+                      }
+                      disabled={resolveApproval.isPending}
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -271,10 +366,10 @@ function WorkflowStep({
   last: boolean;
 }) {
   const title = step.description || step.template || step.action_id || step.id;
-  const isBrowser = step.type === "browser";
   // A browser step has no integration — Nex drives the operator's own browser
   // for it — so it reads as its own kind: the Globe node + a "runs in your
   // browser" line, distinct from an API action step.
+  const isBrowser = step.type === "browser";
   const nodeVariant = isBrowser ? "browser" : step.gated ? "action" : "enrich";
   return (
     <div className="opr-step">
@@ -307,8 +402,7 @@ function WorkflowStep({
             <Globe size={11} strokeWidth={2} aria-hidden={true} />
             Runs in your browser — Nex drives it, and asks before it sends
           </div>
-        ) : null}
-        {step.gated && !isBrowser ? (
+        ) : step.gated ? (
           <div className="opr-step-gate">
             <Lock size={11} strokeWidth={2} aria-hidden={true} />
             Held for your approval before it sends

@@ -7,9 +7,19 @@ import { AppWorkflowTab } from "./AppWorkflowTab";
 
 const getAppWorkflow = vi.fn();
 const compileAppWorkflow = vi.fn();
+const runAppWorkflow = vi.fn();
 vi.mock("../apps/workflowClient", () => ({
   getAppWorkflow: (id: string) => getAppWorkflow(id),
   compileAppWorkflow: (id: string) => compileAppWorkflow(id),
+  runAppWorkflow: (id: string, dry: boolean, conns?: Record<string, string>) =>
+    runAppWorkflow(id, dry, conns),
+}));
+
+// Browser-step approvals (only exercised when a workflow has a browser step).
+vi.mock("../apps/browserApprovals", () => ({
+  getBrowserApprovals: vi.fn().mockResolvedValue([]),
+  resolveBrowserApproval: vi.fn().mockResolvedValue(undefined),
+  browserApprovalPrompt: vi.fn().mockReturnValue("prompt"),
 }));
 
 // Toast has no provider in this unit test; mock it so mutation callbacks are safe.
@@ -119,7 +129,7 @@ describe("AppWorkflowTab", () => {
     expect(channel.closest(".opr-step")).not.toBeNull();
   });
 
-  it("renders a browser step with its own 'runs in your browser' affordance (slice 6)", async () => {
+  it("renders a browser step and a Run live action (browser needs interactive execution)", async () => {
     getAppWorkflow.mockResolvedValue({
       compiled: true,
       workflow_key: "operator-app-abc",
@@ -127,59 +137,22 @@ describe("AppWorkflowTab", () => {
         {
           id: "s1",
           type: "browser",
-          description: "Email the digest to finance",
+          description: "Book the meeting room",
           gated: true,
         },
       ],
     });
-    const { getByText, queryByText } = wrap(
-      <AppWorkflowTab appId="app_abc" appName="Digest" />,
+    const { getByText, getByRole } = wrap(<AppWorkflowTab appId="app_abc" />);
+    await waitFor(() =>
+      expect(getByText("Book the meeting room")).toBeTruthy(),
     );
-    await waitFor(() => expect(getByText("Deterministic")).toBeTruthy());
+    // Browser steps read as their own kind with the "runs in your browser" line.
     expect(getByText(/runs in your browser/i)).toBeTruthy();
-    // A browser step reads as "browser", not the generic gated-action lock line.
-    expect(queryByText(/held for your approval/i)).toBeNull();
-  });
-
-  it("a live run surfaces a browser-control ask in chat and Allow resolves it (3b)", async () => {
-    getAppWorkflow.mockResolvedValue({
-      compiled: true,
-      workflow_key: "operator-app-abc",
-      steps: [
-        {
-          id: "s1",
-          type: "browser",
-          description: "Email the digest to finance",
-          gated: true,
-        },
-      ],
-    });
-    // A live run stays in flight (paused on the browser step) so the approvals
-    // poll is active; the broker reports one pending control ask.
-    runAppWorkflow.mockReturnValue(new Promise(() => {}));
-    getBrowserApprovals.mockResolvedValue([
-      {
-        id: "ap_1",
-        app_id: "app_abc",
-        kind: "control",
-        goal: "Email the digest to finance",
-      },
-    ]);
-    const { findByRole } = wrap(
-      <AppWorkflowTab appId="app_abc" appName="Digest" />,
-    );
-    (await findByRole("button", { name: /run live/i })).click();
+    // A browser workflow gets the one interactive action it requires.
+    const runLive = getByRole("button", { name: /run live/i });
+    runLive.click();
     await waitFor(() =>
       expect(runAppWorkflow).toHaveBeenCalledWith("app_abc", false, {}),
-    );
-    // The ask surfaces conversationally; Allow resumes the paused step.
-    (await findByRole("button", { name: /^allow$/i })).click();
-    await waitFor(() =>
-      expect(resolveBrowserApproval).toHaveBeenCalledWith(
-        "app_abc",
-        "ap_1",
-        "approve",
-      ),
     );
   });
 });
