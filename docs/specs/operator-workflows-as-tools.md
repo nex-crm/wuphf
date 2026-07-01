@@ -72,11 +72,17 @@ unreachable model. The response carries `authored_by: "model" | "stub"`.
 
 ## Slice 5 — sandboxed execution, called from the chat (DONE)
 The chat CALLS tools via `POST /tools/call` → `runTool`
-(`agent/src/toolRuntime.ts`): the tool's code runs in a constrained
-`new Function` scope (dangerous globals shadowed; `import`/`eval` rejected by a
-code scan; cooperative timeout — a prototype boundary, `TODO(security)` for a
-real isolate) against a SIMULATED capability runtime (`nex.ai.*`, `nex.run`,
-`nex.send`, `crm.*`) with every capability call recorded as an action trace.
+(`agent/src/toolRuntime.ts`): the tool's code runs in a **Worker isolate**
+(`agent/src/toolSandboxWorker.ts`) that is HARD-KILLED at the deadline
+(`worker.terminate()` — a synchronous infinite loop dies on time, not just the
+waiting). Capabilities stay HOST-side: every capability call is an RPC from the
+worker back to the host, so tool code never holds the broker token, a model
+key, or the capability implementations (`import`/`eval` are also rejected by a
+code scan and dangerous globals are shadowed). The capability runtime
+(`agent/src/capabilities.ts`) composes REAL seams from the host env — pi-ai
+`nex.ai.*` via `TOOL_RUNTIME_MODEL=1`, broker `integrations.call` +
+`nex.browser` via `WUPHF_BROKER_URL`/`WUPHF_BROKER_TOKEN` — and deterministic
+simulations otherwise, with every capability call recorded as an action trace.
 **Send-gate:** gated capabilities (`crm.assign`, `nex.send`) default-deny —
 the run halts `needs_approval` with a human-readable gate detail; `approved:
 true` (the human's answer) executes. FE: saying "run the weekly summary" in the
@@ -85,8 +91,12 @@ title-word overlap), renders the call + action trace + result, pauses on an
 inline Approve / Not now card for gated calls, and logs completed calls so the
 Tools tab shows a read-only "Last run". Still no Run button anywhere.
 
+## Slice 6 — real capability seams (DONE)
+The Worker isolate + host-side capability composition above (real
+integrations/browser via the broker, real `nex.ai.*` via a model, simulated
+fallbacks) shipped as slice 6; realness is a deployment property of the host
+env, not of the tool's code.
+
 ## Later slices
-6. Real integrations behind the capability runtime (Composio / the browser-step
-   engine) replacing the simulated `nex`/`crm` implementations; a real sandbox.
 7. Persistence + versioning of Tools; edit-a-tool in chat; restore app-edit-via-AI
    alongside tool-teaching in the Ask-AI dock.

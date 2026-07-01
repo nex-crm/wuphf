@@ -112,6 +112,16 @@ export function createServer(opts: ServerOptions = {}) {
 				if (!tool || typeof tool !== "object" || typeof tool.name !== "string" || typeof tool.code !== "string") {
 					return json({ error: "invalid tool call request: tool { name, code } required" }, 400);
 				}
+				// inputs is caller-supplied JSON: absent -> []; present but not an array
+				// of { name: string } entries -> a plain 400, not a 500 inside runTool.
+				const rawInputs = (tool as { inputs?: unknown }).inputs;
+				const inputsValid =
+					rawInputs === undefined ||
+					(Array.isArray(rawInputs) &&
+						rawInputs.every((i) => i !== null && typeof i === "object" && typeof (i as { name?: unknown }).name === "string"));
+				if (!inputsValid) {
+					return json({ error: "invalid tool call request: inputs must be an array of { name } entries" }, 400);
+				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
 				// Capabilities compose per host env: real broker/model seams when
 				// configured (WUPHF_BROKER_URL/TOKEN, TOOL_RUNTIME_MODEL=1), simulated
@@ -119,7 +129,7 @@ export function createServer(opts: ServerOptions = {}) {
 				// hosts running slow capabilities (e.g. nex.browser drives real Chrome).
 				const timeoutMs = Number(process.env.TOOL_CALL_TIMEOUT_MS) || undefined;
 				return json(
-					await runTool(tool, body.args ?? {}, {
+					await runTool({ ...tool, inputs: rawInputs === undefined ? [] : tool.inputs }, body.args ?? {}, {
 						approved: body.approved === true,
 						capabilities: buildCapabilities(capabilityConfigFromEnv()),
 						timeoutMs,

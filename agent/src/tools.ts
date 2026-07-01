@@ -13,6 +13,7 @@
 
 import { complete, type Context, type Model, type StreamOptions } from "@mariozechner/pi-ai";
 import { apiKeyFor, resolveModel } from "./model.js";
+import { asError, deadlineSignal, textOf } from "./modelCall.js";
 import { extractJson, type Tool, type ToolBuildResult, type ToolInput } from "./wire.js";
 
 interface Shape {
@@ -112,13 +113,19 @@ export function authorTool(description: string): Tool {
 		.replace(/[^a-z0-9\s]/g, " ")
 		.split(/\s+/)
 		.filter((w) => w && !STOPWORDS.has(w));
-	const name = words.length ? camel(words.slice(0, 3)) : "runWorkflow";
+	const rawName = words.length ? camel(words.slice(0, 3)) : "runWorkflow";
+	// A digit-leading word would yield `async function 2026RenewalSync` — not a
+	// legal identifier. Prefix "run" (keeping the camelCase tail) when needed.
+	const name = /^[A-Za-z_$]/.test(rawName) ? rawName : `run${rawName[0].toUpperCase()}${rawName.slice(1)}`;
+	// The description is interpolated into a `//` line comment: a newline in it
+	// would terminate the comment and spill raw text into the function body.
+	const commentDesc = desc.replace(/\s+/g, " ");
 	return {
 		name,
 		title: humanTitle(desc, name),
 		purpose: desc ? desc[0].toUpperCase() + desc.slice(1) : name,
 		inputs: [{ name: "input", type: "string" }],
-		code: `async function ${name}(input) {\n  // Nex scripted this from: "${desc}"\n  return nex.run(input);\n}`,
+		code: `async function ${name}(input) {\n  // Nex scripted this from: "${commentDesc}"\n  return nex.run(input);\n}`,
 	};
 }
 
@@ -165,18 +172,6 @@ export interface ToolAuthorOptions {
 	complete?: typeof complete;
 }
 
-function asError(reason: unknown): Error {
-	if (reason instanceof Error) return reason;
-	return new Error(typeof reason === "string" ? reason : "tool authoring aborted");
-}
-
-function textOf(content: { type: string; text?: string }[]): string {
-	return content
-		.filter((c) => c.type === "text" && typeof c.text === "string")
-		.map((c) => c.text as string)
-		.join("");
-}
-
 /** Coerce model-emitted inputs — strings or {name} objects — into ToolInputs;
  * garbage entries are skipped. */
 function coerceInputs(raw: unknown): ToolInput[] {
@@ -216,25 +211,22 @@ export async function authorToolWithModel(message: string, opts: ToolAuthorOptio
 		messages: [{ role: "user", content: message.trim(), timestamp: Date.now() }],
 	};
 
-	// One signal that aborts on either the caller's signal or the timeout, whichever
-	// fires first. Built by hand (not AbortSignal.any) so it works across runtimes.
-	const ctrl = new AbortController();
-	const onAbort = () => ctrl.abort(asError(opts.signal?.reason));
-	if (opts.signal?.aborted) ctrl.abort(asError(opts.signal.reason));
-	else opts.signal?.addEventListener("abort", onAbort, { once: true });
-	const timer = setTimeout(() => ctrl.abort(new Error(`tool authoring timed out after ${timeoutMs}ms`)), timeoutMs);
+	// Caller signal + hard timeout composed into one signal (modelCall.ts).
+	const deadline = deadlineSignal(opts.signal, timeoutMs, {
+		timeoutMessage: `tool authoring timed out after ${timeoutMs}ms`,
+		abortFallback: "tool authoring aborted",
+	});
 
 	try {
 		// Fail loud before spending a model call when we are already aborted.
-		if (ctrl.signal.aborted) throw asError(ctrl.signal.reason);
+		if (deadline.signal.aborted) throw asError(deadline.signal.reason, "tool authoring aborted");
 		const res = await completeFn(model, ctx, {
 			apiKey: opts.apiKey ?? apiKeyFor(model),
-			signal: ctrl.signal,
+			signal: deadline.signal,
 		} satisfies StreamOptions);
 		return validateTool(extractJson(textOf(res.content as { type: string; text?: string }[])), message);
 	} finally {
-		clearTimeout(timer);
-		opts.signal?.removeEventListener("abort", onAbort);
+		deadline.done();
 	}
 }
 

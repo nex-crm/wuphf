@@ -7,6 +7,7 @@
 
 import { complete, type Context, type Model, type StreamOptions } from "@mariozechner/pi-ai";
 import { apiKeyFor, resolveModel } from "./model.js";
+import { asError, deadlineSignal, textOf } from "./modelCall.js";
 import { extractJson, SCHEMA_PROMPT, validateSpec, type WorkflowSpec } from "./wire.js";
 
 // A stalled provider or a client that drops mid-build must not pin the request
@@ -25,18 +26,6 @@ export interface BuildOptions {
 	complete?: typeof complete;
 }
 
-function asError(reason: unknown): Error {
-	if (reason instanceof Error) return reason;
-	return new Error(typeof reason === "string" ? reason : "build aborted");
-}
-
-function textOf(content: { type: string; text?: string }[]): string {
-	return content
-		.filter((c) => c.type === "text" && typeof c.text === "string")
-		.map((c) => c.text as string)
-		.join("");
-}
-
 /** Compile a description into a validated WorkflowSpec via the pi-ai model layer. */
 export async function buildWorkflow(message: string, opts: BuildOptions = {}): Promise<WorkflowSpec> {
 	const model = opts.model ?? resolveModel();
@@ -47,25 +36,22 @@ export async function buildWorkflow(message: string, opts: BuildOptions = {}): P
 		messages: [{ role: "user", content: message.trim(), timestamp: Date.now() }],
 	};
 
-	// One signal that aborts on either the caller's signal or the timeout, whichever
-	// fires first. Built by hand (not AbortSignal.any) so it works across runtimes.
-	const ctrl = new AbortController();
-	const onAbort = () => ctrl.abort(asError(opts.signal?.reason));
-	if (opts.signal?.aborted) ctrl.abort(asError(opts.signal.reason));
-	else opts.signal?.addEventListener("abort", onAbort, { once: true });
-	const timer = setTimeout(() => ctrl.abort(new Error(`build timed out after ${timeoutMs}ms`)), timeoutMs);
+	// Caller signal + hard timeout composed into one signal (modelCall.ts).
+	const deadline = deadlineSignal(opts.signal, timeoutMs, {
+		timeoutMessage: `build timed out after ${timeoutMs}ms`,
+		abortFallback: "build aborted",
+	});
 
 	try {
 		// Fail loud before spending a model call when we are already aborted.
-		if (ctrl.signal.aborted) throw asError(ctrl.signal.reason);
+		if (deadline.signal.aborted) throw asError(deadline.signal.reason, "build aborted");
 		const res = await completeFn(model, ctx, {
 			apiKey: opts.apiKey ?? apiKeyFor(model),
-			signal: ctrl.signal,
+			signal: deadline.signal,
 		} satisfies StreamOptions);
 		return validateSpec(extractJson(textOf(res.content as { type: string; text?: string }[])), opts.toolId);
 	} finally {
-		clearTimeout(timer);
-		opts.signal?.removeEventListener("abort", onAbort);
+		deadline.done();
 	}
 }
 
