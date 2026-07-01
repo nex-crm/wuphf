@@ -30,8 +30,6 @@ export interface Tool {
   /** The operator's own words that Nex turned into this tool. */
   createdFrom: string;
   calls: ToolCall[];
-  /** Built-in tools (e.g. the create-a-tool tool) can't be deleted. */
-  builtin?: boolean;
 }
 
 // A tiny keyword → shape table so a described workflow yields a plausible,
@@ -204,33 +202,6 @@ export function authorToolFromDescription(description: string): Tool {
 }
 
 /**
- * The built-in **create-a-tool tool** — the tool the app's builder chat uses to
- * make new tools. It is always present, can't be deleted, and its "runs" are the
- * tools it has created. A stable id so it stays put across renders.
- */
-export function createToolMetaTool(): Tool {
-  return {
-    id: "tool_create",
-    title: "Create a tool",
-    name: "createTool",
-    purpose:
-      "Describe a workflow in plain words and I'll build a tool your app's chat can call.",
-    inputs: [{ name: "workflow", type: "string" }],
-    script: [
-      "async function createTool(workflow) {",
-      "  const spec = await nex.ai.designTool(workflow);",
-      "  const tool = await nex.tools.write(spec);   // Nex writes the code",
-      "  await app.tools.add(tool);                  // and adds it to this app",
-      "  return `Built ${tool.title}`;",
-      "}",
-    ].join("\n"),
-    createdFrom: "built in",
-    calls: [],
-    builtin: true,
-  };
-}
-
-/**
  * The agent "calls" a tool — a deterministic mock result. Uses the known shape's
  * sample result when available, else echoes the args.
  */
@@ -254,7 +225,6 @@ export function sampleArgsFor(tool: Tool): Record<string, string> {
  */
 export function seedToolsForApp(_appName?: string): Tool[] {
   return [
-    createToolMetaTool(),
     authorToolFromDescription("Every Monday, summarize last week's pipeline"),
     authorToolFromDescription(
       "When a new lead comes in, score its fit and route hot ones to the right AE",

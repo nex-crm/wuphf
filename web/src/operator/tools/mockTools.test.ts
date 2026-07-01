@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   authorToolFromDescription,
   callTool,
-  createToolMetaTool,
   sampleArgsFor,
   seedToolsForApp,
 } from "./mockTools";
@@ -72,24 +71,12 @@ describe("callTool", () => {
   });
 });
 
-describe("createToolMetaTool", () => {
-  it("is a built-in tool that makes tools", () => {
-    const meta = createToolMetaTool();
-    expect(meta.name).toBe("createTool");
-    expect(meta.builtin).toBe(true);
-    expect(meta.title).toBe("Create a tool");
-    expect(meta.inputs.map((i) => i.name)).toEqual(["workflow"]);
-  });
-});
-
 describe("seedToolsForApp", () => {
-  it("leads with the built-in create-a-tool tool, then illustrative tools", () => {
+  it("lists the app's already-built tools (no create-a-tool UI here)", () => {
     const seeded = seedToolsForApp("Pipeline");
     expect(seeded.map((t) => t.name)).toEqual([
-      "createTool",
       "weeklyPipelineSummary",
       "scoreAndRouteLead",
     ]);
-    expect(seeded[0].builtin).toBe(true);
   });
 });

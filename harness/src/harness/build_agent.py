@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from .providers import detect_providers
+from .tools import ToolStore, make_create_tool
 from .wire import ClarifyQuestion, WorkflowSpec, WorkflowStep
 
 _log = logging.getLogger(__name__)
@@ -125,7 +126,12 @@ Design an ordered pipeline of steps. Each step has a kind:
 Keep it tight (3-6 steps). Any step that mutates an external system MUST be gated.
 Ask AT MOST ONE sharp clarifying question (a threshold or a destination channel) only \
 if you genuinely cannot proceed. When done, call submit_workflow exactly once with the \
-full spec. Do not narrate after the tool call."""
+full spec. Do not narrate after the tool call.
+
+You also have a create_tool tool. When the operator teaches a repeatable task that \
+should become a reusable capability the app can call later, call create_tool to make \
+it — a snake_case name, a plain-language title, a one-line purpose, and its inputs. \
+This is the only way tools are created; there is no build-a-tool UI."""
 
 
 def _spec_from_capture(captured: dict[str, Any], fallback_tool_id: str | None) -> WorkflowSpec:
@@ -159,6 +165,9 @@ class DeepAgentBuildAgent:
 
     def __init__(self, model: str | None = None):
         self._model = model or os.getenv("HARNESS_MODEL") or "anthropic:claude-sonnet-4-5"
+        # Tools the agent authors this session (via its create_tool tool) land here,
+        # so a later turn can call them and the FE can list them.
+        self.tools = ToolStore()
 
     def _invoke(self, message: str, tool_id: str | None) -> dict[str, Any]:  # pragma: no cover - needs a model key
         from deepagents import create_deep_agent
@@ -170,7 +179,15 @@ class DeepAgentBuildAgent:
             captured.update(name=name, tool_id=tool_id, steps=steps, narration=narration, clarify=clarify)
             return "workflow recorded"
 
-        agent = create_deep_agent(model=self._model, tools=[submit_workflow], system_prompt=_BUILD_SYSTEM_PROMPT)
+        # The chat agent's own tool for BUILDING tools: when the operator teaches a
+        # repeatable task, the agent calls create_tool to make it callable. This is
+        # the only way tools are made — there is no build-a-tool UI.
+        create_tool = make_create_tool(self.tools)
+        agent = create_deep_agent(
+            model=self._model,
+            tools=[submit_workflow, create_tool],
+            system_prompt=_BUILD_SYSTEM_PROMPT,
+        )
         prompt = message if not tool_id else f"{message}\n\n(Refine the existing tool: {tool_id})"
         agent.invoke({"messages": [{"role": "user", "content": prompt}]})
         if "name" not in captured:

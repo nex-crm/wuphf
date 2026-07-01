@@ -4014,7 +4014,6 @@
   }
 }
 
-
 /* ── App Tools tab: plain-language tools + the built-in create-a-tool tool ──── */
 /* Non-technical first: a readable title + what it does; code behind a toggle.
    Additive to the app tab model (Workflow tab unchanged). Tokens only. See
@@ -4036,11 +4035,6 @@
   background: var(--t-elevated);
   padding: var(--space-3);
 }
-/* The create-a-tool tool reads as the special, always-there builder tool. */
-.opr-tool-card-meta {
-  border-color: color-mix(in srgb, var(--t-accent) 34%, transparent);
-  background: color-mix(in srgb, var(--t-accent) 6%, transparent);
-}
 .opr-tool-card-head {
   display: flex;
   align-items: center;
@@ -4059,27 +4053,12 @@
   color: var(--t-text);
   letter-spacing: -0.01em;
 }
-.opr-tool-builtin {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--t-accent);
-  background: color-mix(in srgb, var(--t-accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--t-accent) 32%, transparent);
-  border-radius: var(--t-r-sm);
-  padding: 1px 6px;
-}
 .opr-tool-runs {
   font-size: 10.5px;
   font-weight: 600;
   color: var(--t-text-2);
 }
 .opr-tool-run-btn {
-  margin-left: auto;
-}
-/* On the meta card the count sits before the composer, so push nothing. */
-.opr-tool-card-meta .opr-tool-runs {
   margin-left: auto;
 }
 .opr-tool-purpose {
@@ -4118,10 +4097,6 @@
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--t-text);
-}
-
-.opr-tool-teach-composer {
-  margin-top: var(--space-3);
 }
 
 /* Code view — hidden by default; for whoever wants the technical detail. */
