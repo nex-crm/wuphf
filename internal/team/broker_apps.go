@@ -9,6 +9,7 @@ package team
 //	GET    /apps          -> { apps: [...] }            (sidebar listing)
 //	POST   /apps          -> { app }                    (App Builder register/update)
 //	GET    /apps/{id}      -> { app, html }             (render in sandboxed iframe)
+//	PATCH  /apps/{id}      -> { app }                   (rename an app)
 //	DELETE /apps/{id}      -> { ok: true }              (remove an app)
 
 import (
@@ -348,6 +349,29 @@ func (b *Broker) handleAppRoot(w http.ResponseWriter, r *http.Request, id string
 			out["capabilities"] = introspectAppSource(source)
 		}
 		writeJSON(w, http.StatusOK, out)
+	case http.MethodPatch:
+		// Rename: the one metadata mutation on an app. Gated like delete/rollback
+		// (a human session or the App Builder) so a random agent holding the
+		// broker token cannot rewrite app names. The FE's client-side rename
+		// store is a cache of this.
+		actor, _, _ := richArtifactAuthenticatedSlug(r, "", "actor")
+		if !b.appWriterAllowed(r, actor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a human or the App Builder may rename apps"})
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		app, err := b.appStore().Rename(id, body.Name, actor, time.Now())
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"app": app})
 	case http.MethodDelete:
 		actor, _, _ := richArtifactAuthenticatedSlug(r, "", "actor")
 		if !b.appWriterAllowed(r, actor) {
