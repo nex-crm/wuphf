@@ -49,22 +49,21 @@ sends.
    (`BoundStep{Type:"browser"}`, goal in the template); the Composio spec
    validates a `browser` type; `executeWorkflowStep` emits a deterministic marker
    (`{type:browser, goal, runs_in_browser}`) so a frozen run never breaks.
-3. **Execution — the architectural bridge (NEXT, do carefully).** Run a `browser`
-   step via the cua runner. The hard part: the deterministic workflow run
-   (`ExecuteWorkflow`) is **synchronous/batch**, while cua is **streaming +
-   interactive with a mid-run chat approval**. Options:
-   - **(a) injected step-executor hook** — the action package calls an injected
-     `browserStepRunner(ctx, goal)` (package-var, like `realtimeHTTPClient`); the
-     broker supplies a cua-backed, chat-gated implementation. Keeps the engine
-     agnostic; the runner blocks until cua finishes/approves.
-   - **(b) broker orchestration** — the broker runs the workflow itself, calling
-     `ExecuteWorkflow` for Composio steps and cua for browser steps, interleaved.
-     More control, but re-implements the step loop + scope/data flow.
-   Lean **(a)**. Either way the browser step pauses for the in-chat permission via
-   the existing `run_id`/stdin back-channel before it drives, and a gated send
-   inside it asks again.
-4. **Chat permission + send-gate** surfaced in `AppBuilderChat` (part of slice 3's
-   flow).
+3. **Execution — DONE (3a).** The engine calls an injected `action.BrowserStepRunner`
+   (a package-var hook, so the action package never imports the broker/cua). The
+   broker wires a cua-backed impl (`runBrowserStepViaCua`, `broker_browser_step.go`)
+   that drives cua for the step's goal on a REAL run. A **dry** run previews (no
+   drive); an **unwired** host degrades to a marker; **sends are auto-denied**
+   (they need 3b's chat approval). Chosen option (a) over broker orchestration —
+   the engine stays agnostic.
+4. **Chat permission + send-gate (3b) — the resumable-run piece.** Asking the
+   browser-control permission (and per-send approval) *in the app chat and
+   waiting for the reply mid-run* means the deterministic run can no longer be a
+   single blocking request — it must **pause, post to `AppBuilderChat`, and
+   resume when the operator replies**. That needs run-state persistence + a
+   resume path (a real async-workflow change), so it is deliberately separated
+   from 3a. Interim: 3a auto-denies sends (safe) and drives non-send browser
+   steps after the operator hits "Run".
 5. **Retire the modal:** remove the standalone `BrowserRunModal` "Run" button.
 6. **FE:** render a `browser` step in the workflow view (its own glyph + "runs in
    your browser") and the chat approval affordance.
