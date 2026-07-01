@@ -7,6 +7,7 @@
 //   POST /run           execute a compiled spec deterministically (gated step -> CQ1)
 
 import { streamWorkflow } from "./buildAgent.js";
+import { buildCapabilities, capabilityConfigFromEnv } from "./capabilities.js";
 import { runWorkflow } from "./executor.js";
 import { providersPayload } from "./providers.js";
 import { runTool } from "./toolRuntime.js";
@@ -112,7 +113,18 @@ export function createServer(opts: ServerOptions = {}) {
 					return json({ error: "invalid tool call request: tool { name, code } required" }, 400);
 				}
 				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
-				return json(await runTool(tool, body.args ?? {}, { approved: body.approved === true }));
+				// Capabilities compose per host env: real broker/model seams when
+				// configured (WUPHF_BROKER_URL/TOKEN, TOOL_RUNTIME_MODEL=1), simulated
+				// otherwise. TOOL_CALL_TIMEOUT_MS raises the hard-kill deadline for
+				// hosts running slow capabilities (e.g. nex.browser drives real Chrome).
+				const timeoutMs = Number(process.env.TOOL_CALL_TIMEOUT_MS) || undefined;
+				return json(
+					await runTool(tool, body.args ?? {}, {
+						approved: body.approved === true,
+						capabilities: buildCapabilities(capabilityConfigFromEnv()),
+						timeoutMs,
+					}),
+				);
 			}
 
 			if (req.method === "POST" && pathname === "/run") {

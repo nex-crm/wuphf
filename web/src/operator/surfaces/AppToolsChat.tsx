@@ -311,9 +311,16 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
 
           {pending ? (
             <div className="opr-browser-ask">
-              <div className="opr-browser-ask-head">Confirm this send</div>
+              <div className="opr-browser-ask-head">
+                {pending.gate.capability === "nex.browser"
+                  ? "Control your browser?"
+                  : "Confirm this send"}
+              </div>
               <p className="opr-browser-ask-body">
-                This will {pending.gate.detail}. Send it?
+                This will {pending.gate.detail}.{" "}
+                {pending.gate.capability === "nex.browser"
+                  ? "Allow it?"
+                  : "Send it?"}
               </p>
               <div className="opr-browser-ask-actions">
                 <button

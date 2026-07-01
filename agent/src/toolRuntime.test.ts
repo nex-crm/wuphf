@@ -95,7 +95,7 @@ test("dangerous globals are shadowed to undefined inside tool code", async () =>
 	expect(r.result).toBe("undefined/undefined");
 });
 
-test("cooperative timeout: a never-resolving capability -> error", async () => {
+test("timeout: a never-resolving capability -> error", async () => {
 	const capabilities: CapabilityTree = {
 		nex: { run: () => new Promise(() => {}) },
 		crm: {},
@@ -105,6 +105,28 @@ test("cooperative timeout: a never-resolving capability -> error", async () => {
 	expect(r.status).toBe("error");
 	if (r.status !== "error") throw new Error("unreachable");
 	expect(r.detail).toContain("timed out after 20ms");
+});
+
+test("HARD KILL: a synchronous infinite loop dies at the deadline (worker isolate)", async () => {
+	// The old in-process sandbox could only stop WAITING (Promise.race); a sync
+	// loop hung the service forever. The worker isolate terminates the thread.
+	const t = makeTool("function t() { while (true) {} }");
+	const started = Date.now();
+	const r = await runTool(t, {}, { timeoutMs: 150 });
+	const elapsed = Date.now() - started;
+	expect(r.status).toBe("error");
+	if (r.status !== "error") throw new Error("unreachable");
+	expect(r.detail).toContain("timed out after 150ms");
+	expect(elapsed).toBeLessThan(2000); // returned promptly — the loop was killed, not raced
+});
+
+test("nex.browser is gated: default deny with the browser-control detail", async () => {
+	const t = makeTool('async function t() { return nex.browser("post the digest to the vendor portal"); }');
+	const r = await runTool(t, {});
+	expect(r.status).toBe("needs_approval");
+	if (r.status !== "needs_approval") throw new Error("unreachable");
+	expect(r.gate.capability).toBe("nex.browser");
+	expect(r.gate.detail).toContain("control your browser");
 });
 
 test("injected capabilities are used AND recorded (and stay gated)", async () => {

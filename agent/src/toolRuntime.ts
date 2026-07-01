@@ -1,30 +1,26 @@
-// Sandboxed tool execution: the app's chat CALLS a saved Tool (agent-authored by
-// create_tool, agent/src/tools.ts) and this runs its `code` in a constrained scope
-// against a simulated, deterministic capability runtime — mirroring how the
-// executor simulates steps (executor.ts); real integrations come later.
+// Sandboxed tool execution (host side): the app's chat CALLS a saved Tool
+// (agent-authored by create_tool) and this runs its `code` in a SEPARATE WORKER
+// (toolSandboxWorker.ts) against the host's capability runtime (capabilities.ts —
+// simulated by default, real seams when configured; see that file).
 //
-// SEND-GATE (CQ1, default deny): the gated capabilities (`crm.assign`, `nex.send`)
-// throw a GateError unless the run carries approved=true, halting the run with
-// status="needs_approval" so the FE renders the human approval card — the same
-// needs_approval pattern as executor.ts's gated steps.
+// THE ISOLATE (slice 6, replacing the old in-process cooperative sandbox):
+//   - The code executes in a Worker thread. The timeout HARD-KILLS it
+//     (worker.terminate()), so a synchronous infinite loop dies at the deadline
+//     instead of hanging the service.
+//   - Capabilities are NOT given to the worker. Every capability call is an RPC
+//     back to this host, where instrumentation records the action and the
+//     SEND-GATE enforces default-deny — the tool code physically cannot reach an
+//     integration, the broker token, or a model key except through this RPC.
+//   - Residual ambient authority inside the worker (fetch etc.) is still reduced
+//     by strict-mode parameter shadowing + a code scan (import/eval rejected).
+//     TODO(security): a permissioned runtime for full authority stripping.
 //
-// SANDBOX LIMITATION — a prototype boundary, NOT a security boundary yet. Only
-// agent-authored tool code is executed (never operator-typed content), and the
-// containment is best-effort:
-//   - `new Function` compiles the code in strict mode with ONLY the allowed
-//     bindings (capabilities + declared inputs) as parameters; dangerous globals
-//     (fetch, process, require, globalThis, Bun, ...) are shadowed by undefined
-//     parameters of the same name.
-//   - `import` and `eval` cannot be shadowed as parameter names, so a code scan
-//     rejects code containing them outright.
-//   - The wall-clock timeout is COOPERATIVE (Promise.race): it stops waiting, it
-//     does not kill the code. A synchronous infinite loop still hangs the worker
-//     — known limitation, out of scope for this slice.
-// TODO(security): replace with a real isolate (worker/subprocess with no ambient
-// authority) when real integrations land; parameter shadowing does not stop
-// prototype-chain escapes (e.g. via constructors).
+// SEND-GATE (CQ1, default deny): gated capabilities (`crm.assign`, `nex.send`,
+// `nex.browser`) halt the run with status="needs_approval" unless the run carries
+// approved=true — the FE renders the human approval card in the chat.
 
-import type { Tool, ToolCallGate, ToolCallResult } from "./wire.js";
+import { buildCapabilities } from "./capabilities.js";
+import type { Tool, ToolCallGate } from "./wire.js";
 
 /** One callable capability (e.g. crm.deals). Args/return are untyped on purpose:
  * tool code is agent-authored JS, not a typed consumer. */
@@ -38,9 +34,9 @@ export interface CapabilityTree {
 export interface ToolRunOptions {
 	/** Human approval for gated capabilities. DEFAULT DENY. */
 	approved?: boolean;
-	/** Cooperative wall-clock timeout (see header comment). */
+	/** Wall-clock deadline; the worker is hard-killed when it elapses. */
 	timeoutMs?: number;
-	/** Override the simulated runtime (tests inject their own capabilities). */
+	/** Override the host capability runtime (tests inject their own). */
 	capabilities?: CapabilityTree;
 }
 
@@ -51,13 +47,14 @@ export type ToolRunResult =
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
-// Capabilities that mutate the outside world: halt for the approval card unless
-// the run is approved. Keyed by dotted path so injected runtimes stay gated too.
-const GATED = new Set(["crm.assign", "nex.send"]);
+// Capabilities that mutate the outside world (or seize the operator's browser):
+// halt for the approval card unless the run is approved. Keyed by dotted path so
+// injected runtimes stay gated too.
+const GATED = new Set(["crm.assign", "nex.send", "nex.browser"]);
 
-// Globals shadowed as unused strict-mode parameters. `eval`/`arguments` are not
-// legal strict-mode parameter names and `import` is a keyword — those are handled
-// by the code scan below instead.
+// Globals shadowed as unused strict-mode parameters inside the worker compile.
+// `eval`/`arguments` are not legal strict-mode parameter names and `import` is a
+// keyword — those are handled by the code scan below instead.
 const SHADOWED_GLOBALS = [
 	"fetch",
 	"process",
@@ -70,6 +67,8 @@ const SHADOWED_GLOBALS = [
 	"setImmediate",
 	"XMLHttpRequest",
 	"WebSocket",
+	"postMessage",
+	"self",
 ] as const;
 
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -84,11 +83,15 @@ class GateError extends Error {
 	}
 }
 
-class TimeoutError extends Error {}
-
-// ---------------------------------------------------------------------------
-// Simulated, deterministic capability runtime (real integrations come later).
-// ---------------------------------------------------------------------------
+function preview(v: unknown): string {
+	let s: string;
+	try {
+		s = v === undefined ? "undefined" : JSON.stringify(v);
+	} catch {
+		s = String(v);
+	}
+	return s.length > 60 ? `${s.slice(0, 57)}…` : s;
+}
 
 function labelOf(v: unknown): string {
 	if (v == null) return "…";
@@ -101,102 +104,86 @@ function labelOf(v: unknown): string {
 	return preview(v);
 }
 
-function preview(v: unknown): string {
-	let s: string;
-	try {
-		s = v === undefined ? "undefined" : JSON.stringify(v);
-	} catch {
-		s = String(v);
+/** Human-readable gate copy for the approval card ("This will <detail>."). */
+function gateDetail(path: string, args: unknown[]): string {
+	if (path === "crm.assign") return `assign ${labelOf(args[0])} to ${labelOf(args[1])}`;
+	if (path === "nex.send") return `send ${labelOf(args[1])} to ${labelOf(args[0])}`;
+	if (path === "nex.browser") return `control your browser to ${labelOf(args[0])}`;
+	return `run ${path}`;
+}
+
+// ---------------------------------------------------------------------------
+// Host-side capability table: flatten the tree to dotted paths, instrumented.
+// ---------------------------------------------------------------------------
+
+interface HostCaps {
+	paths: string[];
+	rootNames: string[];
+	invoke: (path: string, args: unknown[]) => Promise<unknown>;
+}
+
+function flatten(tree: CapabilityTree, prefix: string, into: Map<string, CapabilityFn>): void {
+	for (const [key, node] of Object.entries(tree)) {
+		const path = prefix ? `${prefix}.${key}` : key;
+		if (typeof node === "function") into.set(path, node);
+		else flatten(node, path, into);
 	}
-	return s.length > 60 ? `${s.slice(0, 57)}…` : s;
 }
 
-/** Deterministic hash of the subject -> 55..95 (a plausible fit score). */
-function hashScore(subject: unknown): number {
-	const s = typeof subject === "string" ? subject : preview(subject);
-	let h = 0;
-	for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-	return 55 + (h % 41);
-}
-
-const DEALS = [
-	{ name: "Globex", stage: "Negotiation", amount: 120_000, stageChanged: true },
-	{ name: "Initech", stage: "Discovery", amount: 45_000, stageChanged: false },
-	{ name: "Acme", stage: "Proposal", amount: 80_000, stageChanged: true },
-	{ name: "Umbrella", stage: "Closed Won", amount: 96_000, stageChanged: true },
-] as const;
-
-/** The default runtime: every capability is simulated and deterministic. */
-export function simulatedCapabilities(): CapabilityTree {
+function hostCaps(tree: CapabilityTree, ctx: { actions: string[]; approved: boolean }): HostCaps {
+	const table = new Map<string, CapabilityFn>();
+	flatten(tree, "", table);
 	return {
-		nex: {
-			ai: {
-				score: (subject: unknown) => hashScore(subject),
-				summarize: (items: unknown) => {
-					const list = Array.isArray(items) ? items : [items];
-					const names = list.map(labelOf).slice(0, 3).join(", ");
-					return `${list.length} item${list.length === 1 ? "" : "s"} — ${names || "nothing notable"} (simulated recap)`;
-				},
-				write: (kind: unknown) => `Drafted ${labelOf(kind)} — warm, brief, ready to review (simulated).`,
-			},
-			run: (input: unknown) => `Ran on ${labelOf(input)} (simulated).`,
-			send: (target: unknown) => `Sent to ${labelOf(target)} (simulated).`,
-		},
-		crm: {
-			deals: () => DEALS.map((d) => ({ ...d })),
-			dealContext: (deal: unknown) => ({
-				deal: labelOf(deal),
-				stage: "Negotiation",
-				lastTouch: "9 days ago",
-				owner: "Priya (AE)",
-			}),
-			ownerFor: () => ({ name: "Priya (AE)" }),
-			assign: (lead: unknown, ae: unknown) => `Assigned ${labelOf(lead)} to ${labelOf(ae)} (simulated).`,
+		paths: [...table.keys()],
+		rootNames: Object.keys(tree),
+		invoke: async (path, args) => {
+			const fn = table.get(path);
+			if (!fn) throw new Error(`unknown capability: ${path}`);
+			ctx.actions.push(`${path}(${args.map(preview).join(", ")})`);
+			// Default deny: a gated capability halts the run for the human approval
+			// card unless this run carries approved=true.
+			if (GATED.has(path) && !ctx.approved) throw new GateError(path, gateDetail(path, args));
+			return await fn(...args);
 		},
 	};
 }
 
 // ---------------------------------------------------------------------------
-// Instrumentation: record every capability call + enforce the send-gate.
+// Compile + run (in the worker isolate)
 // ---------------------------------------------------------------------------
 
-/** Human-readable gate copy for the approval card ("This will <detail>."). */
-function gateDetail(path: string, args: unknown[]): string {
-	if (path === "crm.assign") return `assign ${labelOf(args[0])} to ${labelOf(args[1])}`;
-	if (path === "nex.send") return `send ${labelOf(args[1])} to ${labelOf(args[0])}`;
-	return `run ${path}`;
-}
-
-function instrument(tree: CapabilityTree, prefix: string, ctx: { actions: string[]; approved: boolean }): CapabilityTree {
-	const out: CapabilityTree = {};
-	for (const [key, node] of Object.entries(tree)) {
-		const path = prefix ? `${prefix}.${key}` : key;
-		if (typeof node === "function") {
-			out[key] = (...args: unknown[]) => {
-				ctx.actions.push(`${path}(${args.map(preview).join(", ")})`);
-				// Default deny: a gated capability halts the run for the human
-				// approval card unless this run carries approved=true.
-				if (GATED.has(path) && !ctx.approved) throw new GateError(path, gateDetail(path, args));
-				return node(...args);
-			};
-		} else {
-			out[key] = instrument(node, path, ctx);
-		}
-	}
-	return out;
-}
-
-// ---------------------------------------------------------------------------
-// Compile + run
-// ---------------------------------------------------------------------------
-
-/** Reject code the parameter-shadowing sandbox cannot contain (see header). */
+/** Reject code the parameter-shadowing compile cannot contain (see header). */
 function scanReject(code: string): string | null {
 	if (/\bimport\s*\(/.test(code) || /^\s*import[\s"']/m.test(code)) {
 		return "tool code may not use import";
 	}
 	if (/\beval\s*\(/.test(code)) return "tool code may not use eval";
 	return null;
+}
+
+interface WorkerCapMsg {
+	t: "cap";
+	id: number;
+	path: string;
+	args: unknown[];
+}
+interface WorkerDoneMsg {
+	t: "done";
+	result: string;
+}
+interface WorkerErrMsg {
+	t: "err";
+	detail: string;
+}
+type WorkerMsg = WorkerCapMsg | WorkerDoneMsg | WorkerErrMsg;
+
+/** Drop non-cloneable values before a capability result crosses postMessage. */
+function plain(v: unknown): unknown {
+	try {
+		return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+	} catch {
+		return preview(v);
+	}
 }
 
 export async function runTool(tool: Tool, args: Record<string, string> = {}, opts: ToolRunOptions = {}): Promise<ToolRunResult> {
@@ -210,13 +197,12 @@ export async function runTool(tool: Tool, args: Record<string, string> = {}, opt
 		return { status: "error", detail: "tool code must declare a named function", actions: ctx.actions };
 	}
 
-	const caps = instrument(opts.capabilities ?? simulatedCapabilities(), "", ctx);
-	const capNames = Object.keys(caps);
+	const caps = hostCaps(opts.capabilities ?? buildCapabilities(), ctx);
 
 	// Declared inputs become parameters bound to the (string) args. Reject names
 	// that would break or subvert the parameter list.
 	const inputNames = tool.inputs.map((i) => i.name);
-	const reserved = new Set<string>([...capNames, ...SHADOWED_GLOBALS]);
+	const reserved = new Set<string>([...caps.rootNames, ...SHADOWED_GLOBALS]);
 	for (const name of inputNames) {
 		if (!IDENT.test(name) || reserved.has(name)) {
 			return { status: "error", detail: `invalid tool input name: ${JSON.stringify(name)}`, actions: ctx.actions };
@@ -224,34 +210,56 @@ export async function runTool(tool: Tool, args: Record<string, string> = {}, opt
 	}
 
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	try {
-		// Strict mode + ONLY the allowed bindings as parameters; dangerous globals
-		// are shadowed by trailing undefined parameters (see header for limits).
-		const compiled = new Function(
-			...capNames,
-			...inputNames,
-			...SHADOWED_GLOBALS,
-			`"use strict";\n${tool.code}\nreturn ${fnName}(${inputNames.join(", ")});`,
-		);
-		const invocation = Promise.resolve(
-			compiled(...capNames.map((n) => caps[n]), ...inputNames.map((n) => args[n] ?? ""), ...SHADOWED_GLOBALS.map(() => undefined)),
-		);
-		// Cooperative timeout: stops WAITING after timeoutMs; it does not kill the
-		// tool code (a sync infinite loop is out of scope — prototype boundary).
-		const timeout = new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new TimeoutError(`tool timed out after ${timeoutMs}ms`)), timeoutMs);
+	const worker = new Worker(new URL("./toolSandboxWorker.ts", import.meta.url).href);
+
+	return await new Promise<ToolRunResult>((resolve) => {
+		let settled = false;
+		const finish = (r: ToolRunResult) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			worker.terminate();
+			resolve(r);
+		};
+		// The HARD KILL: a sync infinite loop in tool code dies here, at the
+		// deadline — worker.terminate() stops the thread, not just the waiting.
+		const timer = setTimeout(() => finish({ status: "error", detail: `tool timed out after ${timeoutMs}ms`, actions: ctx.actions }), timeoutMs);
+
+		worker.onmessage = (ev: MessageEvent) => {
+			const msg = ev.data as WorkerMsg;
+			if (msg.t === "done") {
+				finish({ status: "ok", result: msg.result, actions: ctx.actions });
+			} else if (msg.t === "err") {
+				finish({ status: "error", detail: msg.detail, actions: ctx.actions });
+			} else if (msg.t === "cap") {
+				void caps
+					.invoke(msg.path, msg.args)
+					.then((value) => {
+						if (!settled) worker.postMessage({ t: "capres", id: msg.id, ok: true, value: plain(value) });
+					})
+					.catch((e: unknown) => {
+						if (e instanceof GateError) {
+							finish({ status: "needs_approval", gate: { capability: e.capability, detail: e.detail }, actions: ctx.actions });
+							return;
+						}
+						if (!settled) {
+							worker.postMessage({ t: "capres", id: msg.id, ok: false, detail: e instanceof Error ? e.message : String(e) });
+						}
+					});
+			}
+		};
+		worker.onerror = (ev: ErrorEvent) => {
+			finish({ status: "error", detail: ev.message || "tool worker crashed", actions: ctx.actions });
+		};
+
+		worker.postMessage({
+			t: "run",
+			code: tool.code,
+			fnName,
+			inputNames,
+			argValues: inputNames.map((n) => args[n] ?? ""),
+			capPaths: caps.paths,
+			shadowedGlobals: [...SHADOWED_GLOBALS],
 		});
-		const value: unknown = await Promise.race([invocation, timeout]);
-		const result = typeof value === "string" ? value : preview(value);
-		return { status: "ok", result, actions: ctx.actions };
-	} catch (e) {
-		if (e instanceof GateError) {
-			return { status: "needs_approval", gate: { capability: e.capability, detail: e.detail }, actions: ctx.actions };
-		}
-		const detail = e instanceof Error ? e.message : String(e);
-		return { status: "error", detail, actions: ctx.actions };
-	} finally {
-		clearTimeout(timer);
-	}
+	});
 }

@@ -138,11 +138,14 @@ export const TOOL_SCHEMA_PROMPT = `You are the create_tool author for an operato
 - inputs: the argument names the tool takes (may be empty).
 - code: a complete async JavaScript function named exactly like "name", taking the inputs as parameters, that performs the workflow.
 
-The code runs against these capabilities (use them; do not invent others):
+The code runs against these capabilities (use them; do not invent others). All are async — await every call:
 - nex.ai.score(subject, { rubric }) -> number 0-100
 - nex.ai.summarize(items, { style }) -> string
 - nex.ai.write(kind, { context, tone }) -> string
 - nex.run(input) -> generic fallback execution
+- integrations.call(platform, action, params) -> call a connected integration (e.g. integrations.call("gmail", "GMAIL_FETCH_EMAILS", { max_results: 10 })); reads return data, writes are held for human approval
+- nex.browser(goal) -> drive the operator's browser to accomplish a goal when no integration exists (needs the operator's approval)
+- nex.send(target, content) -> external send (needs the operator's approval)
 - crm.deals({ since }) -> deal list; crm.ownerFor(lead) -> owner; crm.assign(lead, owner) -> void; crm.dealContext(deal) -> context
 
 Output the JSON object and nothing else.`;
