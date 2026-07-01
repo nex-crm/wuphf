@@ -1,5 +1,5 @@
 import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CustomAppDetail } from "../../api/apps";
 import { OperatorAppDetail } from "./OperatorAppDetail";
@@ -13,6 +13,9 @@ vi.mock("../apps/useOperatorApps", () => ({
   appBuildState: (app: { status?: string }) =>
     app.status === "building" ? "building" : "ready",
   useDeleteApp: () => ({ mutate: vi.fn(), isPending: false }),
+  // Real-id check used by the agent-service wiring (tools/routines/sessions).
+  isRealAppId: (id: string | null | undefined) =>
+    typeof id === "string" && id.startsWith("app_"),
 }));
 
 // Stub the sandbox frame (real iframe), the integrations tab (fetches the
@@ -63,6 +66,10 @@ function detail(
 }
 
 describe("OperatorAppDetail", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("shows the live preview (UI builds in front of you) while building", () => {
     useOperatorAppMock.mockReturnValue({
       data: detail({ status: "building" }, ""),
@@ -131,6 +138,45 @@ describe("OperatorAppDetail", () => {
       <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
     );
     expect(queryByRole("button", { name: /ask agent/i })).toBeNull();
+  });
+
+  it("appends the agent service's artifacts after the live app artifact", async () => {
+    useOperatorAppMock.mockReturnValue({
+      data: detail({ status: "ready" }, "<html>hi</html>"),
+      isError: false,
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/agent/artifacts?agent=app_abc") {
+        return {
+          ok: true,
+          json: async () => ({
+            artifacts: [
+              {
+                id: "art_1",
+                type: "md",
+                title: "weekly-recap.md",
+                producedBy: "Monday pipeline recap",
+                at: "Monday 9:02",
+                content: "# Recap",
+              },
+            ],
+          }),
+        };
+      }
+      // Any other call (e.g. the tools hydration) degrades gracefully.
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container, findByText } = render(
+      <OperatorAppDetail appId="app_abc" onBack={() => {}} />,
+    );
+    // The persisted artifact renders in the strip…
+    expect(await findByText("weekly-recap.md")).toBeTruthy();
+    // …AFTER the live app artifact.
+    const chips = container.querySelectorAll(".opr-artifact-chip");
+    expect(chips.length).toBe(2);
+    expect(chips[0].textContent).toContain("Open Tasks");
+    expect(chips[1].textContent).toContain("weekly-recap.md");
   });
 
   it("opens Ask AI as a docked drawer (not full screen) when clicked", () => {

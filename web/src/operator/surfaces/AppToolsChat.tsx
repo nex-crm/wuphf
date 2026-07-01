@@ -28,6 +28,9 @@ interface AppToolsChatProps {
   /** Pre-existing transcript (e.g. a routine session's run) shown instead of
    * the greeting. */
   initialTranscript?: { from: "you" | "nex"; body: string }[];
+  /** Mirror each chat turn (the operator's send, the agent's reply) to the
+   * host — AgentSessions persists them on the session, fire-and-forget. */
+  onTurn?: (from: "you" | "nex", body: string) => void;
 }
 
 type ChatItem =
@@ -129,8 +132,9 @@ export function AppToolsChat({
   appName,
   seed,
   initialTranscript,
+  onTurn,
 }: AppToolsChatProps) {
-  const { tools, addTool, logCall } = useAppTools();
+  const { tools, addTool, logCall, agentId } = useAppTools();
   const [items, setItems] = useState<ChatItem[]>(() =>
     initialTranscript
       ? initialTranscript.map((m) => ({
@@ -172,6 +176,12 @@ export function AppToolsChat({
       ...prev,
       { kind: "invoke", id: nextId(), tool, args, outcome },
     ]);
+    onTurn?.(
+      "nex",
+      outcome.status === "ok"
+        ? (outcome.result ?? "done")
+        : (outcome.detail ?? "Something went wrong."),
+    );
     if (outcome.status === "ok") {
       const call: ToolCall = {
         id: nextId(),
@@ -186,15 +196,12 @@ export function AppToolsChat({
   // A rejection must never wedge the chat (working stuck, composer disabled):
   // tell the operator, keep the composer usable.
   function reportAgentError() {
+    const body = "Something went wrong talking to the agent — try again.";
     setItems((prev) => [
       ...prev,
-      {
-        kind: "text",
-        id: nextId(),
-        from: "nex",
-        body: "Something went wrong talking to the agent — try again.",
-      },
+      { kind: "text", id: nextId(), from: "nex", body },
     ]);
+    onTurn?.("nex", body);
   }
 
   async function invokeTool(tool: Tool, args: Record<string, string>) {
@@ -262,6 +269,7 @@ export function AppToolsChat({
       ...prev,
       { kind: "text", id: nextId(), from: "you", body },
     ]);
+    onTurn?.("you", body);
     // Invoking an existing tool? The chat CALLS it (there is no Run button).
     const invoked = matchTool(body, tools);
     if (invoked) {
@@ -272,23 +280,23 @@ export function AppToolsChat({
     scrollDown();
     try {
       // The pi-mono chat agent decides to make a tool and calls create_tool; we
-      // render that call and drop the tool into the shared Tools state.
-      const { tool, offline } = await buildToolFromChat(body, appName);
+      // render that call and drop the tool into the shared Tools state. The
+      // `app` field carries the REAL agent id when the provider has one, so the
+      // service persists the tool per-agent.
+      const { tool, offline } = await buildToolFromChat(
+        body,
+        agentId ?? appName,
+      );
       addTool(tool);
+      const reply = `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.${
+        offline ? " (built offline — start the agent to use the live one.)" : ""
+      }`;
       setItems((prev) => [
         ...prev,
         { kind: "call", id: nextId(), tool },
-        {
-          kind: "text",
-          id: nextId(),
-          from: "nex",
-          body: `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.${
-            offline
-              ? " (built offline — start the agent to use the live one.)"
-              : ""
-          }`,
-        },
+        { kind: "text", id: nextId(), from: "nex", body: reply },
       ]);
+      onTurn?.("nex", reply);
     } catch {
       reportAgentError();
     } finally {
