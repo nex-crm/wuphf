@@ -3,8 +3,50 @@ package action
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
+
+// TestBindAndRunBrowserStepE2E is the engine e2e for the browser-step foundation
+// (slices 1-2): a plan with a no-integration step binds into a real `browser`
+// step in the frozen workflow, that step carries its goal, and running it is
+// tolerated (a marker, never an error). Actual cua execution is slice 3.
+func TestBindAndRunBrowserStepE2E(t *testing.T) {
+	plan := Plan{
+		Name:   "Vendor Portal Poster",
+		ToolID: "app_x",
+		Steps: []PlanStep{
+			{ID: "t", Kind: "trigger", Title: "On a schedule"},
+			{ID: "portal", Kind: "browser", Title: "Submit in the vendor portal", Detail: "Open the vendor portal and submit the refund"},
+		},
+	}
+	// A browser step needs no search/LLM to bind.
+	def, err := BindWorkflowPlan(context.Background(), plan, NewComposioActionResolver(nil, nil))
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	var browser *workflowStep
+	for i := range def.Steps {
+		if def.Steps[i].Type == "browser" {
+			browser = &def.Steps[i]
+			break
+		}
+	}
+	if browser == nil {
+		t.Fatal("expected a browser step in the frozen definition")
+	}
+	if !strings.Contains(browser.Template, "submit the refund") {
+		t.Fatalf("browser step lost its goal: %q", browser.Template)
+	}
+	// A frozen run tolerates the browser step (marker, no error).
+	out, err := executeWorkflowBrowserStep(*browser)
+	if err != nil {
+		t.Fatalf("run browser step: %v", err)
+	}
+	if out["runs_in_browser"] != true || out["goal"] == "" {
+		t.Fatalf("browser step run output = %#v", out)
+	}
+}
 
 func slackCandidates() []Action {
 	return []Action{
