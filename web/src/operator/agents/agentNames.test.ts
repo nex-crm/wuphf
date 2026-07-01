@@ -1,9 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { agentName, setAgentName } from "./agentNames";
+import { agentName, reloadAgentNames, setAgentName } from "./agentNames";
 
 describe("agentNames", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    reloadAgentNames();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("falls back to the given name with no override", () => {
     expect(agentName("app_x", "Pipeline Agent")).toBe("Pipeline Agent");
@@ -18,5 +25,17 @@ describe("agentNames", () => {
     setAgentName("app_x", "Revenue Radar");
     setAgentName("app_x", "   ");
     expect(agentName("app_x", "Pipeline Agent")).toBe("Pipeline Agent");
+  });
+
+  it("keeps the rename in memory when localStorage.setItem throws", () => {
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    setAgentName("app_x", "Revenue Radar");
+    // Persistence was attempted and failed…
+    expect(setItem).toHaveBeenCalled();
+    expect(localStorage.getItem("wuphf.operator.agentNames")).toBeNull();
+    // …but only the cross-reload copy is lost — the in-memory rename applies.
+    expect(agentName("app_x", "Pipeline Agent")).toBe("Revenue Radar");
   });
 });

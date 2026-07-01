@@ -37,17 +37,18 @@ export function ArtifactsTab({
 
   return (
     <div className="opr-artifacts">
+      {/* Honest semantics: a group of toggle buttons, not a tablist (no
+          aria-controls/tabpanel/arrow-key contract here). */}
       <div
         className="opr-artifact-strip"
-        role="tablist"
+        role="group"
         aria-label="Artifacts this agent produced"
       >
         {artifacts.map((a) => (
           <button
             key={a.id}
             type="button"
-            role="tab"
-            aria-selected={selected?.id === a.id}
+            aria-pressed={selected?.id === a.id}
             className={`opr-artifact-chip${selected?.id === a.id ? " is-active" : ""}`}
             onClick={() => setSelectedId(a.id)}
           >
@@ -119,10 +120,26 @@ function ArtifactViewer({
               {artifact.size ?? "PDF"} · {artifact.producedBy} · {artifact.at}
             </div>
           </div>
-          <button type="button" className="opr-btn opr-btn-sm">
-            <Download size={13} strokeWidth={1.9} aria-hidden={true} />
-            Download
-          </button>
+          {artifact.url ? (
+            <a
+              className="opr-btn opr-btn-sm"
+              href={artifact.url}
+              download={artifact.title}
+            >
+              <Download size={13} strokeWidth={1.9} aria-hidden={true} />
+              Download
+            </a>
+          ) : (
+            <button
+              type="button"
+              className="opr-btn opr-btn-sm"
+              disabled={true}
+              title="Not exported yet"
+            >
+              <Download size={13} strokeWidth={1.9} aria-hidden={true} />
+              Download
+            </button>
+          )}
         </div>
       );
     default:

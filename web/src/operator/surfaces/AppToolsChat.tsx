@@ -73,10 +73,13 @@ function invokeSignature(tool: Tool, args: Record<string, string>): string {
   return `${tool.name}(${parts})`;
 }
 
-// Does this message invoke an existing tool (vs teach a new one)? Heuristic:
-// an exact mention of a tool's callable name or full title, OR a run/call/use
-// prefix plus the strongest title-word overlap. Conversational, kept light.
+// Does this message invoke an existing tool (vs teach a new one)? Explicit
+// intent required: the message must START with a run/call/use cue — a bare
+// mention of a tool's name (e.g. a teach/modify hand-off that references it)
+// must never re-run it. Behind the cue, an exact mention of the callable name
+// or full title wins, else the strongest title-word overlap. Kept light.
 function matchTool(text: string, tools: Tool[]): Tool | null {
+  if (!/^\s*(run|call|use)\b/i.test(text)) return null;
   const lower = text.toLowerCase();
   const exact = tools.find(
     (t) =>
@@ -84,7 +87,6 @@ function matchTool(text: string, tools: Tool[]): Tool | null {
       lower.includes(t.title.toLowerCase()),
   );
   if (exact) return exact;
-  if (!/^\s*(run|call|use)\b/i.test(text)) return null;
   let best: Tool | null = null;
   let bestScore = 0;
   for (const t of tools) {
@@ -165,34 +167,60 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
     }
   }
 
+  // A rejection must never wedge the chat (working stuck, composer disabled):
+  // tell the operator, keep the composer usable.
+  function reportAgentError() {
+    setItems((prev) => [
+      ...prev,
+      {
+        kind: "text",
+        id: nextId(),
+        from: "nex",
+        body: "Something went wrong talking to the agent — try again.",
+      },
+    ]);
+  }
+
   async function invokeTool(tool: Tool, args: Record<string, string>) {
     setWorking(`Nex is calling ${tool.name}…`);
     scrollDown();
-    const outcome = await callToolViaAgent(tool, args, false);
-    if (outcome.status === "needs_approval" && outcome.gate) {
-      // Paused at the send-gate: show the call, then the approval card. The
-      // pending call lives in React state until Approve / Not now.
-      setItems((prev) => [
-        ...prev,
-        { kind: "invoke", id: nextId(), tool, args, outcome },
-      ]);
-      setPending({ tool, args, gate: outcome.gate });
-    } else {
-      finishCall(tool, args, outcome);
+    try {
+      const outcome = await callToolViaAgent(tool, args, false);
+      if (outcome.status === "needs_approval" && outcome.gate) {
+        // Paused at the send-gate: show the call, then the approval card. The
+        // pending call lives in React state until Approve / Not now.
+        setItems((prev) => [
+          ...prev,
+          { kind: "invoke", id: nextId(), tool, args, outcome },
+        ]);
+        setPending({ tool, args, gate: outcome.gate });
+      } else {
+        finishCall(tool, args, outcome);
+      }
+    } catch {
+      reportAgentError();
+    } finally {
+      setWorking(null);
+      scrollDown();
     }
-    setWorking(null);
-    scrollDown();
   }
 
   async function approvePending() {
     const p = pending;
     if (!p || working) return;
-    setPending(null);
     setWorking(`Nex is calling ${p.tool.name}…`);
-    const outcome = await callToolViaAgent(p.tool, p.args, true);
-    finishCall(p.tool, p.args, outcome);
-    setWorking(null);
-    scrollDown();
+    try {
+      // Clear the pending approval only on a successful outcome: a failure
+      // keeps the card actionable instead of losing the approval context.
+      const outcome = await callToolViaAgent(p.tool, p.args, true);
+      if (outcome.status !== "error") setPending(null);
+      finishCall(p.tool, p.args, outcome);
+    } catch {
+      reportAgentError();
+    } finally {
+      setWorking(null);
+      scrollDown();
+    }
   }
 
   function declinePending() {
@@ -226,26 +254,31 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
     }
     setWorking("Nex is calling create_tool…");
     scrollDown();
-    // The pi-mono chat agent decides to make a tool and calls create_tool; we
-    // render that call and drop the tool into the shared Tools state.
-    const { tool, offline } = await buildToolFromChat(body, appName);
-    addTool(tool);
-    setItems((prev) => [
-      ...prev,
-      { kind: "call", id: nextId(), tool },
-      {
-        kind: "text",
-        id: nextId(),
-        from: "nex",
-        body: `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.${
-          offline
-            ? " (built offline — start the agent to use the live one.)"
-            : ""
-        }`,
-      },
-    ]);
-    setWorking(null);
-    scrollDown();
+    try {
+      // The pi-mono chat agent decides to make a tool and calls create_tool; we
+      // render that call and drop the tool into the shared Tools state.
+      const { tool, offline } = await buildToolFromChat(body, appName);
+      addTool(tool);
+      setItems((prev) => [
+        ...prev,
+        { kind: "call", id: nextId(), tool },
+        {
+          kind: "text",
+          id: nextId(),
+          from: "nex",
+          body: `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.${
+            offline
+              ? " (built offline — start the agent to use the live one.)"
+              : ""
+          }`,
+        },
+      ]);
+    } catch {
+      reportAgentError();
+    } finally {
+      setWorking(null);
+      scrollDown();
+    }
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fire the seed once

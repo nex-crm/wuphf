@@ -19,6 +19,8 @@ export interface Artifact {
   at: string;
   /** Inline content for md/html; absent for app (rendered live) and pdf (mock). */
   content?: string;
+  /** Download URL for file-ish artifacts; absent until the file is exported. */
+  url?: string;
   /** Display size for file-ish artifacts. */
   size?: string;
 }

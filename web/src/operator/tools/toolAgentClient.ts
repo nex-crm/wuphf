@@ -65,6 +65,9 @@ export async function buildToolFromChat(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ schema_version: SCHEMA_VERSION, message, app }),
+      // A hung agent service must not wedge the chat: time out into the
+      // offline fallback below.
+      signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`harness ${res.status}`);
     const data = (await res.json()) as ToolBuildResult;
@@ -124,6 +127,9 @@ export async function callToolViaAgent(
         args,
         approved,
       }),
+      // Generous: tool runs can drive slow capabilities (browser, sends), but
+      // a hung agent still resolves into the error outcome below.
+      signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) throw new Error(`agent ${res.status}`);
     const data = (await res.json()) as ToolCallOutcome;
