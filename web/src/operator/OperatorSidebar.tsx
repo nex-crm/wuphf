@@ -8,7 +8,6 @@ import {
   PhoneCall,
   Plus,
   Settings,
-  Sparkles,
   Workflow,
 } from "lucide-react";
 
@@ -16,7 +15,7 @@ import {
 // as tabs inside a Work Tool, because each is scoped to the tool that uses it
 // (an integration is connected once but shown under the tools that use it; a
 // tool's chat only affects that tool). The shell is just Work Tools + Settings.
-export type OperatorSurface = "assistant" | "tools" | "settings";
+export type OperatorSurface = "tools" | "settings";
 
 interface NavDef {
   id: OperatorSurface;
@@ -26,9 +25,6 @@ interface NavDef {
 }
 
 const NAV: readonly NavDef[] = [
-  // "Assistant" is the workflows-as-tools spike: chat-first, where Nex writes
-  // custom tools for the operator's workflows (docs/specs/operator-workflows-as-tools.md).
-  { id: "assistant", label: "Assistant", icon: Sparkles },
   { id: "tools", label: "Apps", icon: Workflow, count: 3 },
   { id: "settings", label: "Settings", icon: Settings },
 ];

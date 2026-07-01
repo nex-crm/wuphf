@@ -30,16 +30,26 @@ import { type TabDef, Tabs } from "../components/primitives";
 import { AppBuilderChat } from "./AppBuilderChat";
 import { AppDataTab } from "./AppDataTab";
 import { AppKnowledgeTab } from "./AppKnowledgeTab";
+import { AppToolsTab } from "./AppToolsTab";
 import { AppWorkflowTab } from "./AppWorkflowTab";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type PanelSize = "dock" | "wide" | "modal";
 
-type AppTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
+type AppTab =
+  | "ui"
+  | "workflow"
+  | "tools"
+  | "data"
+  | "integrations"
+  | "knowledge";
 
 const TABS: readonly TabDef<AppTab>[] = [
   { id: "ui", label: "UI" },
   { id: "workflow", label: "Workflow" },
+  // Tools: the callable tools Nex builds from taught workflows; the app's chat
+  // calls them. Additive — the Workflow tab is unchanged.
+  { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
   { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge" },
@@ -336,6 +346,8 @@ function TabBody({
           hint="Once this app finishes building, compile it into a deterministic workflow and run it on a schedule."
         />
       );
+    case "tools":
+      return <AppToolsTab appName={app?.name ?? "This app"} />;
     case "data":
       return app ? (
         <AppDataTab appId={app.id} />

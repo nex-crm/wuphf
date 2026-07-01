@@ -4,7 +4,7 @@ import {
   authorToolFromDescription,
   callTool,
   sampleArgsFor,
-  seedTools,
+  seedToolsForApp,
 } from "./mockTools";
 
 describe("authorToolFromDescription", () => {
@@ -62,10 +62,12 @@ describe("callTool", () => {
   });
 });
 
-describe("seedTools", () => {
-  it("seeds the library with one tool so it is not empty", () => {
-    const seeded = seedTools();
-    expect(seeded).toHaveLength(1);
-    expect(seeded[0].name).toBe("weeklyPipelineSummary");
+describe("seedToolsForApp", () => {
+  it("seeds the app's Tools tab with a couple of illustrative tools", () => {
+    const seeded = seedToolsForApp("Pipeline");
+    expect(seeded.map((t) => t.name)).toEqual([
+      "weeklyPipelineSummary",
+      "scoreAndRouteLead",
+    ]);
   });
 });

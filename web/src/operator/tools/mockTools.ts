@@ -199,17 +199,16 @@ export function sampleArgsFor(tool: Tool): Record<string, string> {
   return SHAPES.find((s) => s.name === tool.name)?.sampleArg ?? {};
 }
 
-/** Starter workflows the operator can click, mapping to the three ICP examples. */
-export const TOOL_STARTERS: readonly string[] = [
-  "When a new lead comes in, score its fit and route hot ones to the right AE",
-  "Every Monday, summarize last week's pipeline",
-  "Draft a follow-up email for a stalled deal",
-];
-
-/** A pre-seeded Tool so the library is not empty on first open. */
-export function seedTools(): Tool[] {
-  const t = authorToolFromDescription(
-    "Every Monday, summarize last week's pipeline",
-  );
-  return [t];
+/**
+ * Seed the app's Tools tab with a couple of tools, as if Nex had already built
+ * them from workflows the operator taught this app — so the tab is not empty. The
+ * app name only tailors copy; the shapes are the illustrative ICP examples.
+ */
+export function seedToolsForApp(_appName?: string): Tool[] {
+  return [
+    authorToolFromDescription("Every Monday, summarize last week's pipeline"),
+    authorToolFromDescription(
+      "When a new lead comes in, score its fit and route hot ones to the right AE",
+    ),
+  ];
 }

@@ -48,15 +48,24 @@ import {
   type ToolVersion,
   type WorkflowStep,
 } from "../mock/data";
+import { AppToolsTab } from "./AppToolsTab";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 import { type BuiltWorkflow, WorkflowBuilder } from "./WorkflowBuilder";
 
-type ToolTab = "ui" | "workflow" | "data" | "integrations" | "knowledge";
+type ToolTab =
+  | "ui"
+  | "workflow"
+  | "tools"
+  | "data"
+  | "integrations"
+  | "knowledge";
 
 const TABS: readonly TabDef<ToolTab>[] = [
   { id: "ui", label: "UI" },
   { id: "workflow", label: "Workflow" },
+  // Tools Nex builds from taught workflows; the app's chat calls them. Additive.
+  { id: "tools", label: "Tools" },
   { id: "data", label: "Data" },
   { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge" },
@@ -307,6 +316,7 @@ export function InternalToolDetail({
               changedStepIds={changedStepIds}
             />
           )}
+          {tab === "tools" && <AppToolsTab appName={tool.name} />}
           {tab === "data" &&
             (isInbound ? (
               <DataTab tool={tool} rows={inboundRows} />

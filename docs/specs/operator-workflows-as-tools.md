@@ -2,15 +2,16 @@
 
 **Status:** spike, slice 1 (FE-first, mock). Branch `operator/workflows-as-tools`.
 
-## The reframe
-Drop the built **app UI**. The operator surface is a **chat with Nex**. When the
-operator teaches Nex a workflow, Nex does not assemble an app — it **writes a
-custom Tool** (a scripted function tailored to that workflow) and stores it in the
-**Tools** library ("Workflows" and "Tools" are the same thing). In chat, the
-agent **calls those Tools** to run the operator's workflow on demand.
+## The reframe (revised 2026-07-01 — keep the app UI)
+**Keep the app and its UI.** The one change: when the operator teaches a workflow,
+Nex **writes a custom Tool** (a scripted function tailored to that workflow) that
+the app's chat can call. These tools are surfaced in a **new Tools tab** on the
+app — additive; the **Workflow tab is untouched**. The app's chat has context of
+the tools it has access to and **calls them when needed**.
 
-So the unit of work is a **Tool**: AI-authored, workflow-specific, callable by the
-agent. The chat is the surface; the Tools library is what Nex has built for you.
+So the unit is a **Tool**: AI-authored, workflow-specific, callable by the app's
+agent. "Workflows" and "Tools" are the same idea; the Tools tab lists them with an
+explanation of what each does.
 
 A Tool: `{ id, name (callable, camelCase), purpose, inputs[], script, createdFrom
 (the workflow the operator described), calls[] (invocation history) }`.
@@ -27,20 +28,27 @@ A Tool: `{ id, name (callable, camelCase), purpose, inputs[], script, createdFro
    Nex writes `draftFollowup(deal)` → Tools. "draft one for the Globex deal" → the
    agent calls `draftFollowup({deal:"Globex"})` → returns the draft.
 
-## Slice 1 — the clickable shape (mock)
-A chat-first **Assistant** surface + a **Tools** rail.
-- Chat: describe a workflow → a short "Nex is writing a tool…" activity → a
-  message with a **Tool card** (name, purpose, inputs, a peek at the script); the
-  Tool lands in the Tools rail.
-- Run: "run it / call <tool>" → the chat renders a **tool-call** block (the agent
-  invoking the Tool with args) → a mock result.
-- Tools rail: the library of authored tools; selecting one shows its script,
-  inputs, and call history.
-- All mock: `authorToolFromDescription(desc)` derives a plausible Tool; `callTool`
-  returns a canned result. No backend.
+## Slice 1 — the clickable shape (mock) — DONE
+A new **Tools tab** on the app detail (`AppToolsTab`), added to both the real
+(`OperatorAppDetail`) and mock (`InternalToolDetail`) tab models — after Workflow,
+before Data. The Workflow tab and everything else are unchanged.
+- **Lists the app's tools** (seeded, as if built from taught workflows): each with
+  its signature, an explanation of what it does, "Taught from" (the workflow), a
+  collapsible script, a call count, and its last call result.
+- **Call**: each tool has a Call button that logs a mock invocation (stands in for
+  the app's chat calling the tool).
+- **Teach a tool**: a composer at the bottom — describe a workflow → Nex writes a
+  tool → it appears in the list.
+- All mock: `authorToolFromDescription(desc)` derives a plausible Tool (keyword →
+  shape for the three ICP examples, else a synthesized stub); `callTool` returns a
+  canned result. No backend. (`web/src/operator/tools/mockTools.ts`,
+  `web/src/operator/surfaces/AppToolsTab.tsx`.)
 
 ## Later slices (after the shape is validated)
-2. Real tool authoring — Nex writes actual callable code for the workflow.
-3. Real execution — the agent calls the Tool (sandboxed), against real
+2. **Author in the app's own chat.** Move tool-building from the tab composer into
+   the app's Ask-AI chat (`AppBuilderChat`): teaching a workflow there writes a
+   tool into the app's Tools; the chat gains tool-context and renders tool-calls.
+3. **Real tool authoring** — Nex writes actual callable code for the workflow.
+4. **Real execution** — the app's chat calls the Tool (sandboxed), against real
    integrations / the browser-step engine, with the existing send-gate.
-4. Persistence + versioning of Tools; edit-a-tool in chat.
+5. Persistence + versioning of Tools; edit-a-tool in chat.
