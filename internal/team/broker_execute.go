@@ -67,17 +67,32 @@ func spawnRunnerSSE(w http.ResponseWriter, r *http.Request, args, extraEnv []str
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner pipe failed"})
 		return
 	}
+	// stdin is the send-approval back-channel: the runner blocks reading it when
+	// it hits an external send; /execute/approve writes the decision here.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner stdin failed"})
+		return
+	}
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "runner start failed"})
 		return
 	}
+	runID := newRunID()
+	activeRuns.add(runID, stdin)
+	defer func() {
+		activeRuns.remove(runID)
+		stdin.Close()
+	}()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	// First frame: the run id, so the FE can POST send-approvals back to this run.
+	fmt.Fprintf(w, "data: {\"type\":\"run\",\"run_id\":%q}\n\n", runID)
 	flusher.Flush()
 
 	scanner := bufio.NewScanner(stdout)

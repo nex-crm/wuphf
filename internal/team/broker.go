@@ -643,6 +643,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/realtime/session", b.requireAuth(b.handleRealtimeSession))
 	mux.HandleFunc("/execute/browser", b.requireAuth(b.handleExecuteBrowser))
 	mux.HandleFunc("/execute/replay", b.requireAuth(b.handleExecuteReplay))
+	mux.HandleFunc("/execute/approve", b.requireAuth(b.handleExecuteApprove))
 	mux.HandleFunc("/observe/browser", b.requireAuth(b.handleObserveBrowser))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	// Single derived-stats source: every surface-level count (header
