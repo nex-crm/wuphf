@@ -365,9 +365,17 @@ function TabBody({
       return <ToolIntegrations usedNames={[]} />;
     case "knowledge":
       // The gbrain-backed, Wikipedia-style reader with cited claims and an
-      // Explain-why affordance — the same rich Knowledge surface the workspace
-      // uses, scoped into the app tab. (Replaces the plain wiki-catalog reader.)
-      return <KnowledgeSurface />;
+      // Explain-why affordance — the same rich Knowledge surface, now backed by
+      // the app's REAL synthesized cited pages (grounded in its own artifacts).
+      return app ? (
+        <KnowledgeSurface appId={app.id} />
+      ) : (
+        <EmptyState
+          glyph="📖"
+          title="No knowledge yet"
+          hint="Your AI writes cited pages about this app once it has finished building."
+        />
+      );
     default:
       return null;
   }

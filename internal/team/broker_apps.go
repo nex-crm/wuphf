@@ -132,6 +132,8 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		b.handleAppActivity(w, r, id)
 	case "db":
 		b.handleAppDB(w, r, id)
+	case "knowledge":
+		b.handleAppKnowledge(w, r, id)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}

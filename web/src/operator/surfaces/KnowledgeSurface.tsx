@@ -3,14 +3,21 @@
 // citation shows the source: what kind it is, where it came from, and the exact
 // snippet the fact was drawn from. An "Explain" button reveals why the brain
 // chose that source for this fact (e.g. why a specific chat backs an insight).
-// Mock data only.
+//
+// With an `appId` this reads the app's REAL synthesized pages from the broker
+// (grounded in the app's own artifacts, cached). Without one it renders the mock
+// pages — the shape is identical, so the render code is shared verbatim.
 
 import { type ReactNode, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 
+import { getAppKnowledge } from "../apps/knowledgeClient";
+import { EmptyState } from "../components/EmptyState";
 import { Eyebrow } from "../components/primitives";
 import {
   KNOWLEDGE,
+  type KnowledgePage,
   type KnowledgeRef,
   type KnowledgeSourceKind,
 } from "../mock/data";
@@ -102,16 +109,35 @@ function renderProse(
   });
 }
 
-export function KnowledgeSurface() {
-  const [activeId, setActiveId] = useState(KNOWLEDGE[0]?.id ?? "");
-  const page = KNOWLEDGE.find((k) => k.id === activeId) ?? KNOWLEDGE[0];
-  const titleOf = (id: string) =>
-    KNOWLEDGE.find((k) => k.id === id)?.title ?? id;
+interface KnowledgeSurfaceProps {
+  /**
+   * When set, read the app's REAL synthesized knowledge from the broker. When
+   * absent, render the mock pages (same shape, same render).
+   */
+  appId?: string;
+}
+
+export function KnowledgeSurface({ appId }: KnowledgeSurfaceProps) {
+  const query = useQuery({
+    queryKey: ["operator-app-knowledge", appId],
+    queryFn: () => getAppKnowledge(appId ?? ""),
+    enabled: Boolean(appId),
+    staleTime: 5 * 60_000,
+  });
+
+  const pages: KnowledgePage[] = appId ? (query.data?.pages ?? []) : KNOWLEDGE;
+  const [activeId, setActiveId] = useState("");
+  const page = pages.find((k) => k.id === activeId) ?? pages[0];
+  const titleOf = (id: string) => pages.find((k) => k.id === id)?.title ?? id;
 
   const refByN = useMemo(
     () => new Map((page?.references ?? []).map((r) => [r.n, r])),
     [page],
   );
+
+  // Real synthesis takes a few seconds on first open (cached after).
+  const synthesizing = Boolean(appId) && query.isLoading;
+  const emptyBrain = Boolean(appId) && !query.isLoading && pages.length === 0;
 
   return (
     <div className="opr-surface-wide">
@@ -128,102 +154,126 @@ export function KnowledgeSurface() {
             citation to see the source, and ask why it was chosen.
           </p>
         </div>
-        <button type="button" className="opr-btn opr-btn-sm">
-          New page
-        </button>
+        {appId ? null : (
+          <button type="button" className="opr-btn opr-btn-sm">
+            New page
+          </button>
+        )}
       </div>
 
-      <div className="opr-wiki">
-        <nav className="opr-kn-list" aria-label="Knowledge pages">
-          <div
-            className="opr-eyebrow"
-            style={{ marginBottom: "var(--space-2)" }}
-          >
-            Pages
+      {synthesizing ? (
+        <div className="opr-app-building" role="status">
+          <span className="opr-work-dots" aria-hidden={true}>
+            <span />
+            <span />
+            <span />
+          </span>
+          <div className="opr-empty-title">Reading what your AI knows…</div>
+          <div className="opr-empty-hint">
+            Synthesizing cited pages from this app's real sources.
           </div>
-          {KNOWLEDGE.map((k) => (
-            <button
-              key={k.id}
-              type="button"
-              className={`opr-kn-item${k.id === activeId ? " is-active" : ""}`}
-              onClick={() => setActiveId(k.id)}
+        </div>
+      ) : emptyBrain ? (
+        <EmptyState
+          glyph="📖"
+          title="No knowledge yet"
+          hint="Your AI has not written any cited pages about this app yet. As it learns from the app and your workspace, they appear here."
+        />
+      ) : (
+        <div className="opr-wiki">
+          <nav className="opr-kn-list" aria-label="Knowledge pages">
+            <div
+              className="opr-eyebrow"
+              style={{ marginBottom: "var(--space-2)" }}
             >
-              {k.title}
-            </button>
-          ))}
-        </nav>
-
-        {page ? (
-          <article className="opr-article">
-            <aside className="opr-article-infobox">
-              <div className="opr-infobox-title">{page.title}</div>
-              <dl>
-                {page.infobox.map((row) => (
-                  <div className="opr-infobox-row" key={row.label}>
-                    <dt>{row.label}</dt>
-                    <dd>{row.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </aside>
-
-            <h1>{page.title}</h1>
-            <div className="opr-article-meta">
-              From the company brain · {page.updatedAt}
+              Pages
             </div>
-
-            <p className="opr-article-lead">{renderProse(page.lead, refByN)}</p>
-
-            {page.sections.map((section) => (
-              <section key={section.heading ?? "body"}>
-                {section.heading ? <h2>{section.heading}</h2> : null}
-                {section.paras.map((para, i) => (
-                  <p key={i}>{renderProse(para, refByN)}</p>
-                ))}
-              </section>
+            {pages.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                className={`opr-kn-item${k.id === (page?.id ?? "") ? " is-active" : ""}`}
+                onClick={() => setActiveId(k.id)}
+              >
+                {k.title}
+              </button>
             ))}
+          </nav>
 
-            <h2>References</h2>
-            <ol className="opr-refs">
-              {page.references.map((ref) => (
-                <li id={`ref-${ref.n}`} key={ref.n}>
-                  <span className="opr-ref-kind">{KIND_LABEL[ref.kind]}</span>
-                  <span className="opr-ref-source">{ref.title}</span>
-                  <span className="opr-ref-detail"> · {ref.detail}</span>
-                </li>
-              ))}
-            </ol>
-
-            {page.seeAlso.length > 0 ? (
-              <>
-                <h2>See also</h2>
-                <ul className="opr-seealso">
-                  {page.seeAlso.map((id) => (
-                    <li key={id}>
-                      <button
-                        type="button"
-                        className="opr-wikilink"
-                        onClick={() => setActiveId(id)}
-                      >
-                        {titleOf(id)}
-                      </button>
-                    </li>
+          {page ? (
+            <article className="opr-article">
+              <aside className="opr-article-infobox">
+                <div className="opr-infobox-title">{page.title}</div>
+                <dl>
+                  {page.infobox.map((row) => (
+                    <div className="opr-infobox-row" key={row.label}>
+                      <dt>{row.label}</dt>
+                      <dd>{row.value}</dd>
+                    </div>
                   ))}
-                </ul>
-              </>
-            ) : null}
+                </dl>
+              </aside>
 
-            <div className="opr-categories">
-              <span className="opr-cat-label">Categories</span>
-              {page.categories.map((c) => (
-                <span className="opr-cat" key={c}>
-                  {c}
-                </span>
+              <h1>{page.title}</h1>
+              <div className="opr-article-meta">
+                From the company brain · {page.updatedAt}
+              </div>
+
+              <p className="opr-article-lead">
+                {renderProse(page.lead, refByN)}
+              </p>
+
+              {page.sections.map((section) => (
+                <section key={section.heading ?? "body"}>
+                  {section.heading ? <h2>{section.heading}</h2> : null}
+                  {section.paras.map((para, i) => (
+                    <p key={i}>{renderProse(para, refByN)}</p>
+                  ))}
+                </section>
               ))}
-            </div>
-          </article>
-        ) : null}
-      </div>
+
+              <h2>References</h2>
+              <ol className="opr-refs">
+                {page.references.map((ref) => (
+                  <li id={`ref-${ref.n}`} key={ref.n}>
+                    <span className="opr-ref-kind">{KIND_LABEL[ref.kind]}</span>
+                    <span className="opr-ref-source">{ref.title}</span>
+                    <span className="opr-ref-detail"> · {ref.detail}</span>
+                  </li>
+                ))}
+              </ol>
+
+              {page.seeAlso.length > 0 ? (
+                <>
+                  <h2>See also</h2>
+                  <ul className="opr-seealso">
+                    {page.seeAlso.map((id) => (
+                      <li key={id}>
+                        <button
+                          type="button"
+                          className="opr-wikilink"
+                          onClick={() => setActiveId(id)}
+                        >
+                          {titleOf(id)}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              <div className="opr-categories">
+                <span className="opr-cat-label">Categories</span>
+                {page.categories.map((c) => (
+                  <span className="opr-cat" key={c}>
+                    {c}
+                  </span>
+                ))}
+              </div>
+            </article>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
