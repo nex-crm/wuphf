@@ -39,7 +39,7 @@ func TestBindAndRunBrowserStepE2E(t *testing.T) {
 		t.Fatalf("browser step lost its goal: %q", browser.Template)
 	}
 	// A frozen run tolerates the browser step (marker, no error).
-	out, err := executeWorkflowBrowserStep(*browser)
+	out, err := executeWorkflowBrowserStep(context.Background(), *browser, false)
 	if err != nil {
 		t.Fatalf("run browser step: %v", err)
 	}
@@ -105,12 +105,44 @@ func TestResolverBrowserStep(t *testing.T) {
 }
 
 func TestExecuteWorkflowBrowserStepEmitsGoal(t *testing.T) {
-	out, err := executeWorkflowBrowserStep(workflowStep{Type: "browser", Template: "do the thing"})
+	out, err := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "do the thing"}, false)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if out["type"] != "browser" || out["goal"] != "do the thing" || out["runs_in_browser"] != true {
 		t.Fatalf("browser step output = %#v", out)
+	}
+}
+
+func TestExecuteWorkflowBrowserStepDrivesViaRunner(t *testing.T) {
+	prev := BrowserStepRunner
+	defer func() { BrowserStepRunner = prev }()
+
+	var gotGoal string
+	BrowserStepRunner = func(_ context.Context, goal string) (map[string]any, error) {
+		gotGoal = goal
+		return map[string]any{"actions_count": 2, "result": "did it"}, nil
+	}
+	// A REAL (non-dry) run drives the runner and merges its outcome.
+	out, err := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "email the digest"}, false)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotGoal != "email the digest" {
+		t.Fatalf("runner got goal %q", gotGoal)
+	}
+	if out["type"] != "browser" || out["goal"] != "email the digest" || out["result"] != "did it" || out["actions_count"] != 2 {
+		t.Fatalf("browser step output = %#v", out)
+	}
+
+	// A DRY run NEVER drives the browser (preview only).
+	gotGoal = ""
+	dryOut, _ := executeWorkflowBrowserStep(context.Background(), workflowStep{Type: "browser", Template: "x"}, true)
+	if gotGoal != "" {
+		t.Fatal("dry run must not drive the browser")
+	}
+	if dryOut["dry_run"] != true {
+		t.Fatalf("dry marker = %#v", dryOut)
 	}
 }
 
