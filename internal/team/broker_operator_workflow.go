@@ -80,6 +80,18 @@ func (b *Broker) handleOperatorAppWorkflow(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		b.getOperatorAppWorkflowConnections(w, r, appID)
+	case "workflow/browser/pending":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.getOperatorAppBrowserPending(w, r, appID)
+	case "workflow/browser/approve":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.resolveOperatorAppBrowserApproval(w, r, appID)
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -300,7 +312,11 @@ func (b *Broker) runOperatorAppWorkflow(w http.ResponseWriter, r *http.Request, 
 	if body.DryRun != nil {
 		dryRun = *body.DryRun
 	}
-	execution, err := prov.ExecuteWorkflow(r.Context(), action.WorkflowExecuteRequest{
+	// Carry the app id so a `browser` step knows which app's chat to ask for
+	// browser-control + send approval (slice 3b). A live (non-dry) run may PAUSE
+	// on that ask; the request stays open until the operator replies in chat.
+	ctx := context.WithValue(r.Context(), browserStepAppIDKey, appID)
+	execution, err := prov.ExecuteWorkflow(ctx, action.WorkflowExecuteRequest{
 		KeyOrPath: key,
 		Inputs:    inputs,
 		DryRun:    dryRun,

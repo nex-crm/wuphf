@@ -1,8 +1,10 @@
 # Browser execution as a workflow step (not a Run button)
 
-**Status:** plan + slice 1. **Supersedes** the standalone `BrowserRunModal` "Run in
-browser" button. **Builds on** the cua execution engine (C1/C2/send-gating):
-`runner/cua_exec.py` + broker `/execute` · `/replay` · `/approve` · `/observe`.
+**Status:** COMPLETE — slices 1–6 done (authoring → bind → execution → in-chat
+approval → modal retired → step rendered). **Supersedes** the standalone
+`BrowserRunModal` "Run in browser" button (now removed). **Builds on** the cua
+execution engine (C1/C2/send-gating): `runner/cua_exec.py` + broker `/execute` ·
+`/replay` · `/approve` · `/observe`.
 
 ## Principle
 A workflow runs on APIs (Composio) when it can. **When there is no integration
@@ -56,17 +58,40 @@ sends.
    drive); an **unwired** host degrades to a marker; **sends are auto-denied**
    (they need 3b's chat approval). Chosen option (a) over broker orchestration —
    the engine stays agnostic.
-4. **Chat permission + send-gate (3b) — the resumable-run piece.** Asking the
-   browser-control permission (and per-send approval) *in the app chat and
-   waiting for the reply mid-run* means the deterministic run can no longer be a
-   single blocking request — it must **pause, post to `AppBuilderChat`, and
-   resume when the operator replies**. That needs run-state persistence + a
-   resume path (a real async-workflow change), so it is deliberately separated
-   from 3a. Interim: 3a auto-denies sends (safe) and drives non-send browser
-   steps after the operator hits "Run".
-5. **Retire the modal:** remove the standalone `BrowserRunModal` "Run" button.
-6. **FE:** render a `browser` step in the workflow view (its own glyph + "runs in
-   your browser") and the chat approval affordance.
+4. **Chat permission + send-gate (3b) — DONE.** A live (non-dry) run now PAUSES
+   at a browser step and asks the operator *in the app chat*: first for
+   permission to control the browser (`kind:"control"`), then again before any
+   external send inside the step (`kind:"send"`). The operator's reply resumes or
+   skips the paused step. Implementation:
+   - **Pause = an in-process rendezvous.** `browserApprovals` (registry,
+     `internal/team/broker_browser_approval.go`) holds one channel per ask; the
+     browser step BLOCKS on `ask(ctx, appID, kind, goal)` until resolved,
+     cancelled, or timed out (3 min → deny). The run's HTTP request stays open
+     across the wait — the same held-open model the send-gate already uses on
+     the execute stream. Default is DENY on disconnect/timeout, and a browser
+     restart mid-pause simply denies (safe); durable cross-restart run state is a
+     later hardening, not required here.
+   - **Surfaced to chat** by `GET .../workflow/browser/pending` (poll while a live
+     run is in flight) and resolved by `POST .../workflow/browser/approve`
+     (`{approval_id, decision}`). The app id is threaded on the run context
+     (`browserStepAppIDKey`); a run with NO app id (scheduler/cron/headless) has
+     no operator to ask, so the step is **skipped, never driven**.
+   - **Runner send-gate reused unchanged:** the runner still emits
+     `approval_request` + blocks on stdin; the broker now routes that ask to
+     chat (instead of auto-denying) and forwards the decision to stdin.
+   - **FE:** `AppWorkflowTab` gains a "Run live" action (dry_run=false); while it
+     is in flight it polls the asks and renders a conversational Allow / Not now
+     card per pending approval (`browserApprovals.ts`).
+5. **Retire the modal — DONE.** The standalone `BrowserRunModal` "Run in browser"
+   button is removed (from `InternalToolDetail`), and the now-dead FE island is
+   deleted: `BrowserRunModal`, `browserExecClient`, `trajectoryStore` (+ tests).
+   Browser execution is a workflow step now, run via the Workflow tab's "Run
+   live" and gated in chat by 3b. The shared exec helpers (`sse`, `browserExec`)
+   stay — `RealCallModal` and the observe client still use them.
+6. **Render the step — DONE.** `AppWorkflowTab`'s `WorkflowStep` renders a
+   `browser` type as its own kind: the Globe node (cyan `opr-step-node-browser`)
+   plus a "Runs in your browser — Nex drives it, and asks before it sends"
+   affordance, instead of the generic gated-action lock line.
 
 ## Reused, unchanged
 `runner/cua_exec.py` (execute/record/replay/heal + `needs_approval`), broker

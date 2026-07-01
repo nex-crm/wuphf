@@ -965,6 +965,11 @@
   border-color: var(--t-faint);
   color: var(--t-faint);
 }
+/* A browser step (no integration — Nex drives the operator's browser). */
+.opr-step-node-browser {
+  border-color: var(--t-cyan);
+  color: var(--t-cyan);
+}
 .opr-step-line {
   width: 1px;
   flex: 1;
@@ -1025,6 +1030,20 @@
   color: var(--t-yellow);
   background: color-mix(in srgb, var(--t-yellow) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--t-yellow) 30%, transparent);
+  border-radius: var(--t-r-sm);
+  padding: 1px 7px;
+}
+/* "Runs in your browser" affordance on a browser step (slice 6). */
+.opr-step-browser {
+  margin-top: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--t-cyan);
+  background: color-mix(in srgb, var(--t-cyan) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-cyan) 30%, transparent);
   border-radius: var(--t-r-sm);
   padding: 1px 7px;
 }
@@ -3586,6 +3605,43 @@
   color: var(--t-dim);
 }
 .opr-delivery-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Browser-step in-chat asks (slice 3b) ─────────────────────────────────── */
+/* A live run pauses on a step with no integration and asks, conversationally,
+   to control the browser — then again before any external send. Rendered inline
+   under the run actions so the ask reads as part of the run's own thread. */
+.opr-browser-asks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.opr-browser-ask {
+  border: 1px solid color-mix(in srgb, var(--t-cyan) 32%, transparent);
+  background: color-mix(in srgb, var(--t-cyan) 8%, transparent);
+  border-radius: var(--t-r-md);
+  padding: var(--space-3);
+}
+.opr-browser-ask-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--t-cyan);
+}
+.opr-browser-ask-body {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-text);
+}
+.opr-browser-ask-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
