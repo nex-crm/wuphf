@@ -77,51 +77,6 @@ class BuildRequest(BaseModel):
     tool_id: str | None = None  # refine an existing tool, if any
 
 
-ToolInputType = Literal["string", "number", "record"]
-
-
-class ToolInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: ToolInputType = "string"
-
-
-class Tool(BaseModel):
-    """A callable capability the chat agent AUTHORED for an app — a workflow the
-    operator taught it, saved as something the agent can call later by `name`.
-    Mirrors the FE's operator/tools/mockTools.ts Tool. The chat agent creates these
-    by calling its own `create_tool` tool (see harness/tools.py)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str  # callable id, e.g. "score_and_route_lead"
-    title: str  # plain-language, e.g. "Score & route a lead"
-    purpose: str  # one line: what running it does
-    inputs: list[ToolInput] = Field(default_factory=list)
-    code: str = ""  # the agent-written implementation (empty until real authoring)
-
-
-class ToolBuildRequest(BaseModel):
-    """The operator's chat message; the tool agent may call create_tool for it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: int = SCHEMA_VERSION
-    message: str
-    app: str | None = None  # the app the tool is for (copy only)
-
-
-class ToolBuildResult(BaseModel):
-    """What the tool agent produced for one chat turn: the tool it created (if it
-    decided to make one) plus its reflect-back line."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    tool: Tool | None = None
-    narration: str = ""
-
-
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

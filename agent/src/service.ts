@@ -8,7 +8,8 @@
 import { streamWorkflow } from "./buildAgent.js";
 import { runWorkflow } from "./executor.js";
 import { providersPayload } from "./providers.js";
-import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type WorkflowSpec } from "./wire.js";
+import { buildTool } from "./tools.js";
+import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type ToolBuildRequest, type WorkflowSpec } from "./wire.js";
 
 type BuildEvent = { type: "step"; step: WorkflowSpec["steps"][number] } | { type: "spec"; spec: WorkflowSpec };
 type BuildStream = (message: string, opts: { toolId?: string; signal?: AbortSignal }) => AsyncGenerator<BuildEvent>;
@@ -74,6 +75,22 @@ export function createServer(opts: ServerOptions = {}) {
 					},
 				});
 				return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
+			}
+
+			if (req.method === "POST" && pathname === "/tools/build") {
+				// The app's chat teaches a workflow; the agent calls create_tool and
+				// returns the tool it made, so the FE renders the call and lists it.
+				let body: ToolBuildRequest;
+				try {
+					body = (await req.json()) as ToolBuildRequest;
+				} catch {
+					return json({ error: "invalid JSON body" }, 400);
+				}
+				if (!body || typeof body !== "object" || typeof body.message !== "string") {
+					return json({ error: "invalid tool build request: message (string) required" }, 400);
+				}
+				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
+				return json(buildTool(body.message));
 			}
 
 			if (req.method === "POST" && pathname === "/run") {

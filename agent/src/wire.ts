@@ -63,6 +63,34 @@ export interface RunStep {
 	http_status?: number; // present for replayed API steps
 }
 
+export interface ToolInput {
+	name: string;
+	type?: "string" | "number" | "record";
+}
+
+// A callable capability the chat agent authored for an app — a workflow the
+// operator taught it, saved so the agent can call it by `name` later. Mirrors the
+// FE (web/src/operator/tools/mockTools.ts). These are AGENT tools: the app's chat
+// calls them; a human does not run them by hand.
+export interface Tool {
+	name: string; // callable id, e.g. "scoreAndRouteLead"
+	title: string; // plain-language, e.g. "Score & route a lead"
+	purpose: string; // one line: what running it does
+	inputs: ToolInput[];
+	code: string; // the (agent-written) implementation
+}
+
+export interface ToolBuildRequest {
+	schema_version?: number;
+	message: string; // the operator's plain-language task
+	app?: string; // the app the tool is for (copy only)
+}
+
+export interface ToolBuildResult {
+	tool: Tool | null; // the tool the agent made this turn (if it made one)
+	narration: string; // the agent's reflect-back line
+}
+
 export interface RunResult {
 	status: "done" | "needs_approval" | "error";
 	steps: RunStep[];

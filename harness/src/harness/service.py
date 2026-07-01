@@ -20,15 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 from .build_agent import BuildAgent, build_agent
 from .executor import run_workflow
 from .providers import providers_payload
-from .tools import ToolAgent, tool_agent
-from .wire import (
-    SCHEMA_VERSION,
-    BuildRequest,
-    RunRequest,
-    RunResult,
-    ToolBuildRequest,
-    ToolBuildResult,
-)
+from .wire import SCHEMA_VERSION, BuildRequest, RunRequest, RunResult
 
 
 def _check_schema_version(got: int) -> None:
@@ -40,13 +32,9 @@ def _check_schema_version(got: int) -> None:
 
 
 AgentFactory = Callable[[], BuildAgent]
-ToolAgentFactory = Callable[[], ToolAgent]
 
 
-def create_app(
-    agent_factory: AgentFactory = build_agent,
-    tool_agent_factory: ToolAgentFactory = tool_agent,
-) -> FastAPI:
+def create_app(agent_factory: AgentFactory = build_agent) -> FastAPI:
     app = FastAPI(title="wuphf-harness", version="0.0.1")
 
     @app.get("/health")
@@ -75,13 +63,6 @@ def create_app(
                 yield {"event": "error", "data": json.dumps({"message": str(exc)})}
 
         return EventSourceResponse(generate())
-
-    @app.post("/tools/build", response_model=ToolBuildResult)
-    def tools_build(req: ToolBuildRequest) -> ToolBuildResult:
-        """The app's chat teaches a workflow; the tool agent calls create_tool and
-        returns the tool it made, so the FE can render the tool-call and list it."""
-        _check_schema_version(req.schema_version)
-        return tool_agent_factory().build(req.message, req.app)
 
     @app.post("/run", response_model=RunResult)
     def run(req: RunRequest) -> RunResult:

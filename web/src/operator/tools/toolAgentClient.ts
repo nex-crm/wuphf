@@ -1,7 +1,7 @@
-// Client for the harness /tools/build endpoint — the app's chat teaches a
-// workflow, the harness chat agent calls create_tool, and this returns the tool
-// it made. Proxied via /harness in dev (see vite.config.ts). Mirrors the Go
-// harness wire (harness/src/harness/wire.py ToolBuildRequest/ToolBuildResult).
+// Client for the pi-mono agent's /tools/build endpoint — the app's chat teaches a
+// workflow, the agent's create_tool tool authors it, and this returns the tool it
+// made. Proxied via /agent in dev (see vite.config.ts). Mirrors the agent wire
+// (agent/src/wire.ts ToolBuildRequest/ToolBuildResult).
 
 import {
   authorToolFromDescription,
@@ -61,7 +61,7 @@ export async function buildToolFromChat(
   app: string,
 ): Promise<BuiltTool> {
   try {
-    const res = await fetch("/harness/tools/build", {
+    const res = await fetch("/agent/tools/build", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ schema_version: SCHEMA_VERSION, message, app }),

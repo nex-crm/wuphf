@@ -58,28 +58,6 @@ def test_schema_version_mismatch_rejected():
     assert c.post("/build/stream", json={"schema_version": 99, "message": "x"}).status_code == 400
 
 
-def test_tools_build_creates_a_tool():
-    c = _client()
-    r = c.post(
-        "/tools/build",
-        json={"message": "draft a follow-up for a stalled deal", "app": "Pipeline"},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["tool"]["name"] == "draftFollowup"
-    assert body["tool"]["title"] == "Draft a follow-up email"
-    assert [i["name"] for i in body["tool"]["inputs"]] == ["deal"]
-    assert "Built" in body["narration"]
-
-
-def test_tools_build_rejects_schema_mismatch():
-    c = _client()
-    assert (
-        c.post("/tools/build", json={"schema_version": 99, "message": "x"}).status_code
-        == 400
-    )
-
-
 class _ExplodingAgent:
     async def stream(self, message, tool_id=None):
         # An agent that fails AFTER the stream has started (the real-build risk).

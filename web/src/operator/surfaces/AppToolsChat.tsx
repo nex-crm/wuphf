@@ -1,15 +1,15 @@
 // AppToolsChat — the app's Ask-AI chat, as the tool-teaching agent. Describe a
-// repeatable workflow and it calls the harness /tools/build endpoint, where the
-// chat agent's create_tool tool authors it (harness/src/harness/tools.py). The
+// repeatable workflow and it calls the pi-mono agent's /tools/build endpoint,
+// where the chat agent's create_tool tool authors it (agent/src/tools.ts). The
 // chat renders the create_tool call and the new tool lands in the app's Tools tab
-// (shared context). Falls back to the local mock when the harness is unreachable,
-// so the FE keeps working offline. See docs/specs/operator-workflows-as-tools.md.
+// (shared context). Falls back to the local mock when the agent is unreachable, so
+// the FE keeps working offline. See docs/specs/operator-workflows-as-tools.md.
 
 import { useEffect, useRef, useState } from "react";
 import { Send, Terminal } from "lucide-react";
 
-import { buildToolFromChat } from "../tools/harnessClient";
 import type { Tool } from "../tools/mockTools";
+import { buildToolFromChat } from "../tools/toolAgentClient";
 import { useAppTools } from "../tools/toolsContext";
 
 interface AppToolsChatProps {
@@ -74,7 +74,7 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
     ]);
     setThinking(true);
     scrollDown();
-    // The harness chat agent decides to make a tool and calls create_tool; we
+    // The pi-mono chat agent decides to make a tool and calls create_tool; we
     // render that call and drop the tool into the shared Tools state.
     const { tool, offline } = await buildToolFromChat(body, appName);
     addTool(tool);
@@ -87,7 +87,7 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
         from: "nex",
         body: `Done — I built “${tool.title}”. It's in your Tools now, and I'll call it when you need it.${
           offline
-            ? " (built offline — start the harness to use the live agent.)"
+            ? " (built offline — start the agent to use the live one.)"
             : ""
         }`,
       },
