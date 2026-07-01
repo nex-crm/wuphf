@@ -46,7 +46,7 @@ export function AppDataTab({ appId }: AppDataTabProps) {
       <EmptyState
         glyph="▦"
         title="No data access yet"
-        hint="This app does not read workspace data or call an integration yet. When it does, exactly what it touches shows here — derived from its real code."
+        hint="This agent does not read workspace data or call an integration yet. When it does, exactly what it touches shows here — derived from its real code."
       />
     );
   }

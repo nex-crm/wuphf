@@ -20,11 +20,15 @@ import {
 import type { CustomApp, CustomAppDetail } from "../../api/apps";
 import { AppLivePreview } from "../../components/apps/AppLivePreview";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
+import { AgentName } from "../agents/AgentName";
+import { AgentPurpose } from "../agents/AgentPurpose";
 import {
   appBuildState,
   useDeleteApp,
   useOperatorApp,
 } from "../apps/useOperatorApps";
+import { ArtifactsTab } from "../artifacts/ArtifactsTab";
+import type { Artifact } from "../artifacts/artifacts";
 import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
 import { ToolsProvider } from "../tools/toolsContext";
@@ -38,7 +42,7 @@ import { ToolIntegrations } from "./ToolIntegrations";
 type PanelSize = "dock" | "wide" | "modal";
 
 type AppTab =
-  | "ui"
+  | "artifacts"
   | "workflow"
   | "tools"
   | "data"
@@ -46,7 +50,7 @@ type AppTab =
   | "knowledge";
 
 const TABS: readonly TabDef<AppTab>[] = [
-  { id: "ui", label: "UI" },
+  { id: "artifacts", label: "Artifacts" },
   { id: "workflow", label: "Workflow" },
   // Tools: the callable tools Nex builds from taught workflows; the app's chat
   // calls them. Additive — the Workflow tab is unchanged.
@@ -72,7 +76,7 @@ export function OperatorAppDetail({
   onBack,
   buildWalk,
 }: OperatorAppDetailProps) {
-  const [tab, setTab] = useState<AppTab>("ui");
+  const [tab, setTab] = useState<AppTab>("artifacts");
   const [chatOpen, setChatOpen] = useState(false);
   const [panelSize, setPanelSize] = useState<PanelSize>("dock");
   const query = useOperatorApp(appId);
@@ -94,7 +98,7 @@ export function OperatorAppDetail({
       window.setTimeout(() => setTab("workflow"), 900),
       window.setTimeout(() => setTab("data"), 3200),
       window.setTimeout(() => setTab("knowledge"), 5500),
-      window.setTimeout(() => setTab("ui"), 8000),
+      window.setTimeout(() => setTab("artifacts"), 8000),
     ];
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, [buildWalk, ready]);
@@ -114,7 +118,7 @@ export function OperatorAppDetail({
         <div className="opr-surface-wide opr-app-detail">
           <button type="button" className="opr-back" onClick={onBack}>
             <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
-            All apps
+            All agents
           </button>
 
           <div className="opr-detail-head">
@@ -123,11 +127,12 @@ export function OperatorAppDetail({
             </span>
             <div className="opr-detail-titles">
               <div className="opr-detail-name">
-                {app?.name ?? "Loading app…"}
+                {app ? (
+                  <AgentName id={app.id} fallback={app.name} />
+                ) : (
+                  "Loading agent…"
+                )}
               </div>
-              {app?.summary ? (
-                <p className="opr-tool-summary">{app.summary}</p>
-              ) : null}
               <div className="opr-tool-meta">
                 <span
                   className={`opr-pill ${failed ? "opr-pill-bad" : "opr-pill-muted"}`}
@@ -156,7 +161,7 @@ export function OperatorAppDetail({
                   onClick={() => setChatOpen(true)}
                 >
                   <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
-                  Ask AI
+                  Ask Agent
                 </button>
               </div>
             ) : failed ? (
@@ -173,6 +178,8 @@ export function OperatorAppDetail({
               </div>
             ) : null}
           </div>
+
+          <AgentPurpose summary={app?.summary} />
 
           <Tabs tabs={TABS} active={tab} onSelect={setTab} />
 
@@ -228,10 +235,10 @@ function AskAiDock({
         type="button"
         className="opr-ask-fab"
         onClick={() => onOpenChange(true)}
-        aria-label={`Ask AI about ${app.name}`}
+        aria-label={`Ask Agent about ${app.name}`}
       >
         <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-        Ask AI
+        Ask Agent
       </button>
     );
   }
@@ -247,12 +254,12 @@ function AskAiDock({
       ) : null}
       <aside
         className={`opr-ask-panel is-${size}`}
-        aria-label={`Ask AI about ${app.name}`}
+        aria-label={`Ask Agent about ${app.name}`}
       >
         <div className="opr-ask-bar">
           <span className="opr-ask-bar-title">
             <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
-            Ask AI · {app.name}
+            Ask Agent · {app.name}
           </span>
           <div className="opr-ask-bar-controls">
             <button
@@ -321,15 +328,31 @@ function TabBody({
   const ready =
     app && appBuildState(app) === "ready" && Boolean(query.data?.html);
   switch (tab) {
-    case "ui":
+    case "artifacts": {
+      // The app is ONE artifact among the agent's outcomes; more (PDFs, pages,
+      // docs from tool runs) collect here as they are produced.
+      const appArtifact: Artifact = {
+        id: "app",
+        type: "app",
+        title: app?.name ?? "App",
+        producedBy: "built by Nex",
+        at: app ? `v${app.version}` : "",
+      };
       return (
-        <UiTab
-          query={query}
-          failed={failed}
-          onRemove={onRemove}
-          removing={removing}
+        <ArtifactsTab
+          agentName={app?.name ?? "This agent"}
+          artifacts={[appArtifact]}
+          renderApp={() => (
+            <UiTab
+              query={query}
+              failed={failed}
+              onRemove={onRemove}
+              removing={removing}
+            />
+          )}
         />
       );
+    }
     case "workflow":
       return ready ? (
         <AppWorkflowTab appId={app.id} appName={app.name} />
@@ -337,7 +360,7 @@ function TabBody({
         <EmptyState
           glyph="⌥"
           title="No automation yet"
-          hint="Once this app finishes building, compile it into a deterministic workflow and run it on a schedule."
+          hint="Once this agent finishes building, compile it into a deterministic workflow and run it on a schedule."
         />
       );
     case "tools":
@@ -349,7 +372,7 @@ function TabBody({
         <EmptyState
           glyph="▦"
           title="No data yet"
-          hint="The data this app reads and writes appears here once it has finished building."
+          hint="The data this agent reads and writes appears here once it has finished building."
         />
       );
     case "integrations":
@@ -400,7 +423,7 @@ function UiTab({
         </span>
         <div className="opr-empty-title">Build failed</div>
         <div className="opr-empty-hint">
-          This app stalled before it published a version — it is not building
+          This agent stalled before it published a version — it is not building
           anymore. Remove it and rebuild, or describe it again.
         </div>
         <div className="opr-empty-actions">
@@ -411,7 +434,7 @@ function UiTab({
             disabled={removing}
           >
             <Trash2 size={13} strokeWidth={1.9} aria-hidden={true} />
-            Remove app
+            Remove agent
           </button>
         </div>
       </div>
@@ -425,7 +448,7 @@ function UiTab({
         <span />
       </span>
       <div className="opr-empty-title">
-        {query.isError ? "Could not load this app" : "Building your app…"}
+        {query.isError ? "Could not load this agent" : "Building your agent…"}
       </div>
       <div className="opr-empty-hint">
         {query.isError

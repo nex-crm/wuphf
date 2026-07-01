@@ -204,7 +204,7 @@ export function AppToolsChat({ appName, seed }: AppToolsChatProps) {
         kind: "text",
         id: nextId(),
         from: "nex",
-        body: "Okay — I didn't send it. Nothing left this app.",
+        body: "Okay — I didn't send it. Nothing left this agent.",
       },
     ]);
     scrollDown();

@@ -35,8 +35,8 @@ export function InternalToolsSurface({
   return (
     <div className="opr-surface-wide">
       <SurfaceHeader
-        eyebrow="Apps"
-        title="Your apps"
+        eyebrow="Agents"
+        title="Your agents"
         lede="Each app is a small tool your team runs — a dashboard, a form, a workflow — built by describing it in chat, or talked through on a call."
         actions={
           <div className="opr-header-actions">
@@ -46,7 +46,7 @@ export function InternalToolsSurface({
               onClick={onBuild}
             >
               <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
-              Build an app
+              Build an agent
             </button>
             <button type="button" className="opr-btn" onClick={onStartCall}>
               <PhoneCall size={14} strokeWidth={1.9} aria-hidden={true} />
@@ -87,7 +87,7 @@ export function InternalToolsSurface({
       {rest.length > 0 || buildingApps.length > 0 || failedApps.length > 0 ? (
         <>
           <div className="opr-section-label">
-            <Eyebrow>All apps</Eyebrow>
+            <Eyebrow>All agents</Eyebrow>
             <div className="opr-section-rule" />
           </div>
           <div className="opr-grid">

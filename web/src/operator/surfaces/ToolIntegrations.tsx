@@ -156,7 +156,9 @@ function IntegrationLogo({ item }: { item: IntegrationCatalogItem }) {
       />
     );
   }
-  return ToolkitBrandLogo({ platform: item.platform }) ?? <GenericIntegrationLogo />;
+  return (
+    ToolkitBrandLogo({ platform: item.platform }) ?? <GenericIntegrationLogo />
+  );
 }
 
 function IntegrationCard({

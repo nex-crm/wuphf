@@ -201,7 +201,11 @@ async function buildPlanViaService(
   const res = await fetch(`${AGENT_URL}/build/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ schema_version: 1, message: description, integrations }),
+    body: JSON.stringify({
+      schema_version: 1,
+      message: description,
+      integrations,
+    }),
     signal,
   });
   const { ok, body, status } = res;

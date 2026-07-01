@@ -23,7 +23,7 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   return (
     <div className="opr-approval" role="group" aria-label="Approval needed">
-      <span className="opr-approval-icon" aria-hidden>
+      <span className="opr-approval-icon" aria-hidden={true}>
         !
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -36,15 +36,11 @@ export function ApprovalCard({
             className="opr-btn opr-btn-primary opr-btn-sm"
             onClick={onApprove}
           >
-            <Check size={13} strokeWidth={1.9} aria-hidden />
+            <Check size={13} strokeWidth={1.9} aria-hidden={true} />
             Approve &amp; send
           </button>
-          <button
-            type="button"
-            className="opr-btn opr-btn-sm"
-            onClick={onSkip}
-          >
-            <X size={13} strokeWidth={1.9} aria-hidden />
+          <button type="button" className="opr-btn opr-btn-sm" onClick={onSkip}>
+            <X size={13} strokeWidth={1.9} aria-hidden={true} />
             Skip
           </button>
         </div>

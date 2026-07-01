@@ -85,25 +85,31 @@ describe("appBuildState", () => {
 });
 
 describe("deriveAppName", () => {
-  it("strips lead-ins and title-cases the first clause", () => {
-    expect(deriveAppName("build a dashboard of our open tasks")).toBe(
-      "Dashboard Of Our Open Tasks",
+  it("names an agent for its role when the domain is recognizable", () => {
+    expect(deriveAppName("score inbound leads and route hot ones")).toBe(
+      "Lead Routing Agent",
+    );
+    expect(deriveAppName("keep the CRM clean, dedupe contacts")).toBe(
+      "CRM Hygiene Agent",
+    );
+    expect(deriveAppName("a weekly pipeline summary I can glance at")).toBe(
+      "Pipeline Agent",
     );
   });
 
-  it("takes only the first clause", () => {
-    expect(
-      deriveAppName("a refund form, then post it to Slack when approved"),
-    ).toBe("Refund Form");
+  it("synthesizes <lead words> Agent for an unknown domain", () => {
+    expect(deriveAppName("a refund form for vendors")).toBe(
+      "Refund Form For Agent",
+    );
   });
 
-  it("caps at six words", () => {
+  it("caps the synthesized lead at three words", () => {
     expect(
       deriveAppName("create one two three four five six seven eight nine"),
-    ).toBe("One Two Three Four Five Six");
+    ).toBe("One Two Three Agent");
   });
 
   it("falls back when empty", () => {
-    expect(deriveAppName("   ")).toBe("Untitled app");
+    expect(deriveAppName("   ")).toBe("Untitled Agent");
   });
 });

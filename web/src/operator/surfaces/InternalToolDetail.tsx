@@ -29,6 +29,10 @@ import {
   X,
 } from "lucide-react";
 
+import { AgentName } from "../agents/AgentName";
+import { AgentPurpose } from "../agents/AgentPurpose";
+import { ArtifactsTab } from "../artifacts/ArtifactsTab";
+import { seedArtifacts } from "../artifacts/artifacts";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { EmptyState } from "../components/EmptyState";
 import {
@@ -55,7 +59,7 @@ import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
 type ToolTab =
-  | "ui"
+  | "artifacts"
   | "workflow"
   | "tools"
   | "data"
@@ -63,7 +67,7 @@ type ToolTab =
   | "knowledge";
 
 const TABS: readonly TabDef<ToolTab>[] = [
-  { id: "ui", label: "UI" },
+  { id: "artifacts", label: "Artifacts" },
   { id: "workflow", label: "Workflow" },
   // Tools Nex builds from taught workflows; the app's chat calls them. Additive.
   { id: "tools", label: "Tools" },
@@ -89,7 +93,7 @@ export function InternalToolDetail({
   tool,
   onBack,
   onStartCall,
-  initialTab = "ui",
+  initialTab = "artifacts",
   demoSeed,
 }: InternalToolDetailProps) {
   const [tab, setTab] = useState<ToolTab>(initialTab);
@@ -139,7 +143,7 @@ export function InternalToolDetail({
         <div className="opr-surface-wide">
           <button type="button" className="opr-back" onClick={onBack}>
             <ArrowLeft size={13} strokeWidth={1.9} aria-hidden={true} />
-            All tools
+            All agents
           </button>
 
           <div className="opr-detail-head">
@@ -147,8 +151,9 @@ export function InternalToolDetail({
               {sigil(tool.name)}
             </span>
             <div className="opr-detail-titles">
-              <div className="opr-detail-name">{tool.name}</div>
-              <p className="opr-tool-summary">{tool.summary}</p>
+              <div className="opr-detail-name">
+                <AgentName id={tool.id} fallback={tool.name} />
+              </div>
               <div className="opr-tool-meta">
                 <ToolStatusBadge status={tool.status} />
                 <span className="opr-meta-dot">
@@ -174,7 +179,7 @@ export function InternalToolDetail({
                 onClick={() => setChatOpen(true)}
               >
                 <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
-                Ask AI
+                Ask Agent
               </button>
               {tool.status === "enabled" && (
                 <>
@@ -245,6 +250,8 @@ export function InternalToolDetail({
             </div>
           </div>
 
+          <AgentPurpose summary={tool.summary} />
+
           <Tabs
             tabs={TABS}
             active={tab}
@@ -257,18 +264,34 @@ export function InternalToolDetail({
             id={`opr-panel-${tab}`}
             aria-labelledby={`opr-tab-${tab}`}
           >
-            {tab === "ui" &&
-              (isInbound ? (
-                <UITab rows={inboundRows} onApprove={approveInbound} />
-              ) : (
-                <EmptyState
-                  glyph="◧"
-                  title="No screen built yet"
-                  hint="Build the screen your team will use to run this tool. Demo it to Nex on a call and your AI assembles it."
-                  actionLabel="Demo workflow to Nex"
-                  onAction={onStartCall}
-                />
-              ))}
+            {tab === "artifacts" && (
+              <ArtifactsTab
+                agentName={tool.name}
+                artifacts={[
+                  {
+                    id: "app",
+                    type: "app",
+                    title: tool.name,
+                    producedBy: "built by Nex",
+                    at: `v${version}`,
+                  },
+                  ...seedArtifacts(),
+                ]}
+                renderApp={() =>
+                  isInbound ? (
+                    <UITab rows={inboundRows} onApprove={approveInbound} />
+                  ) : (
+                    <EmptyState
+                      glyph="◧"
+                      title="No screen built yet"
+                      hint="Build the screen your team will use to run this agent. Demo it to Nex on a call and your AI assembles it."
+                      actionLabel="Demo workflow to Nex"
+                      onAction={onStartCall}
+                    />
+                  )
+                }
+              />
+            )}
             {tab === "workflow" && (
               <WorkflowTab
                 tool={{ ...tool, steps: liveSteps }}
@@ -311,10 +334,10 @@ export function InternalToolDetail({
               type="button"
               className="opr-ask-fab"
               onClick={() => setChatOpen(true)}
-              aria-label={`Ask AI about ${tool.name}`}
+              aria-label={`Ask Agent about ${tool.name}`}
             >
               <Sparkles size={16} strokeWidth={2} aria-hidden={true} />
-              Ask AI
+              Ask Agent
             </button>
           </div>
         )}
@@ -331,12 +354,12 @@ export function InternalToolDetail({
             ) : null}
             <aside
               className={`opr-ask-panel is-${panelSize}`}
-              aria-label={`Ask AI about ${tool.name}`}
+              aria-label={`Ask Agent about ${tool.name}`}
             >
               <div className="opr-ask-bar">
                 <span className="opr-ask-bar-title">
                   <Sparkles size={13} strokeWidth={2} aria-hidden={true} />
-                  Ask AI · {tool.name}
+                  Ask Agent · {tool.name}
                 </span>
                 <div className="opr-ask-bar-controls">
                   <button

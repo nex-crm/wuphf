@@ -178,7 +178,7 @@ describe("AppToolsChat calls tools (slice 5)", () => {
 
     fireEvent.click(await findByText("Not now"));
     expect(
-      await findByText("Okay — I didn't send it. Nothing left this app."),
+      await findByText("Okay — I didn't send it. Nothing left this agent."),
     ).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

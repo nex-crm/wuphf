@@ -598,7 +598,7 @@ export function WorkflowBuilder({
         {panelMode ? null : (
           <header className="opr-builder-head">
             <div>
-              <Eyebrow>{scopeToolName ? "Ask AI" : "Build a tool"}</Eyebrow>
+              <Eyebrow>{scopeToolName ? "Ask Agent" : "Build a tool"}</Eyebrow>
               <div className="opr-builder-title">
                 {scopeToolName ? scopeToolName : "Describe it, I will build it"}
               </div>

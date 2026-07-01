@@ -72,7 +72,7 @@ describe("AppWorkflowTab", () => {
     await waitFor(() =>
       expect(compileAppWorkflow).toHaveBeenCalledWith("app_abc"),
     );
-    expect(getByText(/designing this app's workflow/i)).toBeTruthy();
+    expect(getByText(/designing this agent's workflow/i)).toBeTruthy();
     expect(queryByRole("button", { name: /compile workflow/i })).toBeNull();
   });
 
