@@ -150,6 +150,28 @@ describe("AppWorkflowTab", () => {
     );
   });
 
+  it("renders a browser step with its own 'runs in your browser' affordance (slice 6)", async () => {
+    getAppWorkflow.mockResolvedValue({
+      compiled: true,
+      workflow_key: "operator-app-abc",
+      steps: [
+        {
+          id: "s1",
+          type: "browser",
+          description: "Email the digest to finance",
+          gated: true,
+        },
+      ],
+    });
+    const { getByText, queryByText } = wrap(
+      <AppWorkflowTab appId="app_abc" appName="Digest" />,
+    );
+    await waitFor(() => expect(getByText("Deterministic")).toBeTruthy());
+    expect(getByText(/runs in your browser/i)).toBeTruthy();
+    // A browser step reads as "browser", not the generic gated-action lock line.
+    expect(queryByText(/held for your approval/i)).toBeNull();
+  });
+
   it("a live run surfaces a browser-control ask in chat and Allow resolves it (3b)", async () => {
     getAppWorkflow.mockResolvedValue({
       compiled: true,

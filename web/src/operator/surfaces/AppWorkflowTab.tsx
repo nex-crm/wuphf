@@ -34,7 +34,8 @@ import { EmptyState } from "../components/EmptyState";
 import { Eyebrow } from "../components/primitives";
 import { AppDeliverySchedule } from "./AppDeliverySchedule";
 
-// A short node label per frozen step type, so the flow reads at a glance.
+// A short node label per frozen step type, so the flow reads at a glance. A
+// `browser` step renders the Globe icon instead (handled in WorkflowStep).
 const STEP_GLYPH: Record<string, string> = {
   action: "DO",
   template: "··",
@@ -443,19 +444,28 @@ function WorkflowStep({
   last: boolean;
 }) {
   const title = step.description || step.template || step.action_id || step.id;
+  const isBrowser = step.type === "browser";
+  // A browser step has no integration — Nex drives the operator's own browser
+  // for it — so it reads as its own kind: the Globe node + a "runs in your
+  // browser" line, distinct from an API action step.
+  const nodeVariant = isBrowser ? "browser" : step.gated ? "action" : "enrich";
   return (
     <div className="opr-step">
       <div className="opr-step-rail">
         <div
-          className={`opr-step-node opr-step-node-${step.gated ? "action" : "enrich"}`}
+          className={`opr-step-node opr-step-node-${nodeVariant}`}
           aria-hidden={true}
         >
-          {STEP_GLYPH[step.type] ?? "··"}
+          {isBrowser ? (
+            <Globe size={13} strokeWidth={2} />
+          ) : (
+            (STEP_GLYPH[step.type] ?? "··")
+          )}
         </div>
         {last ? null : <div className="opr-step-line" />}
       </div>
       <div className="opr-step-body">
-        <div className="opr-step-kind">{step.type}</div>
+        <div className="opr-step-kind">{isBrowser ? "browser" : step.type}</div>
         <div className="opr-step-title">
           {title}
           {step.platform ? (
@@ -465,7 +475,13 @@ function WorkflowStep({
         {step.run_if ? (
           <div className="opr-step-detail">Only when {step.run_if}</div>
         ) : null}
-        {step.gated ? (
+        {isBrowser ? (
+          <div className="opr-step-browser">
+            <Globe size={11} strokeWidth={2} aria-hidden={true} />
+            Runs in your browser — Nex drives it, and asks before it sends
+          </div>
+        ) : null}
+        {step.gated && !isBrowser ? (
           <div className="opr-step-gate">
             <Lock size={11} strokeWidth={2} aria-hidden={true} />
             Held for your approval before it sends
