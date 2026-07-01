@@ -27,6 +27,9 @@ import "./styles/onboarding.css";
 import "./styles/onboarding-wizard.css";
 import "./styles/office-tour.css";
 import "./styles/office-tour-slides.css";
+/* After the three sheets above: pins the onboarding hosts to the operator
+   shell palette by overriding the tokens those sheets consume. */
+import "./styles/onboarding-shell.css";
 import "./styles/operator.css";
 import "./styles/apps.css";
 
