@@ -1,10 +1,10 @@
 # Browser execution as a workflow step (not a Run button)
 
-**Status:** slices 1–3 done (authoring → bind → execution → in-chat approval).
-Remaining: 5 (retire the standalone modal), 6 (compile-time step rendering).
-**Supersedes** the standalone `BrowserRunModal` "Run in browser" button. **Builds
-on** the cua execution engine (C1/C2/send-gating): `runner/cua_exec.py` + broker
-`/execute` · `/replay` · `/approve` · `/observe`.
+**Status:** COMPLETE — slices 1–6 done (authoring → bind → execution → in-chat
+approval → modal retired → step rendered). **Supersedes** the standalone
+`BrowserRunModal` "Run in browser" button (now removed). **Builds on** the cua
+execution engine (C1/C2/send-gating): `runner/cua_exec.py` + broker `/execute` ·
+`/replay` · `/approve` · `/observe`.
 
 ## Principle
 A workflow runs on APIs (Composio) when it can. **When there is no integration
@@ -82,10 +82,16 @@ sends.
    - **FE:** `AppWorkflowTab` gains a "Run live" action (dry_run=false); while it
      is in flight it polls the asks and renders a conversational Allow / Not now
      card per pending approval (`browserApprovals.ts`).
-5. **Retire the modal:** remove the standalone `BrowserRunModal` "Run" button.
-6. **FE polish:** render a `browser` step in the frozen workflow view with its own
-   glyph + "runs in your browser" affordance (the run-time approval card is done
-   in 3b; this is the compile-time step rendering).
+5. **Retire the modal — DONE.** The standalone `BrowserRunModal` "Run in browser"
+   button is removed (from `InternalToolDetail`), and the now-dead FE island is
+   deleted: `BrowserRunModal`, `browserExecClient`, `trajectoryStore` (+ tests).
+   Browser execution is a workflow step now, run via the Workflow tab's "Run
+   live" and gated in chat by 3b. The shared exec helpers (`sse`, `browserExec`)
+   stay — `RealCallModal` and the observe client still use them.
+6. **Render the step — DONE.** `AppWorkflowTab`'s `WorkflowStep` renders a
+   `browser` type as its own kind: the Globe node (cyan `opr-step-node-browser`)
+   plus a "Runs in your browser — Nex drives it, and asks before it sends"
+   affordance, instead of the generic gated-action lock line.
 
 ## Reused, unchanged
 `runner/cua_exec.py` (execute/record/replay/heal + `needs_approval`), broker
