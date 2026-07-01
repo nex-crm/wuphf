@@ -130,6 +130,8 @@ func (b *Broker) handleAppByID(w http.ResponseWriter, r *http.Request) {
 		b.handleAppDev(w, r, id, parts)
 	case "activity":
 		b.handleAppActivity(w, r, id)
+	case "db":
+		b.handleAppDB(w, r, id)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -181,6 +183,77 @@ func (b *Broker) appBuilderRunTaskID(editChannel string) string {
 		}
 	}
 	return ""
+}
+
+// appDBOpRequest is the POST /apps/{id}/db body: an op selector plus the
+// op-specific fields. One endpoint, op-dispatched, so the Bridge speaks a single
+// db channel rather than a route per verb.
+type appDBOpRequest struct {
+	Op      string           `json:"op"`
+	Table   string           `json:"table"`
+	Columns []AppDBColumn    `json:"columns"`
+	Rows    []map[string]any `json:"rows"`
+	Key     string           `json:"key"`
+}
+
+// handleAppDB is the app's backing DATABASE: named tables, typed columns, rows.
+// The app writes its derived model here (via the Bridge) and renders from it; the
+// Data tab reads it directly. Reads are authed; writes are gated to the App
+// Builder or a human session (appWriterAllowed), the same trust boundary as app
+// bytes.
+//
+//	GET  /apps/{id}/db  -> {tables:[{name,columns,rows}]}
+//	POST /apps/{id}/db  -> op-dispatch: define | upsert | query | clear
+func (b *Broker) handleAppDB(w http.ResponseWriter, r *http.Request, id string) {
+	switch r.Method {
+	case http.MethodGet:
+		tables, err := b.appStore().AppDBTables(id)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"tables": tables})
+	case http.MethodPost:
+		actor, status, err := richArtifactAuthenticatedSlug(r, "", "actor")
+		if err != nil {
+			writeJSON(w, status, map[string]string{"error": err.Error()})
+			return
+		}
+		if !b.appWriterAllowed(r, actor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "not allowed to write app data"})
+			return
+		}
+		var req appDBOpRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		store := b.appStore()
+		var (
+			table AppDBTable
+			opErr error
+		)
+		switch strings.TrimSpace(req.Op) {
+		case "define":
+			table, opErr = store.DefineAppDBTable(id, req.Table, req.Columns)
+		case "upsert":
+			table, opErr = store.UpsertAppDBRows(id, req.Table, req.Rows, req.Key)
+		case "query":
+			table, opErr = store.QueryAppDBTable(id, req.Table)
+		case "clear":
+			table, opErr = store.ClearAppDBTable(id, req.Table)
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown op: want define|upsert|query|clear"})
+			return
+		}
+		if opErr != nil {
+			writeAppError(w, opErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"table": table})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // appDevManager lazily constructs the live-preview dev-server manager on first
