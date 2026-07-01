@@ -1020,6 +1020,27 @@
   color: var(--t-faint);
   margin-right: 2px;
 }
+/* Inline, editable channel picker native to the delivery node — reads as an
+   editable chip, not a form field bolted below the flow. */
+.opr-step-channel {
+  font-family: var(--t-mono, monospace);
+  font-size: 11px;
+  color: var(--t-cyan);
+  background: color-mix(in srgb, var(--t-accent-2) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t-accent-2) 45%, var(--t-line-2));
+  border-radius: var(--t-r-sm);
+  padding: 1px 6px;
+  width: 11ch;
+  min-width: 8ch;
+  outline: none;
+}
+.opr-step-channel:focus {
+  border-color: var(--t-accent-2);
+  background: color-mix(in srgb, var(--t-accent-2) 16%, transparent);
+}
+.opr-step-channel::placeholder {
+  color: var(--t-faint);
+}
 .opr-step-gate {
   margin-top: var(--space-2);
   display: inline-flex;

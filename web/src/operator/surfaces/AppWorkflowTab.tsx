@@ -1,16 +1,20 @@
-// AppWorkflowTab — the app's DETERMINISTIC workflow, the real engine behind the
-// Workflow tab (not a hardcoded diagram).
+// AppWorkflowTab — a READ-ONLY picture of how the app works.
 //
-// The promise: building an app makes its automation deterministic. So this tab
-// COMPILES the app once from its real capabilities and freezes the plan, then
-// renders those exact frozen steps and runs the SAME plan every time. "Run once"
-// is a dry-run preview — deterministic, nothing sent. The Slack delivery
-// schedule (the shipped grant + routine) stays below as the way to run it on a
-// cadence.
+// This tab SHOWS the app's deterministic workflow; it does not run, schedule, or
+// recompile it. Those are actions taken from the app itself, not from this
+// diagram. Building an app compiles its automation once and freezes it, and this
+// renders that single frozen plan as a top-to-bottom flow:
+//
+//   TRIGGER (when it runs)
+//     → the app's real compiled steps (deterministic, run identically every time)
+//       → DELIVER (where the result goes, human-gated)
+//
+// The workflow compiles automatically the first time the tab is opened, so the
+// picture is always current — there is no button to press here.
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Globe, Lock, Play, Plug, ShieldCheck, Sparkles } from "lucide-react";
+import { Lock, ShieldCheck } from "lucide-react";
 
 import { showNotice } from "../../components/ui/Toast";
 import {
@@ -21,18 +25,12 @@ import {
 } from "../apps/browserApprovals";
 import {
   type AppWorkflow,
-  type ConnectionChoice,
   compileAppWorkflow,
   getAppWorkflow,
-  getAppWorkflowConnections,
-  runAppWorkflow,
-  type WorkflowConnectionsResult,
-  type WorkflowRunResult,
   type WorkflowStepView,
 } from "../apps/workflowClient";
 import { EmptyState } from "../components/EmptyState";
 import { Eyebrow } from "../components/primitives";
-import { AppDeliverySchedule } from "./AppDeliverySchedule";
 
 // A short node label per frozen step type, so the flow reads at a glance. A
 // `browser` step renders the Globe icon instead (handled in WorkflowStep).
@@ -45,12 +43,10 @@ const STEP_GLYPH: Record<string, string> = {
 
 interface AppWorkflowTabProps {
   appId: string;
-  appName: string;
 }
 
-export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
+export function AppWorkflowTab({ appId }: AppWorkflowTabProps) {
   const qc = useQueryClient();
-  const [chosen, setChosen] = useState<ConnectionChoice>({});
   const workflowQuery = useQuery({
     queryKey: ["operator-app-workflow", appId],
     queryFn: () => getAppWorkflow(appId),
@@ -59,102 +55,21 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
   const wf = workflowQuery.data;
   const compiled = Boolean(wf?.compiled && wf.steps && wf.steps.length > 0);
 
-  // Which account to use per external platform — only needed once compiled.
-  const connectionsQuery = useQuery({
-    queryKey: ["operator-app-workflow-connections", appId],
-    queryFn: () => getAppWorkflowConnections(appId),
-    enabled: compiled,
-  });
-
-  // Effective choice: the operator's pick, else the first account for a platform.
-  function effectiveConnections(): ConnectionChoice {
-    const out: ConnectionChoice = {};
-    for (const p of connectionsQuery.data?.platforms ?? []) {
-      const pick = chosen[p.platform] || p.connections[0]?.key;
-      if (pick) out[p.platform] = pick;
-    }
-    return out;
-  }
-
+  // The workflow is intrinsic to the app, so it compiles automatically the first
+  // time the tab is opened — the picture is always current, no button to press.
   const compile = useMutation({
     mutationFn: () => compileAppWorkflow(appId),
-    onSuccess: (data) => {
-      qc.setQueryData(["operator-app-workflow", appId], data);
+    onSuccess: (data) =>
+      qc.setQueryData(["operator-app-workflow", appId], data),
+    onError: (err) =>
       showNotice(
-        "Compiled — this workflow now runs the same way every time.",
-        "success",
-      );
-    },
-    onError: (err) => {
-      showNotice(
-        err instanceof Error ? err.message : "Could not compile this workflow.",
+        err instanceof Error ? err.message : "Could not read this workflow.",
         "error",
-      );
-    },
+      ),
   });
 
-  const run = useMutation({
-    mutationFn: () => runAppWorkflow(appId, true, effectiveConnections()),
-    onSuccess: () =>
-      showNotice("Previewed the workflow — nothing was sent.", "success"),
-    onError: (err) => {
-      showNotice(
-        err instanceof Error ? err.message : "Could not run this workflow.",
-        "error",
-      );
-    },
-  });
-
-  // A LIVE run (not a dry preview) actually executes — so a step with no
-  // integration drives the browser, and the run PAUSES to ask permission in
-  // chat (the cards below). Errors surface, but a pause is normal, not a failure.
-  const runLive = useMutation({
-    mutationFn: () => runAppWorkflow(appId, false, effectiveConnections()),
-    // Drop any approval cards left cached from a previous run so stale asks
-    // can't flash before the first poll of the new run returns.
-    onMutate: () =>
-      qc.setQueryData(["operator-app-browser-approvals", appId], []),
-    onSuccess: () => showNotice("Live run finished.", "success"),
-    onError: (err) => {
-      showNotice(
-        err instanceof Error ? err.message : "Could not run this workflow.",
-        "error",
-      );
-    },
-  });
-
-  // While a live run is in flight it may pause on a browser step; poll the app's
-  // chat asks so the operator can allow/skip. Idle otherwise (no polling).
-  const approvalsQuery = useQuery({
-    queryKey: ["operator-app-browser-approvals", appId],
-    // Thread React Query's signal so a superseded poll is aborted and a late
-    // response can't repopulate stale cards during the next run.
-    queryFn: ({ signal }) => getBrowserApprovals(appId, signal),
-    enabled: runLive.isPending,
-    refetchInterval: runLive.isPending ? 1200 : false,
-  });
-  const resolveApproval = useMutation({
-    mutationFn: ({
-      id,
-      decision,
-    }: {
-      id: string;
-      decision: "approve" | "deny";
-    }) => resolveBrowserApproval(appId, id, decision),
-    onSuccess: () => approvalsQuery.refetch(),
-    onError: (err) => {
-      showNotice(
-        err instanceof Error
-          ? err.message
-          : "Could not update this browser approval.",
-        "error",
-      );
-    },
-  });
-
-  // The workflow is intrinsic to the app, so it compiles automatically the first
-  // time the tab is opened — no button. Fire once per app, only after the query
-  // settles and only if nothing is compiled yet.
+  // Fire once per app, only after the query settles and only if nothing is
+  // compiled yet. A failed compile can be retried from the error state.
   const autoCompiledFor = useRef<string | null>(null);
   const compileMutate = compile.mutate;
   useEffect(() => {
@@ -169,8 +84,10 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
       <div className="opr-data-intro">
         <Eyebrow>How this app runs</Eyebrow>
         <p className="opr-scoped-note">
-          Building the app compiles a workflow once, then freezes it. Every run
-          executes the exact same steps — deterministic, no surprises.
+          Building the app compiled its automation once and froze it. This is
+          that one flow — when it runs, the exact steps it takes, and where the
+          result goes — deterministic, the same every time. Run or schedule it
+          from the app itself.
         </p>
       </div>
 
@@ -184,41 +101,23 @@ export function AppWorkflowTab({ appId, appName }: AppWorkflowTabProps) {
           <div className="opr-empty-title">Reading the workflow…</div>
         </div>
       ) : compiled && wf ? (
-        <CompiledWorkflow
-          wf={wf}
-          connections={connectionsQuery.data}
-          chosen={chosen}
-          onChoose={(platform, key) =>
-            setChosen((prev) => ({ ...prev, [platform]: key }))
-          }
-          onRun={() => run.mutate()}
-          running={run.isPending}
-          onRunLive={() => runLive.mutate()}
-          runningLive={runLive.isPending}
-          approvals={runLive.isPending ? (approvalsQuery.data ?? []) : []}
-          onResolveApproval={(id, decision) =>
-            resolveApproval.mutate({ id, decision })
-          }
-          resolvingApproval={resolveApproval.isPending}
-          lastRun={run.data}
-          onRecompile={() => compile.mutate()}
-          recompiling={compile.isPending}
-        />
+        <CompiledWorkflow wf={wf} />
       ) : (
-        <Compiling failed={compile.isError} onRetry={() => compile.mutate()} />
+        <Compiling
+          failed={compile.isError}
+          onRetry={() => {
+            autoCompiledFor.current = appId;
+            compile.mutate();
+          }}
+        />
       )}
-
-      <div className="opr-workflow-divider">
-        <Eyebrow>Deliver on a schedule</Eyebrow>
-      </div>
-      <AppDeliverySchedule appName={appName} appId={appId} />
     </div>
   );
 }
 
 // The workflow compiles automatically (it is part of the app), so there is no
 // "compile" button — only a working state, and a retry if the model was briefly
-// unavailable.
+// unavailable while producing the picture.
 function Compiling({
   failed,
   onRetry,
@@ -230,8 +129,8 @@ function Compiling({
     return (
       <EmptyState
         glyph="⚠"
-        title="Could not build the workflow"
-        hint="Your AI could not design this app's workflow just now. It will retry, or you can try again."
+        title="Could not read the workflow"
+        hint="Your AI could not lay out this app's workflow just now. It will retry, or you can try again."
         actionLabel="Try again"
         onAction={onRetry}
       />
@@ -244,7 +143,7 @@ function Compiling({
         <span />
         <span />
       </span>
-      <div className="opr-empty-title">Designing this app's workflow…</div>
+      <div className="opr-empty-title">Laying out this app's workflow…</div>
       <div className="opr-empty-hint">
         Your AI is turning what this app does into a deterministic workflow.
       </div>
@@ -252,39 +151,12 @@ function Compiling({
   );
 }
 
-function CompiledWorkflow({
-  wf,
-  connections,
-  chosen,
-  onChoose,
-  onRun,
-  running,
-  onRunLive,
-  runningLive,
-  approvals,
-  onResolveApproval,
-  resolvingApproval,
-  lastRun,
-  onRecompile,
-  recompiling,
-}: {
-  wf: AppWorkflow;
-  connections?: WorkflowConnectionsResult;
-  chosen: ConnectionChoice;
-  onChoose: (platform: string, key: string) => void;
-  onRun: () => void;
-  running: boolean;
-  onRunLive: () => void;
-  runningLive: boolean;
-  approvals: BrowserApproval[];
-  onResolveApproval: (id: string, decision: "approve" | "deny") => void;
-  resolvingApproval: boolean;
-  lastRun?: WorkflowRunResult;
-  onRecompile: () => void;
-  recompiling: boolean;
-}) {
+function CompiledWorkflow({ wf }: { wf: AppWorkflow }) {
   const steps = wf.steps ?? [];
-  const platforms = connections?.platforms ?? [];
+  // Which Slack channel delivery targets — configured inline on the delivery
+  // node itself, not as a separate block. Running/scheduling is done from the
+  // app; here you just say where the result lands.
+  const [channel, setChannel] = useState("#general");
   return (
     <div className="opr-workflow-frozen">
       <div className="opr-workflow-banner">
@@ -298,154 +170,95 @@ function CompiledWorkflow({
         </span>
       </div>
 
+      {/* ONE flow, read-only: trigger → the app's compiled steps → delivery.
+          The delivery node carries its own channel picker (native to the node). */}
       <div className="opr-flow">
-        {steps.map((step, i) => (
-          <WorkflowStep
-            key={step.id}
-            step={step}
-            last={i === steps.length - 1}
-          />
-        ))}
-      </div>
-
-      {platforms.length > 0 ? (
-        <ConnectionChooser
-          platforms={platforms}
-          chosen={chosen}
-          onChoose={onChoose}
+        <FlowFrameNode
+          glyph="TR"
+          nodeKind="trigger"
+          kindLabel="trigger"
+          title="Runs on demand or on a schedule"
+          detail="The app runs this when you trigger it, or on a schedule you set for it."
         />
-      ) : null}
-
-      <div className="opr-delivery-actions">
-        <button
-          type="button"
-          className="opr-btn opr-btn-primary opr-btn-sm"
-          onClick={onRun}
-          disabled={running || runningLive}
-        >
-          <Play size={13} strokeWidth={1.9} aria-hidden={true} />
-          {running ? "Running…" : "Run once (preview)"}
-        </button>
-        <button
-          type="button"
-          className="opr-btn opr-btn-sm"
-          onClick={onRunLive}
-          disabled={running || runningLive}
-          title="Runs for real — a step with no integration asks to control your browser first."
-        >
-          <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
-          {runningLive ? "Running live…" : "Run live"}
-        </button>
-        <button
-          type="button"
-          className="opr-btn opr-btn-sm"
-          onClick={onRecompile}
-          disabled={recompiling}
-        >
-          <Sparkles size={13} strokeWidth={1.9} aria-hidden={true} />
-          {recompiling ? "Recompiling…" : "Recompile"}
-        </button>
+        {steps.map((step) => (
+          <WorkflowStep key={step.id} step={step} last={false} />
+        ))}
+        <FlowFrameNode
+          glyph="DO"
+          nodeKind="action"
+          kindLabel="deliver"
+          title="Deliver to Slack"
+          detail="Posts the app's result to this Slack channel."
+          gate="Approval required before it sends"
+          channel={channel}
+          onChannelChange={setChannel}
+          last={true}
+        />
       </div>
-
-      {approvals.length > 0 ? (
-        <section
-          className="opr-browser-asks"
-          aria-label="Browser step approvals"
-        >
-          {approvals.map((a) => (
-            <div className="opr-browser-ask" key={a.id}>
-              <div className="opr-browser-ask-head">
-                <Globe size={13} strokeWidth={1.9} aria-hidden={true} />
-                {a.kind === "send"
-                  ? "Confirm this send"
-                  : "Control your browser?"}
-              </div>
-              <p className="opr-browser-ask-body">{browserApprovalPrompt(a)}</p>
-              <div className="opr-browser-ask-actions">
-                <button
-                  type="button"
-                  className="opr-btn opr-btn-primary opr-btn-sm"
-                  onClick={() => onResolveApproval(a.id, "approve")}
-                  disabled={resolvingApproval}
-                >
-                  {a.kind === "send" ? "Send it" : "Allow"}
-                </button>
-                <button
-                  type="button"
-                  className="opr-btn opr-btn-ghost opr-btn-sm"
-                  onClick={() => onResolveApproval(a.id, "deny")}
-                  disabled={resolvingApproval}
-                >
-                  Not now
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
-      ) : null}
-
-      {lastRun ? (
-        <p className="opr-scoped-note">
-          Previewed {Object.keys(lastRun.steps ?? {}).length} step
-          {Object.keys(lastRun.steps ?? {}).length === 1 ? "" : "s"} — this was
-          a dry run, so nothing was sent.
-        </p>
-      ) : null}
     </div>
   );
 }
 
-// Per-platform account picker. A platform with one account shows it read-only;
-// with several, a select disambiguates which the run uses; with none, a prompt
-// to connect. The default (first account) is applied even without interaction,
-// so a run never fails on ambiguity.
-function ConnectionChooser({
-  platforms,
-  chosen,
-  onChoose,
+// A synthetic framing node (the trigger at the top, the delivery at the tail) —
+// same visual language as a compiled step so the flow reads as ONE list. The
+// delivery node may carry an inline channel picker (native to the node), so
+// choosing where the result lands lives ON the node, not in a separate block.
+function FlowFrameNode({
+  glyph,
+  nodeKind,
+  kindLabel,
+  title,
+  detail,
+  gate,
+  channel,
+  onChannelChange,
+  last,
 }: {
-  platforms: WorkflowConnectionsResult["platforms"];
-  chosen: ConnectionChoice;
-  onChoose: (platform: string, key: string) => void;
+  glyph: string;
+  nodeKind: string;
+  kindLabel: string;
+  title: string;
+  detail: string;
+  gate?: string;
+  channel?: string;
+  onChannelChange?: (value: string) => void;
+  last?: boolean;
 }) {
   return (
-    <div className="opr-data-block opr-conn-chooser">
-      <div className="opr-data-block-head">
-        <Plug size={12} strokeWidth={2} aria-hidden={true} />
-        Accounts
-        <span className="opr-data-block-sub">which account each step uses</span>
+    <div className="opr-step">
+      <div className="opr-step-rail">
+        <div
+          className={`opr-step-node opr-step-node-${nodeKind}`}
+          aria-hidden={true}
+        >
+          {glyph}
+        </div>
+        {last ? null : <div className="opr-step-line" />}
       </div>
-      {platforms.map((p) => {
-        const selected = chosen[p.platform] || p.connections[0]?.key || "";
-        return (
-          <div className="opr-conn-row" key={p.platform}>
-            <span className="opr-conn-platform">{p.platform}</span>
-            {p.connections.length === 0 ? (
-              <span className="opr-pill opr-pill-bad">
-                <span className="opr-led opr-led-bad" />
-                Not connected
-              </span>
-            ) : p.connections.length === 1 ? (
-              <span className="opr-conn-single">
-                {p.connections[0].name || p.connections[0].key}
-              </span>
-            ) : (
-              <select
-                className="opr-conn-select"
-                value={selected}
-                onChange={(e) => onChoose(p.platform, e.target.value)}
-                aria-label={`Account for ${p.platform}`}
-              >
-                {p.connections.map((c) => (
-                  <option key={c.key} value={c.key}>
-                    {c.name || c.key}
-                  </option>
-                ))}
-              </select>
-            )}
+      <div className="opr-step-body">
+        <div className="opr-step-kind">{kindLabel}</div>
+        <div className="opr-step-title">
+          {title}
+          {onChannelChange ? (
+            <input
+              className="opr-step-channel"
+              type="text"
+              value={channel ?? ""}
+              onChange={(e) => onChannelChange(e.target.value)}
+              placeholder="#channel"
+              aria-label="Slack channel"
+              spellCheck={false}
+            />
+          ) : null}
+        </div>
+        <div className="opr-step-detail">{detail}</div>
+        {gate ? (
+          <div className="opr-step-gate">
+            <Lock size={11} strokeWidth={2} aria-hidden={true} />
+            {gate}
           </div>
-        );
-      })}
+        ) : null}
+      </div>
     </div>
   );
 }

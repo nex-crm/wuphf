@@ -7,32 +7,9 @@ import { AppWorkflowTab } from "./AppWorkflowTab";
 
 const getAppWorkflow = vi.fn();
 const compileAppWorkflow = vi.fn();
-const runAppWorkflow = vi.fn();
-const getAppWorkflowConnections = vi.fn();
 vi.mock("../apps/workflowClient", () => ({
   getAppWorkflow: (id: string) => getAppWorkflow(id),
   compileAppWorkflow: (id: string) => compileAppWorkflow(id),
-  runAppWorkflow: (id: string, dry: boolean, conns?: Record<string, string>) =>
-    runAppWorkflow(id, dry, conns),
-  getAppWorkflowConnections: (id: string) => getAppWorkflowConnections(id),
-}));
-
-const getBrowserApprovals = vi.fn();
-const resolveBrowserApproval = vi.fn();
-vi.mock("../apps/browserApprovals", () => ({
-  getBrowserApprovals: (id: string) => getBrowserApprovals(id),
-  resolveBrowserApproval: (id: string, approvalId: string, decision: string) =>
-    resolveBrowserApproval(id, approvalId, decision),
-  browserApprovalPrompt: (a: { kind: string; goal: string }) =>
-    a.kind === "send"
-      ? `This step wants to send: “${a.goal}”. Send it?`
-      : `Let me control your browser to run it? ${a.goal}`,
-}));
-
-// The delivery schedule fetches connections; stub it so this test is scoped to
-// the deterministic-workflow section.
-vi.mock("./AppDeliverySchedule", () => ({
-  AppDeliverySchedule: () => <div data-testid="delivery-schedule" />,
 }));
 
 // Toast has no provider in this unit test; mock it so mutation callbacks are safe.
@@ -49,13 +26,6 @@ describe("AppWorkflowTab", () => {
   beforeEach(() => {
     getAppWorkflow.mockReset();
     compileAppWorkflow.mockReset();
-    runAppWorkflow.mockReset();
-    getAppWorkflowConnections.mockReset();
-    getAppWorkflowConnections.mockResolvedValue({ platforms: [] });
-    getBrowserApprovals.mockReset();
-    getBrowserApprovals.mockResolvedValue([]);
-    resolveBrowserApproval.mockReset();
-    resolveBrowserApproval.mockResolvedValue(undefined);
   });
 
   it("auto-compiles (no button) when the app has no frozen workflow yet", async () => {
@@ -63,91 +33,90 @@ describe("AppWorkflowTab", () => {
       compiled: false,
       workflow_key: "operator-app-abc",
     });
-    // Leave compile pending so we observe the auto "designing" state.
+    // Leave compile pending so we observe the auto "laying out" state.
     compileAppWorkflow.mockReturnValue(new Promise(() => {}));
-    const { getByText, queryByRole } = wrap(
-      <AppWorkflowTab appId="app_abc" appName="Digest" />,
-    );
-    // It compiles automatically — no "compile" button to click.
+    const { getByText, queryByRole } = wrap(<AppWorkflowTab appId="app_abc" />);
+    // It compiles automatically — no button to press.
     await waitFor(() =>
       expect(compileAppWorkflow).toHaveBeenCalledWith("app_abc"),
     );
-    expect(getByText(/designing this app's workflow/i)).toBeTruthy();
-    expect(queryByRole("button", { name: /compile workflow/i })).toBeNull();
+    expect(getByText(/laying out this app's workflow/i)).toBeTruthy();
+    expect(queryByRole("button")).toBeNull();
   });
 
-  it("renders the frozen steps and a deterministic badge when compiled", async () => {
+  it("renders the frozen steps as ONE read-only flow (trigger → steps → deliver)", async () => {
     getAppWorkflow.mockResolvedValue({
       compiled: true,
       workflow_key: "operator-app-abc",
-      title: "Digest",
+      title: "World Weather",
       steps: [
         {
           id: "s1",
           type: "template",
-          description: "Read recent email",
+          description: "Read city weather table",
           gated: false,
         },
         {
           id: "s2",
-          type: "action",
-          description: "Slack: sends a message",
-          platform: "slack",
-          gated: true,
+          type: "nex_ask",
+          description: "Summarize the five-city forecast",
+          gated: false,
         },
       ],
     });
-    const { getByText, getByRole } = wrap(
-      <AppWorkflowTab appId="app_abc" appName="Digest" />,
-    );
+    const { getByText } = wrap(<AppWorkflowTab appId="app_abc" />);
     await waitFor(() => expect(getByText("Deterministic")).toBeTruthy());
-    expect(getByText("Read recent email")).toBeTruthy();
-    expect(getByText(/held for your approval/i)).toBeTruthy();
-    expect(getByRole("button", { name: /run once \(preview\)/i })).toBeTruthy();
+    // The app's real steps, framed by the trigger and delivery nodes.
+    expect(getByText("Read city weather table")).toBeTruthy();
+    expect(getByText("Runs on demand or on a schedule")).toBeTruthy();
+    expect(getByText("Deliver to Slack")).toBeTruthy();
   });
 
-  it("shows an account chooser when a platform has multiple connections", async () => {
+  it("has NO run / schedule / recompile action buttons — the flow is read-only", async () => {
     getAppWorkflow.mockResolvedValue({
       compiled: true,
       workflow_key: "operator-app-abc",
       steps: [
         {
           id: "s1",
-          type: "action",
-          description: "Read recent email",
-          platform: "gmail",
-          action_id: "GMAIL_FETCH_EMAILS",
+          type: "template",
+          description: "Read city weather table",
           gated: false,
         },
       ],
     });
-    getAppWorkflowConnections.mockResolvedValue({
-      platforms: [
+    const { queryByRole } = wrap(<AppWorkflowTab appId="app_abc" />);
+    await waitFor(() =>
+      expect(
+        queryByRole("button", { name: /run|schedule|recompile/i }),
+      ).toBeNull(),
+    );
+    // And there are no buttons at all on the compiled view.
+    expect(queryByRole("button")).toBeNull();
+  });
+
+  it("keeps the Slack channel picker native to the delivery node", async () => {
+    getAppWorkflow.mockResolvedValue({
+      compiled: true,
+      workflow_key: "operator-app-abc",
+      steps: [
         {
-          platform: "gmail",
-          multiple: true,
-          connections: [
-            { key: "conn_a", name: "work@nex.ai" },
-            { key: "conn_b", name: "personal@gmail.com" },
-          ],
+          id: "s1",
+          type: "template",
+          description: "Read city weather table",
+          gated: false,
         },
       ],
     });
-    const { getByRole, getByLabelText } = wrap(
-      <AppWorkflowTab appId="app_abc" appName="Digest" />,
-    );
-    const select = (await waitFor(() =>
-      getByLabelText("Account for gmail"),
-    )) as HTMLSelectElement;
-    // Defaults to the first account, no interaction required.
-    expect(select.value).toBe("conn_a");
-    // Run passes the chosen connection through.
-    getByRole("button", { name: /run once \(preview\)/i }).click();
-    await waitFor(() =>
-      expect(runAppWorkflow).toHaveBeenCalledWith("app_abc", true, {
-        gmail: "conn_a",
-      }),
-    );
+    const { getByLabelText } = wrap(<AppWorkflowTab appId="app_abc" />);
+    const channel = (await waitFor(() =>
+      getByLabelText("Slack channel"),
+    )) as HTMLInputElement;
+    // The channel input lives ON the delivery node (defaulting to #general),
+    // not in a separate delivery block.
+    expect(channel.tagName).toBe("INPUT");
+    expect(channel.value).toBe("#general");
+    expect(channel.closest(".opr-step")).not.toBeNull();
   });
 
   it("renders a browser step with its own 'runs in your browser' affordance (slice 6)", async () => {

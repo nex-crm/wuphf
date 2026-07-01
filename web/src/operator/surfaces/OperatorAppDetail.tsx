@@ -343,7 +343,7 @@ function TabBody({
       );
     case "workflow":
       return ready ? (
-        <AppWorkflowTab appId={app.id} appName={app.name} />
+        <AppWorkflowTab appId={app.id} />
       ) : (
         <EmptyState
           glyph="⌥"
