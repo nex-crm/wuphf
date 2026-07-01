@@ -188,7 +188,7 @@ export function StepMeet({
             src="/media/onboarding/meet-office.gif"
             width={868}
             height={620}
-            alt="A WUPHF office coming online: the CEO who runs the office, Pam the librarian who keeps the wiki honest, and the App Builder who ships the tools your team asks for, each turning to an online presence as they arrive."
+            alt="WUPHF agents spinning up one by one: a CRM Auditor that runs your CRM hygiene sweep end to end, a Lead Router that routes every inbound lead, and a Pipeline Digest that briefs you every Monday, each flipping to Running as it arrives."
             loading="lazy"
             decoding="async"
           />

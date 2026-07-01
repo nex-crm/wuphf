@@ -51,7 +51,7 @@ export function StepShip({ active }: OnboardingWizardStepProps) {
             src="/media/onboarding/work-ships.gif"
             width={1000}
             height={760}
-            alt="An issue filed in the #general channel: a human asks for a CRM audit, @ceo claims it and cuts it into tasks (duplicate scan, owner gaps, 30-day stale), and the finished cleanup plan lands back in #general."
+            alt="An issue filed in the #general channel: a human asks for a CRM audit, @crm-auditor spins up and runs the workflow step by step (duplicate scan, owner gaps, 30-day stale), and the finished cleanup plan lands back in #general."
             loading="lazy"
             decoding="async"
           />
