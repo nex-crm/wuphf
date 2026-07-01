@@ -9,7 +9,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { get } from "../../api/client";
+import { get, post } from "../../api/client";
 import type { Task } from "../../api/tasks";
 import {
   type CapabilityRow,
@@ -52,7 +52,9 @@ export function AppDataTab({ appId }: AppDataTabProps) {
   }
 
   const { reads, writes } = deriveCapabilityRows(caps);
-  const readsTasks = (caps.bridge_apis ?? []).includes("getTasks");
+  const bridgeApis = caps.bridge_apis ?? [];
+  const readsTasks = bridgeApis.includes("getTasks");
+  const readsEmails = bridgeApis.includes("getEmails");
 
   return (
     <div className="opr-tool-scoped opr-app-data">
@@ -86,6 +88,7 @@ export function AppDataTab({ appId }: AppDataTabProps) {
       ) : null}
 
       {readsTasks ? <TasksPreview /> : null}
+      {readsEmails ? <EmailsPreview appId={appId} /> : null}
     </div>
   );
 }
@@ -162,6 +165,102 @@ function TasksPreview() {
                   <span className="opr-pill opr-pill-muted">{t.status}</span>
                 </td>
                 <td>{t.owner || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+interface EmailBridgeResult {
+  result?: unknown;
+  error?: string;
+}
+
+interface EmailRow {
+  id: string;
+  sender: string;
+  subject: string;
+  received: string;
+}
+
+// Best-effort normalizer over the GMAIL_FETCH_EMAILS payload (its envelope
+// varies — a bare array, or { messages } / { data } — and per-email field names
+// differ), so the preview shows real rows regardless of the exact shape.
+function normalizeEmails(raw: unknown): EmailRow[] {
+  const asArray = (v: unknown): unknown[] => {
+    if (Array.isArray(v)) return v;
+    const o = (v ?? {}) as { messages?: unknown; data?: unknown };
+    if (Array.isArray(o.messages)) return o.messages;
+    if (Array.isArray(o.data)) return o.data;
+    return [];
+  };
+  const str = (v: unknown): string =>
+    typeof v === "string" ? v : v == null ? "" : String(v);
+  return asArray(raw)
+    .slice(0, 12)
+    .map((e, i) => {
+      const o = (e ?? {}) as Record<string, unknown>;
+      return {
+        id: str(o.id ?? o.message_id ?? o.messageId ?? i),
+        sender: str(o.sender ?? o.from ?? o.from_email ?? o.fromEmail).trim(),
+        subject: str(o.subject).trim(),
+        received: str(
+          o.date ?? o.received_at ?? o.messageTimestamp ?? o.internalDate,
+        ).trim(),
+      };
+    });
+}
+
+// Live preview of the real emails this app reads through the Gmail bridge, so
+// "Data" shows the actual rows + columns the app renders, not just a capability
+// map. Read-only and best-effort: a failure degrades to a quiet note.
+function EmailsPreview({ appId }: { appId: string }) {
+  const query = useQuery({
+    queryKey: ["operator-app-data-emails", appId],
+    queryFn: () =>
+      post<EmailBridgeResult>("/apps/integrations/call", {
+        platform: "gmail",
+        action: "GMAIL_FETCH_EMAILS",
+        params: { query: "newer_than:7d", max_results: 12 },
+        app_id: appId,
+      }),
+  });
+  const rows = normalizeEmails(query.data?.result);
+  const failed = query.isError || Boolean(query.data?.error);
+
+  return (
+    <div className="opr-data-block">
+      <div className="opr-data-block-head">
+        Live preview · Emails
+        <span className="opr-data-block-sub">what the app sees right now</span>
+      </div>
+      {query.isLoading ? (
+        <p className="opr-scoped-note">Reading your inbox…</p>
+      ) : failed ? (
+        <p className="opr-scoped-note">
+          Could not read Gmail right now — connect it in Settings, or the
+          workspace is offline.
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="opr-scoped-note">No recent emails in the window.</p>
+      ) : (
+        <table className="opr-data-table">
+          <thead>
+            <tr>
+              <th>Sender</th>
+              <th>Subject</th>
+              <th>Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => (
+              <tr key={e.id}>
+                <td>{e.sender || "—"}</td>
+                <td>{e.subject || "—"}</td>
+                <td>{e.received || "—"}</td>
               </tr>
             ))}
           </tbody>
