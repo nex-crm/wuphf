@@ -35,9 +35,9 @@ export function InternalToolsSurface({
   return (
     <div className="opr-surface-wide">
       <SurfaceHeader
-        eyebrow="Apps"
-        title="Your apps"
-        lede="Each app is a small tool your team runs — a dashboard, a form, a workflow — built by describing it in chat, or talked through on a call."
+        eyebrow="Agents"
+        title="Your agents"
+        lede="Each agent runs one workflow end to end — built by describing it in chat, or talked through on a call."
         actions={
           <div className="opr-header-actions">
             <button
@@ -46,7 +46,7 @@ export function InternalToolsSurface({
               onClick={onBuild}
             >
               <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
-              Build an app
+              Build an agent
             </button>
             <button type="button" className="opr-btn" onClick={onStartCall}>
               <PhoneCall size={14} strokeWidth={1.9} aria-hidden={true} />
@@ -59,17 +59,16 @@ export function InternalToolsSurface({
       {hero ? (
         <HeroAppCard app={hero} onOpen={() => onOpen(hero.id)} />
       ) : appsQuery.isLoading ? (
-        <p className="opr-scoped-note">Loading your apps…</p>
+        <p className="opr-scoped-note">Loading your agents…</p>
       ) : apps.length > 0 ? null : (
         <div className="opr-empty">
           <span className="opr-empty-glyph" aria-hidden={true}>
             ◧
           </span>
-          <div className="opr-empty-title">No apps yet</div>
+          <div className="opr-empty-title">No agents yet</div>
           <div className="opr-empty-hint">
-            Describe the tool your team needs and your AI builds it — a
-            dashboard, a form, a workflow. It appears here the moment it is
-            ready.
+            Describe the workflow you need run and your AI builds the agent
+            for it. It appears here the moment it is ready.
           </div>
           <div className="opr-empty-actions">
             <button
@@ -78,7 +77,7 @@ export function InternalToolsSurface({
               onClick={onBuild}
             >
               <Plus size={13} strokeWidth={1.9} aria-hidden={true} />
-              Build your first app
+              Build your first agent
             </button>
           </div>
         </div>
@@ -87,7 +86,7 @@ export function InternalToolsSurface({
       {rest.length > 0 || buildingApps.length > 0 || failedApps.length > 0 ? (
         <>
           <div className="opr-section-label">
-            <Eyebrow>All apps</Eyebrow>
+            <Eyebrow>All agents</Eyebrow>
             <div className="opr-section-rule" />
           </div>
           <div className="opr-grid">

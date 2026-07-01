@@ -292,7 +292,7 @@ export function AppBuilderChat({
         {panelMode ? null : (
           <header className="opr-builder-head">
             <div>
-              <Eyebrow>{editApp ? "Ask AI" : "Build an app"}</Eyebrow>
+              <Eyebrow>{editApp ? "Ask AI" : "Build an agent"}</Eyebrow>
               <div className="opr-builder-title">
                 {phase === "intro"
                   ? editApp

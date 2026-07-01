@@ -25,7 +25,7 @@ interface NavDef {
 }
 
 const NAV: readonly NavDef[] = [
-  { id: "tools", label: "Apps", icon: Workflow, count: 3 },
+  { id: "tools", label: "Agents", icon: Workflow },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -86,7 +86,7 @@ export function OperatorSidebar({
         onClick={onBuild}
       >
         <Plus size={14} strokeWidth={1.9} aria-hidden={true} />
-        Build an app
+        Build an agent
       </button>
       <button
         type="button"
