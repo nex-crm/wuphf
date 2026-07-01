@@ -41,8 +41,8 @@ const TABS: readonly TabDef<AppTab>[] = [
   { id: "ui", label: "UI" },
   { id: "workflow", label: "Workflow" },
   { id: "data", label: "Data" },
-  { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge" },
+  { id: "integrations", label: "Integrations" },
 ];
 
 interface OperatorAppDetailProps {
