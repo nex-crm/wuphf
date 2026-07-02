@@ -33,7 +33,7 @@ describe("resolveObjectRoute", () => {
     // Per-segment encodeURIComponent keeps `/` separators intact for
     // nested slugs like `people/nazz`.
     expect(route.href).toBe("#/wiki/people/nazz");
-    expect(route.label).toBe("Wiki: people/nazz");
+    expect(route.label).toBe("Company Brain: people/nazz");
     expect(route.appAction).toEqual({ app: "wiki" });
   });
 
@@ -48,7 +48,7 @@ describe("resolveObjectRoute", () => {
     expect(route.href).toBe("#/wiki/concepts/foo%3Fbar%23baz%26qux");
     expect(route.href).not.toContain("?bar");
     expect(route.href).not.toContain("#baz");
-    expect(route.label).toBe("Wiki: concepts/foo?bar#baz&qux");
+    expect(route.label).toBe("Company Brain: concepts/foo?bar#baz&qux");
   });
 
   it("resolves a workbench-item to the task route and surfaces its kind", () => {

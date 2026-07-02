@@ -1,17 +1,17 @@
 /**
- * StepWiki — wizard step 02, "Your knowledge base."
+ * StepWiki — wizard step 02, "Your company brain."
  *
- * Explains the shared brain through the RevOps lens: the wiki holds the
- * operator's CRM rules and playbooks (tiering, deal stages, dedupe policy),
- * and agents read them as first-class context before they touch a record.
+ * Explains the company brain through the RevOps lens: it holds the operator's
+ * CRM rules and playbooks (tiering, deal stages, dedupe policy), and agents
+ * read them as first-class context before they touch a record.
  *
- * The stage visual is a rendered Remotion clip (web/public/media/onboarding/
- * knowledge-base.gif): a "wuphf · wiki / revops" window where the RevOps
- * playbooks light up and @revops reads them. The clip is a self-contained
- * product window, so it reads correctly on every onboarding page theme.
+ * The stage visual is a rendered clip (web/public/media/onboarding/
+ * knowledge-base.gif): a "wuphf · company brain" window where the playbook
+ * pages light up as they are captured. The clip is a self-contained product
+ * window, so it reads correctly on every onboarding page theme.
  *
  * Informational step plus the one optional input on this page: the
- * "Power semantic memory" section, where the user can hand the shared brain an
+ * "Power the company brain" section, where the user can hand the brain an
  * OpenAI key (the recommended embedder), see the local Ollama alternative, or
  * stay on the no-setup keyword default. Advancing is never gated on it. Copy
  * from ONBOARDING_WIZARD_COPY.wiki and ONBOARDING_EMBEDDING_COPY.
@@ -57,7 +57,7 @@ export function StepWiki({ active }: OnboardingWizardStepProps) {
             src="/media/onboarding/knowledge-base.gif"
             width={800}
             height={680}
-            alt="A RevOps knowledge base: CRM hygiene playbook, account tiering, deal stage definitions, lead routing rules, duplicate merge policy, and stale opportunity thresholds, with an agent reading the playbook before acting."
+            alt="A company brain: CRM hygiene playbook, account tiering, deal stage definitions, lead routing rules, duplicate merge policy, and stale opportunity thresholds, each captured once for every agent to read before acting."
             loading="lazy"
             decoding="async"
           />

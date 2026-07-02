@@ -1,8 +1,8 @@
 /**
- * EmbeddingChoice — the wiki step's "Power semantic memory" section.
+ * EmbeddingChoice — the company-brain step's "Power the company brain" section.
  *
- * The wiki is the team's shared brain, so this is where the user picks how that
- * brain recalls a rule: by meaning (semantic memory) or by exact word (keyword
+ * The company brain holds the rules agents run on, so this is where the user
+ * picks how it recalls a rule: by meaning (embeddings) or by exact word (keyword
  * search). The backend's EnsureBrain auto-selects in priority order — an OpenAI
  * key, then a local Ollama model, then keyword — so this section is mostly
  * informational: it recommends the key, presents the alternatives in that same
@@ -306,8 +306,8 @@ export function EmbeddingChoiceView({
 
   const canSave = keyValue.trim().length > 0 && !saving;
 
-  // The install affordance is for the user who wants semantic memory but has no
-  // gbrain index yet. "Wants semantic memory" means they saved an OpenAI key or
+  // The install affordance is for the user who wants the company brain but has no
+  // gbrain index yet. "Wants the company brain" means they saved an OpenAI key or
   // picked the local path. We also keep the panel up whenever an install is
   // mid-flight or has errored, so a run that started earlier stays visible.
   const wantsSemantic = options.openai_key_set || ollamaChosen;

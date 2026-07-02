@@ -7,6 +7,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
+	"github.com/nex-crm/wuphf/internal/onboarding"
 )
 
 // Defaults + state normalization. Owns:
@@ -201,6 +202,13 @@ func (b *Broker) ensureDefaultOfficeMembersLocked() {
 	if len(b.members) > 0 {
 		return
 	}
+	// An onboarded office with zero members is intentional, not corrupted:
+	// since the packs/CEO removal, agents are user-created and a fresh office
+	// starts empty. Only an office that never finished onboarding gets the
+	// recovery roster.
+	if s, err := onboarding.Load(); err == nil && s != nil && strings.TrimSpace(s.CompletedAt) != "" {
+		return
+	}
 	b.members = defaultOfficeMembers()
 }
 
@@ -241,7 +249,16 @@ func (b *Broker) normalizeLoadedStateLocked() {
 	// present); the BuiltIn line above keeps her flag set on subsequent loads.
 	// The App Builder is back-filled the same way so it shows in the roster of
 	// offices created before the Apps feature.
-	b.members = ensureAppBuilderOfficeMember(ensureLibrarianMember(normalizedMembers))
+	//
+	// The back-fill only applies to a NON-empty roster: since the packs/CEO
+	// removal a fresh office intentionally seeds zero agents (people spin up
+	// agents that run their workflows end to end), and resurrecting built-ins
+	// on every load would undo that contract on the first restart.
+	if len(normalizedMembers) > 0 {
+		b.members = ensureAppBuilderOfficeMember(ensureLibrarianMember(normalizedMembers))
+	} else {
+		b.members = normalizedMembers
+	}
 	for i := range b.channels {
 		b.channels[i].Slug = normalizeChannelSlug(b.channels[i].Slug)
 		if strings.TrimSpace(b.channels[i].Name) == "" {
@@ -265,7 +282,14 @@ func (b *Broker) normalizeLoadedStateLocked() {
 				filteredMembers = append(filteredMembers, slug)
 			}
 		}
-		b.channels[i].Members = uniqueSlugs(append([]string{"ceo"}, filteredMembers...))
+		// The CEO pin only applies when a ceo member actually exists — since
+		// the packs/CEO removal an office may have no CEO at all, and pinning
+		// the slug into channel membership renders a ghost participant.
+		channelSeed := filteredMembers
+		if b.findMemberLocked("ceo") != nil {
+			channelSeed = append([]string{"ceo"}, filteredMembers...)
+		}
+		b.channels[i].Members = uniqueSlugs(channelSeed)
 		filteredDisabled := make([]string, 0, len(b.channels[i].Disabled))
 		for _, slug := range uniqueSlugs(b.channels[i].Disabled) {
 			if slug == "ceo" {

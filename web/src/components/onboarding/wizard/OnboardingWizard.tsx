@@ -31,8 +31,6 @@ import { MOD_KEY } from "../../ui/Kbd";
 import { BtnLabel, EnterHint } from "./components";
 import { StepFirstIssue } from "./steps/StepFirstIssue";
 import { StepMeet } from "./steps/StepMeet";
-import { StepShip } from "./steps/StepShip";
-import { StepTeam } from "./steps/StepTeam";
 import { StepWiki } from "./steps/StepWiki";
 import { useOnboardingWizard } from "./useOnboardingWizard";
 import {
@@ -57,8 +55,6 @@ const STEPS: Record<
 > = {
   meet: StepMeet,
   wiki: StepWiki,
-  team: StepTeam,
-  ship: StepShip,
   "first-issue": StepFirstIssue,
 };
 
@@ -155,7 +151,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     isLast,
     answers,
     setAnswers,
-    blueprints,
     canAdvance,
     next,
     back,
@@ -183,16 +178,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const goBack = useCallback(() => {
     runWithTransition(back);
   }, [back]);
-
-  // The team-step escape: take the scratch path (clear any picked blueprint /
-  // agent) and advance. This is the only way past the team step without a
-  // blueprint or a named agent, and it deliberately does NOT skip the rest of
-  // onboarding — the user still writes a first issue.
-  const skipTeam = useCallback(() => {
-    track("onboarding_step_completed", { step_id: "team", step_index: index });
-    setAnswers({ blueprintId: "", pickedAgents: [], agentName: "" });
-    runWithTransition(next);
-  }, [setAnswers, next, index]);
 
   // The primary footer button advances on every step except the last, where it
   // becomes the Finish CTA that seeds the office and hands off into a composer.
@@ -267,7 +252,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
           active={true}
           answers={answers}
           setAnswers={setAnswers}
-          blueprints={blueprints}
         />
       </div>
 
@@ -320,17 +304,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         </div>
 
         <div className="onboarding-wizard-footer-side onboarding-wizard-footer-side-end">
-          {stepId === "team" ? (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={skipTeam}
-              disabled={seeding}
-              data-testid="onboarding-wizard-team-skip"
-            >
-              {ONBOARDING_WIZARD_LABELS.teamSkip}
-            </button>
-          ) : null}
           {stepId === "first-issue" ? (
             <button
               type="button"

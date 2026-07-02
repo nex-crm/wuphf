@@ -173,7 +173,7 @@ function wikiCatalogItems(
     .slice(0, 8)
     .map((entry) => ({
       id: `wiki:${entry.path}`,
-      group: "Wiki" as const,
+      group: "Company Brain" as const,
       icon: "📖",
       label: entry.title || prettyWikiPath(entry.path),
       desc: prettyWikiPath(entry.path),

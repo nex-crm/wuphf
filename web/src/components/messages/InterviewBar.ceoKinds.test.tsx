@@ -466,7 +466,7 @@ describe("CeoScanChip", () => {
     render(<CeoScanChip payload={payload} />);
     const chip = screen.getByTestId("ceo-scan-chip");
     expect(chip).toHaveClass("ceo-scan-chip--done");
-    expect(chip).toHaveTextContent("Wiki updated");
+    expect(chip).toHaveTextContent("Company brain updated");
   });
 
   it("renders failed state with error label", () => {

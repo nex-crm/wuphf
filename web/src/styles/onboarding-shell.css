@@ -30,8 +30,8 @@
   --onb-faint: hsl(215 6% 56%);
   --onb-line: hsl(210 6% 20%);
   --onb-line-2: hsl(210 6% 25%);
-  --onb-purple: hsl(264.84 100% 53.7%); /* operator --primary */
   --onb-cobalt: oklch(50.58% 0.2886 264.84); /* --ms-cobalt-600 */
+  --onb-cobalt-bright: oklch(76.12% 0.1218 272.4); /* --ms-cobalt-400 */
 
   /* ── Semantic remap: everything below is what the existing onboarding
      rules actually consume, so the whole flow re-skins from here. ── */
@@ -50,11 +50,11 @@
   --border-dark: var(--onb-line-2);
   --border-strong: hsl(210 6% 32%);
 
-  /* Purple = selection/meaning only (matches the operator nav + section
-     labels). Lightened a step from --primary so small text passes on paper. */
-  --accent: hsl(265 95% 72%);
-  --accent-bg: hsl(264.84 100% 53.7% / 0.12);
-  --accent-bg-strong: hsl(264.84 100% 53.7% / 0.28);
+  /* The shell's accent is cobalt (the operator figure ink), not the old
+     brand purple. It marks links, selection, and focus — buttons stay B&W. */
+  --accent: var(--onb-cobalt-bright);
+  --accent-bg: color-mix(in srgb, var(--onb-cobalt) 16%, transparent);
+  --accent-bg-strong: color-mix(in srgb, var(--onb-cobalt) 32%, transparent);
 
   /* Status colors, softened so nothing glows on the muted surface. */
   --green: oklch(0.76 0.11 158);
@@ -68,7 +68,7 @@
   --input-bg: var(--onb-surface-2);
   --input-bg-disabled: var(--onb-surface);
   --input-border: var(--onb-line-2);
-  --focus-ring-color: hsl(265 95% 72%);
+  --focus-ring-color: var(--onb-cobalt-bright);
 
   /* The serif logo face is the office's voice; the shell is sans-only.
      Headlines pick up weight instead (below). */
@@ -166,6 +166,92 @@
   background: color-mix(in srgb, var(--onb-surface) 82%, var(--onb-paper));
 }
 
+/* ── Control metrics: the shell's buttons are compact chrome (12px/600 at
+   4px radius, .opr-btn), not hero CTAs. The kbd-labelled variant carries
+   its padding on the inner .btn-label / .kbd-hint instead. ── */
+.pre-pick-screen .btn,
+.onboarding-wizard .btn {
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--onb-line-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pre-pick-screen .btn-primary,
+.onboarding-wizard .btn-primary {
+  border-color: var(--onb-ink);
+}
+
+.pre-pick-screen .btn:has(.btn-label),
+.onboarding-wizard .btn:has(.btn-label) {
+  padding: 0;
+}
+
+.pre-pick-screen .btn .btn-label,
+.onboarding-wizard .btn .btn-label {
+  padding: var(--space-2) var(--space-3);
+}
+
+.pre-pick-screen .btn .kbd-hint,
+.onboarding-wizard .btn .kbd-hint {
+  padding: var(--space-2);
+}
+
+/* Compact buttons keep a 44px hit target on touch devices — the extra
+   area is invisible padding, mirroring the sheets' own coarse rules. */
+@media (pointer: coarse) {
+  .pre-pick-screen .btn,
+  .onboarding-wizard .btn {
+    min-height: 44px;
+  }
+}
+
+/* ── Type scale: match the operator surfaces exactly — 25px/800 titles
+   (.opr-surface-title), 13px dim ledes at 1.65 (.opr-surface-lede),
+   small mono caps for form labels, mono for real data. ── */
+.pre-pick-headline,
+.onboarding-wizard .office-tour-slide-headline,
+.onboarding-wizard .office-tour-slide-headline--serif {
+  font-size: 25px;
+  line-height: 1.25;
+}
+
+.pre-pick-subhead,
+.onboarding-wizard .office-tour-slide-body {
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 62ch;
+}
+
+.onboarding-wizard .office-tour-slide-caption {
+  font-size: 12px;
+}
+
+.pre-pick-screen .label,
+.onboarding-wizard .onboarding-team-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--onb-faint);
+}
+
+.onboarding-wizard .onboarding-team-input,
+.onboarding-wizard .onboarding-team-textarea {
+  font-size: 13px;
+  border-radius: var(--radius-md);
+}
+
+/* Version strings and sign-in state are data — they read in mono, like
+   every readout in the shell. */
+.pre-pick-screen .pre-pick-card-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 /* ── Cards: operator chrome radius (6px) instead of the 12px pill cards,
    and a dark-appropriate hover shadow (the light 4% black lift vanishes
    on paper-dark). ── */
@@ -175,6 +261,18 @@
 
 .pre-pick-screen .pre-pick-card:hover:not(:disabled) {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Button-shaped accents go B&W like every real control in the shell:
+   the handoff card's Send chip mimics a primary button, and the active
+   progress dot is wayfinding, not meaning — both render in ink. ── */
+.onboarding-wizard .onboarding-handoff-send {
+  background: var(--onb-ink);
+  color: hsl(210 10% 10%);
+}
+
+.onboarding-wizard .onboarding-wizard-dot-active {
+  background: var(--onb-ink);
 }
 
 /* ── Figures: the step clips are self-contained light product windows.

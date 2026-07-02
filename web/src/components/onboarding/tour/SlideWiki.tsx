@@ -24,7 +24,7 @@ const COPY = OFFICE_TOUR_COPY.wiki;
 const SEEDED_PAGES = [
   "How your office works",
   "Working with agents",
-  "The wiki",
+  "The company brain",
   "Channels",
   "Skills and runtimes",
 ];

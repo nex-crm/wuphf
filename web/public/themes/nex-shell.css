@@ -1,0 +1,265 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Theme: Shell
+   The operator shell's dark technical manual, applied to the office.
+   Paper-dark surfaces, soft off-white ink, cobalt figure accents,
+   speckle + construction-grid atmosphere. No brand purple: color is
+   reserved for meaning (green running, amber warning, red error) and
+   cobalt marks links, selection, and focus. Values mirror
+   web/src/styles/operator-shell.css `.opr-root` — move them together.
+   Structural rules live in nex.css (scoped [data-theme^="nex"]) and
+   are inherited here; this file only overrides the semantic layer.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import url("./nex.css");
+
+html[data-theme="nex-shell"] {
+  /* ── Overlays flipped for dark surface ── */
+  --overlay-soft: rgba(255, 255, 255, 0.04);
+  --overlay: rgba(255, 255, 255, 0.08);
+  --overlay-strong: rgba(255, 255, 255, 0.16);
+  --scrim: rgba(0, 0, 0, 0.7);
+  --overlay-white-soft: rgba(255, 255, 255, 0.06);
+  --overlay-white: rgba(255, 255, 255, 0.12);
+  --overlay-white-strong: rgba(255, 255, 255, 0.32);
+
+  /* ── Operator paper palette ── */
+  --bg: hsl(210 6% 8%);
+  --bg-warm: hsl(214 5% 14%);
+  --bg-subtle: hsl(210 6% 6%);
+  --bg-card: hsl(210 5% 10%);
+  --text: hsl(210 8% 82%); /* soft, not harsh white */
+  --text-secondary: hsl(215 6% 60%);
+  --text-tertiary: hsl(215 6% 56%);
+  --text-disabled: hsl(215 6% 38%);
+
+  --border: hsl(210 6% 20%);
+  --border-light: hsl(210 6% 16%);
+  --border-dark: hsl(210 6% 25%);
+  --border-strong: hsl(210 6% 32%);
+
+  /* ── Cobalt figure ink replaces the brand purple. Mid-stop (cobalt-500):
+     the office reuses --accent as both link ink and button fill, so it has
+     to read against the paper AND carry light text on a fill. ── */
+  --accent: oklch(63.79% 0.1899 269.89); /* --ms-cobalt-500 */
+  --accent-bg: color-mix(
+    in srgb,
+    oklch(50.58% 0.2886 264.84) 16%,
+    transparent
+  );
+  --accent-bg-strong: color-mix(
+    in srgb,
+    oklch(50.58% 0.2886 264.84) 32%,
+    transparent
+  );
+
+  /* ── Status colors, softened so nothing glows on the muted surface ── */
+  --green: oklch(0.76 0.11 158);
+  --red: hsl(6 58% 60%);
+  --red-bg: hsl(6 58% 60% / 0.12);
+
+  /* ── Sidebar: the purple rail becomes the operator rail — a darker
+     panel one step below the paper, dim text, ink when active. ── */
+  --nex-sidebar: hsl(210 6% 6%);
+  --nex-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --nex-sidebar-active: color-mix(
+    in srgb,
+    oklch(50.58% 0.2886 264.84) 26%,
+    transparent
+  );
+  --nex-sidebar-text: hsl(215 6% 62%);
+  --nex-sidebar-text-active: hsl(210 8% 88%);
+
+  /* ── Inline accents (mentions, JSON syntax) track cobalt, not violet ── */
+  --mention-bg: color-mix(in srgb, oklch(50.58% 0.2886 264.84) 18%, transparent);
+  --mention-fg: oklch(80% 0.1 272.4);
+  --syntax-number: oklch(80% 0.1 272.4);
+  --syntax-bool: oklch(0.79 0.1 85);
+}
+
+/* ── Paper atmosphere: speckle + fine construction grid, fixed so it
+   does not tile when the chat scrolls. Same recipe as .opr-root and
+   the onboarding hosts, so the whole product sits on one surface. ── */
+html[data-theme="nex-shell"] body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(
+      circle at 1px 1px,
+      color-mix(in srgb, var(--text) 3%, transparent) 1px,
+      transparent 0
+    ),
+    linear-gradient(90deg, hsl(210 6% 13% / 0.34) 1px, transparent 1px),
+    linear-gradient(180deg, hsl(210 6% 13% / 0.34) 1px, transparent 1px);
+  background-size:
+    15px 15px,
+    56px 56px,
+    56px 56px;
+  background-attachment: fixed;
+}
+
+/* ── Sidebar chrome pieces that hardcode the rail color ── */
+html[data-theme="nex-shell"] .sidebar-bottom,
+html[data-theme="nex-shell"] .sidebar-header {
+  background: hsl(210 6% 6%);
+}
+
+/* ── Active sidebar rows: nex.css hardcodes bright cyan on these via the
+   shared [data-theme^="nex"] rule. Selection in the shell is a quiet
+   cobalt tint with ink text, same as everywhere else. ── */
+html[data-theme="nex-shell"] .sidebar-item.active,
+html[data-theme="nex-shell"] .sidebar-agent.active {
+  background: var(--nex-sidebar-active);
+  color: hsl(210 8% 88%);
+}
+
+/* ── Primary buttons are B&W chrome (soft ink on dark), not colored fills.
+   Color stays reserved for status; cobalt marks links and selection. ── */
+html[data-theme="nex-shell"] .btn-primary,
+html[data-theme="nex-shell"] .issues-new-btn {
+  background: var(--text);
+  color: hsl(210 10% 10%);
+}
+html[data-theme="nex-shell"] .btn-primary:not(:disabled):hover,
+html[data-theme="nex-shell"] .issues-new-btn:hover {
+  background: var(--text);
+  color: hsl(210 10% 10%);
+  filter: brightness(1.08);
+}
+
+/* ── Override hard-coded message text color (not a CSS variable in nex.css) ── */
+html[data-theme="nex-shell"] .message-text {
+  color: hsl(210 7% 78%);
+}
+
+/* ── Composer inner — match the card tone ── */
+html[data-theme="nex-shell"] .composer-inner {
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
+}
+
+/* ── Message hover on dark bg ── */
+html[data-theme="nex-shell"] .message:hover {
+  background: hsl(210 5% 10%);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Dark-theme contrast fixes
+   The base stylesheets target light surfaces. Anywhere a rule
+   hardcodes a light bg + dark text (or vice versa) needs an
+   override here so the dark theme stays readable. Mirrors the
+   nex-dark fix list with cobalt in place of the violet accents.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Task status badges — light pastel chips don't survive on dark surface ── */
+html[data-theme="nex-shell"] .task-detail-status-badge.status-done {
+  background: rgba(47, 170, 100, 0.14);
+  color: #54c984;
+  border-color: rgba(47, 170, 100, 0.3);
+}
+html[data-theme="nex-shell"] .task-detail-status-badge.status-blocked {
+  background: color-mix(in srgb, oklch(50.58% 0.2886 264.84) 18%, transparent);
+  color: oklch(80% 0.1 272.4);
+  border-color: color-mix(in srgb, oklch(50.58% 0.2886 264.84) 40%, transparent);
+}
+
+/* ── Insight badges — white text on bright accent washes out ── */
+html[data-theme="nex-shell"] .insight-badge-low {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+/* ── Notebook surface — base tokens assume cream-paper light mode. ── */
+html[data-theme="nex-shell"] .notebook-surface {
+  --nb-paper: hsl(210 5% 9%);
+  --nb-paper-dark: hsl(210 6% 7%);
+  --nb-rule: rgba(255, 255, 255, 0.03);
+  --nb-surface: hsl(210 5% 10%);
+  --nb-text: hsl(210 8% 84%);
+  --nb-text-muted: hsl(215 6% 62%);
+  --nb-text-tertiary: hsl(215 6% 50%);
+  --nb-border: hsl(210 6% 22%);
+  --nb-border-light: hsl(210 6% 15%);
+  --nb-ink-blue: oklch(76.12% 0.1218 272.4);
+  --nb-stamp-red: #d6443c;
+  --nb-amber: #ffb647;
+  --nb-amber-bg: rgba(255, 182, 71, 0.1);
+  --nb-amber-hover: #f0a541;
+  --nb-green-approve: #54c984;
+  --nb-green-bg: rgba(84, 201, 132, 0.1);
+
+  /* Kill the cream paper grain — both layers read as scanlines on dark. */
+  background-image: none !important;
+  background-color: var(--nb-paper);
+}
+
+html[data-theme="nex-shell"] .notebook-surface .nb-shelf-item .nb-status-draft {
+  color: var(--text-secondary);
+}
+html[data-theme="nex-shell"] .notebook-surface .nb-shelf-item .nb-status-review {
+  color: #ffb647;
+}
+html[data-theme="nex-shell"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-changes {
+  color: #ff7e6e;
+}
+
+html[data-theme="nex-shell"] .notebook-surface .nb-shelf-card {
+  background: var(--nb-paper-dark);
+  outline-color: rgba(255, 255, 255, 0.08);
+  color: var(--nb-text);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+html[data-theme="nex-shell"] .notebook-surface .nb-shelf-card:hover {
+  background: hsl(210 5% 12%);
+  outline-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="nex-shell"]
+  .notebook-surface
+  .nb-shelf-card
+  .nb-shelf-card-meta {
+  color: var(--text-tertiary);
+}
+
+html[data-theme="nex-shell"] .notebook-surface .nb-review-card {
+  background: rgba(255, 182, 71, 0.1);
+  outline-color: rgba(255, 255, 255, 0.1);
+  color: var(--nb-text);
+}
+html[data-theme="nex-shell"] .notebook-surface .nb-review-card:hover {
+  background: rgba(255, 182, 71, 0.18);
+  outline-color: rgba(255, 182, 71, 0.4);
+}
+
+html[data-theme="nex-shell"] .notebook-surface::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Company-brain editor links + accents (Tiptap chrome). wiki.css seeds
+   these from the light olive ramp; on paper-dark the olive link is
+   invisible and the near-white amber surfaces burn. Cobalt owns links
+   and selection here, exactly like the rest of the shell. Scoped to
+   html[data-theme] because the slash/mention menus portal to body. ── */
+html[data-theme="nex-shell"] {
+  --wk-wikilink: oklch(76.12% 0.1218 272.4);
+  --wk-amber: oklch(76.12% 0.1218 272.4);
+  --wk-amber-bg: color-mix(in srgb, oklch(50.58% 0.2886 264.84) 22%, transparent);
+  --wk-amber-banner: color-mix(
+    in srgb,
+    oklch(50.58% 0.2886 264.84) 22%,
+    transparent
+  );
+
+  --wk-diff-add-bg: rgba(64, 180, 116, 0.16);
+  --wk-diff-add-ink: #5ad08a;
+  --wk-diff-remove-bg: rgba(214, 68, 60, 0.16);
+  --wk-diff-remove-ink: #f08a82;
+}
+
+/* "NEW" / type pill — near-white accent wash flashes on dark; cobalt tint. */
+html[data-theme="nex-shell"] .wk-section-new {
+  background: color-mix(in srgb, oklch(50.58% 0.2886 264.84) 20%, transparent);
+  color: oklch(80% 0.1 272.4);
+}

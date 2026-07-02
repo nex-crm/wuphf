@@ -287,13 +287,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     </span>
                     <span className="cmd-palette-item-text">
                       <span className="cmd-palette-item-label">
-                        {g.group === "Wiki" || g.group === "Messages"
+                        {g.group === "Company Brain" || g.group === "Messages"
                           ? highlightMatch(item.label, queryTrim)
                           : item.label}
                       </span>
                       {item.desc ? (
                         <span className="cmd-palette-item-desc">
-                          {g.group === "Wiki"
+                          {g.group === "Company Brain"
                             ? highlightMatch(item.desc, queryTrim)
                             : item.desc}
                         </span>

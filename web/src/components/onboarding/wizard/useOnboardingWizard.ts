@@ -4,9 +4,7 @@
  * Owns:
  *   - The working `answers` object and an immutable patch setter.
  *   - The current step index plus next / back / goTo navigation.
- *   - `canAdvance` gating per step (team needs a blueprint or a named agent;
- *     first-issue needs text).
- *   - The blueprint roster fetched once from GET /onboarding/blueprints.
+ *   - `canAdvance` gating per step (first-issue needs text).
  *
  * On FINISH it runs the seed contract (verified against
  * internal/onboarding/handlers.go + internal/team/broker_onboarding.go):
@@ -17,10 +15,11 @@
  *      MUST happen first. owner_name / owner_role are persisted the same way
  *      when collected.
  *   2. POST /onboarding/complete { task: firstIssue, skip_task: false,
- *      blueprint: blueprintId, agents: pickedAgents }. The broker seeds the
- *      team from that blueprint (or synthesizes one when blueprint is empty),
- *      honors the agents filter, posts the first CEO turn, and flips
- *      onboarded=true. An already_completed response is treated as success.
+ *      blueprint: "", agents: [] }. Blueprint "" plus an explicit empty agents
+ *      list is the no-team seed: since the packs/CEO removal the office starts
+ *      with zero agents, the first workflow lands untagged in #general, and
+ *      the broker flips onboarded=true. An already_completed response is
+ *      treated as success.
  *   3. Seed the home composer with the first issue (pendingComposerDraft on the
  *      app store, keyed to HOME_COMPOSER_DRAFT_CHANNEL, which the home
  *      TaskComposer consumes on landing) so the office opens with the issue
@@ -31,11 +30,10 @@
  * them and re-enables Finish so the user can retry.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   completeOnboarding,
-  fetchBlueprints,
   postOnboardingAnswer,
   postOnboardingProgress,
 } from "../../../api/onboarding";
@@ -46,8 +44,6 @@ import {
   track,
 } from "../../../lib/analytics";
 import { HOME_COMPOSER_DRAFT_CHANNEL, useAppStore } from "../../../stores/app";
-import type { BlueprintOption } from "./types";
-import { toBlueprintOption } from "./types";
 import {
   ONBOARDING_FIRST_ISSUE_EXAMPLE,
   ONBOARDING_WIZARD_STEP_IDS,
@@ -106,11 +102,6 @@ function initialAnswers(): OnboardingAnswers {
     ownerRole: "",
     email: "",
     keepInTouch: true,
-    blueprintId: "",
-    pickedAgents: [],
-    startFromScratch: false,
-    agentName: "",
-    agentInstructions: "",
     firstIssue: ONBOARDING_FIRST_ISSUE_EXAMPLE,
     telemetryConsent: true,
     recordingConsent: true,
@@ -130,8 +121,6 @@ export interface UseOnboardingWizardResult {
   answers: OnboardingAnswers;
   /** Merge-patch the answers immutably. */
   setAnswers: (patch: Partial<OnboardingAnswers>) => void;
-  /** The blueprint roster options (empty while loading or on error). */
-  blueprints: BlueprintOption[];
   /** Whether the user may advance from the current step. */
   canAdvance: boolean;
   /** Advance one step (no-op on the last step; use finish there). */
@@ -160,7 +149,6 @@ export function useOnboardingWizard(
   const [index, setIndex] = useState(0);
   const [answers, setAnswersState] =
     useState<OnboardingAnswers>(initialAnswers);
-  const [blueprints, setBlueprints] = useState<BlueprintOption[]>([]);
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -173,48 +161,16 @@ export function useOnboardingWizard(
     setAnswersState((current) => ({ ...current, ...patch }));
   }, []);
 
-  // Fetch the blueprint roster once. A failure is non-fatal: the team step
-  // falls back to the scratch path, so we keep blueprints empty and let the
-  // user proceed rather than blocking onboarding on a roster fetch.
-  useEffect(() => {
-    let cancelled = false;
-    fetchBlueprints()
-      .then((summaries) => {
-        if (cancelled) return;
-        setBlueprints(summaries.map(toBlueprintOption));
-      })
-      .catch(() => {
-        if (!cancelled) setBlueprints([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Per-step advance gate. The team step needs a chosen blueprint OR a named
-  // first agent (the "I will set this up later" escape sets neither and uses
-  // the scratch path, so that escape is wired in the host, not here). The
-  // first-issue step needs non-empty text. Every other step is informational.
+  // Per-step advance gate. The first-issue step needs non-empty text. Every
+  // other step is informational.
   const canAdvance = useMemo(() => {
     switch (stepId) {
-      case "team":
-        return (
-          answers.blueprintId.trim() !== "" ||
-          answers.startFromScratch ||
-          answers.agentName.trim() !== ""
-        );
       case "first-issue":
         return answers.firstIssue.trim() !== "";
       default:
         return true;
     }
-  }, [
-    stepId,
-    answers.blueprintId,
-    answers.startFromScratch,
-    answers.agentName,
-    answers.firstIssue,
-  ]);
+  }, [stepId, answers.firstIssue]);
 
   const next = useCallback(() => {
     setIndex((current) => Math.min(current + 1, lastIndex));
@@ -245,7 +201,6 @@ export function useOnboardingWizard(
       const ownerRole = answers.ownerRole.trim();
       const email = answers.email.trim();
       const firstIssue = answers.firstIssue.trim();
-      const blueprintId = answers.blueprintId.trim();
       const telemetryConsent = answers.telemetryConsent;
       const recordingConsent = answers.recordingConsent;
 
@@ -259,16 +214,17 @@ export function useOnboardingWizard(
           email,
         );
 
-        // 2. Seed the team + post the first CEO turn + flip onboarded=true.
-        //    blueprint empty => scratch path; agents filters the roster.
+        // 2. Seed the empty office + flip onboarded=true. Blueprint "" plus an
+        //    explicit empty agents list is the no-team seed: no packs, no CEO,
+        //    zero agents. The first workflow lands untagged in #general.
         //    owner_name / owner_role are also sent on the complete body so a
         //    fresh broker persists them to config even if the answer writes
         //    above raced; the broker merges, it does not require them.
         const result = await completeOnboarding({
           task: skipTask ? "" : firstIssue,
           skip_task: skipTask,
-          blueprint: blueprintId,
-          agents: answers.pickedAgents,
+          blueprint: "",
+          agents: [],
           owner_name: ownerName || undefined,
           owner_role: ownerRole || undefined,
           analytics_telemetry_enabled: telemetryConsent,
@@ -291,8 +247,6 @@ export function useOnboardingWizard(
         // 2b. Funnel close-out + the explicit consent record (both no-ops when
         //     telemetry is off). No content, only counts + the chosen flags.
         track("onboarding_completed", {
-          blueprint_id: blueprintId,
-          agent_count: answers.pickedAgents.length,
           skipped_first_task: skipTask,
           telemetry_consent: telemetryConsent,
           recording_consent: recordingConsent,
@@ -344,8 +298,6 @@ export function useOnboardingWizard(
       answers.email,
       answers.keepInTouch,
       answers.firstIssue,
-      answers.blueprintId,
-      answers.pickedAgents,
       answers.telemetryConsent,
       answers.recordingConsent,
       onComplete,
@@ -365,7 +317,6 @@ export function useOnboardingWizard(
     isLast,
     answers,
     setAnswers,
-    blueprints,
     canAdvance,
     next,
     back,

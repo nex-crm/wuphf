@@ -175,20 +175,8 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 			return seedErr
 		}
 		b.backfillAgentFilesForRoster()
-		b.materializeBlueprintWiki(loaded)
-		// Seed the team/getting-started/ pages so a brand-new office is never
-		// empty. Mirrors the team/about/ seed and is gated identically (only
-		// runs when a real wiki root is known). Best-effort: logged, not fatal.
-		b.materializeGettingStarted()
-		// materializeBlueprintWiki only regenerates the index when its
-		// transactional materializer wrote new bytes. The seed boundary
-		// must still guarantee a fresh index/all.md — for example when the
-		// blueprint wiki was already on disk from a prior run but the
-		// index was rebuilt empty by a clean-boot reconcile. Call here
-		// unconditionally so the post-seed snapshot is always correct.
-		regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		b.regenWikiIndexAfterSeed(regenCtx, "blueprint seed")
-		cancel()
+		// The company brain starts empty — we do not seed content (no
+		// blueprint wiki skeletons, no getting-started pages).
 		return nil
 	}
 	// Scratch path: minimal seed (#general + about/ wiki stubs + CEO).
@@ -205,10 +193,6 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 	// rather than an empty one. Best-effort: failures are logged inside the
 	// helper and do not fail the seed phase.
 	b.materializeScratchWikiStubs(s)
-	// Seed the team/getting-started/ pages on the scratch path too, gated
-	// identically to the about/ stubs, so an empty-office founder still lands
-	// in a wiki that explains how the office works. Best-effort.
-	b.materializeGettingStarted()
 	// Stubs land via atomicWrite (not the WikiWorker), so force an index
 	// regen here so /index/all.md reflects the new about/ files.
 	regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -428,59 +412,6 @@ func (b *Broker) materializeScratchWikiStubs(s *onboarding.State) {
 		log.Printf("onboarding: scratch wiki commit: %v", err)
 	} else if sha != "" {
 		log.Printf("onboarding: scratch wiki stubs committed %s", sha)
-	}
-}
-
-// materializeGettingStarted seeds the team/getting-started/ wiki pages into a
-// brand-new office so it is never empty. It mirrors materializeScratchWikiStubs
-// exactly: it resolves the same wiki root, delegates the skip-if-exists
-// atomic writes to operations.SeedGettingStarted, and is best-effort (errors
-// are logged, never returned, so a file I/O failure does not fail the seed
-// phase). The caller regenerates the wiki index immediately afterward via
-// regenWikiIndexAfterSeed, so the pages land in index/all.md under the
-// "team/getting-started" section.
-//
-// Wired into BOTH the blueprint and scratch seed paths in runSeedPhase, gated
-// identically to the team/about/ seed (only runs when a real wiki root is
-// known). Caller must NOT hold b.mu.
-//
-// See docs/specs/office-onboarding-uplift.md section 5.
-func (b *Broker) materializeGettingStarted() {
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		log.Printf("onboarding: materializeGettingStarted: WUPHF_RUNTIME_HOME unset")
-		return
-	}
-	wikiRoot := filepath.Join(home, ".wuphf", "wiki")
-
-	written, err := operations.SeedGettingStarted(wikiRoot)
-	if err != nil {
-		log.Printf("onboarding: seed getting-started: %v", err)
-		return
-	}
-	if len(written) == 0 {
-		// Already on disk from a prior seed; nothing new to commit.
-		return
-	}
-
-	worker := b.WikiWorker()
-	if worker == nil || worker.Repo() == nil {
-		// Non-markdown backend (e.g. memory in tests). Files stay on disk;
-		// RecoverDirtyTree on the next markdown-backend launch folds them in.
-		// Same fallback shape as materializeScratchWikiStubs.
-		return
-	}
-	repo := worker.Repo()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := repo.IndexRegen(ctx); err != nil {
-		log.Printf("onboarding: getting-started index regen: %v", err)
-	}
-	sha, err := repo.CommitBootstrap(ctx, "wuphf: materialize getting-started wiki pages")
-	if err != nil {
-		log.Printf("onboarding: getting-started commit: %v", err)
-	} else if sha != "" {
-		log.Printf("onboarding: getting-started pages committed %s", sha)
 	}
 }
 
