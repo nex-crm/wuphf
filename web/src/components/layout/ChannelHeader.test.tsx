@@ -98,11 +98,12 @@ describe("<ChannelHeader>", () => {
     const menu = screen.getByRole("menu");
     const items = screen.getAllByRole("menuitemradio");
 
-    // Menu opens with focus on the active item (Nex Light, index 0).
-    expect(document.activeElement).toBe(items[0]);
+    // Menu opens with focus on the active item (Nex Light — index 1, after
+    // the Shell default that now leads the registry).
+    expect(document.activeElement).toBe(items[1]);
 
     fireEvent.keyDown(menu, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(items[1]);
+    expect(document.activeElement).toBe(items[2]);
 
     fireEvent.keyDown(menu, { key: "End" });
     expect(document.activeElement).toBe(items[items.length - 1]);

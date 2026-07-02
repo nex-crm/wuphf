@@ -29,6 +29,13 @@ export interface ThemeDef {
 
 export const THEMES = [
   {
+    id: "nex-shell",
+    name: "Shell",
+    desc: "The dark technical manual.",
+    swatch: { primary: "#131516", accent: "#93a5f0", surface: "#18191b" },
+    cssPath: "/themes/nex-shell.css",
+  },
+  {
     id: "nex",
     name: "Nex Light",
     desc: "Clean light. Purple accent.",
@@ -53,7 +60,7 @@ export const THEMES = [
 
 export type Theme = (typeof THEMES)[number]["id"];
 
-export const DEFAULT_THEME: Theme = "nex";
+export const DEFAULT_THEME: Theme = "nex-shell";
 
 const THEME_IDS: ReadonlySet<string> = new Set(THEMES.map((t) => t.id));
 
