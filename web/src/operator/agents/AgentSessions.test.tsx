@@ -196,4 +196,26 @@ describe("AgentSessions", () => {
     const first = (await findByText("Weekly recap run")).closest("button");
     expect(first?.className).not.toContain("is-active");
   });
+
+  it("list layout renders a left session panel, newest first, with New chat", async () => {
+    vi.stubGlobal("fetch", serviceFetch());
+    const { container, findByText, getByLabelText } = render(
+      <AgentSessions
+        agentName="Pipeline Agent"
+        agentId="app_x"
+        layout="list"
+      />,
+    );
+    await findByText("Weekly recap run"); // hydrated
+    const panel = container.querySelector(".opr-chat-list");
+    expect(panel).toBeTruthy();
+    const rows = Array.from(
+      panel?.querySelectorAll(".opr-chat-listitem") ?? [],
+    ).map((b) => b.querySelector(".opr-chat-listitem-title")?.textContent);
+    // Wire order is s1 (routine) then s2 (manual); the panel flips it.
+    expect(rows).toEqual(["Chat", "Weekly recap run"]);
+    expect(getByLabelText("New chat")).toBeTruthy();
+    // No chip strip in this layout.
+    expect(container.querySelector(".opr-session-strip")).toBeNull();
+  });
 });

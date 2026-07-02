@@ -124,6 +124,7 @@ export function SimpleAgentDetail({ appId, onBack }: SimpleAgentDetailProps) {
             <AgentSessions
               agentName={app?.name ?? "This agent"}
               agentId={app?.id}
+              layout="list"
             />
           </div>
           {section === "tools" ? (

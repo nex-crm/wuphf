@@ -4728,3 +4728,38 @@
   overflow-y: auto;
   padding-bottom: var(--space-6);
 }
+
+/* List layout: the ChatGPT-style session panel to the chat's left. The base
+   .opr-agent-sessions flex declaration is later in this file than
+   .opr-chat-layout's grid, so re-assert grid at higher specificity. */
+.opr-agent-sessions.is-list {
+  display: grid;
+}
+.opr-chat-newchat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2-5) var(--space-3);
+  margin-bottom: var(--space-2);
+  border: 1px dashed var(--t-line-2);
+  border-radius: var(--t-r-sm);
+  background: transparent;
+  color: var(--t-dim);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--duration-fast) ease;
+}
+.opr-chat-newchat:hover {
+  color: var(--t-text);
+  border-color: color-mix(in srgb, var(--t-accent-2) 45%, transparent);
+}
+/* Frame the chat so the panel + transcript read as one surface. */
+.opr-simple-chat .opr-agent-sessions.is-list {
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--t-surface) 40%, transparent);
+}

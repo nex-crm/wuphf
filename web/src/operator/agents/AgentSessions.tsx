@@ -35,6 +35,9 @@ interface AgentSessionsProps {
   requestedSessionId?: string | null;
   /** One-shot instruction for the manual session (demo hand-off). */
   seed?: string;
+  /** "strip": chips above the chat (the dock). "list": a ChatGPT-style left
+   * panel with one row per session, newest first. */
+  layout?: "strip" | "list";
 }
 
 type Transcript = { from: "you" | "nex"; body: string }[];
@@ -59,11 +62,25 @@ function toTranscript(messages: WireSessionMessage[]): Transcript {
   return messages.map(({ from, body }) => ({ from, body }));
 }
 
+// Human-friendly "when" for a session row: relative for a parseable timestamp
+// (the agent service persists ISO strings), the raw label otherwise (seeds).
+function sessionWhen(at: string): string {
+  const t = Date.parse(at);
+  if (Number.isNaN(t)) return at;
+  const mins = Math.round((Date.now() - t) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  if (mins < 60 * 24 * 7) return `${Math.round(mins / (60 * 24))}d ago`;
+  return new Date(t).toLocaleDateString();
+}
+
 export function AgentSessions({
   agentName,
   agentId,
   requestedSessionId,
   seed,
+  layout = "strip",
 }: AgentSessionsProps) {
   const [sessions, setSessions] = useState<ChatSessionMeta[]>(() =>
     seedSessions(),
@@ -164,6 +181,84 @@ export function AgentSessions({
     return undefined;
   }
 
+  const panes = (
+    <div className="opr-session-panes">
+      {sessions
+        .filter((s) => mounted.includes(s.id))
+        .map((s) => (
+          <div
+            key={s.id}
+            style={s.id === activeId ? undefined : { display: "none" }}
+          >
+            <AppToolsChat
+              appName={agentName}
+              seed={
+                s.kind === "manual" && s.id === sessions[0]?.id
+                  ? seed
+                  : undefined
+              }
+              initialTranscript={initialTranscriptFor(s)}
+              onTurn={
+                live && realId
+                  ? (from, body) =>
+                      trySendSessionMessage(s.id, {
+                        agent: realId,
+                        from,
+                        body,
+                      })
+                  : undefined
+              }
+            />
+          </div>
+        ))}
+    </div>
+  );
+
+  if (layout === "list") {
+    return (
+      <div className="opr-agent-sessions is-list opr-chat-layout">
+        <aside className="opr-chat-list" aria-label="Chat sessions">
+          <button
+            type="button"
+            className="opr-chat-newchat"
+            onClick={addManual}
+            aria-label="New chat"
+          >
+            <Plus size={13} strokeWidth={2} aria-hidden={true} />
+            New chat
+          </button>
+          {/* Newest on top, like ChatGPT — a fresh chat lands first. */}
+          {[...sessions].reverse().map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={`opr-chat-listitem${s.id === activeId ? " is-active" : ""}`}
+              onClick={() => open(s.id)}
+            >
+              <div className="opr-chat-listitem-title">
+                {s.kind === "routine" ? (
+                  <CalendarClock size={12} strokeWidth={2} aria-hidden={true} />
+                ) : (
+                  <MessageSquareText
+                    size={12}
+                    strokeWidth={2}
+                    aria-hidden={true}
+                  />
+                )}
+                {s.title}
+              </div>
+              <div className="opr-chat-listitem-sub">
+                {s.kind === "routine" ? "routine · " : ""}
+                {sessionWhen(s.at)}
+              </div>
+            </button>
+          ))}
+        </aside>
+        <div className="opr-chat-main">{panes}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="opr-agent-sessions">
       <div className="opr-session-strip" aria-label="Chat sessions">
@@ -194,36 +289,7 @@ export function AgentSessions({
         </button>
       </div>
 
-      <div className="opr-session-panes">
-        {sessions
-          .filter((s) => mounted.includes(s.id))
-          .map((s) => (
-            <div
-              key={s.id}
-              style={s.id === activeId ? undefined : { display: "none" }}
-            >
-              <AppToolsChat
-                appName={agentName}
-                seed={
-                  s.kind === "manual" && s.id === sessions[0]?.id
-                    ? seed
-                    : undefined
-                }
-                initialTranscript={initialTranscriptFor(s)}
-                onTurn={
-                  live && realId
-                    ? (from, body) =>
-                        trySendSessionMessage(s.id, {
-                          agent: realId,
-                          from,
-                          body,
-                        })
-                    : undefined
-                }
-              />
-            </div>
-          ))}
-      </div>
+      {panes}
     </div>
   );
 }
