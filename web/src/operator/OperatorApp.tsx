@@ -29,9 +29,9 @@ import {
 } from "./OperatorSidebar";
 import { InternalToolDetail } from "./surfaces/InternalToolDetail";
 import { InternalToolsSurface } from "./surfaces/InternalToolsSurface";
-import { OperatorAppDetail } from "./surfaces/OperatorAppDetail";
 import { OperatorBuildExperience } from "./surfaces/OperatorBuildExperience";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
+import { SimpleAgentDetail } from "./surfaces/SimpleAgentDetail";
 import {
   type BuiltWorkflow,
   type FinishMode,
@@ -151,8 +151,10 @@ export function OperatorApp() {
   function renderSurface() {
     if (surface === "settings") return <SettingsSurface />;
     if (isRealAppId(selectedId)) {
+      // The simplified agent: chat is the main screen; Tools and Integrations
+      // are the only other sections (see SimpleAgentDetail).
       return (
-        <OperatorAppDetail
+        <SimpleAgentDetail
           key={selectedId}
           appId={selectedId as string}
           onBack={() => setSelectedId(null)}
@@ -211,7 +213,15 @@ export function OperatorApp() {
             onFinish={finishWorkflow}
           />
         ) : (
-          <div className="opr-surface">{renderSurface()}</div>
+          <div
+            // The simple agent view pins the chat to the viewport: the surface
+            // stops scrolling and hands its height to the chat pane instead.
+            className={`opr-surface${
+              isRealAppId(selectedId) ? " is-simple-agent" : ""
+            }`}
+          >
+            {renderSurface()}
+          </div>
         )}
       </main>
 

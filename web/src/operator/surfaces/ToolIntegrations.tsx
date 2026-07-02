@@ -22,9 +22,14 @@ import { Eyebrow } from "../components/primitives";
 interface ToolIntegrationsProps {
   /** Integration names the tool's workflow references (from its steps). */
   usedNames: string[];
+  /** Eyebrow over the used-names chips; the agent view speaks agent language. */
+  usedLabel?: string;
 }
 
-export function ToolIntegrations({ usedNames }: ToolIntegrationsProps) {
+export function ToolIntegrations({
+  usedNames,
+  usedLabel = "Used by this tool",
+}: ToolIntegrationsProps) {
   const [search, setSearch] = useState("");
   const [connecting, setConnecting] = useState<string | null>(null);
 
@@ -52,7 +57,7 @@ export function ToolIntegrations({ usedNames }: ToolIntegrationsProps) {
     <div className="opr-tool-scoped">
       {usedNames.length > 0 ? (
         <>
-          <Eyebrow>Used by this tool</Eyebrow>
+          <Eyebrow>{usedLabel}</Eyebrow>
           <ul className="opr-scoped-chips">
             {usedNames.map((name) => (
               <li key={name} className="opr-scoped-chip">

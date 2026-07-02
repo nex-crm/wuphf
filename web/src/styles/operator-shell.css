@@ -4666,3 +4666,65 @@
 .opr-session-panes > div {
   height: 100%;
 }
+
+/* ── Simple agent detail: the agent IS the chat (Chat / Tools / Integrations) ── */
+.opr-surface.is-simple-agent {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: var(--space-5);
+}
+.opr-simple-agent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
+}
+.opr-simple-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.opr-simple-head .opr-back {
+  margin: 0 var(--space-2) 0 0;
+}
+.opr-simple-head .opr-detail-actions {
+  margin-left: auto;
+}
+.opr-simple-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.opr-simple-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.opr-simple-chat .opr-agent-sessions {
+  flex: 1;
+  min-height: 0;
+}
+/* Give each mounted chat pane a real flex chain so the transcript scrolls and
+   the composer pins to the bottom of the viewport (the dock gets this from
+   .opr-ask-body; the full-screen chat provides its own). */
+.opr-simple-chat .opr-session-panes > div {
+  display: flex;
+  flex-direction: column;
+}
+.opr-simple-chat .opr-builder {
+  flex: 1;
+  min-height: 0;
+}
+.opr-simple-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-6);
+}
