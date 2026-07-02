@@ -523,6 +523,56 @@ func (s *customAppStore) SetEditChannel(id, channel string) error {
 	return nil
 }
 
+// Rename updates an app's display name in place — the narrow metadata mutation
+// behind PATCH /apps/{id}. It touches Name/UpdatedBy/UpdatedAt only: no version
+// bump, no snapshot, no bytes — a rename is not a build. Deliberately NOT a
+// generic update. Safe because nothing derives storage keys from Name: the app
+// dir is keyed by ID, the manifest Slug is minted once at create and never
+// recomputed, and operatorAppWorkflowKey slugs from the app ID.
+//
+// Validation mirrors Save: trimmed, non-empty, <= customAppMaxNameBytes, no NUL
+// bytes (caller errors → 400 upstream). An unknown id surfaces the underlying
+// os.ErrNotExist from the manifest read so writeAppError maps it to 404.
+func (s *customAppStore) Rename(id, name, actor string, now time.Time) (CustomApp, error) {
+	if err := validateCustomAppID(id); err != nil {
+		return CustomApp{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return CustomApp{}, newCustomAppCallerError("app: name is required")
+	}
+	if len(name) > customAppMaxNameBytes {
+		return CustomApp{}, newCustomAppCallerError("app: name exceeds %d bytes", customAppMaxNameBytes)
+	}
+	if strings.ContainsRune(name, '\x00') {
+		return CustomApp{}, newCustomAppCallerError("app: name must not contain NUL bytes")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, err := s.readManifestLocked(id)
+	if err != nil {
+		return CustomApp{}, err
+	}
+	if app.Name == name {
+		// A no-op rename (retried PATCH) never churns the manifest or stamps.
+		return app, nil
+	}
+	app.Name = name
+	if trimmedActor := strings.TrimSpace(actor); trimmedActor != "" {
+		app.UpdatedBy = trimmedActor
+	}
+	app.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
+	manifestBytes, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return CustomApp{}, fmt.Errorf("app: marshal manifest: %w", err)
+	}
+	manifestBytes = append(manifestBytes, '\n')
+	if err := writeFileAtomic(filepath.Join(s.appDir(id), customAppManifestFile), manifestBytes, 0o600); err != nil {
+		return CustomApp{}, fmt.Errorf("app: write manifest: %w", err)
+	}
+	return app, nil
+}
+
 // Scaffold materializes a brand-new app's editable source from the embedded
 // starter template and records a "building" draft manifest, BEFORE the App
 // Builder writes a single line of code. The live preview can then boot a real

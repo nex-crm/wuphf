@@ -120,6 +120,65 @@ export interface ToolCallResult {
 	actions: string[]; // every capability call the tool made, e.g. crm.deals({"since":"7d"})
 }
 
+// ---------------------------------------------------------------------------
+// Persistence contracts (routines slice 2). The FE is wired against these EXACT
+// shapes — keep them in sync with web/src/operator/routines/routines.ts.
+// Timestamps are ISO strings (new Date().toISOString()).
+// ---------------------------------------------------------------------------
+
+/** A persisted agent tool. Re-authoring a same-named tool bumps `version`. */
+export interface StoredTool extends Tool {
+	version: number;
+}
+
+/** A scheduled prompt the agent runs in its own chat session. */
+export interface Routine {
+	id: string;
+	agent: string;
+	/** Plain-language name, e.g. "Monday pipeline recap". */
+	name: string;
+	/** The prompt the agent runs in its chat. */
+	prompt: string;
+	/** Human schedule label, e.g. "Every Monday 9:00" (see scheduler.ts). */
+	schedule: string;
+	enabled: boolean;
+	/** Published version of the prompt; Publish freezes the draft as vN+1. */
+	version: number;
+	/** True when the prompt changed since the last publish. */
+	draft?: boolean;
+	lastRun?: string;
+	/** The chat session this routine runs in. */
+	sessionId: string;
+}
+
+export interface SessionMeta {
+	id: string;
+	agent: string;
+	title: string;
+	/** "routine" sessions are created by a schedule; "manual" by the operator. */
+	kind: "routine" | "manual";
+	at: string;
+}
+
+export interface SessionMessage {
+	from: "you" | "nex";
+	body: string;
+	at: string;
+}
+
+/** A saved run output (routine runs always land an "md" artifact). */
+export interface StoredArtifact {
+	id: string;
+	type: "md" | "html" | "pdf";
+	title: string;
+	/** Who made it, e.g. the routine's name. */
+	producedBy: string;
+	at: string;
+	content?: string;
+	url?: string;
+	size?: string;
+}
+
 export interface RunResult {
 	status: "done" | "needs_approval" | "error";
 	steps: RunStep[];

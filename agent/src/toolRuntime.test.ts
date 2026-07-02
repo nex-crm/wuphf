@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { currentRunSignal } from "./runContext.js";
 import { createServer } from "./service.js";
 import { type CapabilityTree, runTool } from "./toolRuntime.js";
 import type { Tool, ToolCallResult, WorkflowSpec } from "./wire.js";
@@ -118,6 +119,43 @@ test("HARD KILL: a synchronous infinite loop dies at the deadline (worker isolat
 	if (r.status !== "error") throw new Error("unreachable");
 	expect(r.detail).toContain("timed out after 150ms");
 	expect(elapsed).toBeLessThan(2000); // returned promptly — the loop was killed, not raced
+});
+
+test("a settled run ABORTS in-flight capability calls (deferred finding [15])", async () => {
+	// A never-resolving capability records the ambient run signal; when the run
+	// times out, that signal must abort so a real broker fetch / model call in
+	// flight is torn down, not left burning after the worker died.
+	let seen: AbortSignal | undefined;
+	const capabilities: CapabilityTree = {
+		nex: {
+			run: () =>
+				new Promise(() => {
+					seen = currentRunSignal();
+				}),
+		},
+	};
+	const t = makeTool("async function t() { return nex.run('x'); }");
+	const r = await runTool(t, {}, { capabilities, timeoutMs: 30 });
+	expect(r.status).toBe("error");
+	expect(seen).toBeDefined();
+	expect(seen?.aborted).toBe(true);
+	expect(String(seen?.reason)).toContain("tool run settled");
+});
+
+test("the run signal is NOT aborted while capabilities execute mid-run", async () => {
+	let abortedDuring: boolean | undefined;
+	const capabilities: CapabilityTree = {
+		nex: {
+			run: () => {
+				abortedDuring = currentRunSignal()?.aborted;
+				return "fine";
+			},
+		},
+	};
+	const t = makeTool("async function t() { return nex.run('x'); }");
+	const r = await runTool(t, {}, { capabilities });
+	expect(r.status).toBe("ok");
+	expect(abortedDuring).toBe(false);
 });
 
 test("nex.browser is gated: default deny with the browser-control detail", async () => {

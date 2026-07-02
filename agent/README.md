@@ -20,7 +20,16 @@ src/buildAgent.ts  buildWorkflow(message) -> WorkflowSpec via pi-ai `complete`; 
 src/executor.ts    deterministic run; a step with an `api` is REPLAYED as a real HTTP call (auth resolved from a named ref); a gated step halts for the approval card (CQ1); a failed call halts with error
 src/sniff.ts       browsersniff: HAR -> ApiCall/WorkflowStep; strips secrets, auth->named ref, classifies stable-key vs rotating-session (A3/A4)
 src/providers.ts   inference-path detection for the FE Settings surface (subscription / BYOK / local)
-src/service.ts     Bun.serve HTTP/SSE: /health, /providers, POST /build/stream (SSE), POST /run
+src/service.ts     Bun.serve HTTP/SSE: /health, /providers, POST /build/stream (SSE), POST /run,
+                   /tools/build + /tools/call, and the persistence routes (below)
+src/store.ts       file-backed per-agent store: tools, routines, sessions, artifacts
+                   (WUPHF_AGENT_DATA_DIR, default .wuphf-agent-data/; atomic-ish writes)
+src/routineRunner.ts  run a routine = match-or-author a tool, run it approved:false,
+                   append the transcript, save the md run artifact
+src/scheduler.ts   interval tick over due routines (ROUTINE_SCHEDULER=1 to enable;
+                   ROUTINE_TICK_MS, default 30s); schedule labels, not cron
+src/runContext.ts  per-run AbortSignal (AsyncLocalStorage) so a settled tool run
+                   aborts in-flight real capability calls
 src/run.ts         CLI runner (compile a description live)
 scripts/smoke.sh   live smoke (boots the service; /build/stream key-free against Ollama)
 src/*.test.ts      pure + service tests (offline; the service test stubs the engine)
@@ -56,6 +65,36 @@ bun run smoke     # boots it + exercises /health /providers /run /build/stream (
 
 The FE points its build/run calls here (same `WorkflowSpec` contract as the mock). This
 is the only operator backend — the Python `harness/` (deepagents) has been removed.
+
+### Persistence + routines routes (slice 2)
+
+Per-agent state persists as one JSON file per agent id (`src/store.ts`). Wire
+shapes live in `src/wire.ts` (`StoredTool`, `Routine`, `SessionMeta`,
+`SessionMessage`, `StoredArtifact`).
+
+```text
+POST  /tools/build             `app` set -> persist the authored tool under that agent
+                               (re-authoring a same-named tool bumps `version`)
+GET   /tools?agent=<id>        { tools: StoredTool[] }
+GET   /routines?agent=<id>     { routines: Routine[] }
+POST  /routines                { agent, name, prompt, schedule } -> { routine } (+ its chat session)
+PATCH /routines/<id>           { agent, enabled?, prompt?, publish? } -> { routine }
+                               (prompt edit -> draft; publish -> vN+1, draft cleared)
+POST  /routines/<id>/run       { agent } -> { routine, session } — run NOW, approved:false
+GET   /sessions?agent=<id>     { sessions: SessionMeta[] }
+GET   /sessions/<id>?agent=    { session, messages }
+POST  /sessions                { agent, title? } -> { session } (manual; default "Chat <n>")
+POST  /sessions/<id>/message   { agent, from, body } -> { ok: true } (append-only)
+GET   /artifacts?agent=<id>    { artifacts: StoredArtifact[] }
+```
+
+A routine run always executes with `approved: false` (send-gate, default deny):
+a gated capability records `needs_approval` into the transcript and artifact —
+scheduled runs never auto-send. The scheduler is opt-in (`ROUTINE_SCHEDULER=1`;
+tick every `ROUTINE_TICK_MS`, default 30s) and interprets human schedule labels
+("Every 30 minutes", "Every hour", "Weekdays 8:00", "Every day 18:00", "Every
+Monday 9:00") — time-of-day labels fire on the first tick at/after the time,
+once per matching day; this is deliberately not cron (see `src/scheduler.ts`).
 
 ## Status
 
