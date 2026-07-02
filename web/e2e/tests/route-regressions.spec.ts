@@ -252,8 +252,8 @@ test.describe("PR #634 review pins", () => {
     const getErrors = collectReactErrors(page);
 
     const surfaces = [
-      { route: "/#/wiki", label: "Wiki" },
-      { route: "/#/wiki/lookup?q=test", label: "Wiki" },
+      { route: "/#/wiki", label: "Company Brain" },
+      { route: "/#/wiki/lookup?q=test", label: "Company Brain" },
     ];
 
     for (const { route, label } of surfaces) {
