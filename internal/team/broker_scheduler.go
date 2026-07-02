@@ -750,9 +750,12 @@ func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, s
 	job.LastRun = now.Format(time.RFC3339)
 	job.LastRunStatus = "triggered"
 	// Workflow cron jobs are dispatched through the watchdog scheduler's
-	// processWorkflowJob path. Marking next_run = now makes the job appear
-	// due on the next scheduler poll so it executes within one tick.
-	if strings.TrimSpace(job.TargetType) == "workflow" {
+	// processWorkflowJob path, and OPERATOR routines (custom-app owners)
+	// through processOperatorRoutineJob. Marking next_run = now makes the
+	// job appear due on the next scheduler poll so it executes within one
+	// tick.
+	if strings.TrimSpace(job.TargetType) == "workflow" ||
+		(strings.TrimSpace(job.TargetType) == "agent" && isOperatorAgentTarget(job.TargetID)) {
 		job.NextRun = now.Format(time.RFC3339)
 		job.DueAt = job.NextRun
 	}

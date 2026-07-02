@@ -6,21 +6,25 @@
 // See docs/specs/operator-agent-routines.md.
 
 export interface Routine {
+  /** For LIVE routines this is the broker scheduler slug. */
   id: string;
   /** Plain-language name, e.g. "Monday pipeline recap". */
   name: string;
   /** The prompt the agent runs in its chat. */
   prompt: string;
-  /** Human schedule label, e.g. "Every Monday 9:00". */
+  /** Cron expression / broker shorthand for live routines; a human label for
+   * seeded mocks. Render through humanSchedule(). */
   schedule: string;
   enabled: boolean;
-  /** Published version of the prompt; Publish freezes the draft as vN+1. */
+  /** Latest published version — the broker's revision history owns this. */
   version: number;
-  /** True when the prompt changed since the last publish. */
+  /** FE-local: the prompt was edited since the last publish. Publishing sends
+   * the edit to the broker as a new revision (with a change note). */
   draft?: boolean;
   lastRun?: string;
-  /** The chat session this routine runs in. */
-  sessionId: string;
+  /** The chat session this routine runs in (known for seeded mocks; live
+   * routines resolve their session by slug via the sessions list). */
+  sessionId?: string;
 }
 
 export interface ChatSessionMeta {
@@ -29,6 +33,38 @@ export interface ChatSessionMeta {
   /** "routine" sessions are created by a schedule; "manual" by the operator. */
   kind: "routine" | "manual";
   at: string;
+  /** Broker scheduler slug of the owning routine (routine sessions only). */
+  routine?: string;
+}
+
+/** Schedule presets: a human label + the broker cron/shorthand it sends. */
+export const SCHEDULE_PRESETS: ReadonlyArray<{ label: string; expr: string }> =
+  [
+    { label: "Every Monday 9:00", expr: "0 9 * * 1" },
+    { label: "Weekdays 8:00", expr: "0 8 * * 1-5" },
+    { label: "Every day 18:00", expr: "0 18 * * *" },
+    { label: "Every 30 minutes", expr: "*/30 * * * *" },
+    { label: "Every hour", expr: "hourly" },
+  ];
+
+/** Render a schedule for humans: preset exprs map back to their label; an
+ * unknown expr (hand-written cron, seeded label) renders as-is. */
+export function humanSchedule(schedule: string): string {
+  const preset = SCHEDULE_PRESETS.find((p) => p.expr === schedule);
+  return preset ? preset.label : schedule;
+}
+
+/** Render a last-run stamp: broker RFC3339 becomes a short local time; a
+ * seeded human label ("12 minutes ago") renders as-is. */
+export function formatLastRun(value: string): string {
+  const t = Date.parse(value);
+  if (Number.isNaN(t)) return value;
+  return new Date(t).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 let seq = 0;
@@ -51,6 +87,12 @@ export function newRoutine(
     version: 1,
     sessionId: nextId("sess"),
   };
+}
+
+/** Session key for "Open its chat": seeded mocks know their session id; live
+ * routines hand over their scheduler slug, which the sessions list resolves. */
+export function routineSessionKey(r: Routine): string {
+  return r.sessionId ?? r.id;
 }
 
 export function newSession(

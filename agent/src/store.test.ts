@@ -69,47 +69,9 @@ test("agents are isolated per file", () => {
 	expect(store.listTools("a2")).toEqual([]);
 });
 
-test("createRoutine mints the routine AND its session (kind routine, title = name)", () => {
-	const { store } = tmpStore();
-	const { routine, session } = store.createRoutine("a1", "Monday recap", "Summarize the pipeline.", "Every Monday 9:00");
-	expect(routine.agent).toBe("a1");
-	expect(routine.enabled).toBe(true);
-	expect(routine.version).toBe(1);
-	expect(routine.sessionId).toBe(session.id);
-	expect(session.kind).toBe("routine");
-	expect(session.title).toBe("Monday recap");
-	expect(new Date(session.at).toISOString()).toBe(session.at); // ISO timestamp
-	expect(store.getRoutine("a1", routine.id)?.name).toBe("Monday recap");
-	expect(store.getSession("a1", session.id)?.messages).toEqual([]);
-});
 
-test("updateRoutine applies a patch; unknown id -> null", () => {
-	const { store } = tmpStore();
-	const { routine } = store.createRoutine("a1", "R", "p", "Every hour");
-	const off = store.updateRoutine("a1", routine.id, (r) => ({ ...r, enabled: false }));
-	expect(off?.enabled).toBe(false);
-	expect(store.getRoutine("a1", routine.id)?.enabled).toBe(false);
-	expect(store.updateRoutine("a1", "nope", (r) => r)).toBeNull();
-});
 
-test("manual sessions default their title to Chat <n> over the manual count", () => {
-	const { store } = tmpStore();
-	store.createRoutine("a1", "R", "p", "Every hour"); // routine session must not count
-	expect(store.createSession("a1").title).toBe("Chat 1");
-	expect(store.createSession("a1").title).toBe("Chat 2");
-	expect(store.createSession("a1", "Named").title).toBe("Named");
-	expect(store.createSession("a1").title).toBe("Chat 4"); // count includes "Named"
-});
 
-test("appendMessage is append-only and false for an unknown session", () => {
-	const { store } = tmpStore();
-	const session = store.createSession("a1");
-	expect(store.appendMessage("a1", session.id, { from: "you", body: "hi", at: new Date().toISOString() })).toBe(true);
-	expect(store.appendMessage("a1", session.id, { from: "nex", body: "hello", at: new Date().toISOString() })).toBe(true);
-	const found = store.getSession("a1", session.id);
-	expect(found?.messages.map((m) => m.body)).toEqual(["hi", "hello"]);
-	expect(store.appendMessage("a1", "ghost", { from: "you", body: "x", at: new Date().toISOString() })).toBe(false);
-});
 
 test("artifacts persist with generated id + ISO at", () => {
 	const { store } = tmpStore();
@@ -122,10 +84,10 @@ test("artifacts persist with generated id + ISO at", () => {
 test("data survives a fresh store instance over the same dir (atomic file write)", () => {
 	const { store, dir } = tmpStore();
 	store.upsertTool("a1", TOOL);
-	store.createRoutine("a1", "R", "p", "Every hour");
+	store.addArtifact("a1", { type: "md", title: "r-run-1.md", producedBy: "R", content: "out" });
 	const reopened = new AgentStore(dir);
 	expect(reopened.listTools("a1")).toHaveLength(1);
-	expect(reopened.listRoutines("a1")).toHaveLength(1);
+	expect(reopened.listArtifacts("a1")).toHaveLength(1);
 	// No stray tmp file left behind.
 	expect(readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
 });

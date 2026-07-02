@@ -1,15 +1,24 @@
-// agentStateClient — typed client for the agent service's persistence
-// endpoints (tools, routines, sessions, artifacts), reached via the /agent
-// vite proxy. House pattern (see ../tools/toolAgentClient.ts): every call
+// agentStateClient — typed client for the agent's persisted state, split
+// across its two REAL homes:
+//
+//   - ROUTINES live in the BROKER's scheduler registry (cron, enable/disable,
+//     revision history = versioning with change notes, per-slug run history)
+//     — reached through the /api broker client. The registry is the previous
+//     product avatar's proven engine; nothing routine-shaped is stored on the
+//     agent service.
+//   - TOOLS, SESSIONS (pi SessionManager JSONL), and ARTIFACTS live on the
+//     agent service, reached via the /agent vite proxy.
+//
+// House pattern (see ../tools/toolAgentClient.ts): every agent-service call
 // carries an AbortSignal.timeout and throws on !ok; the try* wrappers resolve
 // null on ANY failure so callers can fall back to the local seeded state and
-// the FE keeps working offline. All POST/PATCH bodies carry schema_version.
+// the FE keeps working offline. All agent POST bodies carry schema_version.
+
+import { get as brokerGet, patch as brokerPatch, post as brokerPost } from "../../api/client";
 
 const SCHEMA_VERSION = 1;
 const READ_TIMEOUT_MS = 10_000;
 const WRITE_TIMEOUT_MS = 30_000;
-// Run-now drives a full chat turn through the agent — give it longer.
-const RUN_TIMEOUT_MS = 60_000;
 
 // ── Wire shapes (mirror the agent service) ──────────────────────────────────
 
@@ -27,6 +36,8 @@ export interface WireTool {
   version: number;
 }
 
+/** FE view of a broker scheduler job that IS an operator routine. `id` is the
+ * scheduler slug; `version` is the latest revision's version. */
 export interface WireRoutine {
   id: string;
   agent: string;
@@ -35,9 +46,33 @@ export interface WireRoutine {
   schedule: string;
   enabled: boolean;
   version: number;
-  draft?: boolean;
   lastRun?: string;
-  sessionId: string;
+  lastRunStatus?: string;
+}
+
+/** One entry of the routine's revision history (broker scheduler revisions). */
+export interface WireRoutineRevision {
+  version: number;
+  created_at: string;
+  author?: string;
+  change_note?: string;
+  label: string;
+  schedule_expr?: string;
+  payload?: string;
+  enabled: boolean;
+}
+
+/** One entry of the routine's run history (broker per-slug run ring). */
+export interface WireRoutineRun {
+  slug: string;
+  started_at: string;
+  finished_at?: string;
+  status: string;
+  message?: string;
+  triggered_by?: string;
+  output_summary?: string;
+  events?: string[];
+  error?: string;
 }
 
 export type WireSessionKind = "routine" | "manual";
@@ -48,6 +83,8 @@ export interface WireSession {
   title: string;
   kind: WireSessionKind;
   at: string;
+  /** Broker scheduler slug of the owning routine (routine sessions only). */
+  routine?: string;
 }
 
 export interface WireSessionMessage {
@@ -105,65 +142,129 @@ export async function listAgentTools(agent: string): Promise<WireTool[]> {
   return Array.isArray(data.tools) ? data.tools : [];
 }
 
-// ── Routines ─────────────────────────────────────────────────────────────────
+// ── Routines (BROKER scheduler registry) ─────────────────────────────────────
+
+/** Raw broker scheduler job — only the fields the routine view reads. */
+interface BrokerSchedulerJob {
+  slug: string;
+  label: string;
+  target_type?: string;
+  target_id?: string;
+  schedule_expr?: string;
+  payload?: string;
+  enabled: boolean;
+  last_run?: string;
+  last_run_status?: string;
+  status?: string;
+}
+
+function jobToRoutine(job: BrokerSchedulerJob, version: number): WireRoutine {
+  return {
+    id: job.slug,
+    agent: job.target_id ?? "",
+    name: job.label,
+    prompt: job.payload ?? "",
+    schedule: job.schedule_expr ?? "",
+    enabled: job.enabled,
+    version,
+    lastRun: job.last_run || undefined,
+    lastRunStatus: job.last_run_status || undefined,
+  };
+}
+
+/** Latest revision version per slug; 1 when no revision recorded yet. */
+async function latestRevisionVersion(slug: string): Promise<number> {
+  try {
+    const data = await brokerGet<{ revisions: WireRoutineRevision[] }>(
+      `/scheduler/${encodeURIComponent(slug)}/revisions`,
+    );
+    const versions = (data.revisions ?? []).map((r) => r.version);
+    return versions.length ? Math.max(...versions) : 1;
+  } catch {
+    return 1;
+  }
+}
 
 export async function listRoutines(agent: string): Promise<WireRoutine[]> {
-  const data = await agentFetch<{ routines: WireRoutine[] }>(
-    `/routines?${q(agent)}`,
-    { timeoutMs: READ_TIMEOUT_MS },
+  const data = await brokerGet<{ jobs: BrokerSchedulerJob[] }>("/scheduler");
+  const jobs = (data.jobs ?? []).filter(
+    (j) => j.target_type === "agent" && j.target_id === agent,
   );
-  return Array.isArray(data.routines) ? data.routines : [];
+  return Promise.all(
+    jobs.map(async (j) => jobToRoutine(j, await latestRevisionVersion(j.slug))),
+  );
 }
 
 export interface CreateRoutineInput {
   agent: string;
   name: string;
   prompt: string;
+  /** Cron expression or broker shorthand (daily, hourly, 4h, "0 9 * * 1"). */
   schedule: string;
 }
 
 export async function createRoutine(
   input: CreateRoutineInput,
 ): Promise<WireRoutine> {
-  const data = await agentFetch<{ routine: WireRoutine }>("/routines", {
-    method: "POST",
-    body: { ...input },
-    timeoutMs: WRITE_TIMEOUT_MS,
-  });
-  return data.routine;
+  const data = await brokerPost<{ job: BrokerSchedulerJob }>(
+    "/scheduler/routines",
+    {
+      purpose: input.name,
+      schedule: input.schedule,
+      prompt: input.prompt,
+      owner: input.agent,
+      created_by: "operator",
+    },
+  );
+  return jobToRoutine(data.job, 1);
 }
 
 export interface PatchRoutineInput {
   agent: string;
   enabled?: boolean;
+  /** Publishing a new prompt version = a broker revision with a change note. */
   prompt?: string;
-  publish?: boolean;
+  changeNote?: string;
 }
 
 export async function patchRoutine(
   id: string,
   input: PatchRoutineInput,
 ): Promise<WireRoutine> {
-  const data = await agentFetch<{ routine: WireRoutine }>(
-    `/routines/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: { ...input }, timeoutMs: WRITE_TIMEOUT_MS },
+  const body: Record<string, unknown> = {};
+  if (input.enabled !== undefined) body.enabled = input.enabled;
+  if (input.prompt !== undefined) {
+    body.payload = input.prompt;
+    body.change_note = input.changeNote || "Prompt updated from the Routines tab";
+  }
+  const data = await brokerPatch<{ job: BrokerSchedulerJob }>(
+    `/scheduler/${encodeURIComponent(id)}`,
+    body,
   );
-  return data.routine;
+  return jobToRoutine(data.job, await latestRevisionVersion(id));
 }
 
-export interface RunRoutineResult {
-  routine: WireRoutine;
-  session: WireSession;
+/** Run NOW: the broker backdates next_run so the watchdog fires the routine
+ * against the agent service within one tick (~20s). The outcome lands in the
+ * run history + the routine's chat session — not in this response. */
+export async function runRoutineNow(id: string): Promise<void> {
+  await brokerPost(`/scheduler/${encodeURIComponent(id)}/run`, {});
 }
 
-export async function runRoutineNow(
+export async function listRoutineRuns(id: string): Promise<WireRoutineRun[]> {
+  const data = await brokerGet<{ runs: WireRoutineRun[] }>(
+    `/scheduler/${encodeURIComponent(id)}/runs`,
+  );
+  return Array.isArray(data.runs) ? data.runs : [];
+}
+
+export async function listRoutineRevisions(
   id: string,
-  agent: string,
-): Promise<RunRoutineResult> {
-  return agentFetch<RunRoutineResult>(
-    `/routines/${encodeURIComponent(id)}/run`,
-    { method: "POST", body: { agent }, timeoutMs: RUN_TIMEOUT_MS },
+): Promise<WireRoutineRevision[]> {
+  const data = await brokerGet<{ revisions: WireRoutineRevision[] }>(
+    `/scheduler/${encodeURIComponent(id)}/revisions`,
   );
+  return Array.isArray(data.revisions) ? data.revisions : [];
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -266,11 +367,21 @@ export function tryPatchRoutine(
   return orNull(patchRoutine(id, input));
 }
 
-export function tryRunRoutineNow(
+/** True when the run-now was accepted (queued at the broker), null on failure. */
+export function tryRunRoutineNow(id: string): Promise<true | null> {
+  return orNull(runRoutineNow(id).then(() => true as const));
+}
+
+export function tryListRoutineRuns(
   id: string,
-  agent: string,
-): Promise<RunRoutineResult | null> {
-  return orNull(runRoutineNow(id, agent));
+): Promise<WireRoutineRun[] | null> {
+  return orNull(listRoutineRuns(id));
+}
+
+export function tryListRoutineRevisions(
+  id: string,
+): Promise<WireRoutineRevision[] | null> {
+  return orNull(listRoutineRevisions(id));
 }
 
 export function tryListSessions(agent: string): Promise<WireSession[] | null> {

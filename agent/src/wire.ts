@@ -131,25 +131,10 @@ export interface StoredTool extends Tool {
 	version: number;
 }
 
-/** A scheduled prompt the agent runs in its own chat session. */
-export interface Routine {
-	id: string;
-	agent: string;
-	/** Plain-language name, e.g. "Monday pipeline recap". */
-	name: string;
-	/** The prompt the agent runs in its chat. */
-	prompt: string;
-	/** Human schedule label, e.g. "Every Monday 9:00" (see scheduler.ts). */
-	schedule: string;
-	enabled: boolean;
-	/** Published version of the prompt; Publish freezes the draft as vN+1. */
-	version: number;
-	/** True when the prompt changed since the last publish. */
-	draft?: boolean;
-	lastRun?: string;
-	/** The chat session this routine runs in. */
-	sessionId: string;
-}
+// NOTE: routine DEFINITIONS (prompt, schedule, enabled, versioning, run
+// history) live in the BROKER's scheduler registry — there is no Routine wire
+// shape here. On each fire the broker POSTs /routines/run with {slug, name,
+// prompt} (routineRunner.RoutineRunRequest).
 
 export interface SessionMeta {
 	id: string;
@@ -158,6 +143,9 @@ export interface SessionMeta {
 	/** "routine" sessions are created by a schedule; "manual" by the operator. */
 	kind: "routine" | "manual";
 	at: string;
+	/** Broker scheduler slug of the owning routine (routine sessions only) —
+	 * the FE's "open its chat" matches on this. */
+	routine?: string;
 }
 
 export interface SessionMessage {

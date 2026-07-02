@@ -22,12 +22,15 @@ src/sniff.ts       browsersniff: HAR -> ApiCall/WorkflowStep; strips secrets, au
 src/providers.ts   inference-path detection for the FE Settings surface (subscription / BYOK / local)
 src/service.ts     Bun.serve HTTP/SSE: /health, /providers, POST /build/stream (SSE), POST /run,
                    /tools/build + /tools/call, and the persistence routes (below)
-src/store.ts       file-backed per-agent store: tools, routines, sessions, artifacts
+src/store.ts       file-backed per-agent store: tools + artifacts
                    (WUPHF_AGENT_DATA_DIR, default .wuphf-agent-data/; atomic-ish writes)
-src/routineRunner.ts  run a routine = match-or-author a tool, run it approved:false,
-                   append the transcript, save the md run artifact
-src/scheduler.ts   interval tick over due routines (ROUTINE_SCHEDULER=1 to enable;
-                   ROUTINE_TICK_MS, default 30s); schedule labels, not cron
+src/sessions.ts    pi-backed chat sessions: transcripts persist as pi SessionManager
+                   JSONL trees under <dataDir>/sessions/<agent>/ (resume/branching
+                   come from pi, not custom code)
+src/routineRunner.ts  run a fired routine = match-or-author a tool, run it approved:false,
+                   append the transcript into the routine's pi session, save the md
+                   run artifact. Definitions/cron/versioning/run history live in the
+                   BROKER's scheduler registry — the broker calls POST /routines/run
 src/runContext.ts  per-run AbortSignal (AsyncLocalStorage) so a settled tool run
                    aborts in-flight real capability calls
 src/run.ts         CLI runner (compile a description live)
@@ -66,21 +69,22 @@ bun run smoke     # boots it + exercises /health /providers /run /build/stream (
 The FE points its build/run calls here (same `WorkflowSpec` contract as the mock). This
 is the only operator backend — the Python `harness/` (deepagents) has been removed.
 
-### Persistence + routines routes (slice 2)
+### Persistence + routines routes
 
-Per-agent state persists as one JSON file per agent id (`src/store.ts`). Wire
-shapes live in `src/wire.ts` (`StoredTool`, `Routine`, `SessionMeta`,
-`SessionMessage`, `StoredArtifact`).
+Tools + artifacts persist as one JSON file per agent id (`src/store.ts`); chat
+sessions persist in pi's native session format (`src/sessions.ts`). Wire shapes
+live in `src/wire.ts` (`StoredTool`, `SessionMeta`, `SessionMessage`,
+`StoredArtifact`). Routine DEFINITIONS (prompt, cron, enable/disable, revision
+history = versioning, per-run history) live in the BROKER's scheduler registry
+— this service holds none of them.
 
 ```text
 POST  /tools/build             `app` set -> persist the authored tool under that agent
                                (re-authoring a same-named tool bumps `version`)
 GET   /tools?agent=<id>        { tools: StoredTool[] }
-GET   /routines?agent=<id>     { routines: Routine[] }
-POST  /routines                { agent, name, prompt, schedule } -> { routine } (+ its chat session)
-PATCH /routines/<id>           { agent, enabled?, prompt?, publish? } -> { routine }
-                               (prompt edit -> draft; publish -> vN+1, draft cleared)
-POST  /routines/<id>/run       { agent } -> { routine, session } — run NOW, approved:false
+POST  /routines/run            { agent, slug, name, prompt } -> { status, digest, session_id }
+                               the BROKER fires a due routine here (approved:false);
+                               the outcome lands in its per-slug run ring
 GET   /sessions?agent=<id>     { sessions: SessionMeta[] }
 GET   /sessions/<id>?agent=    { session, messages }
 POST  /sessions                { agent, title? } -> { session } (manual; default "Chat <n>")
@@ -90,11 +94,10 @@ GET   /artifacts?agent=<id>    { artifacts: StoredArtifact[] }
 
 A routine run always executes with `approved: false` (send-gate, default deny):
 a gated capability records `needs_approval` into the transcript and artifact —
-scheduled runs never auto-send. The scheduler is opt-in (`ROUTINE_SCHEDULER=1`;
-tick every `ROUTINE_TICK_MS`, default 30s) and interprets human schedule labels
-("Every 30 minutes", "Every hour", "Weekdays 8:00", "Every day 18:00", "Every
-Monday 9:00") — time-of-day labels fire on the first tick at/after the time,
-once per matching day; this is deliberately not cron (see `src/scheduler.ts`).
+scheduled runs never auto-send. Scheduling is the broker watchdog's job (real
+cron via `internal/calendar/cron.go`; `WUPHF_AGENT_URL` points it at this
+service, default :8820). pi session semantics apply to chats: a session file
+flushes on its first exchange, so an empty chat does not survive a restart.
 
 ## Status
 

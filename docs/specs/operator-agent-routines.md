@@ -30,14 +30,28 @@ only belong to each workflow, not to the whole agent."
    session holds its own transcript. Agent-header Disable / Publish buttons are
    removed. Mock state lives in a per-agent `routinesContext` +
    `sessionsContext` seam.
-2. **Backend (DONE).** Routines, tools, sessions, and artifacts persist per
-   agent (`agent/src/store.ts`, one JSON file per agent id under
-   `WUPHF_AGENT_DATA_DIR`); the scheduler (`ROUTINE_SCHEDULER=1`,
-   `agent/src/scheduler.ts`) runs a due routine through the tools flow
-   (match-or-author, then run with `approved: false` — a gated run records
-   needs_approval, never auto-sends); transcripts persist into the routine's
-   session; `POST /routines/<id>/run` runs one NOW. Schedule labels are
-   approximate (once per matching day at/after HH:MM), not cron.
-3. **Artifacts (md DONE with slice 2).** Every routine run saves its outcome
-   as an `md` artifact (`<kebab-name>-run-<n>.md`) served by `GET /artifacts`.
-   pdf/html outputs are still to come.
+2. **Backend (DONE — reworked to NO custom engine, founder direction
+   2026-07-01: "don't do custom; use what pi agent already provides").**
+   A routine IS a broker scheduler job (`internal/team/scheduler*.go` — the
+   previous product avatar's proven engine). The broker owns:
+   - **cron** (`internal/calendar/cron.go`: 5-field + daily/hourly/Nh) and
+     enable/disable;
+   - **versioning**: every prompt edit is a scheduler REVISION (monotonic
+     version, author, change note, restorable) — "Publish new version" is
+     `PATCH /scheduler/{slug} {payload, change_note}`;
+   - **run history**: the per-slug 20-ring (status, timestamps, trigger
+     attribution, events, errors) + the 50-ring activity log.
+   On each fire the watchdog detects a custom-app owner
+   (`scheduler_operator_routines.go`) and POSTs `WUPHF_AGENT_URL`
+   `/routines/run {agent, slug, name, prompt}`; the agent service runs the
+   prompt through the tools flow (match-or-author, then run with
+   `approved: false` — a gated run records needs_approval, never auto-sends)
+   and persists the transcript into the routine's **pi session**
+   (`agent/src/sessions.ts`: pi `SessionManager` JSONL trees — resume and
+   branching come from pi, not custom code). "Run now" =
+   `POST /scheduler/{slug}/run` (the broker backdates next_run; the watchdog
+   fires within a tick). The agent service stores NO routine definitions and
+   runs NO scheduler; its custom session store was deleted with the rework.
+3. **Artifacts (md DONE).** Every routine run saves its outcome as an `md`
+   artifact (`<kebab-name>-run-<n>.md`) served by `GET /artifacts`. pdf/html
+   outputs are still to come.

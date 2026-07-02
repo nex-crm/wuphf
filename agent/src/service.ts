@@ -7,10 +7,9 @@
 //   POST /tools/call    the app's chat calls a saved tool (sandboxed; gated -> approval)
 //   POST /run           execute a compiled spec deterministically (gated step -> CQ1)
 //   GET  /tools?agent=              the agent's persisted tools
-//   GET  /routines?agent=           the agent's routines
-//   POST /routines                  create a routine (+ its chat session)
-//   PATCH /routines/<id>            enable/disable, edit prompt (draft), publish vN+1
-//   POST /routines/<id>/run         run NOW regardless of schedule (approved: false)
+//   POST /routines/run              the BROKER fires a due routine here (approved: false).
+//                                   Definitions/cron/versioning/run history live in the
+//                                   broker's scheduler registry, not in this service.
 //   GET  /sessions?agent=           session list; GET /sessions/<id>?agent= transcript
 //   POST /sessions                  new manual session; POST /sessions/<id>/message append
 //   GET  /artifacts?agent=          the agent's saved run artifacts
@@ -20,11 +19,11 @@ import { buildCapabilities, capabilityConfigFromEnv } from "./capabilities.js";
 import { runWorkflow } from "./executor.js";
 import { providersPayload } from "./providers.js";
 import { runRoutine } from "./routineRunner.js";
-import { startScheduler } from "./scheduler.js";
-import { AgentStore, sanitizeAgentId } from "./store.js";
+import { PiSessions } from "./sessions.js";
+import { AgentStore, defaultDataDir, sanitizeAgentId } from "./store.js";
 import { runTool } from "./toolRuntime.js";
 import { buildTool } from "./tools.js";
-import { type BuildRequest, type Routine, type RunRequest, SCHEMA_VERSION, type ToolBuildRequest, type ToolCallRequest, type WorkflowSpec } from "./wire.js";
+import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type ToolBuildRequest, type ToolCallRequest, type WorkflowSpec } from "./wire.js";
 
 type BuildEvent = { type: "step"; step: WorkflowSpec["steps"][number] } | { type: "spec"; spec: WorkflowSpec };
 type BuildStream = (message: string, opts: { toolId?: string; signal?: AbortSignal }) => AsyncGenerator<BuildEvent>;
@@ -35,6 +34,8 @@ export interface ServerOptions {
 	buildStream?: BuildStream;
 	// Override the per-agent store (tests point it at a tmp dir).
 	store?: AgentStore;
+	// Override the pi-backed session layer (tests point it at a tmp dir).
+	sessions?: PiSessions;
 }
 
 function json(data: unknown, status = 200): Response {
@@ -92,10 +93,9 @@ async function parseAgentBody(req: Request): Promise<{ body: Record<string, unkn
 export function createServer(opts: ServerOptions = {}) {
 	const buildStream: BuildStream = opts.buildStream ?? (streamWorkflow as BuildStream);
 	const store = opts.store ?? new AgentStore();
-	// The routine scheduler is OFF unless ROUTINE_SCHEDULER=1 so tests and plain
-	// dev never spin an interval; the timer is also unref'd (scheduler.ts), so it
-	// can never pin a process open on its own.
-	if (process.env.ROUTINE_SCHEDULER === "1") startScheduler({ store });
+	// Scheduling lives in the BROKER's scheduler registry (cron, revisions, run
+	// history) — it calls POST /routines/run on each fire. No interval here.
+	const sessions = opts.sessions ?? new PiSessions(defaultDataDir());
 
 	return Bun.serve({
 		port: opts.port ?? Number(process.env.PORT ?? 8820),
@@ -225,88 +225,47 @@ export function createServer(opts: ServerOptions = {}) {
 				return json(await runWorkflow(body.spec, body.input ?? {}));
 			}
 
-			// ----- Routines (persisted; see routineRunner.ts / scheduler.ts) -----
+			// ----- Routines (definitions live in the BROKER's scheduler registry;
+			// this endpoint is what a broker fire / run-now calls) -----
 
-			if (req.method === "GET" && pathname === "/routines") {
-				const agent = agentParam(url);
-				if (!agent) return json({ error: "agent query param required" }, 400);
-				return json({ routines: store.listRoutines(agent) });
-			}
-
-			if (req.method === "POST" && pathname === "/routines") {
+			if (req.method === "POST" && pathname === "/routines/run") {
 				const parsed = await parseAgentBody(req);
 				if ("error" in parsed) return parsed.error;
 				const { body, agent } = parsed;
 				if (
+					typeof body.slug !== "string" ||
+					!body.slug.trim() ||
 					typeof body.name !== "string" ||
 					!body.name.trim() ||
 					typeof body.prompt !== "string" ||
-					!body.prompt.trim() ||
-					typeof body.schedule !== "string" ||
-					!body.schedule.trim()
+					!body.prompt.trim()
 				) {
-					return json({ error: "invalid routine request: name, prompt, schedule (strings) required" }, 400);
+					return json({ error: "invalid routine run: slug, name, prompt (strings) required" }, 400);
 				}
-				// Creating a routine mints its chat session too (kind "routine", title = name).
-				const { routine } = store.createRoutine(agent, body.name.trim(), body.prompt, body.schedule.trim());
-				return json({ routine });
+				// runRoutine executes with approved: false (SEND-GATE, default deny):
+				// a gated routine records needs_approval into its transcript — it
+				// never auto-sends. Run status history lands in the broker's ring.
+				const result = await runRoutine(
+					agent,
+					{ slug: body.slug.trim(), name: body.name.trim(), prompt: body.prompt },
+					{ store, sessions },
+				);
+				return json({ status: result.status, digest: result.outcome, session_id: result.session.id });
 			}
 
-			const routinePatch = req.method === "PATCH" ? /^\/routines\/([^/]+)$/.exec(pathname) : null;
-			if (routinePatch) {
-				const parsed = await parseAgentBody(req);
-				if ("error" in parsed) return parsed.error;
-				const { body, agent } = parsed;
-				if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
-					return json({ error: "invalid routine patch: enabled must be a boolean" }, 400);
-				}
-				if (body.prompt !== undefined && typeof body.prompt !== "string") {
-					return json({ error: "invalid routine patch: prompt must be a string" }, 400);
-				}
-				if (body.publish !== undefined && typeof body.publish !== "boolean") {
-					return json({ error: "invalid routine patch: publish must be a boolean" }, 400);
-				}
-				const routine = store.updateRoutine(agent, routinePatch[1], (r) => {
-					let next: Routine = { ...r };
-					if (typeof body.enabled === "boolean") next = { ...next, enabled: body.enabled };
-					// A prompt edit is a DRAFT until published.
-					if (typeof body.prompt === "string") next = { ...next, prompt: body.prompt, draft: true };
-					// Publish freezes the current prompt as vN+1 and clears the draft flag.
-					if (body.publish === true) {
-						const { draft: _cleared, ...rest } = next;
-						next = { ...rest, version: next.version + 1 };
-					}
-					return next;
-				});
-				if (!routine) return json({ error: "routine not found" }, 404);
-				return json({ routine });
-			}
-
-			const routineRun = req.method === "POST" ? /^\/routines\/([^/]+)\/run$/.exec(pathname) : null;
-			if (routineRun) {
-				const parsed = await parseAgentBody(req);
-				if ("error" in parsed) return parsed.error;
-				// Run NOW regardless of schedule. runRoutine executes with approved: false
-				// (SEND-GATE, default deny): a gated routine records needs_approval into
-				// its transcript — it never auto-sends.
-				const result = await runRoutine(parsed.agent, routineRun[1], { store });
-				if (!result) return json({ error: "routine not found" }, 404);
-				return json({ routine: result.routine, session: result.session });
-			}
-
-			// ----- Chat sessions (transcripts persist here; chat logic stays FE-side) -----
+			// ----- Chat sessions (pi SessionManager JSONL; chat logic stays FE-side) -----
 
 			if (req.method === "GET" && pathname === "/sessions") {
 				const agent = agentParam(url);
 				if (!agent) return json({ error: "agent query param required" }, 400);
-				return json({ sessions: store.listSessions(agent) });
+				return json({ sessions: await sessions.list(agent) });
 			}
 
 			const sessionGet = req.method === "GET" ? /^\/sessions\/([^/]+)$/.exec(pathname) : null;
 			if (sessionGet) {
 				const agent = agentParam(url);
 				if (!agent) return json({ error: "agent query param required" }, 400);
-				const found = store.getSession(agent, sessionGet[1]);
+				const found = await sessions.get(agent, sessionGet[1]);
 				if (!found) return json({ error: "session not found" }, 404);
 				return json({ session: found.session, messages: found.messages });
 			}
@@ -318,8 +277,9 @@ export function createServer(opts: ServerOptions = {}) {
 				if (body.title !== undefined && typeof body.title !== "string") {
 					return json({ error: "invalid session request: title must be a string" }, 400);
 				}
-				// kind "manual"; default title "Chat <n>" (store.createSession).
-				return json({ session: store.createSession(agent, typeof body.title === "string" ? body.title : undefined) });
+				const n = (await sessions.list(agent)).filter((s) => s.kind === "manual").length + 1;
+				const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : `Chat ${n}`;
+				return json({ session: sessions.create(agent, title, "manual") });
 			}
 
 			const sessionMsg = req.method === "POST" ? /^\/sessions\/([^/]+)\/message$/.exec(pathname) : null;
@@ -330,7 +290,7 @@ export function createServer(opts: ServerOptions = {}) {
 				if ((body.from !== "you" && body.from !== "nex") || typeof body.body !== "string") {
 					return json({ error: 'invalid message: from ("you"|"nex") and body (string) required' }, 400);
 				}
-				const appended = store.appendMessage(agent, sessionMsg[1], { from: body.from, body: body.body, at: new Date().toISOString() });
+				const appended = await sessions.append(agent, sessionMsg[1], { from: body.from, body: body.body, at: new Date().toISOString() });
 				if (!appended) return json({ error: "session not found" }, 404);
 				return json({ ok: true });
 			}

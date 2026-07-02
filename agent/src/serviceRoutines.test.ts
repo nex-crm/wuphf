@@ -1,17 +1,19 @@
-// Service-level coverage for the persistence routes (routines slice 2):
-// /tools/build persistence, /tools, /routines (+patch/run), /sessions
-// (+message), /artifacts. Offline: the store points at a tmp dir, the build
+// Service-level coverage for the persistence routes: /tools/build persistence,
+// /tools, /routines/run (the broker's fire entrypoint), /sessions (+message),
+// /artifacts. Offline: the store + sessions point at a tmp dir, the build
 // engine is stubbed, authoring is the deterministic stub (TOOL_AUTHOR_MODEL
 // unset), and tool runs use the simulated capability tree — never a live
-// model or broker.
+// model or broker. Routine DEFINITIONS (cron, versioning, run history) live in
+// the broker's scheduler registry, so there is no routine CRUD here.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "./service.js";
+import { PiSessions } from "./sessions.js";
 import { AgentStore } from "./store.js";
-import type { Routine, SessionMessage, SessionMeta, StoredArtifact, StoredTool, WorkflowSpec } from "./wire.js";
+import type { SessionMessage, SessionMeta, StoredArtifact, StoredTool, WorkflowSpec } from "./wire.js";
 
 async function* fakeBuild() {
 	yield {
@@ -25,7 +27,8 @@ let server: ReturnType<typeof createServer>;
 let base: string;
 beforeAll(() => {
 	tmp = mkdtempSync(join(tmpdir(), "wuphf-agent-svc-"));
-	server = createServer({ port: 0, buildStream: fakeBuild, store: new AgentStore(join(tmp, "data")) });
+	const data = join(tmp, "data");
+	server = createServer({ port: 0, buildStream: fakeBuild, store: new AgentStore(data), sessions: new PiSessions(data) });
 	base = server.url.toString().replace(/\/$/, "");
 });
 afterAll(() => {
@@ -60,51 +63,25 @@ test("POST /tools/build with app persists the tool; same name bumps version", as
 	expect(((await (await fetch(`${base}/tools?agent=sales`)).json()) as { tools: StoredTool[] }).tools).toHaveLength(1);
 });
 
-test("routine lifecycle: create (+session), patch draft, publish, disable", async () => {
-	const created = (await (
-		await post("/routines", { schema_version: 1, agent: "ops", name: "Monday recap", prompt: "run weeklyPipelineSummary", schedule: "Every Monday 9:00" })
-	).json()) as { routine: Routine };
-	const rt = created.routine;
-	expect(rt).toMatchObject({ agent: "ops", name: "Monday recap", enabled: true, version: 1 });
-	expect(rt.sessionId).toBeTruthy();
-	// The routine's chat session exists: kind "routine", title = name.
-	const sessions = (await (await fetch(`${base}/sessions?agent=ops`)).json()) as { sessions: SessionMeta[] };
-	expect(sessions.sessions).toEqual([expect.objectContaining({ id: rt.sessionId, kind: "routine", title: "Monday recap" })]);
-	// A prompt edit is a draft.
-	const drafted = (await (await post(`/routines/${rt.id}`, { schema_version: 1, agent: "ops", prompt: "new prompt" }, "PATCH")).json()) as {
-		routine: Routine;
-	};
-	expect(drafted.routine.draft).toBe(true);
-	expect(drafted.routine.version).toBe(1);
-	// Publish bumps the version and clears the draft flag.
-	const published = (await (await post(`/routines/${rt.id}`, { schema_version: 1, agent: "ops", publish: true }, "PATCH")).json()) as {
-		routine: Routine;
-	};
-	expect(published.routine.version).toBe(2);
-	expect(published.routine.draft).toBeUndefined();
-	// Disable.
-	const disabled = (await (await post(`/routines/${rt.id}`, { schema_version: 1, agent: "ops", enabled: false }, "PATCH")).json()) as {
-		routine: Routine;
-	};
-	expect(disabled.routine.enabled).toBe(false);
-	const listed = (await (await fetch(`${base}/routines?agent=ops`)).json()) as { routines: Routine[] };
-	expect(listed.routines).toEqual([expect.objectContaining({ id: rt.id, enabled: false, version: 2 })]);
-});
-
-test("POST /routines/<id>/run runs NOW (disabled + unscheduled included) and lands transcript + artifact", async () => {
-	const { routine } = (await (
-		await post("/routines", { schema_version: 1, agent: "runner", name: "Recap", prompt: "Summarize last week's pipeline movement", schedule: "Every Monday 9:00" })
-	).json()) as { routine: Routine };
-	const res = await post(`/routines/${routine.id}/run`, { schema_version: 1, agent: "runner" });
+test("POST /routines/run (a broker fire) lands transcript + artifact and reports back", async () => {
+	const res = await post("/routines/run", {
+		schema_version: 1,
+		agent: "runner",
+		slug: "routine-recap",
+		name: "Recap",
+		prompt: "Summarize last week's pipeline movement",
+	});
 	expect(res.status).toBe(200);
-	const ran = (await res.json()) as { routine: Routine; session: SessionMeta };
-	expect(ran.routine.lastRun).toBeTruthy();
-	expect(ran.session.id).toBe(routine.sessionId);
-	// Transcript persisted.
-	const session = (await (await fetch(`${base}/sessions/${routine.sessionId}?agent=runner`)).json()) as {
+	const ran = (await res.json()) as { status: string; digest: string; session_id: string };
+	expect(ran.status).toBe("ok");
+	expect(ran.digest).toBeTruthy();
+	expect(ran.session_id).toBeTruthy();
+	// Transcript persisted into the routine's pi session.
+	const session = (await (await fetch(`${base}/sessions/${ran.session_id}?agent=runner`)).json()) as {
 		session: SessionMeta;
 		messages: SessionMessage[];
 	};
+	expect(session.session.kind).toBe("routine");
 	expect(session.messages.map((m) => m.from)).toEqual(["you", "nex"]);
 	expect(session.messages[0].body).toBe("(scheduled) Summarize last week's pipeline movement");
 	// The stub-authored tool was persisted, and the run artifact saved.
@@ -112,8 +89,17 @@ test("POST /routines/<id>/run runs NOW (disabled + unscheduled included) and lan
 	expect(tools.tools.map((t) => t.name)).toEqual(["weeklyPipelineSummary"]);
 	const arts = (await (await fetch(`${base}/artifacts?agent=runner`)).json()) as { artifacts: StoredArtifact[] };
 	expect(arts.artifacts).toEqual([expect.objectContaining({ type: "md", title: "recap-run-1.md", producedBy: "Recap" })]);
-	// Unknown routine -> 404.
-	expect((await post("/routines/ghost/run", { schema_version: 1, agent: "runner" })).status).toBe(404);
+
+	// A second fire for the SAME slug reuses the session (one thread per routine).
+	const res2 = await post("/routines/run", {
+		schema_version: 1,
+		agent: "runner",
+		slug: "routine-recap",
+		name: "Recap",
+		prompt: "Summarize last week's pipeline movement",
+	});
+	const ran2 = (await res2.json()) as { session_id: string };
+	expect(ran2.session_id).toBe(ran.session_id);
 });
 
 test("manual sessions: default Chat <n> titles, transcript append, 404s", async () => {
@@ -127,6 +113,9 @@ test("manual sessions: default Chat <n> titles, transcript append, 404s", async 
 	await post(`/sessions/${s1.session.id}/message`, { schema_version: 1, agent: "chatter", from: "nex", body: "hello" });
 	const got = (await (await fetch(`${base}/sessions/${s1.session.id}?agent=chatter`)).json()) as { messages: SessionMessage[] };
 	expect(got.messages.map((m) => `${m.from}:${m.body}`)).toEqual(["you:hi", "nex:hello"]);
+	// Both sessions list (s2 is live-but-unflushed until its first exchange).
+	const listed = (await (await fetch(`${base}/sessions?agent=chatter`)).json()) as { sessions: SessionMeta[] };
+	expect(listed.sessions.map((s) => s.id).sort()).toEqual([s1.session.id, s2.session.id].sort());
 	// 404s: unknown session for both GET and message-append.
 	expect((await fetch(`${base}/sessions/ghost?agent=chatter`)).status).toBe(404);
 	expect((await post("/sessions/ghost/message", { schema_version: 1, agent: "chatter", from: "you", body: "x" })).status).toBe(404);
@@ -134,34 +123,28 @@ test("manual sessions: default Chat <n> titles, transcript append, 404s", async 
 
 test("validation ladder: bad JSON, bad shape, schema mismatch, missing agent", async () => {
 	// JSON parse guard.
-	const notJson = await fetch(`${base}/routines`, { method: "POST", headers: { "content-type": "application/json" }, body: "{nope" });
+	const notJson = await fetch(`${base}/routines/run`, { method: "POST", headers: { "content-type": "application/json" }, body: "{nope" });
 	expect(notJson.status).toBe(400);
 	// Shape guard: null/array/missing fields.
-	for (const bad of [null, [], {}, { agent: "a" }, { agent: "a", name: "n", prompt: "p" }]) {
-		expect((await post("/routines", bad)).status).toBe(400);
+	for (const bad of [null, [], {}, { agent: "a" }, { agent: "a", slug: "s", name: "n" }]) {
+		expect((await post("/routines/run", bad)).status).toBe(400);
 	}
 	// Path-traversal-shaped agent ids are rejected at the boundary.
-	expect((await post("/routines", { schema_version: 1, agent: "..", name: "n", prompt: "p", schedule: "Every hour" })).status).toBe(400);
+	expect((await post("/routines/run", { schema_version: 1, agent: "..", slug: "s", name: "n", prompt: "p" })).status).toBe(400);
 	// schema_version guard.
-	expect((await post("/routines", { schema_version: 99, agent: "a", name: "n", prompt: "p", schedule: "Every hour" })).status).toBe(400);
+	expect((await post("/routines/run", { schema_version: 99, agent: "a", slug: "s", name: "n", prompt: "p" })).status).toBe(400);
 	expect((await post("/sessions", { schema_version: 99, agent: "a" })).status).toBe(400);
-	// PATCH field guards.
-	expect((await post("/routines/x", { schema_version: 1, agent: "a", enabled: "yes" }, "PATCH")).status).toBe(400);
-	expect((await post("/routines/x", { schema_version: 1, agent: "a", publish: 1 }, "PATCH")).status).toBe(400);
-	// PATCH unknown id -> 404.
-	expect((await post("/routines/ghost", { schema_version: 1, agent: "a", enabled: false }, "PATCH")).status).toBe(404);
 	// Message shape guard.
 	expect((await post("/sessions/x/message", { schema_version: 1, agent: "a", from: "them", body: "x" })).status).toBe(400);
 	expect((await post("/sessions/x/message", { schema_version: 1, agent: "a", from: "you" })).status).toBe(400);
 	// GET routes require a usable agent param.
-	for (const path of ["/tools", "/routines", "/sessions", "/artifacts", "/tools?agent=..", "/sessions?agent=%20"]) {
+	for (const path of ["/tools", "/sessions", "/artifacts", "/tools?agent=..", "/sessions?agent=%20"]) {
 		expect((await fetch(`${base}${path}`)).status).toBe(400);
 	}
 });
 
 test("GET routes read empty for an unknown agent (no 500s from a missing file)", async () => {
 	expect(((await (await fetch(`${base}/tools?agent=nobody`)).json()) as { tools: unknown[] }).tools).toEqual([]);
-	expect(((await (await fetch(`${base}/routines?agent=nobody`)).json()) as { routines: unknown[] }).routines).toEqual([]);
 	expect(((await (await fetch(`${base}/sessions?agent=nobody`)).json()) as { sessions: unknown[] }).sessions).toEqual([]);
 	expect(((await (await fetch(`${base}/artifacts?agent=nobody`)).json()) as { artifacts: unknown[] }).artifacts).toEqual([]);
 });

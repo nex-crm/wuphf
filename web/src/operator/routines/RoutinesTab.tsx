@@ -1,11 +1,16 @@
 // RoutinesTab — the agent's workflows, Claude-Routines style: each routine is a
 // PROMPT the agent runs in its own chat on a schedule. No compiled diagram —
 // the chat (which knows the agent's tools) is the runtime. Disable and Publish
-// new version live on EACH routine, not on the agent. With a REAL agent id
-// (app_…) routines persist via the agent service (/agent proxy) — create,
-// enable/disable, prompt drafts, publish, and Run now all round-trip; when the
-// service is unreachable the tab falls back to the local seeded state so the
-// FE keeps working offline. See docs/specs/operator-agent-routines.md.
+// new version live on EACH routine, not on the agent.
+//
+// With a REAL agent id (app_…) a routine IS a broker scheduler job: the broker
+// owns the cron, enable/disable, the revision history (Publish new version =
+// a revision with a change note), and the per-run history; on each fire it
+// runs the prompt in the routine's pi chat session via the agent service.
+// "Run now" queues a fire at the broker (the watchdog picks it up within a
+// tick). When the broker is unreachable the tab falls back to the local
+// seeded state so the FE keeps working offline.
+// See docs/specs/operator-agent-routines.md.
 
 import { useEffect, useState } from "react";
 import {
@@ -26,18 +31,28 @@ import {
 } from "../agents/agentStateClient";
 import { isRealAppId } from "../apps/useOperatorApps";
 import { Eyebrow } from "../components/primitives";
-import { newRoutine, type Routine, seedRoutines } from "./routines";
+import {
+  formatLastRun,
+  humanSchedule,
+  newRoutine,
+  type Routine,
+  routineSessionKey,
+  SCHEDULE_PRESETS,
+  seedRoutines,
+} from "./routines";
 
 interface RoutinesTabProps {
   agentName: string;
-  /** Real agent id (app_…). When set, routines persist via the agent service;
-   * without it (mock agents) the tab keeps its local seeded state. */
+  /** Real agent id (app_…). When set, routines live in the broker's scheduler
+   * registry; without it (mock agents) the tab keeps its local seeded state. */
   agentId?: string;
-  /** Open the routine's chat session in the Ask Agent dock. */
-  onOpenSession?: (sessionId: string, title: string) => void;
+  /** Open the routine's chat session in the Ask Agent dock. Live routines pass
+   * their scheduler slug (resolved to a session by the dock). */
+  onOpenSession?: (sessionKey: string, title: string) => void;
 }
 
 // The wire routine carries an extra `agent` field; the FE shape is the rest.
+// `draft` is FE-local (an unpublished prompt edit), never on the wire.
 function fromWire(w: WireRoutine): Routine {
   return {
     id: w.id,
@@ -46,9 +61,7 @@ function fromWire(w: WireRoutine): Routine {
     schedule: w.schedule,
     enabled: w.enabled,
     version: w.version,
-    draft: w.draft,
     lastRun: w.lastRun,
-    sessionId: w.sessionId,
   };
 }
 
@@ -62,8 +75,8 @@ export function RoutinesTab({
   const [live, setLive] = useState(false);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [schedule, setSchedule] = useState("Every Monday 9:00");
-  // Run-now feedback: which routine is mid-run, and which just finished.
+  const [schedule, setSchedule] = useState(SCHEDULE_PRESETS[0].expr);
+  // Run-now feedback: which routine is mid-queue, and which just queued/ran.
   const [runningId, setRunningId] = useState<string | null>(null);
   const [ranJustNowId, setRanJustNowId] = useState<string | null>(null);
 
@@ -97,18 +110,9 @@ export function RoutinesTab({
     );
   }
 
-  // A prompt edit is a local draft while typing; blur persists it as a draft
-  // on the service (the service keeps vN published until Publish).
-  function savePromptDraft(r: Routine) {
-    if (!(live && realId && r.draft)) return;
-    void tryPatchRoutine(r.id, { agent: realId, prompt: r.prompt }).then(
-      (updated) => {
-        if (updated) patch(r.id, () => fromWire(updated));
-        // Unreachable: the draft stays local — publish will retry the write.
-      },
-    );
-  }
-
+  // Prompt edits stay LOCAL while typing (draft) — the broker records a
+  // revision per content PATCH, so only Publish sends the edit (one revision,
+  // one change note, vN+1). No blur-persistence.
   function publish(r: Routine) {
     const local = () =>
       patch(r.id, (x) => ({ ...x, version: x.version + 1, draft: false }));
@@ -116,29 +120,28 @@ export function RoutinesTab({
       local();
       return;
     }
-    // Send the current prompt with publish so an unsaved draft can't race the
-    // freeze (blur and click can interleave).
     void tryPatchRoutine(r.id, {
       agent: realId,
       prompt: r.prompt,
-      publish: true,
+      changeNote: "Published from the Routines tab",
     }).then((updated) =>
-      updated ? patch(r.id, () => fromWire(updated)) : local(),
+      updated
+        ? patch(r.id, () => ({ ...fromWire(updated), draft: false }))
+        : local(),
     );
   }
 
-  // Run now — runs the routine's prompt through the agent, gated server-side.
+  // Run now — queues a fire at the broker; the watchdog runs the prompt
+  // through the agent (gated server-side) within one tick. The outcome lands
+  // in the routine's chat session + run history, not in this response.
   async function runNow(r: Routine) {
     if (runningId) return;
     setRunningId(r.id);
     setRanJustNowId(null);
     try {
       if (live && realId) {
-        const outcome = await tryRunRoutineNow(r.id, realId);
-        if (outcome) {
-          const remote = await tryListRoutines(realId);
-          if (remote) setRoutines(remote.map(fromWire));
-          else patch(r.id, () => fromWire(outcome.routine));
+        const queued = await tryRunRoutineNow(r.id);
+        if (queued) {
           setRanJustNowId(r.id);
           return;
         }
@@ -203,14 +206,16 @@ export function RoutinesTab({
               </span>
               <span className="opr-routine-schedule">
                 <CalendarClock size={11} strokeWidth={2} aria-hidden={true} />
-                {r.schedule}
+                {humanSchedule(r.schedule)}
               </span>
               <span className="opr-routine-lastrun">
                 {ranJustNowId === r.id
-                  ? "ran just now"
+                  ? live
+                    ? "queued — runs within a tick"
+                    : "ran just now"
                   : r.enabled
                     ? r.lastRun
-                      ? `last ran ${r.lastRun}`
+                      ? `last ran ${formatLastRun(r.lastRun)}`
                       : "not run yet"
                     : "paused"}
               </span>
@@ -228,7 +233,6 @@ export function RoutinesTab({
                   draft: true,
                 }))
               }
-              onBlur={() => savePromptDraft(r)}
             />
 
             <div className="opr-routine-actions">
@@ -262,12 +266,12 @@ export function RoutinesTab({
                 onClick={() => void runNow(r)}
               >
                 <Play size={12} strokeWidth={2} aria-hidden={true} />
-                {runningId === r.id ? "Running…" : "Run now"}
+                {runningId === r.id ? "Queueing…" : "Run now"}
               </button>
               <button
                 type="button"
                 className="opr-btn opr-btn-ghost opr-btn-sm"
-                onClick={() => onOpenSession?.(r.sessionId, r.name)}
+                onClick={() => onOpenSession?.(routineSessionKey(r), r.name)}
               >
                 <MessageSquareText
                   size={12}
@@ -300,11 +304,11 @@ export function RoutinesTab({
             value={schedule}
             onChange={(e) => setSchedule(e.target.value)}
           >
-            <option>Every Monday 9:00</option>
-            <option>Weekdays 8:00</option>
-            <option>Every day 18:00</option>
-            <option>Every 30 minutes</option>
-            <option>Every hour</option>
+            {SCHEDULE_PRESETS.map((p) => (
+              <option key={p.expr} value={p.expr}>
+                {p.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="opr-composer">

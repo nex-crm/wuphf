@@ -52,7 +52,13 @@ function routineTranscript(title: string): Transcript {
 }
 
 function toMeta(s: WireSession): ChatSessionMeta {
-  return { id: s.id, title: s.title, kind: s.kind, at: s.at };
+  return {
+    id: s.id,
+    title: s.title,
+    kind: s.kind,
+    at: s.at,
+    routine: s.routine,
+  };
 }
 
 function toTranscript(messages: WireSessionMessage[]): Transcript {
@@ -132,9 +138,21 @@ export function AgentSessions({
     setMounted((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }
 
+  // Read through a ref so the resolve-on-request effect keys ONLY on the
+  // request: re-running it on every sessions refresh would re-open a session
+  // the operator has already navigated away from.
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+
   useEffect(() => {
     if (!requestedSessionId) return;
-    open(requestedSessionId);
+    // A live routine's "Open its chat" hands over its scheduler SLUG — the
+    // session that routine's runs land in is matched by meta.routine. A
+    // session id (seeded mocks, strip clicks) passes through unchanged.
+    const byRoutine = sessionsRef.current.find(
+      (s) => s.routine === requestedSessionId,
+    );
+    open(byRoutine ? byRoutine.id : requestedSessionId);
   }, [requestedSessionId]);
 
   function addManual() {

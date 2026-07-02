@@ -1,23 +1,40 @@
-// Routine execution (routines slice 2): running a routine = what the chat does
-// with a prompt. Match one of the agent's persisted tools (light title/name
-// word-overlap heuristic, mirroring the FE chat's matchTool); if nothing
-// matches, author a new tool (create_tool) and persist it, then run it.
+// Routine execution: running a routine = what the chat does with a prompt.
+// Match one of the agent's persisted tools (light title/name word-overlap
+// heuristic, mirroring the FE chat's matchTool); if nothing matches, author a
+// new tool (create_tool) and persist it, then run it.
+//
+// The routine's DEFINITION (prompt, schedule, enable/disable, versioning, run
+// history) lives in the BROKER's scheduler registry — the broker calls
+// POST /routines/run with the prompt on each fire. This module only executes
+// and records the transcript into the routine's pi session.
 //
 // SEND-GATE (hard rule): a routine run ALWAYS executes with approved: false —
 // default deny. A gated capability records needs_approval into the transcript
 // ("paused for your approval: …"); a scheduled run never auto-sends.
 //
-// Every run appends to the routine's session transcript, updates lastRun, and
-// ALWAYS saves the outcome as an "md" artifact (<kebab-name>-run-<n>.md).
+// Every run appends to the routine's pi session and ALWAYS saves the outcome
+// as an "md" artifact (<kebab-name>-run-<n>.md).
 
 import { buildCapabilities, capabilityConfigFromEnv } from "./capabilities.js";
+import type { PiSessions } from "./sessions.js";
 import type { AgentStore } from "./store.js";
 import { type CapabilityTree, runTool, type ToolRunResult } from "./toolRuntime.js";
 import { buildTool } from "./tools.js";
-import type { Routine, SessionMeta, StoredTool, Tool } from "./wire.js";
+import type { SessionMeta, StoredTool, Tool } from "./wire.js";
+
+/** What the broker sends on each fire (its scheduler job, projected). */
+export interface RoutineRunRequest {
+	/** Broker scheduler slug — the routine's stable identity. */
+	slug: string;
+	/** Routine label, e.g. "Monday pipeline recap". */
+	name: string;
+	/** The prompt the agent runs in the routine's chat session. */
+	prompt: string;
+}
 
 export interface RoutineRunnerDeps {
 	store: AgentStore;
+	sessions: PiSessions;
 	/** Host capability tree; defaults to the env-composed runtime. */
 	capabilities?: CapabilityTree;
 	/** Tool authoring seam; defaults to buildTool (stub unless TOOL_AUTHOR_MODEL=1). */
@@ -28,7 +45,6 @@ export interface RoutineRunnerDeps {
 }
 
 export interface RoutineRunOutcome {
-	routine: Routine;
 	session: SessionMeta;
 	status: ToolRunResult["status"];
 	outcome: string;
@@ -75,12 +91,10 @@ function outcomeText(r: ToolRunResult): string {
 	return r.detail;
 }
 
-/** Run a routine NOW (the scheduler and POST /routines/<id>/run both land here).
- * Null when the routine id is unknown for this agent. */
-export async function runRoutine(agent: string, routineId: string, deps: RoutineRunnerDeps): Promise<RoutineRunOutcome | null> {
-	const { store } = deps;
-	const routine = store.getRoutine(agent, routineId);
-	if (!routine) return null;
+/** Run a routine NOW (the broker's scheduler fire and its run-now both land
+ * here via POST /routines/run). */
+export async function runRoutine(agent: string, routine: RoutineRunRequest, deps: RoutineRunnerDeps): Promise<RoutineRunOutcome> {
+	const { store, sessions } = deps;
 	const now = deps.now ?? (() => new Date());
 
 	// 1. A persisted tool that matches the prompt, else author + persist one.
@@ -106,13 +120,15 @@ export async function runRoutine(agent: string, routineId: string, deps: Routine
 		outcome = "no tool could be authored for this routine";
 	}
 
-	// 3. Transcript: the scheduled prompt in, the outcome back.
+	// 3. Transcript into the routine's pi session: the scheduled prompt in,
+	// the outcome back.
+	const session = await sessions.ensureRoutineSession(agent, routine.slug, routine.name);
 	const at = now().toISOString();
-	store.appendMessage(agent, routine.sessionId, { from: "you", body: `(scheduled) ${routine.prompt}`, at });
-	store.appendMessage(agent, routine.sessionId, { from: "nex", body: outcome, at: now().toISOString() });
+	await sessions.append(agent, session.id, { from: "you", body: `(scheduled) ${routine.prompt}`, at });
+	await sessions.append(agent, session.id, { from: "nex", body: outcome, at: now().toISOString() });
 
-	// 4. lastRun + the run artifact (always, whatever the outcome).
-	const updated = store.updateRoutine(agent, routineId, (r) => ({ ...r, lastRun: at })) ?? routine;
+	// 4. The run artifact (always, whatever the outcome). Run COUNTS and
+	// status history live in the broker's per-slug run ring, not here.
 	const n = store.listArtifacts(agent).filter((a) => a.producedBy === routine.name).length + 1;
 	store.addArtifact(
 		agent,
@@ -126,12 +142,5 @@ export async function runRoutine(agent: string, routineId: string, deps: Routine
 		now(),
 	);
 
-	const session = store.getSession(agent, routine.sessionId)?.session ?? {
-		id: routine.sessionId,
-		agent,
-		title: routine.name,
-		kind: "routine" as const,
-		at,
-	};
-	return { routine: updated, session, status, outcome };
+	return { session, status, outcome };
 }

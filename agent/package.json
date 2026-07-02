@@ -12,8 +12,9 @@
     "smoke": "bash scripts/smoke.sh"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "0.73.1",
-    "@mariozechner/pi-agent-core": "0.73.1"
+    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@mariozechner/pi-agent-core": "0.73.1",
+    "@mariozechner/pi-ai": "0.73.1"
   },
   "devDependencies": {
     "@types/bun": "latest",
