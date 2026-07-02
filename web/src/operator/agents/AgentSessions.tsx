@@ -7,7 +7,7 @@
 // each turn to the service fire-and-forget; when the service is unreachable the
 // dock falls back to the seeded state. See docs/specs/operator-agent-routines.md.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarClock, MessageSquareText, Plus } from "lucide-react";
 
 import { isRealAppId } from "../apps/useOperatorApps";
@@ -79,25 +79,31 @@ export function AgentSessions({
   >({});
 
   const realId = isRealAppId(agentId) ? agentId : undefined;
+  // The session the operator explicitly opened (strip click or a routine's
+  // "Open its chat"). The list hydration below resolves LATER and must not
+  // clobber it back to the first session.
+  const pickedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!realId) return;
     let cancelled = false;
     void tryListSessions(realId).then(async (remote) => {
       if (cancelled || !remote) return; // unreachable — keep the seeded state
-      const [first] = remote;
-      // Fetch the first session's transcript BEFORE mounting its pane: a pane
+      const picked = pickedRef.current;
+      const target =
+        (picked && remote.find((s) => s.id === picked)) || remote[0];
+      // Fetch the target session's transcript BEFORE mounting its pane: a pane
       // reads its initialTranscript only at mount.
-      const detail = first ? await tryGetSession(first.id, realId) : null;
+      const detail = target ? await tryGetSession(target.id, realId) : null;
       if (cancelled) return;
       setLive(true);
       setSessions(remote.map(toMeta));
-      if (first) {
+      if (target) {
         setTranscripts({
-          [first.id]: detail ? toTranscript(detail.messages) : null,
+          [target.id]: detail ? toTranscript(detail.messages) : null,
         });
-        setActiveId(first.id);
-        setMounted([first.id]);
+        setActiveId(target.id);
+        setMounted([target.id]);
       } else {
         setActiveId("");
         setMounted([]);
@@ -109,6 +115,7 @@ export function AgentSessions({
   }, [realId]);
 
   function open(id: string) {
+    pickedRef.current = id;
     setActiveId(id);
     if (mounted.includes(id)) return;
     if (live && realId && !(id in transcripts)) {

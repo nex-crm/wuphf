@@ -178,4 +178,22 @@ describe("AgentSessions", () => {
       title: "Chat 3",
     });
   });
+
+  it("keeps a requested session active when hydration resolves later (regression)", async () => {
+    // "Open its chat" fires open(requestedSessionId) at mount, BEFORE the
+    // session-list fetch resolves; hydration used to clobber the active pane
+    // back to the FIRST session, dropping the operator into the wrong chat.
+    vi.stubGlobal("fetch", serviceFetch());
+    const { findByText } = render(
+      <AgentSessions
+        agentName="Pipeline Agent"
+        agentId="app_x"
+        requestedSessionId="s2"
+      />,
+    );
+    const requested = (await findByText("Chat")).closest("button");
+    await waitFor(() => expect(requested?.className).toContain("is-active"));
+    const first = (await findByText("Weekly recap run")).closest("button");
+    expect(first?.className).not.toContain("is-active");
+  });
 });
