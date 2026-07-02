@@ -1,9 +1,14 @@
-// Agent display names. Operators can RENAME an agent; the broker has no rename
-// field yet, so overrides live client-side (localStorage) and apply everywhere a
-// name renders (detail header, sidebar rail, lists). When a backend name field
-// lands, this store becomes its cache.
+// Agent display names. Operators can RENAME an agent; overrides live
+// client-side (localStorage) as the optimistic cache and apply everywhere a
+// name renders (detail header, sidebar rail, lists). For a REAL agent (app_…
+// id) the rename is ALSO persisted to the broker fire-and-forget
+// (PATCH /apps/{id} {"name": …} → {app}); the local override stays regardless
+// of the PATCH result, so renames keep working offline.
 
 import { useSyncExternalStore } from "react";
+
+import { patch } from "../../api/client";
+import { isRealAppId } from "../apps/useOperatorApps";
 
 const KEY = "wuphf.operator.agentNames";
 
@@ -44,6 +49,15 @@ export function setAgentName(id: string, name: string): void {
   }
   cache = next;
   notify();
+  // Real agents also persist the rename on the broker. Fire-and-forget: the
+  // localStorage override above is the optimistic cache either way. A cleared
+  // rename (empty name) only drops the local override — the broker keeps its
+  // current name, which is what the fallback then shows.
+  if (trimmed && isRealAppId(id)) {
+    void patch(`/apps/${encodeURIComponent(id)}`, { name: trimmed }).catch(
+      () => {},
+    );
+  }
 }
 
 export function agentName(id: string, fallback: string): string {

@@ -18,10 +18,13 @@ import {
 } from "lucide-react";
 
 import type { CustomApp, CustomAppDetail } from "../../api/apps";
+import { get } from "../../api/client";
 import { AppLivePreview } from "../../components/apps/AppLivePreview";
 import { CustomAppFrame } from "../../components/apps/CustomAppFrame";
 import { AgentName } from "../agents/AgentName";
 import { AgentPurpose } from "../agents/AgentPurpose";
+import { AgentSessions } from "../agents/AgentSessions";
+import { tryListArtifacts } from "../agents/agentStateClient";
 import {
   appBuildState,
   useDeleteApp,
@@ -31,11 +34,10 @@ import { ArtifactsTab } from "../artifacts/ArtifactsTab";
 import type { Artifact } from "../artifacts/artifacts";
 import { EmptyState } from "../components/EmptyState";
 import { type TabDef, Tabs } from "../components/primitives";
+import { RoutinesTab } from "../routines/RoutinesTab";
 import { ToolsProvider } from "../tools/toolsContext";
 import { AppDataTab } from "./AppDataTab";
-import { AppToolsChat } from "./AppToolsChat";
 import { AppToolsTab } from "./AppToolsTab";
-import { AppWorkflowTab } from "./AppWorkflowTab";
 import { KnowledgeSurface } from "./KnowledgeSurface";
 import { ToolIntegrations } from "./ToolIntegrations";
 
@@ -51,7 +53,7 @@ type AppTab =
 
 const TABS: readonly TabDef<AppTab>[] = [
   { id: "artifacts", label: "Artifacts" },
-  { id: "workflow", label: "Workflow" },
+  { id: "workflow", label: "Routines" },
   // Tools: the callable tools Nex builds from taught workflows; the app's chat
   // calls them. Additive — the Workflow tab is unchanged.
   { id: "tools", label: "Tools" },
@@ -78,6 +80,8 @@ export function OperatorAppDetail({
 }: OperatorAppDetailProps) {
   const [tab, setTab] = useState<AppTab>("artifacts");
   const [chatOpen, setChatOpen] = useState(false);
+  // A routine's "Open its chat" jumps the Ask Agent dock to that session.
+  const [requestedSession, setRequestedSession] = useState<string | null>(null);
   const [panelSize, setPanelSize] = useState<PanelSize>("dock");
   const query = useOperatorApp(appId);
   const remove = useDeleteApp();
@@ -87,6 +91,34 @@ export function OperatorAppDetail({
   const state = app ? appBuildState(app) : "building";
   const failed = state === "failed";
   const ready = state === "ready" && !!detail?.html;
+
+  // The agent's persisted artifacts (routine outcomes) from the agent service,
+  // appended after the live app artifact. Refreshed each time the Artifacts tab
+  // becomes active; stays empty when the service is unreachable.
+  const [remoteArtifacts, setRemoteArtifacts] = useState<Artifact[]>([]);
+  const agentId = app?.id;
+  useEffect(() => {
+    if (tab !== "artifacts" || !agentId) return;
+    let cancelled = false;
+    void tryListArtifacts(agentId).then((wire) => {
+      if (cancelled || !wire) return;
+      setRemoteArtifacts(
+        wire.map(({ id, type, title, producedBy, at, content, url, size }) => ({
+          id,
+          type,
+          title,
+          producedBy,
+          at,
+          content,
+          url,
+          size,
+        })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, agentId]);
 
   // Guided reveal: when the app finishes building, walk through the tabs once so
   // the operator sees the workflow, data, and knowledge get hooked up.
@@ -112,7 +144,11 @@ export function OperatorAppDetail({
     // Key the provider on the loaded identity: it mounts before the app query
     // resolves, so remount once the real agent arrives instead of keeping
     // tools/purpose state seeded from the "This app" placeholder.
-    <ToolsProvider key={app?.id ?? "loading"} appName={app?.name ?? "This app"}>
+    <ToolsProvider
+      key={app?.id ?? "loading"}
+      appName={app?.name ?? "This app"}
+      agentId={app?.id}
+    >
       <div
         className={`opr-detail-wrap${
           chatOpen && panelSize !== "modal" ? ` is-chat-${panelSize}` : ""
@@ -206,6 +242,7 @@ export function OperatorAppDetail({
                     producedBy: "built by Nex",
                     at: app ? `v${app.version}` : "",
                   },
+                  ...remoteArtifacts,
                 ]}
                 renderApp={() => (
                   <UiTab
@@ -221,9 +258,10 @@ export function OperatorAppDetail({
               <TabBody
                 tab={tab}
                 query={query}
-                failed={failed}
-                onRemove={removeAndBack}
-                removing={remove.isPending}
+                onOpenRoutineSession={(sessionId) => {
+                  setRequestedSession(sessionId);
+                  setChatOpen(true);
+                }}
               />
             ) : null}
           </div>
@@ -238,6 +276,7 @@ export function OperatorAppDetail({
             size={panelSize}
             onOpenChange={setChatOpen}
             onSizeChange={setPanelSize}
+            requestedSessionId={requestedSession}
           />
         ) : null}
       </div>
@@ -253,12 +292,14 @@ function AskAiDock({
   size,
   onOpenChange,
   onSizeChange,
+  requestedSessionId,
 }: {
   app: CustomApp;
   open: boolean;
   size: PanelSize;
   onOpenChange: (open: boolean) => void;
   onSizeChange: (next: (s: PanelSize) => PanelSize) => void;
+  requestedSessionId?: string | null;
 }) {
   if (!open) {
     return (
@@ -335,7 +376,11 @@ function AskAiDock({
           </div>
         </div>
         <div className="opr-ask-body">
-          <AppToolsChat appName={app.name} />
+          <AgentSessions
+            agentName={app.name}
+            agentId={app.id}
+            requestedSessionId={requestedSessionId}
+          />
         </div>
       </aside>
     </>
@@ -345,28 +390,20 @@ function AskAiDock({
 function TabBody({
   tab,
   query,
-  failed,
-  onRemove,
-  removing,
+  onOpenRoutineSession,
 }: {
   tab: AppTab;
   query: UseQueryResult<CustomAppDetail>;
-  failed: boolean;
-  onRemove: () => void;
-  removing: boolean;
+  onOpenRoutineSession?: (sessionId: string) => void;
 }) {
   const app = query.data?.app;
-  const ready =
-    app && appBuildState(app) === "ready" && Boolean(query.data?.html);
   switch (tab) {
     case "workflow":
-      return ready ? (
-        <AppWorkflowTab appId={app.id} />
-      ) : (
-        <EmptyState
-          glyph="⌥"
-          title="No automation yet"
-          hint="Once this agent finishes building, compile it into a deterministic workflow and run it on a schedule."
+      return (
+        <RoutinesTab
+          agentName={app?.name ?? "This agent"}
+          agentId={app?.id}
+          onOpenSession={(sessionId) => onOpenRoutineSession?.(sessionId)}
         />
       );
     case "tools":
@@ -382,7 +419,7 @@ function TabBody({
         />
       );
     case "integrations":
-      return <ToolIntegrations usedNames={[]} />;
+      return <AppIntegrationsTab />;
     case "knowledge":
       // The gbrain-backed, Wikipedia-style reader with cited claims — backed by
       // the agent's REAL synthesized pages (grounded in its own artifacts).
@@ -398,6 +435,42 @@ function TabBody({
     default:
       return null;
   }
+}
+
+// The broker's app-scoped integration catalog: the CONNECTED platforms an app
+// (and the agent behind it) can call. Mirrors appIntegrationCatalogResponse in
+// internal/team/broker_apps_integrations.go. Passing the connected names into
+// ToolIntegrations stops the tab from falsely claiming "does not use any
+// integrations"; a fetch failure degrades to the previous empty state.
+interface AppIntegrationCatalogItem {
+  platform: string;
+  name: string;
+  logo_url?: string;
+  read_actions: string[];
+}
+
+function AppIntegrationsTab() {
+  const [connectedNames, setConnectedNames] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    get<{ connected?: AppIntegrationCatalogItem[] }>(
+      "/apps/integrations/catalog",
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const names = (data.connected ?? [])
+          .map((c) => (c.name || c.platform || "").trim())
+          .filter((n) => n.length > 0);
+        setConnectedNames(names);
+      })
+      .catch(() => {
+        // Broker unreachable — keep the empty state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return <ToolIntegrations usedNames={connectedNames} />;
 }
 
 function UiTab({

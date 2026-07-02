@@ -120,6 +120,53 @@ export interface ToolCallResult {
 	actions: string[]; // every capability call the tool made, e.g. crm.deals({"since":"7d"})
 }
 
+// ---------------------------------------------------------------------------
+// Persistence contracts (routines slice 2). The FE is wired against these EXACT
+// shapes — keep them in sync with web/src/operator/routines/routines.ts.
+// Timestamps are ISO strings (new Date().toISOString()).
+// ---------------------------------------------------------------------------
+
+/** A persisted agent tool. Re-authoring a same-named tool bumps `version`. */
+export interface StoredTool extends Tool {
+	version: number;
+}
+
+// NOTE: routine DEFINITIONS (prompt, schedule, enabled, versioning, run
+// history) live in the BROKER's scheduler registry — there is no Routine wire
+// shape here. On each fire the broker POSTs /routines/run with {slug, name,
+// prompt} (routineRunner.RoutineRunRequest).
+
+export interface SessionMeta {
+	id: string;
+	agent: string;
+	title: string;
+	/** "routine" sessions are created by a schedule; "manual" by the operator. */
+	kind: "routine" | "manual";
+	at: string;
+	/** Broker scheduler slug of the owning routine (routine sessions only) —
+	 * the FE's "open its chat" matches on this. */
+	routine?: string;
+}
+
+export interface SessionMessage {
+	from: "you" | "nex";
+	body: string;
+	at: string;
+}
+
+/** A saved run output (routine runs always land an "md" artifact). */
+export interface StoredArtifact {
+	id: string;
+	type: "md" | "html" | "pdf";
+	title: string;
+	/** Who made it, e.g. the routine's name. */
+	producedBy: string;
+	at: string;
+	content?: string;
+	url?: string;
+	size?: string;
+}
+
 export interface RunResult {
 	status: "done" | "needs_approval" | "error";
 	steps: RunStep[];

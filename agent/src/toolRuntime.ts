@@ -20,6 +20,7 @@
 // approved=true — the FE renders the human approval card in the chat.
 
 import { buildCapabilities, GATED_CAPABILITIES } from "./capabilities.js";
+import { withRunSignal } from "./runContext.js";
 import type { Tool, ToolCallGate } from "./wire.js";
 
 /** One callable capability (e.g. crm.deals). Args/return are untyped on purpose:
@@ -211,6 +212,12 @@ export async function runTool(tool: Tool, args: Record<string, string> = {}, opt
 
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const worker = new Worker(new URL("./toolSandboxWorker.ts", import.meta.url).href);
+	// Cancellation for HOST-side capability work (deferred finding [15]): the
+	// worker dies at terminate(), but an in-flight real capability call (broker
+	// fetch, model completion) runs on THIS side of the RPC — aborting this
+	// controller in finish() tears those down too. Delivered ambiently via
+	// runContext.ts (AsyncLocalStorage), so CapabilityFn's shape is unchanged.
+	const runCtrl = new AbortController();
 
 	return await new Promise<ToolRunResult>((resolve) => {
 		let settled = false;
@@ -218,6 +225,7 @@ export async function runTool(tool: Tool, args: Record<string, string> = {}, opt
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			runCtrl.abort(new Error(`tool run settled (${r.status})`));
 			worker.terminate();
 			resolve(r);
 		};
@@ -235,8 +243,7 @@ export async function runTool(tool: Tool, args: Record<string, string> = {}, opt
 				// A settled run (timed out / done / errored) must not START new
 				// capability work — the worker is already dead or dying.
 				if (settled) return;
-				void caps
-					.invoke(msg.path, msg.args)
+				void withRunSignal(runCtrl.signal, () => caps.invoke(msg.path, msg.args))
 					.then((value) => {
 						if (!settled) worker.postMessage({ t: "capres", id: msg.id, ok: true, value: plain(value) });
 					})

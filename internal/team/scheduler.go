@@ -73,6 +73,11 @@ type watchdogScheduler struct {
 	clock       clock
 	deliverTask func(officeActionLog, teamTask)
 
+	// operatorRunRecorded, when set, fires after an operator routine's async
+	// fire has recorded its run (scheduler_operator_routines.go). Test seam:
+	// lets tests await the goroutine deterministically instead of polling.
+	operatorRunRecorded func(slug string)
+
 	initialDelay time.Duration
 	pollEvery    time.Duration
 
@@ -496,6 +501,12 @@ func (w *watchdogScheduler) updateJob(slug, label string, interval time.Duration
 // schedulable for the next tick AND the Runs tab gets a detailed trace.
 func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
 	if w.broker == nil {
+		return
+	}
+	// A custom-app owner means an OPERATOR routine: fire the agent service
+	// (pi chat session) instead of posting into an office channel.
+	if isOperatorAgentTarget(job.TargetID) {
+		w.processOperatorRoutineJob(job)
 		return
 	}
 	now := w.clock.Now().UTC()

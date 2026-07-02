@@ -20,7 +20,19 @@ src/buildAgent.ts  buildWorkflow(message) -> WorkflowSpec via pi-ai `complete`; 
 src/executor.ts    deterministic run; a step with an `api` is REPLAYED as a real HTTP call (auth resolved from a named ref); a gated step halts for the approval card (CQ1); a failed call halts with error
 src/sniff.ts       browsersniff: HAR -> ApiCall/WorkflowStep; strips secrets, auth->named ref, classifies stable-key vs rotating-session (A3/A4)
 src/providers.ts   inference-path detection for the FE Settings surface (subscription / BYOK / local)
-src/service.ts     Bun.serve HTTP/SSE: /health, /providers, POST /build/stream (SSE), POST /run
+src/service.ts     Bun.serve HTTP/SSE: /health, /providers, POST /build/stream (SSE), POST /run,
+                   /tools/build + /tools/call, and the persistence routes (below)
+src/store.ts       file-backed per-agent store: tools + artifacts
+                   (WUPHF_AGENT_DATA_DIR, default .wuphf-agent-data/; atomic-ish writes)
+src/sessions.ts    pi-backed chat sessions: transcripts persist as pi SessionManager
+                   JSONL trees under <dataDir>/sessions/<agent>/ (resume/branching
+                   come from pi, not custom code)
+src/routineRunner.ts  run a fired routine = match-or-author a tool, run it approved:false,
+                   append the transcript into the routine's pi session, save the md
+                   run artifact. Definitions/cron/versioning/run history live in the
+                   BROKER's scheduler registry — the broker calls POST /routines/run
+src/runContext.ts  per-run AbortSignal (AsyncLocalStorage) so a settled tool run
+                   aborts in-flight real capability calls
 src/run.ts         CLI runner (compile a description live)
 scripts/smoke.sh   live smoke (boots the service; /build/stream key-free against Ollama)
 src/*.test.ts      pure + service tests (offline; the service test stubs the engine)
@@ -56,6 +68,36 @@ bun run smoke     # boots it + exercises /health /providers /run /build/stream (
 
 The FE points its build/run calls here (same `WorkflowSpec` contract as the mock). This
 is the only operator backend — the Python `harness/` (deepagents) has been removed.
+
+### Persistence + routines routes
+
+Tools + artifacts persist as one JSON file per agent id (`src/store.ts`); chat
+sessions persist in pi's native session format (`src/sessions.ts`). Wire shapes
+live in `src/wire.ts` (`StoredTool`, `SessionMeta`, `SessionMessage`,
+`StoredArtifact`). Routine DEFINITIONS (prompt, cron, enable/disable, revision
+history = versioning, per-run history) live in the BROKER's scheduler registry
+— this service holds none of them.
+
+```text
+POST  /tools/build             `app` set -> persist the authored tool under that agent
+                               (re-authoring a same-named tool bumps `version`)
+GET   /tools?agent=<id>        { tools: StoredTool[] }
+POST  /routines/run            { agent, slug, name, prompt } -> { status, digest, session_id }
+                               the BROKER fires a due routine here (approved:false);
+                               the outcome lands in its per-slug run ring
+GET   /sessions?agent=<id>     { sessions: SessionMeta[] }
+GET   /sessions/<id>?agent=    { session, messages }
+POST  /sessions                { agent, title? } -> { session } (manual; default "Chat <n>")
+POST  /sessions/<id>/message   { agent, from, body } -> { ok: true } (append-only)
+GET   /artifacts?agent=<id>    { artifacts: StoredArtifact[] }
+```
+
+A routine run always executes with `approved: false` (send-gate, default deny):
+a gated capability records `needs_approval` into the transcript and artifact —
+scheduled runs never auto-send. Scheduling is the broker watchdog's job (real
+cron via `internal/calendar/cron.go`; `WUPHF_AGENT_URL` points it at this
+service, default :8820). pi session semantics apply to chats: a session file
+flushes on its first exchange, so an empty chat does not survive a restart.
 
 ## Status
 
