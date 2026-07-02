@@ -1,14 +1,18 @@
 // Thin HTTP/SSE service the operator FE talks to (no broker). Bun.serve, no
-// framework. Mirrors the Python harness contract so the FE is unchanged:
+// framework:
 //   GET  /health        liveness
 //   GET  /providers     which inference paths are available (subscription/BYOK/local)
 //   POST /build/stream  description -> the pi-mono agent assembles a WorkflowSpec (SSE)
+//   POST /tools/call    the app's chat calls a saved tool (sandboxed; gated -> approval)
 //   POST /run           execute a compiled spec deterministically (gated step -> CQ1)
 
 import { streamWorkflow } from "./buildAgent.js";
+import { buildCapabilities, capabilityConfigFromEnv } from "./capabilities.js";
 import { runWorkflow } from "./executor.js";
 import { providersPayload } from "./providers.js";
-import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type WorkflowSpec } from "./wire.js";
+import { runTool } from "./toolRuntime.js";
+import { buildTool } from "./tools.js";
+import { type BuildRequest, type RunRequest, SCHEMA_VERSION, type ToolBuildRequest, type ToolCallRequest, type WorkflowSpec } from "./wire.js";
 
 type BuildEvent = { type: "step"; step: WorkflowSpec["steps"][number] } | { type: "spec"; spec: WorkflowSpec };
 type BuildStream = (message: string, opts: { toolId?: string; signal?: AbortSignal }) => AsyncGenerator<BuildEvent>;
@@ -74,6 +78,66 @@ export function createServer(opts: ServerOptions = {}) {
 					},
 				});
 				return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
+			}
+
+			if (req.method === "POST" && pathname === "/tools/build") {
+				// The app's chat teaches a workflow; the agent calls create_tool and
+				// returns the tool it made, so the FE renders the call and lists it.
+				let body: ToolBuildRequest;
+				try {
+					body = (await req.json()) as ToolBuildRequest;
+				} catch {
+					return json({ error: "invalid JSON body" }, 400);
+				}
+				if (!body || typeof body !== "object" || typeof body.message !== "string") {
+					return json({ error: "invalid tool build request: message (string) required" }, 400);
+				}
+				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
+				// Model authoring is opt-in (TOOL_AUTHOR_MODEL=1): with no model configured
+				// the endpoint must answer deterministically FAST, not eat a model timeout.
+				return json(await buildTool(body.message, { tryModel: process.env.TOOL_AUTHOR_MODEL === "1", signal: req.signal }));
+			}
+
+			if (req.method === "POST" && pathname === "/tools/call") {
+				// The app's chat CALLS a saved tool. Execution is sandboxed
+				// (toolRuntime.ts); a gated capability halts with needs_approval
+				// unless the request carries approved=true (CQ1, default deny).
+				let body: ToolCallRequest;
+				try {
+					body = (await req.json()) as ToolCallRequest;
+				} catch {
+					return json({ error: "invalid JSON body" }, 400);
+				}
+				const tool = body && typeof body === "object" ? body.tool : undefined;
+				if (!tool || typeof tool !== "object" || typeof tool.name !== "string" || typeof tool.code !== "string") {
+					return json({ error: "invalid tool call request: tool { name, code } required" }, 400);
+				}
+				// inputs is caller-supplied JSON: absent -> []; present but not an array
+				// of { name: string } entries -> a plain 400, not a 500 inside runTool.
+				const rawInputs = (tool as { inputs?: unknown }).inputs;
+				const inputsValid =
+					rawInputs === undefined ||
+					(Array.isArray(rawInputs) &&
+						rawInputs.every((i) => i !== null && typeof i === "object" && typeof (i as { name?: unknown }).name === "string"));
+				if (!inputsValid) {
+					return json({ error: "invalid tool call request: inputs must be an array of { name } entries" }, 400);
+				}
+				if (schemaMismatch(body.schema_version)) return json({ error: "schema_version mismatch" }, 400);
+				// Capabilities compose per host env: real broker/model seams when
+				// configured (WUPHF_BROKER_URL/TOKEN, TOOL_RUNTIME_MODEL=1), simulated
+				// otherwise. TOOL_CALL_TIMEOUT_MS raises the hard-kill deadline for
+				// hosts running slow capabilities (e.g. nex.browser drives real Chrome).
+				// Same positive-finite guard as capabilityConfigFromEnv, so the worker
+				// deadline and the capability call bound never diverge on a bad value.
+				const rawTimeoutMs = Number(process.env.TOOL_CALL_TIMEOUT_MS);
+				const timeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? rawTimeoutMs : undefined;
+				return json(
+					await runTool({ ...tool, inputs: rawInputs === undefined ? [] : tool.inputs }, body.args ?? {}, {
+						approved: body.approved === true,
+						capabilities: buildCapabilities(capabilityConfigFromEnv()),
+						timeoutMs,
+					}),
+				);
 			}
 
 			if (req.method === "POST" && pathname === "/run") {

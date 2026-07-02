@@ -158,7 +158,31 @@ export function resolveNewAppId(
  * (the brief instructs the agent to register under it). Take the first clause,
  * strip filler lead-ins, title-case, and cap to a handful of words.
  */
+// Agents are named for their PURPOSE — a role, not an app title: "Sales Agent",
+// "CRM Hygiene Agent", "Support Triage Agent". A domain table catches the common
+// operator jobs; anything else becomes "<Lead words> Agent".
+const AGENT_ROLES: ReadonlyArray<[RegExp, string]> = [
+  [
+    /\b(crm|hygiene|dedupe|duplicate|clean[- ]?up|data quality)\b/i,
+    "CRM Hygiene Agent",
+  ],
+  [
+    /\b(lead|score|scoring|route|routing|inbound|demo request)\b/i,
+    "Lead Routing Agent",
+  ],
+  [/\b(pipeline|deal|forecast)\b/i, "Pipeline Agent"],
+  [/\b(sales|quota|outreach|prospect)\b/i, "Sales Agent"],
+  [/\b(support|ticket|escalation|incident)\b/i, "Support Triage Agent"],
+  [/\b(expense|invoice|reimburse|billing|spend)\b/i, "Expense Agent"],
+  [/\b(email|inbox|follow[- ]?up|reply|nurture)\b/i, "Follow-up Agent"],
+  [/\b(report|summar|digest|dashboard|recap|kpi|metric)\b/i, "Reporting Agent"],
+  [/\b(onboard|welcome|signup|sign-up)\b/i, "Onboarding Agent"],
+  [/\b(hiring|recruit|candidate|interview)\b/i, "Recruiting Agent"],
+];
+
 export function deriveAppName(description: string): string {
+  const role = AGENT_ROLES.find(([test]) => test.test(description));
+  if (role) return role[1];
   const leadIn =
     /^\s*(please|build|make|create|set up|give me|i want|i need|a|an|the)\s+/i;
   let firstClause = description.split(/[.\n,;:]/)[0].trim();
@@ -168,10 +192,10 @@ export function deriveAppName(description: string): string {
     prev = firstClause;
     firstClause = firstClause.replace(leadIn, "").trim();
   }
-  const words = firstClause.split(/\s+/).filter(Boolean).slice(0, 6);
-  if (words.length === 0) return "Untitled app";
+  const words = firstClause.split(/\s+/).filter(Boolean).slice(0, 3);
+  if (words.length === 0) return "Untitled Agent";
   const titled = words
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
-  return titled.slice(0, 120);
+  return `${titled.slice(0, 100)} Agent`;
 }

@@ -1,9 +1,11 @@
-// The operator shell's left nav — deliberately small: Apps and Settings, a
-// build/call CTA, and the operator's identity. No agents, channels, skills, or
-// wiki vocabulary; this is the whole product. Everything else (chat,
-// integrations, knowledge, data) lives as tabs inside an app.
+// The operator shell's left nav — deliberately small: Agents and Settings, a
+// build/call CTA, and the operator's identity. Under Agents sits a collapsible
+// rail of every agent so the operator can jump straight to one; everything else
+// (chat, artifacts, integrations, knowledge) lives as tabs inside an agent.
 
+import { useState } from "react";
 import {
+  ChevronDown,
   type LucideIcon,
   PhoneCall,
   Plus,
@@ -11,17 +13,20 @@ import {
   Workflow,
 } from "lucide-react";
 
-// Chats, Knowledge, and Integrations are no longer top-level surfaces: they live
-// as tabs inside a Work Tool, because each is scoped to the tool that uses it
-// (an integration is connected once but shown under the tools that use it; a
-// tool's chat only affects that tool). The shell is just Work Tools + Settings.
 export type OperatorSurface = "tools" | "settings";
+
+/** One agent in the sidebar rail (real or mock; name overrides pre-applied). */
+export interface SidebarAgent {
+  id: string;
+  name: string;
+  glyph: string;
+  building?: boolean;
+}
 
 interface NavDef {
   id: OperatorSurface;
   label: string;
   icon: LucideIcon;
-  count?: number;
 }
 
 const NAV: readonly NavDef[] = [
@@ -34,6 +39,9 @@ interface OperatorSidebarProps {
   onSelect: (surface: OperatorSurface) => void;
   onStartCall: () => void;
   onBuild: () => void;
+  agents?: SidebarAgent[];
+  activeAgentId?: string | null;
+  onOpenAgent?: (id: string) => void;
 }
 
 export function OperatorSidebar({
@@ -41,7 +49,13 @@ export function OperatorSidebar({
   onSelect,
   onStartCall,
   onBuild,
+  agents = [],
+  activeAgentId,
+  onOpenAgent,
 }: OperatorSidebarProps) {
+  // The rail is collapsible so a long roster doesn't crowd the nav.
+  const [agentsOpen, setAgentsOpen] = useState(true);
+
   return (
     <aside className="opr-sidebar">
       <div className="opr-brand">
@@ -59,22 +73,67 @@ export function OperatorSidebar({
 
       <nav className="opr-nav" aria-label="Primary">
         {NAV.map((item) => (
-          // Icons mirror the manual's sparse instrumentation controls: small,
-          // utilitarian, and subordinate to the label.
-          <button
-            key={item.id}
-            type="button"
-            className={`opr-nav-item${item.id === active ? " is-active" : ""}`}
-            onClick={() => onSelect(item.id)}
-          >
-            <span className="opr-nav-icon" aria-hidden={true}>
-              <item.icon size={15} strokeWidth={1.8} />
-            </span>
-            {item.label}
-            {item.count ? (
-              <span className="opr-nav-count">{item.count}</span>
+          <div key={item.id}>
+            <div
+              className={`opr-nav-item${item.id === active ? " is-active" : ""}`}
+            >
+              <button
+                type="button"
+                className="opr-nav-item-main"
+                onClick={() => onSelect(item.id)}
+              >
+                <span className="opr-nav-icon" aria-hidden={true}>
+                  <item.icon size={15} strokeWidth={1.8} />
+                </span>
+                {item.label}
+                {item.id === "tools" && agents.length > 0 ? (
+                  <span className="opr-nav-count">{agents.length}</span>
+                ) : null}
+              </button>
+              {item.id === "tools" && agents.length > 0 ? (
+                <button
+                  type="button"
+                  className="opr-nav-caret"
+                  onClick={() => setAgentsOpen((v) => !v)}
+                  aria-expanded={agentsOpen}
+                  aria-label={agentsOpen ? "Collapse agents" : "Expand agents"}
+                >
+                  <ChevronDown
+                    size={13}
+                    strokeWidth={2}
+                    aria-hidden={true}
+                    className={agentsOpen ? "is-open" : ""}
+                  />
+                </button>
+              ) : null}
+            </div>
+
+            {item.id === "tools" && agentsOpen && agents.length > 0 ? (
+              <div className="opr-agent-rail" aria-label="Your agents">
+                {agents.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className={`opr-agent-rail-item${
+                      a.id === activeAgentId ? " is-active" : ""
+                    }`}
+                    onClick={() => onOpenAgent?.(a.id)}
+                  >
+                    <span className="opr-agent-rail-glyph" aria-hidden={true}>
+                      {a.glyph}
+                    </span>
+                    <span className="opr-agent-rail-name">{a.name}</span>
+                    {a.building ? (
+                      <span
+                        className="opr-led opr-led-draft"
+                        title="Building"
+                      />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
             ) : null}
-          </button>
+          </div>
         ))}
       </nav>
 

@@ -9,14 +9,24 @@ import { useState } from "react";
 
 import "../styles/operator-shell.css";
 
+import { useAgentNames } from "./agents/agentNames";
 import { capturePromptSeed } from "./apps/demoCapture";
-import { isRealAppId } from "./apps/useOperatorApps";
+import {
+  appBuildState,
+  isRealAppId,
+  useOperatorApps,
+} from "./apps/useOperatorApps";
 import { useRealtimeConfig } from "./apps/useRealtimeConfig";
 import { ApprovalPrompt } from "./components/ApprovalPrompt";
 import { CallModal } from "./components/CallModal";
+import { sigil } from "./components/primitives";
 import { RealCallModal } from "./components/RealCallModal";
-import { getTool } from "./mock/data";
-import { OperatorSidebar, type OperatorSurface } from "./OperatorSidebar";
+import { getTool, TOOLS } from "./mock/data";
+import {
+  OperatorSidebar,
+  type OperatorSurface,
+  type SidebarAgent,
+} from "./OperatorSidebar";
 import { InternalToolDetail } from "./surfaces/InternalToolDetail";
 import { InternalToolsSurface } from "./surfaces/InternalToolsSurface";
 import { OperatorAppDetail } from "./surfaces/OperatorAppDetail";
@@ -69,6 +79,24 @@ export function OperatorApp() {
   // build; demoSeed feeds the chat scoped to the tool being modified.
   const [buildSeed, setBuildSeed] = useState<string | null>(null);
   const [demoSeed, setDemoSeed] = useState<string | null>(null);
+
+  // The sidebar's collapsible Agents rail: every agent (real + mock), renames
+  // applied, so the operator can jump straight to one.
+  const appsQuery = useOperatorApps();
+  const nameOverrides = useAgentNames();
+  const sidebarAgents: SidebarAgent[] = [
+    ...(appsQuery.data ?? []).map((a) => ({
+      id: a.id,
+      name: nameOverrides[a.id] ?? a.name,
+      glyph: a.icon || "🤖",
+      building: appBuildState(a) === "building",
+    })),
+    ...TOOLS.map((t) => ({
+      id: t.id,
+      name: nameOverrides[t.id] ?? t.name,
+      glyph: sigil(t.name),
+    })),
+  ];
 
   function resetSubState() {
     setSelectedId(null);
@@ -144,7 +172,7 @@ export function OperatorApp() {
               toolName: selectedTool.name,
             })
           }
-          initialTab={openOnWorkflowTab ? "workflow" : "ui"}
+          initialTab={openOnWorkflowTab ? "workflow" : "artifacts"}
           demoSeed={demoSeed ?? undefined}
         />
       );
@@ -165,6 +193,9 @@ export function OperatorApp() {
         onSelect={go}
         onStartCall={() => openCall({ mode: "build" })}
         onBuild={() => setAppBuilding(true)}
+        agents={sidebarAgents}
+        activeAgentId={selectedId}
+        onOpenAgent={openTool}
       />
 
       <main className="opr-main">

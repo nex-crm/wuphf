@@ -82,12 +82,12 @@ export function AppWorkflowTab({ appId }: AppWorkflowTabProps) {
   return (
     <div className="opr-tool-scoped opr-app-workflow">
       <div className="opr-data-intro">
-        <Eyebrow>How this app runs</Eyebrow>
+        <Eyebrow>How this agent runs</Eyebrow>
         <p className="opr-scoped-note">
-          Building the app compiled its automation once and froze it. This is
+          Building the agent compiled its automation once and froze it. This is
           that one flow — when it runs, the exact steps it takes, and where the
           result goes — deterministic, the same every time. Run or schedule it
-          from the app itself.
+          from the agent itself.
         </p>
       </div>
 
@@ -107,7 +107,7 @@ export function AppWorkflowTab({ appId }: AppWorkflowTabProps) {
         <EmptyState
           glyph="⚠"
           title="Could not read the workflow"
-          hint="The workspace could not load this app's workflow just now. Try again in a moment."
+          hint="The workspace could not load this agent's workflow just now. Try again in a moment."
           actionLabel="Try again"
           onAction={() => workflowQuery.refetch()}
         />
@@ -141,7 +141,7 @@ function Compiling({
       <EmptyState
         glyph="⚠"
         title="Could not read the workflow"
-        hint="Your AI could not lay out this app's workflow just now. It will retry, or you can try again."
+        hint="Your AI could not lay out this agent's workflow just now. It will retry, or you can try again."
         actionLabel="Try again"
         onAction={onRetry}
       />
@@ -156,7 +156,7 @@ function Compiling({
       </span>
       <div className="opr-empty-title">Laying out this app's workflow…</div>
       <div className="opr-empty-hint">
-        Your AI is turning what this app does into a deterministic workflow.
+        Your AI is turning what this agent does into a deterministic workflow.
       </div>
     </div>
   );
