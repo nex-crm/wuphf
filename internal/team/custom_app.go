@@ -558,8 +558,8 @@ func (s *customAppStore) Rename(id, name, actor string, now time.Time) (CustomAp
 		return app, nil
 	}
 	app.Name = name
-	if actor := strings.TrimSpace(actor); actor != "" {
-		app.UpdatedBy = actor
+	if trimmedActor := strings.TrimSpace(actor); trimmedActor != "" {
+		app.UpdatedBy = trimmedActor
 	}
 	app.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
 	manifestBytes, err := json.MarshalIndent(app, "", "  ")
